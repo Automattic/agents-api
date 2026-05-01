@@ -25,6 +25,13 @@ $policy = array(
 	'recent_messages' => 2,
 );
 
+$conservation_policy = array_merge(
+	$policy,
+	array(
+		'conservation_enabled' => true,
+	)
+);
+
 $messages = array(
 	array( 'role' => 'user', 'content' => 'one' ),
 	array( 'role' => 'assistant', 'content' => 'two' ),
@@ -55,19 +62,74 @@ $long_messages = array_merge(
 
 $compacted = AgentsAPI\AI\AgentConversationCompaction::compact(
 	$long_messages,
-	$policy,
-	static function ( array $messages_to_summarize, array $context ): string {
-		return 'Summarized ' . count( $messages_to_summarize ) . ' of ' . $context['total_messages'] . ' messages.';
+	$conservation_policy,
+	static function ( array $messages_to_summarize, array $context ): array {
+		return array(
+			'summary'        => 'Summarized ' . count( $messages_to_summarize ) . ' of ' . $context['total_messages'] . ' messages: one two three four.',
+			'archived_items' => $messages_to_summarize,
+		);
 	}
 );
 agents_api_smoke_assert_equals( AgentsAPI\AI\AgentConversationCompaction::STATUS_COMPACTED, $compacted['metadata']['compaction']['status'], 'long transcript is compacted', $failures, $passes );
 agents_api_smoke_assert_equals( 3, count( $compacted['messages'] ), 'compacted transcript contains summary plus retained messages', $failures, $passes );
 agents_api_smoke_assert_equals( 'system', $compacted['messages'][0]['role'], 'summary message uses policy role', $failures, $passes );
 agents_api_smoke_assert_equals( 4, $compacted['messages'][0]['metadata']['agents_api_compaction']['compacted_message_count'], 'summary metadata records compacted boundary', $failures, $passes );
+agents_api_smoke_assert_equals( 6, $compacted['metadata']['compaction']['provenance']['original']['item_count'], 'metadata records original item count', $failures, $passes );
+agents_api_smoke_assert_equals( 1, $compacted['metadata']['compaction']['provenance']['compacted']['item_count'], 'metadata records compacted item count', $failures, $passes );
+agents_api_smoke_assert_equals( 2, $compacted['metadata']['compaction']['provenance']['retained']['item_count'], 'metadata records retained item count', $failures, $passes );
+agents_api_smoke_assert_equals( 4, $compacted['metadata']['compaction']['provenance']['archived']['item_count'], 'metadata records archived item count', $failures, $passes );
+agents_api_smoke_assert_equals( true, 0 < $compacted['metadata']['compaction']['provenance']['original']['byte_count'], 'metadata records original byte count', $failures, $passes );
+agents_api_smoke_assert_equals( true, 0 < $compacted['metadata']['compaction']['provenance']['compacted']['byte_count'], 'metadata records compacted byte count', $failures, $passes );
+agents_api_smoke_assert_equals( true, 0 < $compacted['metadata']['compaction']['provenance']['retained']['byte_count'], 'metadata records retained byte count', $failures, $passes );
+agents_api_smoke_assert_equals( true, 0 < $compacted['metadata']['compaction']['provenance']['archived']['byte_count'], 'metadata records archived byte count', $failures, $passes );
+agents_api_smoke_assert_equals( true, $compacted['metadata']['compaction']['conservation']['passed'], 'healthy compaction passes conservation', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\AgentConversationCompaction::EVENT_STARTED, $compacted['events'][0]['type'], 'compaction start event is emitted', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\AgentConversationCompaction::EVENT_COMPLETED, $compacted['events'][1]['type'], 'compaction completed event is emitted', $failures, $passes );
 
-echo "\n[3] Summarizer failures retain the original transcript:\n";
+echo "\n[3] Lossy compaction fails closed when conservation is enabled:\n";
+$durable_messages = array(
+	array( 'role' => 'user', 'content' => str_repeat( 'alpha ', 40 ) ),
+	array( 'role' => 'assistant', 'content' => str_repeat( 'bravo ', 40 ) ),
+	array( 'role' => 'user', 'content' => str_repeat( 'charlie ', 40 ) ),
+	array( 'role' => 'assistant', 'content' => str_repeat( 'delta ', 40 ) ),
+);
+$lossy_failed = AgentsAPI\AI\AgentConversationCompaction::compact(
+	$durable_messages,
+	array(
+		'enabled'                      => true,
+		'conservation_enabled'         => true,
+		'max_messages'                 => 3,
+		'recent_messages'              => 1,
+		'minimum_conserved_byte_ratio' => 1.0,
+	),
+	static function (): string {
+		return 'tiny';
+	}
+);
+agents_api_smoke_assert_equals( AgentsAPI\AI\AgentConversationCompaction::STATUS_FAILED, $lossy_failed['metadata']['compaction']['status'], 'lossy compaction is rejected', $failures, $passes );
+agents_api_smoke_assert_equals( count( $durable_messages ), count( $lossy_failed['messages'] ), 'lossy rejection keeps original transcript length', $failures, $passes );
+agents_api_smoke_assert_equals( false, $lossy_failed['metadata']['compaction']['conservation']['passed'], 'lossy rejection records failed conservation', $failures, $passes );
+agents_api_smoke_assert_equals( true, $lossy_failed['metadata']['compaction']['conservation']['failed_closed'], 'lossy rejection records fail-closed state', $failures, $passes );
+
+echo "\n[4] Conservation can be disabled for intentionally lossy compaction:\n";
+$lossy_allowed = AgentsAPI\AI\AgentConversationCompaction::compact(
+	$durable_messages,
+	array(
+		'enabled'                      => true,
+		'conservation_enabled'         => false,
+		'max_messages'                 => 3,
+		'recent_messages'              => 1,
+		'minimum_conserved_byte_ratio' => 1.0,
+	),
+	static function (): string {
+		return 'tiny';
+	}
+);
+agents_api_smoke_assert_equals( AgentsAPI\AI\AgentConversationCompaction::STATUS_COMPACTED, $lossy_allowed['metadata']['compaction']['status'], 'disabled conservation allows lossy compaction', $failures, $passes );
+agents_api_smoke_assert_equals( 2, count( $lossy_allowed['messages'] ), 'disabled conservation returns compacted transcript', $failures, $passes );
+agents_api_smoke_assert_equals( false, $lossy_allowed['metadata']['compaction']['conservation']['enabled'], 'disabled conservation records opt-out', $failures, $passes );
+
+echo "\n[5] Summarizer failures retain the original transcript:\n";
 $failed = AgentsAPI\AI\AgentConversationCompaction::compact(
 	$long_messages,
 	$policy,
@@ -79,7 +141,7 @@ agents_api_smoke_assert_equals( AgentsAPI\AI\AgentConversationCompaction::STATUS
 agents_api_smoke_assert_equals( count( $long_messages ), count( $failed['messages'] ), 'summarizer failure keeps original transcript length', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\AgentConversationCompaction::EVENT_FAILED, $failed['events'][1]['type'], 'summarizer failure emits failed event', $failures, $passes );
 
-echo "\n[4] Boundary selection does not split tool-call/tool-result pairs:\n";
+echo "\n[6] Boundary selection does not split tool-call/tool-result pairs:\n";
 $tool_messages = array(
 	array( 'role' => 'user', 'content' => 'question' ),
 	AgentsAPI\AI\AgentMessageEnvelope::toolCall( 'call weather', 'weather', array( 'city' => 'New York' ), 1 ),
@@ -98,7 +160,7 @@ $boundary = AgentsAPI\AI\AgentConversationCompaction::select_boundary(
 );
 agents_api_smoke_assert_equals( 1, $boundary, 'boundary moves before retained tool result', $failures, $passes );
 
-echo "\n[5] WP_Agent exposes declarative compaction capability and policy:\n";
+echo "\n[7] WP_Agent exposes declarative compaction capability and policy:\n";
 $agent = new WP_Agent(
 	'compacting-agent',
 	array(
