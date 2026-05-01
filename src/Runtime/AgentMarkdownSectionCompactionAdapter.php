@@ -16,11 +16,11 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class AgentMarkdownSectionCompactionAdapter {
 
-	public const ITEM_SCHEMA = 'agents-api.compaction-item';
+	public const ITEM_SCHEMA  = 'agents-api.compaction-item';
 	public const ITEM_VERSION = 1;
 
-	public const TYPE_PREAMBLE = 'markdown_preamble';
-	public const TYPE_SECTION = 'markdown_section';
+	public const TYPE_PREAMBLE        = 'markdown_preamble';
+	public const TYPE_SECTION         = 'markdown_section';
 	public const TYPE_SECTION_SUMMARY = 'markdown_section_summary';
 	public const TYPE_SECTION_POINTER = 'markdown_section_pointer';
 
@@ -46,14 +46,16 @@ class AgentMarkdownSectionCompactionAdapter {
 
 			$items[] = self::finalize_item( $current, count( $items ) );
 
-			$level = $heading['level'];
-			while ( count( $path_stack ) >= $level ) {
+			$level            = $heading['level'];
+			$path_stack_count = count( $path_stack );
+			while ( $path_stack_count >= $level ) {
 				array_pop( $path_stack );
+				--$path_stack_count;
 			}
 
-			$path_stack[] = $heading['text'];
-			$heading_path = $path_stack;
-			$heading_key  = self::heading_key( $heading_path );
+			$path_stack[]                     = $heading['text'];
+			$heading_path                     = $path_stack;
+			$heading_key                      = self::heading_key( $heading_path );
 			$heading_counters[ $heading_key ] = ( $heading_counters[ $heading_key ] ?? 0 ) + 1;
 
 			if ( $heading_counters[ $heading_key ] > 1 ) {
@@ -78,10 +80,6 @@ class AgentMarkdownSectionCompactionAdapter {
 		$markdown = '';
 
 		foreach ( $items as $item ) {
-			if ( ! is_array( $item ) ) {
-				throw new \InvalidArgumentException( 'invalid_markdown_section_item: item must be an array' );
-			}
-
 			$type     = (string) ( $item['type'] ?? '' );
 			$content  = (string) ( $item['content'] ?? '' );
 			$metadata = is_array( $item['metadata'] ?? null ) ? $item['metadata'] : array();
@@ -115,6 +113,7 @@ class AgentMarkdownSectionCompactionAdapter {
 	 */
 	public static function summary_item( array $section_item, string $summary ): array {
 		$item = self::replacement_item( $section_item, self::TYPE_SECTION_SUMMARY, $summary );
+
 		$item['metadata']['source_item_type'] = $section_item['type'] ?? '';
 		return $item;
 	}
@@ -133,6 +132,7 @@ class AgentMarkdownSectionCompactionAdapter {
 		}
 
 		$item = self::replacement_item( $section_item, self::TYPE_SECTION_POINTER, '[Archived section: ' . $destination . ']' . "\n" );
+
 		$item['metadata']['pointer_destination'] = $destination;
 		return $item;
 	}
@@ -149,10 +149,6 @@ class AgentMarkdownSectionCompactionAdapter {
 		$level  = max( 1, min( 6, $level ) );
 
 		foreach ( $items as $item ) {
-			if ( ! is_array( $item ) ) {
-				throw new \InvalidArgumentException( 'invalid_markdown_section_item: item must be an array' );
-			}
-
 			$metadata = is_array( $item['metadata'] ?? null ) ? $item['metadata'] : array();
 			$path     = is_array( $metadata['heading_path'] ?? null ) ? array_values( $metadata['heading_path'] ) : array();
 			$key      = empty( $path ) ? '__preamble' : self::heading_key( array_slice( $path, 0, $level ) );
@@ -316,9 +312,9 @@ class AgentMarkdownSectionCompactionAdapter {
 	private static function heading_key( array $heading_path ): string {
 		$segments = array();
 		foreach ( $heading_path as $segment ) {
-			$segment = strtolower( trim( $segment ) );
-			$segment = (string) preg_replace( '/[^a-z0-9]+/', '-', $segment );
-			$segment = trim( $segment, '-' );
+			$segment    = strtolower( trim( $segment ) );
+			$segment    = (string) preg_replace( '/[^a-z0-9]+/', '-', $segment );
+			$segment    = trim( $segment, '-' );
 			$segments[] = '' === $segment ? 'untitled' : $segment;
 		}
 

@@ -44,6 +44,27 @@ function do_action( string $hook, ...$args ): void {
 	$GLOBALS['__agents_api_smoke_done'][ $hook ] = ( $GLOBALS['__agents_api_smoke_done'][ $hook ] ?? 0 ) + 1;
 }
 
+function add_filter( string $hook, callable $callback, int $priority = 10, int $accepted_args = 1 ): void {
+	add_action( $hook, $callback, $priority, $accepted_args );
+}
+
+function apply_filters( string $hook, $value, ...$args ) {
+	$GLOBALS['__agents_api_smoke_current'][] = $hook;
+	$callbacks = $GLOBALS['__agents_api_smoke_actions'][ $hook ] ?? array();
+	ksort( $callbacks );
+
+	foreach ( $callbacks as $priority_callbacks ) {
+		foreach ( $priority_callbacks as $callback ) {
+			$value = call_user_func_array( $callback, array_merge( array( $value ), $args ) );
+		}
+	}
+
+	array_pop( $GLOBALS['__agents_api_smoke_current'] );
+	$GLOBALS['__agents_api_smoke_done'][ $hook ] = ( $GLOBALS['__agents_api_smoke_done'][ $hook ] ?? 0 ) + 1;
+
+	return $value;
+}
+
 function doing_action( string $hook ): bool {
 	return in_array( $hook, $GLOBALS['__agents_api_smoke_current'], true );
 }
@@ -54,6 +75,10 @@ function did_action( string $hook ): int {
 
 function esc_html( string $value ): string {
 	return htmlspecialchars( $value, ENT_QUOTES, 'UTF-8' );
+}
+
+function wp_json_encode( $value, int $flags = 0, int $depth = 512 ) {
+	return json_encode( $value, $flags, max( 1, $depth ) );
 }
 
 function _doing_it_wrong( string $function_name, string $message, string $version ): void {

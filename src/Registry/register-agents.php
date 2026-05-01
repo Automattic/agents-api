@@ -15,7 +15,9 @@ if ( ! function_exists( 'wp_register_agent' ) ) {
 	 * collects definitions without deciding whether they should be materialized.
 	 *
 	 * @param string|WP_Agent $agent Agent slug or definition object.
-	 * @param array           $args  Registration arguments.
+	 * @param array           $args  Registration arguments. Use `meta.source_plugin`,
+	 *                               `meta.source_type`, `meta.source_package`, and
+	 *                               `meta.source_version` to declare source provenance.
 	 * @return WP_Agent|null Registered agent, or null on invalid arguments.
 	 */
 	function wp_register_agent( $agent, array $args = array() ): ?WP_Agent {
