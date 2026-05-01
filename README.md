@@ -59,6 +59,23 @@ add_action(
 
 Register agent definitions from inside a `wp_agents_api_init` callback. Reads such as `wp_get_agent()` and `wp_has_agent()` are safe after WordPress `init` has fired.
 
+Agents can declare source provenance in `meta` so registration diagnostics can identify which plugin or package owns a slug:
+
+```php
+wp_register_agent(
+	'example-agent',
+	array(
+		'label' => 'Example Agent',
+		'meta'  => array(
+			'source_plugin'  => 'example-plugin/example-plugin.php',
+			'source_type'    => 'bundled-agent',
+			'source_package' => 'example-package',
+			'source_version' => '1.2.3',
+		),
+	)
+);
+```
+
 ## Public Surface
 
 - `wp_agents_api_init`
