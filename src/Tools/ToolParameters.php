@@ -15,7 +15,7 @@ defined( 'ABSPATH' ) || exit;
 class ToolParameters {
 
 	/**
-	 * Merge caller context with model/client-provided tool parameters.
+	 * Merge caller context with runtime/client-provided tool parameters.
 	 *
 	 * Runtime parameters win over context keys so tool calls can override optional
 	 * defaults supplied by the host runtime. The tool declaration is accepted for
