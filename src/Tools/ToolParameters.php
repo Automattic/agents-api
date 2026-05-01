@@ -31,10 +31,6 @@ class ToolParameters {
 
 		$parameters = $context;
 		foreach ( $tool_parameters as $key => $value ) {
-			if ( ! is_string( $key ) && ! is_int( $key ) ) {
-				continue;
-			}
-
 			$parameters[ $key ] = $value;
 		}
 
