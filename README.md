@@ -9,10 +9,9 @@ It provides generic contracts and value objects that product plugins can build o
 ## Layer Boundary
 
 ```text
-Abilities API  -> actions and tools
-wp-ai-client   -> provider/model prompt execution
-Agents API     -> durable agent runtime substrate
-Data Machine   -> automation product consumer
+wp-ai-client -> provider/model prompt execution and provider capabilities
+Agents API   -> identity, runtime contracts, orchestration contracts, tool mediation contracts, memory/transcripts/sessions
+Consumers    -> product UX, concrete tools, workflows, prompt policy, storage/materialization policy
 ```
 
 Agents API sits between tool/action discovery and product-specific automation. It owns the reusable agent runtime contracts; product plugins own the user-facing product experience.
@@ -25,8 +24,10 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Agent package and package-artifact contracts.
 - Agent memory store contracts and value objects.
 - Conversation compaction policy and transcript transformation contracts.
+- Generic multi-turn conversation loop sequencing around caller-owned adapters.
+- Tool-call mediation contracts and runtime tool declaration value objects.
 - Conversation transcript store contracts.
-- Runtime tool declaration value objects.
+- Session and persistence contracts where they are provider-neutral.
 
 ## What Agents API Does Not Own
 
@@ -35,8 +36,9 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Product UI such as admin pages, settings screens, dashboards, or onboarding.
 - Product CLI commands beyond generic substrate needs.
 - Public REST controllers in v1 unless they are separately designed.
+- Product runner adapters that assemble prompts, choose concrete tools, materialize storage, or decide product policy.
 
-Data Machine is an example consumer and proving ground for these contracts. Agents API must not depend on Data Machine, import Data Machine classes, mirror Data Machine's source tree, or encode Data Machine vocabulary as generic runtime API. Data Machine can require Agents API because it is a product plugin built on the substrate.
+Products can require Agents API because they build on the substrate. Agents API must not depend on any product plugin, import product classes, mirror a product source tree, or encode product vocabulary as generic runtime API.
 
 ## Consumer Integration
 
@@ -87,6 +89,7 @@ wp_register_agent(
 - `AgentsAPI\AI\AgentExecutionPrincipal`
 - `AgentsAPI\AI\AgentConversationCompaction`
 - `AgentsAPI\AI\AgentConversationResult`
+- `AgentsAPI\AI\AgentConversationLoop`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects
@@ -143,6 +146,40 @@ wp_register_agent(
 - `events`: `compaction_started`, `compaction_completed`, or `compaction_failed` lifecycle events that streaming clients can relay.
 
 Boundary selection preserves tool-call/tool-result integrity by default. If summarization fails, the original normalized transcript is returned unchanged and a failure event is emitted rather than silently dropping history.
+
+## Conversation Loop Boundary
+
+`AgentsAPI\AI\AgentConversationLoop` is a thin generic loop facade. It owns the reusable mechanics that every multi-turn agent run needs:
+
+- Normalizing inbound messages to `AgentMessageEnvelope`.
+- Optionally applying caller-supplied compaction before each turn.
+- Calling a runner adapter once per turn.
+- Validating each runner response with `AgentConversationResult`.
+- Asking a caller-supplied continuation policy whether another turn is needed.
+
+It does not assemble prompts, select a provider/model, implement concrete tools, choose durable storage, expose admin UI, or define product workflow semantics. Consumers provide adapters for those concerns and pass them into the loop:
+
+```php
+$result = AgentsAPI\AI\AgentConversationLoop::run(
+	$messages,
+	static function ( array $messages, array $context ): array {
+		// Consumer adapter assembles prompts, dispatches the model, invokes concrete
+		// tools through runtime contracts, materializes storage as needed, and
+		// returns an AgentConversationResult-shaped array.
+		return $runner->run_turn( $messages, $context );
+	},
+	array(
+		'max_turns'       => 4,
+		'should_continue' => static function ( array $turn_result, array $context ): bool {
+			return $policy->should_continue( $turn_result, $context );
+		},
+		'compaction_policy' => $agent->conversation_compaction_policy,
+		'summarizer'         => $summarizer,
+	)
+);
+```
+
+The loop treats all adapter inputs and outputs as JSON-friendly arrays so products can map them to their own storage, streaming, audit, and transport layers without Agents API owning those layers.
 
 ## Tests
 
