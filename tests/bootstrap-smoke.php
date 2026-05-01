@@ -21,10 +21,25 @@ agents_api_smoke_require_module();
 
 $namespace_map = array(
 	'DataMachine\\Engine\\AI\\AgentMessageEnvelope'                         => 'AgentsAPI\\AI\\AgentMessageEnvelope',
+	'DataMachine\\Engine\\AI\\AgentExecutionPrincipal'                      => 'AgentsAPI\\AI\\AgentExecutionPrincipal',
+	'DataMachine\\Engine\\AI\\AgentConversationRequest'                    => 'AgentsAPI\\AI\\AgentConversationRequest',
+	'DataMachine\\Engine\\AI\\AgentConversationRunnerInterface'            => 'AgentsAPI\\AI\\AgentConversationRunnerInterface',
+	'DataMachine\\Engine\\AI\\AgentConversationCompletionDecision'         => 'AgentsAPI\\AI\\AgentConversationCompletionDecision',
+	'DataMachine\\Engine\\AI\\AgentConversationCompletionPolicyInterface'  => 'AgentsAPI\\AI\\AgentConversationCompletionPolicyInterface',
+	'DataMachine\\Engine\\AI\\AgentConversationTranscriptPersisterInterface' => 'AgentsAPI\\AI\\AgentConversationTranscriptPersisterInterface',
+	'DataMachine\\Engine\\AI\\NullAgentConversationTranscriptPersister'     => 'AgentsAPI\\AI\\NullAgentConversationTranscriptPersister',
 	'DataMachine\\Engine\\AI\\AgentConversationCompaction'                  => 'AgentsAPI\\AI\\AgentConversationCompaction',
 	'DataMachine\\Engine\\AI\\AgentConversationResult'                      => 'AgentsAPI\\AI\\AgentConversationResult',
 	'DataMachine\\Engine\\AI\\Tools\\RuntimeToolDeclaration'                => 'AgentsAPI\\AI\\Tools\\RuntimeToolDeclaration',
+	'DataMachine\\Engine\\AI\\Tools\\ToolCall'                              => 'AgentsAPI\\AI\\Tools\\ToolCall',
+	'DataMachine\\Engine\\AI\\Tools\\ToolParameters'                         => 'AgentsAPI\\AI\\Tools\\ToolParameters',
+	'DataMachine\\Engine\\AI\\Tools\\Execution\\ToolExecutionCore'           => 'AgentsAPI\\AI\\Tools\\ToolExecutionCore',
+	'DataMachine\\Engine\\AI\\Tools\\Execution\\ToolExecutorInterface'      => 'AgentsAPI\\AI\\Tools\\ToolExecutorInterface',
+	'DataMachine\\Engine\\AI\\Tools\\ToolSourceRegistry'                     => 'AgentsAPI\\AI\\Tools\\ToolSourceRegistry',
 	'DataMachine\\Core\\Database\\Chat\\ConversationTranscriptStoreInterface' => 'AgentsAPI\\Core\\Database\\Chat\\ConversationTranscriptStoreInterface',
+	'DataMachine\\Core\\Identity\\AgentIdentityScope'                         => 'AgentsAPI\\Core\\Identity\\AgentIdentityScope',
+	'DataMachine\\Core\\Identity\\MaterializedAgentIdentity'                  => 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentity',
+	'DataMachine\\Core\\Identity\\MaterializedAgentIdentityStoreInterface'     => 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentityStoreInterface',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreInterface'           => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreInterface',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryScope'                    => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryScope',
 );
@@ -49,6 +64,8 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact' 
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact_Type' ), 'WP_Agent_Package_Artifact_Type value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifacts_Registry' ), 'WP_Agent_Package_Artifacts_Registry facade is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_PLUGIN_FILE' ), 'plugin file constant is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter' ), 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentConversationLoop' ), 'AgentConversationLoop facade is available', $failures, $passes );
 foreach ( $namespace_map as $legacy_class => $target_class ) {
 	agents_api_smoke_assert_equals( true, class_exists( $target_class ) || interface_exists( $target_class ), $target_class . ' contract is available', $failures, $passes );
 	agents_api_smoke_assert_equals( false, class_exists( $legacy_class, false ) || interface_exists( $legacy_class, false ), $legacy_class . ' compatibility alias is not loaded', $failures, $passes );
@@ -91,6 +108,7 @@ agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Dat
 
 echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
+	'Identity',
 	'Memory',
 	'Packages',
 	'Registry',
