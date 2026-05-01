@@ -97,11 +97,11 @@ class AgentConversationCompaction {
 		}
 
 		$summary_context = array(
-			'policy'          => $policy,
-			'total_messages'  => $total_messages,
-			'compact_count'   => $cutoff,
-			'retained_count'  => $total_messages - $cutoff,
-			'boundary'        => array(
+			'policy'         => $policy,
+			'total_messages' => $total_messages,
+			'compact_count'  => $cutoff,
+			'retained_count' => $total_messages - $cutoff,
+			'boundary'       => array(
 				'compact_until' => $cutoff - 1,
 				'retain_from'   => $cutoff,
 			),
@@ -139,8 +139,8 @@ class AgentConversationCompaction {
 			)
 		);
 
-		$compacted_messages = array_merge( array( $summary_message ), array_slice( $normalized_messages, $cutoff ) );
-		$complete_context   = $summary_context;
+		$compacted_messages                  = array_merge( array( $summary_message ), array_slice( $normalized_messages, $cutoff ) );
+		$complete_context                    = $summary_context;
 		$complete_context['summary_message'] = $summary_message;
 
 		return self::result(
@@ -159,8 +159,9 @@ class AgentConversationCompaction {
 	 * @return int Boundary index.
 	 */
 	public static function select_boundary( array $messages, array $policy ): int {
-		$policy = self::normalize_policy( $policy );
-		$cutoff = max( 0, count( $messages ) - $policy['recent_messages'] );
+		$policy          = self::normalize_policy( $policy );
+		$recent_messages = (int) $policy['recent_messages'];
+		$cutoff          = max( 0, count( $messages ) - $recent_messages );
 
 		if ( ! $policy['preserve_tool_boundaries'] ) {
 			return $cutoff;
@@ -184,7 +185,7 @@ class AgentConversationCompaction {
 	 * @param string                           $status   Compaction status.
 	 * @param array<string, mixed>             $metadata Compaction metadata.
 	 * @param array<int, array<string, mixed>> $events   Lifecycle events.
-	 * @return array<string, mixed>
+	 * @return array{messages: array<int, array<string, mixed>>, metadata: array<string, mixed>, events: array<int, array<string, mixed>>}
 	 */
 	private static function result( array $messages, string $status, array $metadata, array $events ): array {
 		$metadata['status'] = $status;

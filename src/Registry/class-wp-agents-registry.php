@@ -50,7 +50,14 @@ if ( ! class_exists( 'WP_Agents_Registry' ) ) {
 			}
 
 			if ( $this->is_registered( $agent->get_slug() ) ) {
-				$this->notice_invalid_registration( __METHOD__, sprintf( 'Agent "%s" is already registered.', $agent->get_slug() ) );
+				$existing_agent = $this->registered_agents[ $agent->get_slug() ];
+				$message        = sprintf( 'Agent "%s" is already registered.', $agent->get_slug() );
+				$source         = $this->format_agent_source( $existing_agent );
+				if ( '' !== $source ) {
+					$message .= ' Existing source: ' . $source . '.';
+				}
+
+				$this->notice_invalid_registration( __METHOD__, $message );
 				return null;
 			}
 
@@ -212,6 +219,36 @@ if ( ! class_exists( 'WP_Agents_Registry' ) ) {
 				$message       = function_exists( 'esc_html' ) ? esc_html( $message ) : $message;
 				_doing_it_wrong( $function_name, $message, '0.71.0' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- _doing_it_wrong receives a message, not direct output.
 			}
+		}
+
+		/**
+		 * Format the registered agent source provenance for diagnostics.
+		 *
+		 * @param WP_Agent $agent Registered agent.
+		 * @return string Human-readable source, or an empty string when unavailable.
+		 */
+		private function format_agent_source( WP_Agent $agent ): string {
+			$meta        = $agent->get_meta();
+			$source_keys = array(
+				'source_plugin'  => 'plugin',
+				'source_type'    => 'type',
+				'source_package' => 'package',
+				'source_version' => 'version',
+			);
+			$parts       = array();
+
+			foreach ( $source_keys as $meta_key => $label ) {
+				if ( ! isset( $meta[ $meta_key ] ) || ! is_scalar( $meta[ $meta_key ] ) ) {
+					continue;
+				}
+
+				$value = trim( (string) $meta[ $meta_key ] );
+				if ( '' !== $value ) {
+					$parts[] = $label . '=' . $value;
+				}
+			}
+
+			return implode( ', ', $parts );
 		}
 	}
 }

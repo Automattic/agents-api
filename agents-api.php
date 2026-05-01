@@ -6,6 +6,7 @@
  * Requires PHP: 8.1
  * Author: Automattic
  * License: GPL-2.0-or-later
+ * Text Domain: agents-api
  *
  * Agents API bootstrap.
  *
@@ -41,6 +42,7 @@ require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentityStoreInter
 require_once AGENTS_API_PATH . 'src/Transcripts/ConversationTranscriptStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentMessageEnvelope.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentExecutionPrincipal.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentCompactionItem.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompaction.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationResult.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationLoop.php';
