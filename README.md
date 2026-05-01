@@ -28,6 +28,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Generic multi-turn conversation loop sequencing around caller-owned adapters.
 - Tool-call mediation contracts and runtime tool declaration value objects.
 - Conversation transcript store contracts.
+- Tool source registration, parameter normalization, tool-call mediation, and execution result contracts.
 - Session and persistence contracts where they are provider-neutral.
 
 ## What Agents API Does Not Own
@@ -38,6 +39,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Product CLI commands beyond generic substrate needs.
 - Public REST controllers in v1 unless they are separately designed.
 - Product runner adapters that assemble prompts, choose concrete tools, materialize storage, or decide product policy.
+- Concrete tool execution adapters, prompt assembly policy, or product storage/materialization policy.
 
 Products can require Agents API because they build on the substrate. Agents API must not depend on any product plugin, import product classes, mirror a product source tree, or encode product vocabulary as generic runtime API.
 
@@ -98,6 +100,12 @@ wp_register_agent(
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\AgentConversationLoop`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
+- `AgentsAPI\AI\Tools\ToolCall`
+- `AgentsAPI\AI\Tools\ToolSourceRegistry`
+- `AgentsAPI\AI\Tools\ToolParameters`
+- `AgentsAPI\AI\Tools\ToolExecutorInterface`
+- `AgentsAPI\AI\Tools\ToolExecutionCore`
+- `AgentsAPI\AI\Tools\ToolExecutionResult`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects
 

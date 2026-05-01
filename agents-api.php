@@ -53,6 +53,12 @@ require_once AGENTS_API_PATH . 'src/Runtime/NullAgentConversationTranscriptPersi
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompaction.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationResult.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationLoop.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolCall.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolParameters.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolExecutionResult.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolExecutorInterface.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolExecutionCore.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolSourceRegistry.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryScope.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryListEntry.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryReadResult.php';
