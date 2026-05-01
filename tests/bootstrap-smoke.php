@@ -60,7 +60,7 @@ agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Core\\FilesRe
 
 echo "\n[2] Module source keeps Data Machine vocabulary out of agents-api contracts:\n";
 $agents_api_files = new RecursiveIteratorIterator(
-	new RecursiveDirectoryIterator( AGENTS_API_PATH . 'inc', FilesystemIterator::SKIP_DOTS )
+	new RecursiveDirectoryIterator( AGENTS_API_PATH . 'src', FilesystemIterator::SKIP_DOTS )
 );
 foreach ( $agents_api_files as $file ) {
 	if ( 'php' !== $file->getExtension() ) {
@@ -87,5 +87,28 @@ foreach ( $agents_api_files as $file ) {
 $bootstrap_source = (string) file_get_contents( AGENTS_API_PLUGIN_FILE );
 agents_api_smoke_assert_equals( 0, preg_match( '/^\s*(namespace|use)\s+DataMachine\\\\/m', $bootstrap_source ), 'plugin bootstrap has no Data Machine namespace declaration/import', $failures, $passes );
 agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Data Machine' ), 'plugin bootstrap has no Data Machine prose coupling', $failures, $passes );
+
+echo "\n[3] Module source tree uses Agents API vocabulary:\n";
+$expected_source_directories = array(
+	'Memory',
+	'Packages',
+	'Registry',
+	'Runtime',
+	'Tools',
+	'Transcripts',
+);
+$actual_source_directories   = array();
+$source_directory_iterator   = new DirectoryIterator( AGENTS_API_PATH . 'src' );
+foreach ( $source_directory_iterator as $source_directory ) {
+	if ( $source_directory->isDir() && ! $source_directory->isDot() ) {
+		$actual_source_directories[] = $source_directory->getFilename();
+	}
+}
+sort( $actual_source_directories );
+
+agents_api_smoke_assert_equals( $expected_source_directories, $actual_source_directories, 'module source directories are agent-native', $failures, $passes );
+agents_api_smoke_assert_equals( false, is_dir( AGENTS_API_PATH . 'inc/Core' ), 'copied inc/Core tree is absent', $failures, $passes );
+agents_api_smoke_assert_equals( false, is_dir( AGENTS_API_PATH . 'inc/AI' ), 'copied inc/AI tree is absent', $failures, $passes );
+agents_api_smoke_assert_equals( false, is_dir( AGENTS_API_PATH . 'inc' ), 'legacy inc source root is absent', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API bootstrap', $failures, $passes );
