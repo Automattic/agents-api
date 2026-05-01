@@ -44,6 +44,27 @@ function do_action( string $hook, ...$args ): void {
 	$GLOBALS['__agents_api_smoke_done'][ $hook ] = ( $GLOBALS['__agents_api_smoke_done'][ $hook ] ?? 0 ) + 1;
 }
 
+function add_filter( string $hook, callable $callback, int $priority = 10, int $accepted_args = 1 ): void {
+	add_action( $hook, $callback, $priority, $accepted_args );
+}
+
+function apply_filters( string $hook, $value, ...$args ) {
+	$GLOBALS['__agents_api_smoke_current'][] = $hook;
+	$callbacks = $GLOBALS['__agents_api_smoke_actions'][ $hook ] ?? array();
+	ksort( $callbacks );
+
+	foreach ( $callbacks as $priority_callbacks ) {
+		foreach ( $priority_callbacks as $callback ) {
+			$value = call_user_func_array( $callback, array_merge( array( $value ), $args ) );
+		}
+	}
+
+	array_pop( $GLOBALS['__agents_api_smoke_current'] );
+	$GLOBALS['__agents_api_smoke_done'][ $hook ] = ( $GLOBALS['__agents_api_smoke_done'][ $hook ] ?? 0 ) + 1;
+
+	return $value;
+}
+
 function doing_action( string $hook ): bool {
 	return in_array( $hook, $GLOBALS['__agents_api_smoke_current'], true );
 }

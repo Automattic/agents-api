@@ -21,6 +21,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 
 - Agent registration and lookup.
 - Runtime message and result value objects.
+- Agent execution principal/context value objects.
 - Agent package and package-artifact contracts.
 - Agent memory store contracts and value objects.
 - Conversation compaction policy and transcript transformation contracts.
@@ -66,11 +67,37 @@ Register agent definitions from inside a `wp_agents_api_init` callback. Reads su
 - `WP_Agents_Registry`
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `AgentsAPI\AI\AgentMessageEnvelope`
+- `AgentsAPI\AI\AgentExecutionPrincipal`
 - `AgentsAPI\AI\AgentConversationCompaction`
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects
+
+## Execution Principals
+
+`AgentsAPI\AI\AgentExecutionPrincipal` represents the actor and agent context for one runtime request. It records the acting WordPress user ID, effective agent ID/slug, auth source, request context, optional token ID, and JSON-friendly request metadata.
+
+Host plugins can resolve the current principal from REST, CLI, cron, bearer-token, or session state through the `agents_api_execution_principal` filter:
+
+```php
+add_filter(
+	'agents_api_execution_principal',
+	static function ( $principal, array $context ) {
+		if ( 'rest' !== ( $context['request_context'] ?? '' ) ) {
+			return $principal;
+		}
+
+		return AgentsAPI\AI\AgentExecutionPrincipal::user_session(
+			get_current_user_id(),
+			(string) ( $context['agent_id'] ?? '' ),
+			'rest'
+		);
+	},
+	10,
+	2
+);
+```
 
 ## Conversation Compaction
 

@@ -40,6 +40,7 @@ require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentity.php';
 require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentityStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/ConversationTranscriptStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentMessageEnvelope.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentExecutionPrincipal.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompaction.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationResult.php';
 require_once AGENTS_API_PATH . 'src/Tools/RuntimeToolDeclaration.php';
