@@ -42,7 +42,7 @@ agents_api_smoke_assert_equals( 'run', $declaration['scope'], 'runtime declarati
 $registry = new AgentsAPI\AI\Tools\ToolSourceRegistry();
 $registry->registerSource(
 	'local',
-	static function ( array $context ) {
+	static function () {
 		return array(
 			'local/summarize' => array(
 				'description' => 'Summarize text.',
@@ -53,14 +53,6 @@ $registry->registerSource(
 						'text' => array( 'type' => 'string' ),
 					),
 				),
-				'executor'    => AgentsAPI\AI\Tools\ToolExecutionCore::EXECUTOR_CALLABLE,
-				'callback'    => static function ( array $parameters ) use ( $context ) {
-					return array(
-						'summary'    => strtoupper( (string) $parameters['text'] ),
-						'request_id' => $parameters['request_id'],
-						'agent_id'   => $context['agent_id'],
-					);
-				},
 			),
 		);
 	}
@@ -96,8 +88,32 @@ $parameters = AgentsAPI\AI\Tools\ToolParameters::buildParameters(
 agents_api_smoke_assert_equals( 'hello', $parameters['text'], 'runtime parameters override context defaults', $failures, $passes );
 agents_api_smoke_assert_equals( 'req-123', $parameters['request_id'], 'parameter builder preserves runtime context', $failures, $passes );
 
+$tool_call = AgentsAPI\AI\Tools\ToolCall::normalize(
+	array(
+		'name'       => 'local/summarize',
+		'parameters' => array( 'text' => 'hello' ),
+	)
+);
+agents_api_smoke_assert_equals( 'local/summarize', $tool_call['tool_name'], 'tool call normalizes name alias', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'text' => 'hello' ), $tool_call['parameters'], 'tool call normalizes parameters', $failures, $passes );
+
+$adapter = new class() implements AgentsAPI\AI\Tools\ToolExecutorInterface {
+	public function executeToolCall( array $tool_call, array $tool_definition, array $context = array() ): array {
+		unset( $tool_definition );
+
+		return array(
+			'success' => true,
+			'result'  => array(
+				'summary'    => strtoupper( (string) $tool_call['parameters']['text'] ),
+				'request_id' => $tool_call['parameters']['request_id'],
+				'agent_id'   => $context['agent_id'],
+			),
+		);
+	}
+};
+
 $executor = new AgentsAPI\AI\Tools\ToolExecutionCore();
-$missing  = $executor->executeTool( 'local/summarize', array(), $tools, array( 'request_id' => 'req-123' ) );
+$missing  = $executor->executeTool( 'local/summarize', array(), $tools, $adapter, array( 'request_id' => 'req-123' ) );
 agents_api_smoke_assert_equals( false, $missing['success'], 'execution returns normalized error for missing parameters', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'text' ), $missing['metadata']['missing_parameters'], 'execution error includes missing parameter metadata', $failures, $passes );
 
@@ -105,14 +121,15 @@ $result = $executor->executeTool(
 	'local/summarize',
 	array( 'text' => 'hello' ),
 	$tools,
-	array( 'request_id' => 'req-123' )
+	$adapter,
+	array(
+		'agent_id'   => 'writer',
+		'request_id' => 'req-123',
+	)
 );
-agents_api_smoke_assert_equals( true, $result['success'], 'execution returns normalized success result', $failures, $passes );
-agents_api_smoke_assert_equals( 'local/summarize', $result['tool_name'], 'execution result records tool name', $failures, $passes );
-agents_api_smoke_assert_equals( 'HELLO', $result['result']['summary'], 'execution result carries callable payload', $failures, $passes );
-agents_api_smoke_assert_equals( 'req-123', $result['result']['request_id'], 'execution result receives merged parameters', $failures, $passes );
-
-$client_result = $executor->executePreparedTool( 'client/choose_post', array( 'post_id' => 7 ), $declaration );
-agents_api_smoke_assert_equals( false, $client_result['success'], 'server execution refuses client-executed runtime tools', $failures, $passes );
+agents_api_smoke_assert_equals( true, $result['success'], 'mediation returns normalized success result', $failures, $passes );
+agents_api_smoke_assert_equals( 'local/summarize', $result['tool_name'], 'mediated result records tool name', $failures, $passes );
+agents_api_smoke_assert_equals( 'HELLO', $result['result']['summary'], 'mediated result carries adapter payload', $failures, $passes );
+agents_api_smoke_assert_equals( 'req-123', $result['result']['request_id'], 'adapter receives merged parameters', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API tool runtime', $failures, $passes );

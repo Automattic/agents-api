@@ -12,7 +12,7 @@ It provides generic contracts and value objects that product plugins can build o
 Abilities API  -> actions and tools
 wp-ai-client   -> provider/model prompt execution
 Agents API     -> durable agent runtime substrate
-Data Machine   -> automation product consumer
+Consumers      -> product-specific agent experiences
 ```
 
 Agents API sits between tool/action discovery and product-specific automation. It owns the reusable agent runtime contracts; product plugins own the user-facing product experience.
@@ -27,7 +27,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Conversation compaction policy and transcript transformation contracts.
 - Conversation transcript store contracts.
 - Runtime tool declaration value objects.
-- Tool source registration, parameter normalization, and execution result contracts.
+- Tool source registration, parameter normalization, tool-call mediation, and execution result contracts.
 
 ## What Agents API Does Not Own
 
@@ -35,9 +35,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Product workflows such as flows, pipelines, jobs, handlers, queues, retention, and content operations.
 - Product UI such as admin pages, settings screens, dashboards, or onboarding.
 - Product CLI commands beyond generic substrate needs.
-- Public REST controllers in v1 unless they are separately designed.
-
-Data Machine is an example consumer and proving ground for these contracts. Agents API must not depend on Data Machine, import Data Machine classes, mirror Data Machine's source tree, or encode Data Machine vocabulary as generic runtime API. Data Machine can require Agents API because it is a product plugin built on the substrate.
+- Concrete tool execution adapters, prompt assembly policy, storage/materialization policy, or public REST controllers unless separately designed.
 
 ## Consumer Integration
 
@@ -89,8 +87,10 @@ wp_register_agent(
 - `AgentsAPI\AI\AgentConversationCompaction`
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
+- `AgentsAPI\AI\Tools\ToolCall`
 - `AgentsAPI\AI\Tools\ToolSourceRegistry`
 - `AgentsAPI\AI\Tools\ToolParameters`
+- `AgentsAPI\AI\Tools\ToolExecutorInterface`
 - `AgentsAPI\AI\Tools\ToolExecutionCore`
 - `AgentsAPI\AI\Tools\ToolExecutionResult`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
