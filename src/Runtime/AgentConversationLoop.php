@@ -15,9 +15,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Sequences multi-turn agent execution around caller-owned adapters.
  *
  * The loop owns only neutral transcript normalization, optional compaction,
- * turn sequencing, result validation, and stop-condition dispatch. Product
- * plugins supply prompt assembly, model dispatch, tool execution, persistence,
- * and policy decisions through callables.
+ * turn sequencing, result validation, and stop-condition dispatch. Callers
+ * supply prompt assembly, provider/model dispatch, concrete tool execution,
+ * persistence, and product policy through adapters.
  */
 class AgentConversationLoop {
 

@@ -9,10 +9,9 @@ It provides generic contracts and value objects that product plugins can build o
 ## Layer Boundary
 
 ```text
-Abilities API  -> actions and tools
-wp-ai-client   -> provider/model prompt execution
-Agents API     -> durable agent runtime substrate
-Products       -> product-specific agent experiences
+wp-ai-client -> provider/model prompt execution and provider capabilities
+Agents API   -> identity, runtime contracts, orchestration contracts, tool mediation contracts, memory/transcripts/sessions
+Consumers    -> product UX, concrete tools, workflows, prompt policy, storage/materialization policy
 ```
 
 Agents API sits between tool/action discovery and product-specific automation. It owns the reusable agent runtime contracts; product plugins own the user-facing product experience.
@@ -26,8 +25,9 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Agent memory store contracts and value objects.
 - Conversation compaction policy and transcript transformation contracts.
 - Generic multi-turn conversation loop sequencing around caller-owned adapters.
+- Tool-call mediation contracts and runtime tool declaration value objects.
 - Conversation transcript store contracts.
-- Runtime tool declaration value objects.
+- Session and persistence contracts where they are provider-neutral.
 
 ## What Agents API Does Not Own
 
@@ -36,7 +36,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Product UI such as admin pages, settings screens, dashboards, or onboarding.
 - Product CLI commands beyond generic substrate needs.
 - Public REST controllers in v1 unless they are separately designed.
-- Product runner adapters that assemble prompts, choose tools, persist transcripts, or decide product policy.
+- Product runner adapters that assemble prompts, choose concrete tools, materialize storage, or decide product policy.
 
 Products can require Agents API because they build on the substrate. Agents API must not depend on any product plugin, import product classes, mirror a product source tree, or encode product vocabulary as generic runtime API.
 
@@ -140,14 +140,15 @@ Boundary selection preserves tool-call/tool-result integrity by default. If summ
 - Validating each runner response with `AgentConversationResult`.
 - Asking a caller-supplied continuation policy whether another turn is needed.
 
-It does not assemble prompts, select a provider/model, execute tools, choose durable storage, expose admin UI, or define product workflow semantics. Product plugins provide adapters for those concerns and pass them into the loop:
+It does not assemble prompts, select a provider/model, implement concrete tools, choose durable storage, expose admin UI, or define product workflow semantics. Consumers provide adapters for those concerns and pass them into the loop:
 
 ```php
 $result = AgentsAPI\AI\AgentConversationLoop::run(
 	$messages,
 	static function ( array $messages, array $context ): array {
-		// Product adapter assembles prompts, dispatches the model, executes tools,
-		// persists as needed, and returns an AgentConversationResult-shaped array.
+		// Consumer adapter assembles prompts, dispatches the model, invokes concrete
+		// tools through runtime contracts, materializes storage as needed, and
+		// returns an AgentConversationResult-shaped array.
 		return $runner->run_turn( $messages, $context );
 	},
 	array(
