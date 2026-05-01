@@ -21,6 +21,7 @@ agents_api_smoke_require_module();
 
 $namespace_map = array(
 	'DataMachine\\Engine\\AI\\AgentMessageEnvelope'                         => 'AgentsAPI\\AI\\AgentMessageEnvelope',
+	'DataMachine\\Engine\\AI\\AgentExecutionPrincipal'                      => 'AgentsAPI\\AI\\AgentExecutionPrincipal',
 	'DataMachine\\Engine\\AI\\AgentConversationCompaction'                  => 'AgentsAPI\\AI\\AgentConversationCompaction',
 	'DataMachine\\Engine\\AI\\AgentConversationResult'                      => 'AgentsAPI\\AI\\AgentConversationResult',
 	'DataMachine\\Engine\\AI\\Tools\\RuntimeToolDeclaration'                => 'AgentsAPI\\AI\\Tools\\RuntimeToolDeclaration',

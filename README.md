@@ -21,6 +21,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 
 - Agent registration and lookup.
 - Runtime message and result value objects.
+- Agent execution principal/context value objects.
 - Agent package and package-artifact contracts.
 - Agent memory store contracts and value objects.
 - Conversation compaction policy and transcript transformation contracts.
@@ -66,6 +67,7 @@ Register agent definitions from inside a `wp_agents_api_init` callback. Reads su
 - `WP_Agents_Registry`
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `AgentsAPI\AI\AgentMessageEnvelope`
+- `AgentsAPI\AI\AgentExecutionPrincipal`
 - `AgentsAPI\AI\AgentConversationCompaction`
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
