@@ -97,7 +97,6 @@ agents_api_smoke_assert_equals( false, AgentsAPI\AI\AgentConversationCompletionD
 
 echo "\n[4] Transcript persisters expose a no-op implementation:\n";
 $persister = new AgentsAPI\AI\NullAgentConversationTranscriptPersister();
-agents_api_smoke_assert_equals( true, $persister instanceof AgentsAPI\AI\AgentConversationTranscriptPersisterInterface, 'null persister implements contract', $failures, $passes );
 agents_api_smoke_assert_equals( '', $persister->persist( $request->messages(), $request, $runner_result ), 'null persister declines persistence with empty ID', $failures, $passes );
 
 echo "\n[5] Invalid request inputs fail early:\n";

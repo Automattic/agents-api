@@ -165,7 +165,7 @@ class AgentConversationRequest {
 	 */
 	private static function jsonEncode( $value ) {
 		try {
-			return json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR );
+			return wp_json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR );
 		} catch ( \JsonException $e ) {
 			return false;
 		}
