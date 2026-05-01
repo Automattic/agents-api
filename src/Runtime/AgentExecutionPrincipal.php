@@ -149,12 +149,12 @@ final class AgentExecutionPrincipal {
 	 */
 	public function to_array(): array {
 		return array(
-			'acting_user_id'       => $this->acting_user_id,
-			'effective_agent_id'   => $this->effective_agent_id,
-			'auth_source'          => $this->auth_source,
-			'request_context'      => $this->request_context,
-			'token_id'             => $this->token_id,
-			'request_metadata'     => $this->request_metadata,
+			'acting_user_id'     => $this->acting_user_id,
+			'effective_agent_id' => $this->effective_agent_id,
+			'auth_source'        => $this->auth_source,
+			'request_context'    => $this->request_context,
+			'token_id'           => $this->token_id,
+			'request_metadata'   => $this->request_metadata,
 		);
 	}
 
@@ -183,6 +183,7 @@ final class AgentExecutionPrincipal {
 	 */
 	private static function jsonEncode( $value ) {
 		try {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- This pure-PHP value object also runs outside WordPress in smoke tests.
 			return json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR );
 		} catch ( \JsonException $e ) {
 			return false;
