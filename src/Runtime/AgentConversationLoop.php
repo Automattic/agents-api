@@ -103,7 +103,7 @@ class AgentConversationLoop {
 		$compaction = AgentConversationCompaction::compact( $messages, $policy, $summarizer );
 		return array(
 			'messages' => $compaction['messages'],
-			'events'   => self::normalize_events( $compaction['events'] ?? array() ),
+			'events'   => self::normalize_events( $compaction['events'] ),
 		);
 	}
 
