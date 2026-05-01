@@ -26,6 +26,9 @@ $namespace_map = array(
 	'DataMachine\\Engine\\AI\\AgentConversationResult'                      => 'AgentsAPI\\AI\\AgentConversationResult',
 	'DataMachine\\Engine\\AI\\Tools\\RuntimeToolDeclaration'                => 'AgentsAPI\\AI\\Tools\\RuntimeToolDeclaration',
 	'DataMachine\\Core\\Database\\Chat\\ConversationTranscriptStoreInterface' => 'AgentsAPI\\Core\\Database\\Chat\\ConversationTranscriptStoreInterface',
+	'DataMachine\\Core\\Identity\\AgentIdentityScope'                         => 'AgentsAPI\\Core\\Identity\\AgentIdentityScope',
+	'DataMachine\\Core\\Identity\\MaterializedAgentIdentity'                  => 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentity',
+	'DataMachine\\Core\\Identity\\MaterializedAgentIdentityStoreInterface'     => 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentityStoreInterface',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreInterface'           => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreInterface',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryScope'                    => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryScope',
 );
@@ -92,6 +95,7 @@ agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Dat
 
 echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
+	'Identity',
 	'Memory',
 	'Packages',
 	'Registry',
