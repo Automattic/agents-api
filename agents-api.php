@@ -6,6 +6,7 @@
  * Requires PHP: 8.1
  * Author: Automattic
  * License: GPL-2.0-or-later
+ * Text Domain: agents-api
  *
  * Agents API bootstrap.
  *
