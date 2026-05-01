@@ -77,6 +77,10 @@ function esc_html( string $value ): string {
 	return htmlspecialchars( $value, ENT_QUOTES, 'UTF-8' );
 }
 
+function wp_json_encode( $value, int $flags = 0, int $depth = 512 ) {
+	return json_encode( $value, $flags, max( 1, $depth ) );
+}
+
 function _doing_it_wrong( string $function_name, string $message, string $version ): void {
 	$GLOBALS['__agents_api_smoke_wrong'][] = array(
 		'function' => $function_name,
