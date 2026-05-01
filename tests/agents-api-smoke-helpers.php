@@ -13,6 +13,19 @@ $GLOBALS['__agents_api_smoke_actions'] = array();
 $GLOBALS['__agents_api_smoke_wrong']   = array();
 $GLOBALS['__agents_api_smoke_current'] = array();
 $GLOBALS['__agents_api_smoke_done']    = array();
+$GLOBALS['__agents_api_smoke_post_types'] = array();
+$GLOBALS['__agents_api_smoke_taxonomies'] = array();
+$GLOBALS['__agents_api_smoke_terms']      = array();
+
+function __( string $text, string $domain = 'default' ): string {
+	unset( $domain );
+	return $text;
+}
+
+function _x( string $text, string $context, string $domain = 'default' ): string {
+	unset( $context, $domain );
+	return $text;
+}
 
 function sanitize_title( string $value ): string {
 	$value = strtolower( $value );
@@ -87,6 +100,66 @@ function _doing_it_wrong( string $function_name, string $message, string $versio
 		'message'  => $message,
 		'version'  => $version,
 	);
+}
+
+function post_type_exists( string $post_type ): bool {
+	return isset( $GLOBALS['__agents_api_smoke_post_types'][ $post_type ] );
+}
+
+function register_post_type( string $post_type, array $args = array() ) {
+	$GLOBALS['__agents_api_smoke_post_types'][ $post_type ] = $args;
+	return (object) array(
+		'name' => $post_type,
+		'args' => $args,
+	);
+}
+
+function taxonomy_exists( string $taxonomy ): bool {
+	return isset( $GLOBALS['__agents_api_smoke_taxonomies'][ $taxonomy ] );
+}
+
+function register_taxonomy( string $taxonomy, $object_type, array $args = array() ) {
+	$GLOBALS['__agents_api_smoke_taxonomies'][ $taxonomy ] = array(
+		'object_type' => $object_type,
+		'args'        => $args,
+	);
+	return (object) array(
+		'name' => $taxonomy,
+		'args' => $args,
+	);
+}
+
+function wp_is_post_revision( int $post_id ) {
+	unset( $post_id );
+	return false;
+}
+
+function get_the_terms( int $post_id, string $taxonomy ) {
+	return $GLOBALS['__agents_api_smoke_object_terms'][ $post_id ][ $taxonomy ] ?? array();
+}
+
+function term_exists( string $term, string $taxonomy ) {
+	return $GLOBALS['__agents_api_smoke_terms'][ $taxonomy ][ $term ] ?? null;
+}
+
+function wp_insert_term( string $term, string $taxonomy, array $args = array() ) {
+	$slug    = isset( $args['slug'] ) ? (string) $args['slug'] : sanitize_title( $term );
+	$term_id = count( $GLOBALS['__agents_api_smoke_terms'][ $taxonomy ] ?? array() ) + 1;
+	$created = array(
+		'term_id' => $term_id,
+		'slug'    => $slug,
+		'name'    => $term,
+	);
+	$GLOBALS['__agents_api_smoke_terms'][ $taxonomy ][ $slug ] = $created;
+	return $created;
+}
+
+function wp_set_object_terms( int $post_id, $terms, string $taxonomy ): void {
+	$GLOBALS['__agents_api_smoke_object_terms'][ $post_id ][ $taxonomy ] = (array) $terms;
+}
+
+function is_wp_error( $value ): bool {
+	return false;
 }
 
 function agents_api_smoke_assert_equals( $expected, $actual, string $name, array &$failures, int &$passes ): void {

@@ -23,6 +23,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Agent execution principal/context value objects.
 - Multi-turn orchestration contracts.
 - Agent package and package-artifact contracts.
+- Shared `wp_guideline` / `wp_guideline_type` storage substrate polyfill when Core/Gutenberg do not provide it.
 - Agent memory store contracts and value objects.
 - Conversation compaction policy and transcript transformation contracts.
 - Generic multi-turn conversation loop sequencing around caller-owned adapters.
@@ -88,6 +89,7 @@ wp_register_agent(
 - `WP_Agent`
 - `WP_Agents_Registry`
 - `WP_Agent_Package*` value objects and artifact registry helpers
+- `wp_guideline_types()` and `WP_Guidelines_Substrate`
 - `AgentsAPI\AI\AgentMessageEnvelope`
 - `AgentsAPI\AI\AgentExecutionPrincipal`
 - `AgentsAPI\AI\AgentConversationRequest`
