@@ -60,6 +60,20 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		protected array $default_config = array();
 
 		/**
+		 * Whether this agent opts into runtime conversation compaction.
+		 *
+		 * @var bool
+		 */
+		protected bool $supports_conversation_compaction = false;
+
+		/**
+		 * Declarative conversation compaction policy.
+		 *
+		 * @var array<string, mixed>
+		 */
+		protected array $conversation_compaction_policy = array();
+
+		/**
 		 * Optional metadata.
 		 *
 		 * @var array<string, mixed>
@@ -128,6 +142,18 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 				}
 
 				$properties['default_config'] = $args['default_config'];
+			}
+
+			if ( isset( $args['supports_conversation_compaction'] ) ) {
+				$properties['supports_conversation_compaction'] = (bool) $args['supports_conversation_compaction'];
+			}
+
+			if ( isset( $args['conversation_compaction_policy'] ) ) {
+				if ( ! is_array( $args['conversation_compaction_policy'] ) ) {
+					throw new InvalidArgumentException( 'Agent conversation_compaction_policy property must be an array.' );
+				}
+
+				$properties['conversation_compaction_policy'] = \AgentsAPI\AI\AgentConversationCompaction::normalize_policy( $args['conversation_compaction_policy'] );
 			}
 
 			if ( isset( $args['meta'] ) ) {
@@ -222,6 +248,24 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		}
 
 		/**
+		 * Whether this agent opts into runtime conversation compaction.
+		 *
+		 * @return bool
+		 */
+		public function supports_conversation_compaction(): bool {
+			return $this->supports_conversation_compaction;
+		}
+
+		/**
+		 * Retrieves declarative conversation compaction policy.
+		 *
+		 * @return array<string, mixed>
+		 */
+		public function get_conversation_compaction_policy(): array {
+			return $this->conversation_compaction_policy;
+		}
+
+		/**
 		 * Retrieves optional metadata.
 		 *
 		 * @return array<string, mixed>
@@ -237,13 +281,15 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		 */
 		public function to_array(): array {
 			return array(
-				'slug'           => $this->slug,
-				'label'          => $this->label,
-				'description'    => $this->description,
-				'memory_seeds'   => $this->memory_seeds,
-				'owner_resolver' => $this->owner_resolver,
-				'default_config' => $this->default_config,
-				'meta'           => $this->meta,
+				'slug'                             => $this->slug,
+				'label'                            => $this->label,
+				'description'                      => $this->description,
+				'memory_seeds'                     => $this->memory_seeds,
+				'owner_resolver'                   => $this->owner_resolver,
+				'default_config'                   => $this->default_config,
+				'supports_conversation_compaction' => $this->supports_conversation_compaction,
+				'conversation_compaction_policy'   => $this->conversation_compaction_policy,
+				'meta'                             => $this->meta,
 			);
 		}
 
