@@ -23,6 +23,7 @@ $namespace_map = array(
 	'DataMachine\\Engine\\AI\\AgentMessageEnvelope'                         => 'AgentsAPI\\AI\\AgentMessageEnvelope',
 	'DataMachine\\Engine\\AI\\AgentConversationCompaction'                  => 'AgentsAPI\\AI\\AgentConversationCompaction',
 	'DataMachine\\Engine\\AI\\AgentConversationResult'                      => 'AgentsAPI\\AI\\AgentConversationResult',
+	'DataMachine\\Engine\\Agents\\AgentExecutionPrincipal'                  => 'AgentsAPI\\Execution\\AgentExecutionPrincipal',
 	'DataMachine\\Engine\\AI\\Tools\\RuntimeToolDeclaration'                => 'AgentsAPI\\AI\\Tools\\RuntimeToolDeclaration',
 	'DataMachine\\Core\\Database\\Chat\\ConversationTranscriptStoreInterface' => 'AgentsAPI\\Core\\Database\\Chat\\ConversationTranscriptStoreInterface',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreInterface'           => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreInterface',
@@ -38,6 +39,7 @@ agents_api_smoke_assert_equals( true, function_exists( 'wp_get_agent' ), 'wp_get
 agents_api_smoke_assert_equals( true, function_exists( 'wp_get_agents' ), 'wp_get_agents helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, function_exists( 'wp_has_agent' ), 'wp_has_agent helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, function_exists( 'wp_unregister_agent' ), 'wp_unregister_agent helper is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, function_exists( 'wp_get_agent_execution_principal' ), 'wp_get_agent_execution_principal helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, function_exists( 'wp_register_agent_package_artifact_type' ), 'wp_register_agent_package_artifact_type helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, function_exists( 'wp_get_agent_package_artifact_type' ), 'wp_get_agent_package_artifact_type helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, function_exists( 'wp_get_agent_package_artifact_types' ), 'wp_get_agent_package_artifact_types helper is available', $failures, $passes );
@@ -91,6 +93,7 @@ agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Dat
 
 echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
+	'Execution',
 	'Memory',
 	'Packages',
 	'Registry',
