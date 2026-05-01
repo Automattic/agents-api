@@ -147,11 +147,12 @@ $overflow_result           = AgentsAPI\AI\AgentConversationCompaction::compact(
 	}
 );
 $archive_metadata = $overflow_result['metadata']['compaction'];
+$archive_items    = $overflow_result['archive_items'] ?? array();
 agents_api_smoke_assert_equals( AgentsAPI\AI\AgentConversationCompaction::STATUS_ARCHIVED, $archive_metadata['status'], 'oversized transcript uses archive status', $failures, $passes );
 agents_api_smoke_assert_equals( 0, $overflow_summarizer_calls, 'overflow archive does not call summarizer', $failures, $passes );
 agents_api_smoke_assert_equals( 3, count( $overflow_result['messages'] ), 'overflow result retains stub plus active subset', $failures, $passes );
-agents_api_smoke_assert_equals( 4, count( $overflow_result['archive_items'] ), 'overflow result returns archived items', $failures, $passes );
-agents_api_smoke_assert_equals( $overflow_messages[1], $overflow_result['archive_items'][1], 'archived items retain original IDs and metadata verbatim', $failures, $passes );
+agents_api_smoke_assert_equals( 4, count( $archive_items ), 'overflow result returns archived items', $failures, $passes );
+agents_api_smoke_assert_equals( $overflow_messages[1], $archive_items[1], 'archived items retain original IDs and metadata verbatim', $failures, $passes );
 agents_api_smoke_assert_equals( $overflow_policy['overflow_archive_pointer'], $archive_metadata['archive_pointer'], 'archive metadata includes consumer pointer', $failures, $passes );
 agents_api_smoke_assert_equals( $archive_metadata['archive_id'], $overflow_result['messages'][0]['metadata']['agents_api_compaction_archive']['archive_id'], 'stub metadata includes archive ID', $failures, $passes );
 
@@ -212,8 +213,9 @@ $overflow_result_again = AgentsAPI\AI\AgentConversationCompaction::compact(
 		return 'should not run';
 	}
 );
+$archive_items_again = $overflow_result_again['archive_items'] ?? array();
 agents_api_smoke_assert_equals( $overflow_result['metadata']['compaction']['archive_id'], $overflow_result_again['metadata']['compaction']['archive_id'], 'archive IDs are deterministic', $failures, $passes );
-agents_api_smoke_assert_equals( $overflow_result['archive_items'], $overflow_result_again['archive_items'], 'archive item output is deterministic', $failures, $passes );
+agents_api_smoke_assert_equals( $archive_items, $archive_items_again, 'archive item output is deterministic', $failures, $passes );
 agents_api_smoke_assert_equals( $overflow_result['messages'], $overflow_result_again['messages'], 'retained message output is deterministic', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API conversation compaction', $failures, $passes );

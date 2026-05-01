@@ -36,13 +36,13 @@ class AgentConversationCompaction {
 	 */
 	public static function default_policy(): array {
 		return array(
-			'enabled'                  => false,
-			'max_messages'             => 40,
-			'recent_messages'          => 12,
-			'summary_role'             => 'system',
-			'summary_prefix'           => 'Earlier conversation summary:',
-			'summary_model'            => '',
-			'summary_provider'         => '',
+			'enabled'                    => false,
+			'max_messages'               => 40,
+			'recent_messages'            => 12,
+			'summary_role'               => 'system',
+			'summary_prefix'             => 'Earlier conversation summary:',
+			'summary_model'              => '',
+			'summary_provider'           => '',
 			'preserve_tool_boundaries'   => true,
 			'overflow_archive_enabled'   => false,
 			'overflow_threshold_bytes'   => 0,
@@ -63,13 +63,13 @@ class AgentConversationCompaction {
 	public static function normalize_policy( array $policy ): array {
 		$normalized = array_merge( self::default_policy(), $policy );
 
-		$normalized['enabled']                  = (bool) $normalized['enabled'];
-		$normalized['max_messages']             = max( 1, (int) $normalized['max_messages'] );
-		$normalized['recent_messages']          = max( 1, (int) $normalized['recent_messages'] );
-		$normalized['summary_role']             = self::normalize_string( $normalized['summary_role'], 'system' );
-		$normalized['summary_prefix']           = self::normalize_string( $normalized['summary_prefix'], 'Earlier conversation summary:' );
-		$normalized['summary_model']            = self::normalize_string( $normalized['summary_model'], '' );
-		$normalized['summary_provider']         = self::normalize_string( $normalized['summary_provider'], '' );
+		$normalized['enabled']                    = (bool) $normalized['enabled'];
+		$normalized['max_messages']               = max( 1, (int) $normalized['max_messages'] );
+		$normalized['recent_messages']            = max( 1, (int) $normalized['recent_messages'] );
+		$normalized['summary_role']               = self::normalize_string( $normalized['summary_role'], 'system' );
+		$normalized['summary_prefix']             = self::normalize_string( $normalized['summary_prefix'], 'Earlier conversation summary:' );
+		$normalized['summary_model']              = self::normalize_string( $normalized['summary_model'], '' );
+		$normalized['summary_provider']           = self::normalize_string( $normalized['summary_provider'], '' );
 		$normalized['preserve_tool_boundaries']   = (bool) $normalized['preserve_tool_boundaries'];
 		$normalized['overflow_archive_enabled']   = (bool) $normalized['overflow_archive_enabled'];
 		$normalized['overflow_threshold_bytes']   = max( 0, (int) $normalized['overflow_threshold_bytes'] );
@@ -195,19 +195,22 @@ class AgentConversationCompaction {
 	 * @param array<string, mixed>             $metadata Compaction metadata.
 	 * @param array<int, array<string, mixed>> $events   Lifecycle events.
 	 * @param array<string, mixed>             $extra    Extra result fields.
-	 * @return array<string, mixed>
+	 * @return array{messages: array<int, array<string, mixed>>, metadata: array<string, mixed>, events: array<int, array<string, mixed>>, archive_items?: array<int, array<string, mixed>>}
 	 */
 	private static function result( array $messages, string $status, array $metadata, array $events, array $extra = array() ): array {
 		$metadata['status'] = $status;
 
-		return array_merge(
-			array(
-				'messages' => $messages,
-				'metadata' => array( 'compaction' => $metadata ),
-				'events'   => $events,
-			),
-			$extra
+		$result = array(
+			'messages' => $messages,
+			'metadata' => array( 'compaction' => $metadata ),
+			'events'   => $events,
 		);
+
+		if ( isset( $extra['archive_items'] ) && is_array( $extra['archive_items'] ) ) {
+			$result['archive_items'] = $extra['archive_items'];
+		}
+
+		return $result;
 	}
 
 	/**
@@ -229,12 +232,12 @@ class AgentConversationCompaction {
 	 * @param array<int, array<string, mixed>> $source_messages     Original source messages.
 	 * @param array<int, array<string, mixed>> $normalized_messages Normalized messages.
 	 * @param array<string, mixed>             $policy              Normalized policy.
-	 * @return array<string, mixed>
+	 * @return array{messages: array<int, array<string, mixed>>, metadata: array<string, mixed>, events: array<int, array<string, mixed>>, archive_items?: array<int, array<string, mixed>>}
 	 */
 	private static function archive_overflow( array $source_messages, array $normalized_messages, array $policy ): array {
 		$total_messages = count( $normalized_messages );
-		$retain_count   = $policy['overflow_retained_messages'] > 0 ? $policy['overflow_retained_messages'] : $policy['recent_messages'];
-		$cutoff         = max( 0, $total_messages - $retain_count );
+		$retain_count   = (int) ( $policy['overflow_retained_messages'] > 0 ? $policy['overflow_retained_messages'] : $policy['recent_messages'] );
+		$cutoff         = (int) max( 0, $total_messages - $retain_count );
 
 		while ( $policy['overflow_retained_bytes'] > 0 && $cutoff < $total_messages - 1 && self::encoded_size( array_slice( $normalized_messages, $cutoff ) ) > $policy['overflow_retained_bytes'] ) {
 			++$cutoff;
