@@ -15,6 +15,7 @@
     "test": [
       "php tests/bootstrap-smoke.php",
       "php tests/conversation-compaction-smoke.php",
+      "php tests/markdown-section-compaction-smoke.php",
       "php tests/no-product-imports-smoke.php"
     ]
   }

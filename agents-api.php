@@ -38,6 +38,7 @@ require_once AGENTS_API_PATH . 'src/Packages/register-agent-package-artifacts.ph
 require_once AGENTS_API_PATH . 'src/Transcripts/ConversationTranscriptStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentMessageEnvelope.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompaction.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentMarkdownSectionCompactionAdapter.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationResult.php';
 require_once AGENTS_API_PATH . 'src/Tools/RuntimeToolDeclaration.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryScope.php';
