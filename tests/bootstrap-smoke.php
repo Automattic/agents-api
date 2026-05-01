@@ -108,6 +108,7 @@ agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Dat
 
 echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
+	'Guidelines',
 	'Identity',
 	'Memory',
 	'Packages',
@@ -129,5 +130,15 @@ agents_api_smoke_assert_equals( $expected_source_directories, $actual_source_dir
 agents_api_smoke_assert_equals( false, is_dir( AGENTS_API_PATH . 'inc/Core' ), 'copied inc/Core tree is absent', $failures, $passes );
 agents_api_smoke_assert_equals( false, is_dir( AGENTS_API_PATH . 'inc/AI' ), 'copied inc/AI tree is absent', $failures, $passes );
 agents_api_smoke_assert_equals( false, is_dir( AGENTS_API_PATH . 'inc' ), 'legacy inc source root is absent', $failures, $passes );
+
+echo "\n[4] Module owns the generic guideline substrate polyfill:\n";
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Guidelines_Substrate' ), 'guideline substrate class is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, function_exists( 'wp_guideline_types' ), 'wp_guideline_types helper is available', $failures, $passes );
+
+do_action( 'init' );
+agents_api_smoke_assert_equals( true, post_type_exists( 'wp_guideline' ), 'wp_guideline post type is registered on init', $failures, $passes );
+agents_api_smoke_assert_equals( true, taxonomy_exists( 'wp_guideline_type' ), 'wp_guideline_type taxonomy is registered on init', $failures, $passes );
+agents_api_smoke_assert_equals( 'guidelines', $GLOBALS['__agents_api_smoke_post_types']['wp_guideline']['rest_base'] ?? null, 'guideline post type exposes the shared REST base', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'artifact', 'content' ), array_keys( wp_guideline_types() ), 'default guideline types match the shared substrate', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API bootstrap', $failures, $passes );

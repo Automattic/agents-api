@@ -65,5 +65,8 @@ require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryListEntry.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryReadResult.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryWriteResult.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryStoreInterface.php';
+require_once AGENTS_API_PATH . 'src/Guidelines/guidelines.php';
+require_once AGENTS_API_PATH . 'src/Guidelines/class-wp-guidelines-substrate.php';
 
 add_action( 'init', array( 'WP_Agents_Registry', 'init' ), 10 );
+add_action( 'init', array( 'WP_Guidelines_Substrate', 'register' ), 9 );
