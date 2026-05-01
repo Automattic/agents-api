@@ -14,6 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Normalizes ordered compaction inputs into a generic item shape.
  */
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Validation exceptions are not rendered output.
 class AgentCompactionItem {
 
 	public const SCHEMA  = 'agents-api.compaction-item';
@@ -86,8 +87,8 @@ class AgentCompactionItem {
 	 * @return array<string, mixed> Normalized compaction item.
 	 */
 	public static function from_message( array $message, ?int $index = null ): array {
-		$envelope = AgentMessageEnvelope::normalize( $message );
-		$metadata = $envelope['metadata'];
+		$envelope            = AgentMessageEnvelope::normalize( $message );
+		$metadata            = $envelope['metadata'];
 		$metadata['message'] = array(
 			'role'    => $envelope['role'],
 			'payload' => $envelope['payload'],
