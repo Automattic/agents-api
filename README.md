@@ -2,6 +2,8 @@
 
 WordPress-shaped backend substrate for durable agent runtime behavior.
 
+Agents API is maintained by Automattic as a standalone WordPress substrate package.
+
 Agents API owns generic contracts and value objects for registering agents, describing runtime messages/results, declaring package artifacts, and persisting memory/transcripts. Product plugins own UI, workflows, orchestration, and domain behavior.
 
 ## Boundary

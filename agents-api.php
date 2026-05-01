@@ -4,7 +4,7 @@
  * Description: WordPress-shaped agent runtime substrate.
  * Requires at least: 6.8
  * Requires PHP: 8.1
- * Author: Extra Chill
+ * Author: Automattic
  * License: GPL-2.0-or-later
  *
  * Agents API bootstrap.
