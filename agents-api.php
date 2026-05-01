@@ -43,6 +43,7 @@ require_once AGENTS_API_PATH . 'src/Runtime/AgentMessageEnvelope.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentExecutionPrincipal.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompaction.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationResult.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationLoop.php';
 require_once AGENTS_API_PATH . 'src/Tools/RuntimeToolDeclaration.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryScope.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryListEntry.php';

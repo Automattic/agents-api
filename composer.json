@@ -17,6 +17,7 @@
       "php tests/execution-principal-smoke.php",
       "php tests/identity-smoke.php",
       "php tests/conversation-compaction-smoke.php",
+      "php tests/conversation-loop-smoke.php",
       "php tests/no-product-imports-smoke.php"
     ]
   }
