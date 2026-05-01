@@ -43,6 +43,12 @@ require_once AGENTS_API_PATH . 'src/Transcripts/ConversationTranscriptStoreInter
 require_once AGENTS_API_PATH . 'src/Runtime/AgentMessageEnvelope.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentExecutionPrincipal.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentCompactionItem.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationRequest.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationRunnerInterface.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompletionDecision.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompletionPolicyInterface.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationTranscriptPersisterInterface.php';
+require_once AGENTS_API_PATH . 'src/Runtime/NullAgentConversationTranscriptPersister.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompaction.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationResult.php';
 require_once AGENTS_API_PATH . 'src/Tools/RuntimeToolDeclaration.php';
