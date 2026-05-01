@@ -17,12 +17,10 @@ interface AgentConversationTranscriptPersisterInterface {
 	/**
 	 * Persist a runtime transcript.
 	 *
-	 * @param array  $messages Final conversation messages.
-	 * @param string $provider Provider identifier.
-	 * @param string $model    Model identifier.
-	 * @param array  $payload  Runtime payload.
-	 * @param array  $result   Conversation result so far.
+	 * @param array                    $messages Final conversation messages.
+	 * @param AgentConversationRequest $request  Original conversation request.
+	 * @param array                    $result   Conversation result so far.
 	 * @return string Transcript ID on success, empty string when not persisted.
 	 */
-	public function persist( array $messages, string $provider, string $model, array $payload, array $result ): string;
+	public function persist( array $messages, AgentConversationRequest $request, array $result ): string;
 }

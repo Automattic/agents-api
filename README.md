@@ -10,9 +10,9 @@ It provides generic contracts and value objects that product plugins can build o
 
 ```text
 Abilities API  -> actions and tools
-wp-ai-client   -> provider/model prompt execution
-Agents API     -> durable agent runtime substrate
-Data Machine   -> automation product consumer
+wp-ai-client   -> provider/model prompt execution and provider capabilities
+Agents API     -> agent runtime, orchestration, memory, transcript, and session contracts
+Consumers      -> product UX, concrete tools, workflows, prompt assembly, and storage policy
 ```
 
 Agents API sits between tool/action discovery and product-specific automation. It owns the reusable agent runtime contracts; product plugins own the user-facing product experience.
@@ -20,8 +20,10 @@ Agents API sits between tool/action discovery and product-specific automation. I
 ## What Agents API Owns
 
 - Agent registration and lookup.
-- Runtime message and result value objects.
+- Runtime message, result, and request value objects.
 - Agent execution principal/context value objects.
+- Multi-turn orchestration contracts.
+- Tool-call mediation contracts.
 - Agent package and package-artifact contracts.
 - Agent memory store contracts and value objects.
 - Conversation compaction policy and transcript transformation contracts.
@@ -35,8 +37,6 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Product UI such as admin pages, settings screens, dashboards, or onboarding.
 - Product CLI commands beyond generic substrate needs.
 - Public REST controllers in v1 unless they are separately designed.
-
-Data Machine is an example consumer and proving ground for these contracts. Agents API must not depend on Data Machine, import Data Machine classes, mirror Data Machine's source tree, or encode Data Machine vocabulary as generic runtime API. Data Machine can require Agents API because it is a product plugin built on the substrate.
 
 ## Consumer Integration
 
@@ -85,6 +85,12 @@ wp_register_agent(
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `AgentsAPI\AI\AgentMessageEnvelope`
 - `AgentsAPI\AI\AgentExecutionPrincipal`
+- `AgentsAPI\AI\AgentConversationRequest`
+- `AgentsAPI\AI\AgentConversationRunnerInterface`
+- `AgentsAPI\AI\AgentConversationCompletionDecision`
+- `AgentsAPI\AI\AgentConversationCompletionPolicyInterface`
+- `AgentsAPI\AI\AgentConversationTranscriptPersisterInterface`
+- `AgentsAPI\AI\NullAgentConversationTranscriptPersister`
 - `AgentsAPI\AI\AgentConversationCompaction`
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
@@ -126,11 +132,9 @@ wp_register_agent(
 	array(
 		'supports_conversation_compaction' => true,
 		'conversation_compaction_policy'   => array(
-			'enabled'          => true,
-			'max_messages'     => 40,
-			'recent_messages'  => 12,
-			'summary_provider' => 'example-provider',
-			'summary_model'    => 'example-model',
+			'enabled'         => true,
+			'max_messages'    => 40,
+			'recent_messages' => 12,
 		),
 	)
 );

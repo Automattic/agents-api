@@ -17,8 +17,8 @@ class NullAgentConversationTranscriptPersister implements AgentConversationTrans
 	/**
 	 * @inheritDoc
 	 */
-	public function persist( array $messages, string $provider, string $model, array $payload, array $result ): string {
-		unset( $messages, $provider, $model, $payload, $result );
+	public function persist( array $messages, AgentConversationRequest $request, array $result ): string {
+		unset( $messages, $request, $result );
 
 		return '';
 	}
