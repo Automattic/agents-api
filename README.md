@@ -27,6 +27,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Conversation compaction policy and transcript transformation contracts.
 - Conversation transcript store contracts.
 - Runtime tool declaration value objects.
+- Tool source registration, parameter normalization, and execution result contracts.
 
 ## What Agents API Does Not Own
 
@@ -88,6 +89,10 @@ wp_register_agent(
 - `AgentsAPI\AI\AgentConversationCompaction`
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
+- `AgentsAPI\AI\Tools\ToolSourceRegistry`
+- `AgentsAPI\AI\Tools\ToolParameters`
+- `AgentsAPI\AI\Tools\ToolExecutionCore`
+- `AgentsAPI\AI\Tools\ToolExecutionResult`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects
 
