@@ -25,6 +25,8 @@ define( 'AGENTS_API_PATH', __DIR__ . '/' );
 define( 'AGENTS_API_PLUGIN_FILE', __FILE__ );
 
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent.php';
+require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentity.php';
+require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentityStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-type.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifacts-registry.php';
@@ -34,6 +36,7 @@ require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adoption-res
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adopter-interface.php';
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agents-registry.php';
 require_once AGENTS_API_PATH . 'src/Registry/register-agents.php';
+require_once AGENTS_API_PATH . 'src/Identity/register-materialized-agent-identities.php';
 require_once AGENTS_API_PATH . 'src/Packages/register-agent-package-artifacts.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/ConversationTranscriptStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentMessageEnvelope.php';

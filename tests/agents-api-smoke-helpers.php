@@ -10,6 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 $GLOBALS['__agents_api_smoke_actions'] = array();
+$GLOBALS['__agents_api_smoke_filters'] = array();
 $GLOBALS['__agents_api_smoke_wrong']   = array();
 $GLOBALS['__agents_api_smoke_current'] = array();
 $GLOBALS['__agents_api_smoke_done']    = array();
@@ -27,6 +28,24 @@ function sanitize_file_name( string $value ): string {
 function add_action( string $hook, callable $callback, int $priority = 10, int $accepted_args = 1 ): void {
 	unset( $accepted_args );
 	$GLOBALS['__agents_api_smoke_actions'][ $hook ][ $priority ][] = $callback;
+}
+
+function add_filter( string $hook, callable $callback, int $priority = 10, int $accepted_args = 1 ): void {
+	unset( $accepted_args );
+	$GLOBALS['__agents_api_smoke_filters'][ $hook ][ $priority ][] = $callback;
+}
+
+function apply_filters( string $hook, $value ) {
+	$callbacks = $GLOBALS['__agents_api_smoke_filters'][ $hook ] ?? array();
+	ksort( $callbacks );
+
+	foreach ( $callbacks as $priority_callbacks ) {
+		foreach ( $priority_callbacks as $callback ) {
+			$value = call_user_func( $callback, $value );
+		}
+	}
+
+	return $value;
 }
 
 function do_action( string $hook, ...$args ): void {

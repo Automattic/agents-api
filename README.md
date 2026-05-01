@@ -20,6 +20,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 ## What Agents API Owns
 
 - Agent registration and lookup.
+- Materialized agent identity lookup contracts.
 - Runtime message and result value objects.
 - Agent package and package-artifact contracts.
 - Agent memory store contracts and value objects.
@@ -64,6 +65,9 @@ Register agent definitions from inside a `wp_agents_api_init` callback. Reads su
 - `wp_register_agent()` / `wp_get_agent()` / `wp_get_agents()` / `wp_has_agent()` / `wp_unregister_agent()`
 - `WP_Agent`
 - `WP_Agents_Registry`
+- `AgentsAPI\Identity\MaterializedAgentIdentity`
+- `AgentsAPI\Identity\MaterializedAgentIdentityStoreInterface`
+- `wp_register_materialized_agent_identity_store()` / `wp_get_materialized_agent_identity()`
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `AgentsAPI\AI\AgentMessageEnvelope`
 - `AgentsAPI\AI\AgentConversationCompaction`

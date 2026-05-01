@@ -38,6 +38,11 @@ agents_api_smoke_assert_equals( true, function_exists( 'wp_get_agent' ), 'wp_get
 agents_api_smoke_assert_equals( true, function_exists( 'wp_get_agents' ), 'wp_get_agents helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, function_exists( 'wp_has_agent' ), 'wp_has_agent helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, function_exists( 'wp_unregister_agent' ), 'wp_unregister_agent helper is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, function_exists( 'wp_register_materialized_agent_identity_store' ), 'wp_register_materialized_agent_identity_store helper is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, function_exists( 'wp_get_materialized_agent_identity_store' ), 'wp_get_materialized_agent_identity_store helper is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, function_exists( 'wp_get_materialized_agent_identity_by_id' ), 'wp_get_materialized_agent_identity_by_id helper is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, function_exists( 'wp_get_materialized_agent_identity' ), 'wp_get_materialized_agent_identity helper is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, function_exists( 'wp_get_materialized_agent_identities_by_owner_user_id' ), 'wp_get_materialized_agent_identities_by_owner_user_id helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, function_exists( 'wp_register_agent_package_artifact_type' ), 'wp_register_agent_package_artifact_type helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, function_exists( 'wp_get_agent_package_artifact_type' ), 'wp_get_agent_package_artifact_type helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, function_exists( 'wp_get_agent_package_artifact_types' ), 'wp_get_agent_package_artifact_types helper is available', $failures, $passes );
@@ -45,6 +50,8 @@ agents_api_smoke_assert_equals( true, function_exists( 'wp_has_agent_package_art
 agents_api_smoke_assert_equals( true, function_exists( 'wp_unregister_agent_package_artifact_type' ), 'wp_unregister_agent_package_artifact_type helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent' ), 'WP_Agent value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agents_Registry' ), 'WP_Agents_Registry facade is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\Identity\\MaterializedAgentIdentity' ), 'MaterializedAgentIdentity value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\Identity\\MaterializedAgentIdentityStoreInterface' ), 'MaterializedAgentIdentityStoreInterface contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact' ), 'WP_Agent_Package_Artifact value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact_Type' ), 'WP_Agent_Package_Artifact_Type value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifacts_Registry' ), 'WP_Agent_Package_Artifacts_Registry facade is available', $failures, $passes );
@@ -91,6 +98,7 @@ agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Dat
 
 echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
+	'Identity',
 	'Memory',
 	'Packages',
 	'Registry',
