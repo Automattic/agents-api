@@ -19,8 +19,9 @@ Agents API sits between tool/action discovery and product-specific automation. I
 ## What Agents API Owns
 
 - Agent registration and lookup.
-- Runtime message and result value objects.
+- Runtime message, request, result, and completion value objects.
 - Agent execution principal/context value objects.
+- Multi-turn orchestration contracts.
 - Agent package and package-artifact contracts.
 - Agent memory store contracts and value objects.
 - Conversation compaction policy and transcript transformation contracts.
@@ -87,6 +88,12 @@ wp_register_agent(
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `AgentsAPI\AI\AgentMessageEnvelope`
 - `AgentsAPI\AI\AgentExecutionPrincipal`
+- `AgentsAPI\AI\AgentConversationRequest`
+- `AgentsAPI\AI\AgentConversationRunnerInterface`
+- `AgentsAPI\AI\AgentConversationCompletionDecision`
+- `AgentsAPI\AI\AgentConversationCompletionPolicyInterface`
+- `AgentsAPI\AI\AgentConversationTranscriptPersisterInterface`
+- `AgentsAPI\AI\NullAgentConversationTranscriptPersister`
 - `AgentsAPI\AI\AgentConversationCompaction`
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\AgentConversationLoop`
@@ -129,11 +136,9 @@ wp_register_agent(
 	array(
 		'supports_conversation_compaction' => true,
 		'conversation_compaction_policy'   => array(
-			'enabled'          => true,
-			'max_messages'     => 40,
-			'recent_messages'  => 12,
-			'summary_provider' => 'example-provider',
-			'summary_model'    => 'example-model',
+			'enabled'         => true,
+			'max_messages'    => 40,
+			'recent_messages' => 12,
 		),
 	)
 );
