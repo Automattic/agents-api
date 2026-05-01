@@ -35,6 +35,9 @@ require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adopter-inte
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agents-registry.php';
 require_once AGENTS_API_PATH . 'src/Registry/register-agents.php';
 require_once AGENTS_API_PATH . 'src/Packages/register-agent-package-artifacts.php';
+require_once AGENTS_API_PATH . 'src/Identity/AgentIdentityScope.php';
+require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentity.php';
+require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentityStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/ConversationTranscriptStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentMessageEnvelope.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompaction.php';
