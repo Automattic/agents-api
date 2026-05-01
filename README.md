@@ -23,6 +23,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Runtime message and result value objects.
 - Agent package and package-artifact contracts.
 - Agent memory store contracts and value objects.
+- Conversation compaction policy and transcript transformation contracts.
 - Conversation transcript store contracts.
 - Runtime tool declaration value objects.
 
@@ -65,10 +66,39 @@ Register agent definitions from inside a `wp_agents_api_init` callback. Reads su
 - `WP_Agents_Registry`
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `AgentsAPI\AI\AgentMessageEnvelope`
+- `AgentsAPI\AI\AgentConversationCompaction`
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects
+
+## Conversation Compaction
+
+Agents can declare support for runtime conversation compaction without tying Agents API to a provider or model executor:
+
+```php
+wp_register_agent(
+	'example-agent',
+	array(
+		'supports_conversation_compaction' => true,
+		'conversation_compaction_policy'   => array(
+			'enabled'          => true,
+			'max_messages'     => 40,
+			'recent_messages'  => 12,
+			'summary_provider' => 'example-provider',
+			'summary_model'    => 'example-model',
+		),
+	)
+);
+```
+
+`AgentsAPI\AI\AgentConversationCompaction::compact()` transforms a transcript before model dispatch. The caller supplies a summarizer callable, keeping low-level model execution outside Agents API. The result includes:
+
+- `messages`: the transformed transcript, with a synthetic summary message followed by retained recent messages.
+- `metadata.compaction`: status, compacted boundary, retained count, and summary metadata for persisted transcripts.
+- `events`: `compaction_started`, `compaction_completed`, or `compaction_failed` lifecycle events that streaming clients can relay.
+
+Boundary selection preserves tool-call/tool-result integrity by default. If summarization fails, the original normalized transcript is returned unchanged and a failure event is emitted rather than silently dropping history.
 
 ## Tests
 
