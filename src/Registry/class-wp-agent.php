@@ -76,6 +76,10 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		/**
 		 * Optional metadata.
 		 *
+		 * The following optional keys are reserved for source provenance so
+		 * diagnostics can identify where a registered agent came from:
+		 * source_plugin, source_type, source_package, and source_version.
+		 *
 		 * @var array<string, mixed>
 		 */
 		protected array $meta = array();

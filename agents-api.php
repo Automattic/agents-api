@@ -6,6 +6,7 @@
  * Requires PHP: 8.1
  * Author: Automattic
  * License: GPL-2.0-or-later
+ * Text Domain: agents-api
  *
  * Agents API bootstrap.
  *
@@ -35,11 +36,29 @@ require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adopter-inte
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agents-registry.php';
 require_once AGENTS_API_PATH . 'src/Registry/register-agents.php';
 require_once AGENTS_API_PATH . 'src/Packages/register-agent-package-artifacts.php';
+require_once AGENTS_API_PATH . 'src/Identity/AgentIdentityScope.php';
+require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentity.php';
+require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentityStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/ConversationTranscriptStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentMessageEnvelope.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentExecutionPrincipal.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentCompactionItem.php';
+require_once AGENTS_API_PATH . 'src/Tools/RuntimeToolDeclaration.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationRequest.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationRunnerInterface.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompletionDecision.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompletionPolicyInterface.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationTranscriptPersisterInterface.php';
+require_once AGENTS_API_PATH . 'src/Runtime/NullAgentConversationTranscriptPersister.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompaction.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationResult.php';
-require_once AGENTS_API_PATH . 'src/Tools/RuntimeToolDeclaration.php';
+require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationLoop.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolCall.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolParameters.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolExecutionResult.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolExecutorInterface.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolExecutionCore.php';
+require_once AGENTS_API_PATH . 'src/Tools/ToolSourceRegistry.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryScope.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryListEntry.php';
 require_once AGENTS_API_PATH . 'src/Memory/AgentMemoryReadResult.php';

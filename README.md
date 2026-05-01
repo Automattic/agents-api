@@ -9,10 +9,9 @@ It provides generic contracts and value objects that product plugins can build o
 ## Layer Boundary
 
 ```text
-Abilities API  -> actions and tools
-wp-ai-client   -> provider/model prompt execution
-Agents API     -> durable agent runtime substrate
-Data Machine   -> automation product consumer
+wp-ai-client -> provider/model prompt execution and provider capabilities
+Agents API   -> identity, runtime contracts, orchestration contracts, tool mediation contracts, memory/transcripts/sessions
+Consumers    -> product UX, concrete tools, workflows, prompt policy, storage/materialization policy
 ```
 
 Agents API sits between tool/action discovery and product-specific automation. It owns the reusable agent runtime contracts; product plugins own the user-facing product experience.
@@ -20,12 +19,17 @@ Agents API sits between tool/action discovery and product-specific automation. I
 ## What Agents API Owns
 
 - Agent registration and lookup.
-- Runtime message and result value objects.
+- Runtime message, request, result, and completion value objects.
+- Agent execution principal/context value objects.
+- Multi-turn orchestration contracts.
 - Agent package and package-artifact contracts.
 - Agent memory store contracts and value objects.
 - Conversation compaction policy and transcript transformation contracts.
+- Generic multi-turn conversation loop sequencing around caller-owned adapters.
+- Tool-call mediation contracts and runtime tool declaration value objects.
 - Conversation transcript store contracts.
-- Runtime tool declaration value objects.
+- Tool source registration, parameter normalization, tool-call mediation, and execution result contracts.
+- Session and persistence contracts where they are provider-neutral.
 
 ## What Agents API Does Not Own
 
@@ -34,8 +38,10 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Product UI such as admin pages, settings screens, dashboards, or onboarding.
 - Product CLI commands beyond generic substrate needs.
 - Public REST controllers in v1 unless they are separately designed.
+- Product runner adapters that assemble prompts, choose concrete tools, materialize storage, or decide product policy.
+- Concrete tool execution adapters, prompt assembly policy, or product storage/materialization policy.
 
-Data Machine is an example consumer and proving ground for these contracts. Agents API must not depend on Data Machine, import Data Machine classes, mirror Data Machine's source tree, or encode Data Machine vocabulary as generic runtime API. Data Machine can require Agents API because it is a product plugin built on the substrate.
+Products can require Agents API because they build on the substrate. Agents API must not depend on any product plugin, import product classes, mirror a product source tree, or encode product vocabulary as generic runtime API.
 
 ## Consumer Integration
 
@@ -58,6 +64,23 @@ add_action(
 
 Register agent definitions from inside a `wp_agents_api_init` callback. Reads such as `wp_get_agent()` and `wp_has_agent()` are safe after WordPress `init` has fired.
 
+Agents can declare source provenance in `meta` so registration diagnostics can identify which plugin or package owns a slug:
+
+```php
+wp_register_agent(
+	'example-agent',
+	array(
+		'label' => 'Example Agent',
+		'meta'  => array(
+			'source_plugin'  => 'example-plugin/example-plugin.php',
+			'source_type'    => 'bundled-agent',
+			'source_package' => 'example-package',
+			'source_version' => '1.2.3',
+		),
+	)
+);
+```
+
 ## Public Surface
 
 - `wp_agents_api_init`
@@ -66,11 +89,50 @@ Register agent definitions from inside a `wp_agents_api_init` callback. Reads su
 - `WP_Agents_Registry`
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `AgentsAPI\AI\AgentMessageEnvelope`
+- `AgentsAPI\AI\AgentExecutionPrincipal`
+- `AgentsAPI\AI\AgentConversationRequest`
+- `AgentsAPI\AI\AgentConversationRunnerInterface`
+- `AgentsAPI\AI\AgentConversationCompletionDecision`
+- `AgentsAPI\AI\AgentConversationCompletionPolicyInterface`
+- `AgentsAPI\AI\AgentConversationTranscriptPersisterInterface`
+- `AgentsAPI\AI\NullAgentConversationTranscriptPersister`
 - `AgentsAPI\AI\AgentConversationCompaction`
 - `AgentsAPI\AI\AgentConversationResult`
+- `AgentsAPI\AI\AgentConversationLoop`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
+- `AgentsAPI\AI\Tools\ToolCall`
+- `AgentsAPI\AI\Tools\ToolSourceRegistry`
+- `AgentsAPI\AI\Tools\ToolParameters`
+- `AgentsAPI\AI\Tools\ToolExecutorInterface`
+- `AgentsAPI\AI\Tools\ToolExecutionCore`
+- `AgentsAPI\AI\Tools\ToolExecutionResult`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects
+
+## Execution Principals
+
+`AgentsAPI\AI\AgentExecutionPrincipal` represents the actor and agent context for one runtime request. It records the acting WordPress user ID, effective agent ID/slug, auth source, request context, optional token ID, and JSON-friendly request metadata.
+
+Host plugins can resolve the current principal from REST, CLI, cron, bearer-token, or session state through the `agents_api_execution_principal` filter:
+
+```php
+add_filter(
+	'agents_api_execution_principal',
+	static function ( $principal, array $context ) {
+		if ( 'rest' !== ( $context['request_context'] ?? '' ) ) {
+			return $principal;
+		}
+
+		return AgentsAPI\AI\AgentExecutionPrincipal::user_session(
+			get_current_user_id(),
+			(string) ( $context['agent_id'] ?? '' ),
+			'rest'
+		);
+	},
+	10,
+	2
+);
+```
 
 ## Conversation Compaction
 
@@ -82,11 +144,9 @@ wp_register_agent(
 	array(
 		'supports_conversation_compaction' => true,
 		'conversation_compaction_policy'   => array(
-			'enabled'          => true,
-			'max_messages'     => 40,
-			'recent_messages'  => 12,
-			'summary_provider' => 'example-provider',
-			'summary_model'    => 'example-model',
+			'enabled'         => true,
+			'max_messages'    => 40,
+			'recent_messages' => 12,
 		),
 	)
 );
@@ -99,6 +159,40 @@ wp_register_agent(
 - `events`: `compaction_started`, `compaction_completed`, or `compaction_failed` lifecycle events that streaming clients can relay.
 
 Boundary selection preserves tool-call/tool-result integrity by default. If summarization fails, the original normalized transcript is returned unchanged and a failure event is emitted rather than silently dropping history.
+
+## Conversation Loop Boundary
+
+`AgentsAPI\AI\AgentConversationLoop` is a thin generic loop facade. It owns the reusable mechanics that every multi-turn agent run needs:
+
+- Normalizing inbound messages to `AgentMessageEnvelope`.
+- Optionally applying caller-supplied compaction before each turn.
+- Calling a runner adapter once per turn.
+- Validating each runner response with `AgentConversationResult`.
+- Asking a caller-supplied continuation policy whether another turn is needed.
+
+It does not assemble prompts, select a provider/model, implement concrete tools, choose durable storage, expose admin UI, or define product workflow semantics. Consumers provide adapters for those concerns and pass them into the loop:
+
+```php
+$result = AgentsAPI\AI\AgentConversationLoop::run(
+	$messages,
+	static function ( array $messages, array $context ): array {
+		// Consumer adapter assembles prompts, dispatches the model, invokes concrete
+		// tools through runtime contracts, materializes storage as needed, and
+		// returns an AgentConversationResult-shaped array.
+		return $runner->run_turn( $messages, $context );
+	},
+	array(
+		'max_turns'       => 4,
+		'should_continue' => static function ( array $turn_result, array $context ): bool {
+			return $policy->should_continue( $turn_result, $context );
+		},
+		'compaction_policy' => $agent->conversation_compaction_policy,
+		'summarizer'         => $summarizer,
+	)
+);
+```
+
+The loop treats all adapter inputs and outputs as JSON-friendly arrays so products can map them to their own storage, streaming, audit, and transport layers without Agents API owning those layers.
 
 ## Tests
 

@@ -43,7 +43,7 @@ class AgentConversationCompaction {
 			'summary_prefix'           => 'Earlier conversation summary:',
 			'summary_model'            => '',
 			'summary_provider'         => '',
-			'preserve_tool_boundaries' => true,
+			'preserve_tool_boundaries'   => true,
 			'overflow_archive_enabled'   => false,
 			'overflow_threshold_bytes'   => 0,
 			'overflow_retained_messages' => 0,
@@ -70,7 +70,7 @@ class AgentConversationCompaction {
 		$normalized['summary_prefix']           = self::normalize_string( $normalized['summary_prefix'], 'Earlier conversation summary:' );
 		$normalized['summary_model']            = self::normalize_string( $normalized['summary_model'], '' );
 		$normalized['summary_provider']         = self::normalize_string( $normalized['summary_provider'], '' );
-		$normalized['preserve_tool_boundaries'] = (bool) $normalized['preserve_tool_boundaries'];
+		$normalized['preserve_tool_boundaries']   = (bool) $normalized['preserve_tool_boundaries'];
 		$normalized['overflow_archive_enabled']   = (bool) $normalized['overflow_archive_enabled'];
 		$normalized['overflow_threshold_bytes']   = max( 0, (int) $normalized['overflow_threshold_bytes'] );
 		$normalized['overflow_retained_messages'] = max( 0, (int) $normalized['overflow_retained_messages'] );
@@ -118,11 +118,11 @@ class AgentConversationCompaction {
 		}
 
 		$summary_context = array(
-			'policy'          => $policy,
-			'total_messages'  => $total_messages,
-			'compact_count'   => $cutoff,
-			'retained_count'  => $total_messages - $cutoff,
-			'boundary'        => array(
+			'policy'         => $policy,
+			'total_messages' => $total_messages,
+			'compact_count'  => $cutoff,
+			'retained_count' => $total_messages - $cutoff,
+			'boundary'       => array(
 				'compact_until' => $cutoff - 1,
 				'retain_from'   => $cutoff,
 			),
@@ -160,8 +160,8 @@ class AgentConversationCompaction {
 			)
 		);
 
-		$compacted_messages = array_merge( array( $summary_message ), array_slice( $normalized_messages, $cutoff ) );
-		$complete_context   = $summary_context;
+		$compacted_messages                  = array_merge( array( $summary_message ), array_slice( $normalized_messages, $cutoff ) );
+		$complete_context                    = $summary_context;
 		$complete_context['summary_message'] = $summary_message;
 
 		return self::result(
@@ -180,8 +180,9 @@ class AgentConversationCompaction {
 	 * @return int Boundary index.
 	 */
 	public static function select_boundary( array $messages, array $policy ): int {
-		$policy = self::normalize_policy( $policy );
-		$cutoff = max( 0, count( $messages ) - $policy['recent_messages'] );
+		$policy          = self::normalize_policy( $policy );
+		$recent_messages = (int) $policy['recent_messages'];
+		$cutoff          = max( 0, count( $messages ) - $recent_messages );
 
 		return $policy['preserve_tool_boundaries'] ? self::move_boundary_to_safe_index( $messages, $cutoff ) : $cutoff;
 	}
@@ -248,10 +249,10 @@ class AgentConversationCompaction {
 				$normalized_messages,
 				self::STATUS_SKIPPED,
 				array(
-					'policy' => $policy,
-					'reason' => 'overflow_input_unsplittable',
+					'policy'         => $policy,
+					'reason'         => 'overflow_input_unsplittable',
 					'total_messages' => $total_messages,
-					'total_bytes' => self::encoded_size( $source_messages ),
+					'total_bytes'    => self::encoded_size( $source_messages ),
 				),
 				array()
 			);
@@ -261,18 +262,18 @@ class AgentConversationCompaction {
 		$retained      = array_slice( $normalized_messages, $cutoff );
 		$archive_id    = 'agents-api-overflow-' . substr( hash( 'sha256', self::encoded_json( $archive_items ) ), 0, 16 );
 		$archive_meta  = array(
-			'strategy'       => 'deterministic_overflow_archive',
-			'archive_id'     => $archive_id,
+			'strategy'        => 'deterministic_overflow_archive',
+			'archive_id'      => $archive_id,
 			'archive_pointer' => $policy['overflow_archive_pointer'],
-			'archive_count'  => count( $archive_items ),
-			'retained_count' => count( $retained ),
-			'total_messages' => $total_messages,
-			'total_bytes'    => self::encoded_size( $source_messages ),
-			'boundary'       => array(
+			'archive_count'   => count( $archive_items ),
+			'retained_count'  => count( $retained ),
+			'total_messages'  => $total_messages,
+			'total_bytes'     => self::encoded_size( $source_messages ),
+			'boundary'        => array(
 				'archive_until' => $cutoff - 1,
 				'retain_from'   => $cutoff,
 			),
-			'policy'         => $policy,
+			'policy'          => $policy,
 		);
 
 		$stub_message = AgentMessageEnvelope::text(
