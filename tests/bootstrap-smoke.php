@@ -85,7 +85,7 @@ foreach ( $agents_api_files as $file ) {
 		continue;
 	}
 
-	$contents = file_get_contents( $file->getPathname() );
+	$contents = $wp_filesystem->get_contents( $file->getPathname( ) );
 	agents_api_smoke_assert_equals(
 		0,
 		preg_match( '/^\s*(namespace|use)\s+DataMachine\\\\/m', is_string( $contents ) ? $contents : '' ),
@@ -102,7 +102,7 @@ foreach ( $agents_api_files as $file ) {
 	);
 }
 
-$bootstrap_source = (string) file_get_contents( AGENTS_API_PLUGIN_FILE );
+$bootstrap_source = (string) $wp_filesystem->get_contents( AGENTS_API_PLUGIN_FILE );
 agents_api_smoke_assert_equals( 0, preg_match( '/^\s*(namespace|use)\s+DataMachine\\\\/m', $bootstrap_source ), 'plugin bootstrap has no Data Machine namespace declaration/import', $failures, $passes );
 agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Data Machine' ), 'plugin bootstrap has no Data Machine prose coupling', $failures, $passes );
 

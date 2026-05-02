@@ -55,18 +55,18 @@ class AgentConversationLoop {
 	 * @return array Normalized conversation result.
 	 */
 	public static function run( array $messages, callable $turn_runner, array $options = array() ): array {
-		$max_turns           = self::max_turns( $options['max_turns'] ?? 1 );
-		$context             = isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array();
-		$should_continue     = $options['should_continue'] ?? null;
-		$tool_executor       = self::resolve_tool_executor( $options );
-		$tool_declarations   = self::resolve_tool_declarations( $options );
-		$completion_policy   = self::resolve_completion_policy( $options );
-		$transcript_persister = self::resolve_transcript_persister( $options );
-		$on_event            = self::resolve_event_sink( $options );
-		$mediation_enabled   = null !== $tool_executor && ! empty( $tool_declarations );
-		$messages            = AgentMessageEnvelope::normalize_many( $messages );
-		$events              = array();
-		$tool_results        = array();
+		$max_turns             = self::max_turns( $options['max_turns'] ?? 1 );
+		$context               = isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array();
+		$should_continue       = $options['should_continue'] ?? null;
+		$tool_executor         = self::resolve_tool_executor( $options );
+		$tool_declarations     = self::resolve_tool_declarations( $options );
+		$completion_policy     = self::resolve_completion_policy( $options );
+		$transcript_persister  = self::resolve_transcript_persister( $options );
+		$on_event              = self::resolve_event_sink( $options );
+		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
+		$messages              = AgentMessageEnvelope::normalize_many( $messages );
+		$events                = array();
+		$tool_results          = array();
 		$conversation_complete = false;
 
 		for ( $turn = 1; $turn <= $max_turns; ++$turn ) {
@@ -213,14 +213,14 @@ class AgentConversationLoop {
 		int $turn,
 		?callable $on_event
 	): array {
-		$core       = new ToolExecutionCore();
-		$messages   = isset( $result['messages'] ) && is_array( $result['messages'] )
+		$core                   = new ToolExecutionCore();
+		$messages               = isset( $result['messages'] ) && is_array( $result['messages'] )
 			? AgentMessageEnvelope::normalize_many( $result['messages'] )
 			: array();
-		$tool_calls = $result['tool_calls'];
+		$tool_calls             = $result['tool_calls'];
 		$tool_execution_results = array();
-		$events     = array();
-		$complete   = false;
+		$events                 = array();
+		$complete               = false;
 
 		// If the turn runner returned text content, add it as an assistant message.
 		if ( isset( $result['content'] ) && is_string( $result['content'] ) && '' !== $result['content'] ) {

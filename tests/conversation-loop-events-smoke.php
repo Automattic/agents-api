@@ -47,7 +47,7 @@ $event_log = array();
 $result = AgentsAPI\AI\AgentConversationLoop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages, array $context ): array {
-		if ( $context['turn'] === 1 ) {
+		if ( 1 === $context['turn'] ) {
 			return array(
 				'messages'   => $messages,
 				'tool_calls' => array(
