@@ -44,6 +44,10 @@ Agents API sits between tool/action discovery and product-specific automation. I
 
 Products can require Agents API because they build on the substrate. Agents API must not depend on any product plugin, import product classes, mirror a product source tree, or encode product vocabulary as generic runtime API.
 
+## Requirements
+
+Agents API requires **WordPress 7.0 or higher**. The substrate itself is provider-agnostic and loads on earlier versions, but every realistic consumer needs an AI provider. The only WordPress-native provider story is `wp-ai-client`, which ships in WordPress 7.0 core. Sites running 6.8–6.9 can install Agents API without errors but won't have a working AI provider unless they manually install the deprecated `wp-ai-client` plugin.
+
 ## Consumer Integration
 
 Product plugins should treat Agents API as an optional or required runtime dependency depending on their feature surface.
