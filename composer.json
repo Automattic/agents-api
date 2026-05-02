@@ -23,6 +23,10 @@
       "php tests/conversation-compaction-smoke.php",
       "php tests/markdown-section-compaction-smoke.php",
       "php tests/conversation-loop-smoke.php",
+      "php tests/conversation-loop-tool-execution-smoke.php",
+      "php tests/conversation-loop-completion-policy-smoke.php",
+      "php tests/conversation-loop-transcript-persister-smoke.php",
+      "php tests/conversation-loop-events-smoke.php",
       "php tests/guidelines-substrate-smoke.php",
       "php tests/no-product-imports-smoke.php"
     ]
