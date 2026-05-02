@@ -36,7 +36,7 @@ class AgentConversationLoop {
 	 * and the loop handles execution internally. Otherwise the turn runner must
 	 * return an `AgentConversationResult`-compatible array as before.
 	 *
- 	 * Supported options:
+	 * Supported options:
 	 *
 	 * - `max_turns` (int): Maximum turns to run. Defaults to 1.
 	 * - `budgets` (IterationBudget[]): Named iteration budgets for bounded execution.
