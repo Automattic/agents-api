@@ -63,7 +63,7 @@ foreach ( $iterator as $file ) {
 		continue;
 	}
 
-	$source = (string) $wp_filesystem->get_contents( $file->getPathname( ) );
+	$source = (string) file_get_contents( $file->getPathname() );
 	foreach ( $forbidden_namespaces as $namespace ) {
 		$quoted = preg_quote( $namespace, '/' );
 		if ( preg_match( '/(?:use\s+|new\s+|extends\s+|implements\s+|instanceof\s+|\\\\)' . $quoted . '(?:\\\\|;|\s|\(|::)/', $source ) ) {
