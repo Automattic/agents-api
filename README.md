@@ -168,23 +168,26 @@ Boundary selection preserves tool-call/tool-result integrity by default. If summ
 
 ## Conversation Loop Boundary
 
-`AgentsAPI\AI\AgentConversationLoop` is a thin generic loop facade. It owns the reusable mechanics that every multi-turn agent run needs:
+`AgentsAPI\AI\AgentConversationLoop` is a generic loop facade. It owns the reusable mechanics that every multi-turn agent run needs:
 
 - Normalizing inbound messages to `AgentMessageEnvelope`.
 - Optionally applying caller-supplied compaction before each turn.
 - Calling a runner adapter once per turn.
 - Validating each runner response with `AgentConversationResult`.
-- Asking a caller-supplied continuation policy whether another turn is needed.
+- Tool-call mediation through `ToolExecutionCore` + `ToolExecutorInterface` when enabled.
+- Typed completion policy via `AgentConversationCompletionPolicyInterface`.
+- Transcript persistence via `AgentConversationTranscriptPersisterInterface`.
+- Lifecycle event emission via an `on_event` callable.
+- Asking a caller-supplied `should_continue` continuation policy whether another turn is needed.
 
-It does not assemble prompts, select a provider/model, implement concrete tools, choose durable storage, expose admin UI, or define product workflow semantics. Consumers provide adapters for those concerns and pass them into the loop:
+It does not assemble prompts, select a provider/model, implement concrete tools, choose durable storage, expose admin UI, or define product workflow semantics. Consumers provide adapters for those concerns and pass them into the loop.
+
+### Minimal usage (legacy, fully backwards compatible)
 
 ```php
 $result = AgentsAPI\AI\AgentConversationLoop::run(
 	$messages,
 	static function ( array $messages, array $context ): array {
-		// Consumer adapter assembles prompts, dispatches the model, invokes concrete
-		// tools through runtime contracts, materializes storage as needed, and
-		// returns an AgentConversationResult-shaped array.
 		return $runner->run_turn( $messages, $context );
 	},
 	array(
@@ -197,6 +200,62 @@ $result = AgentsAPI\AI\AgentConversationLoop::run(
 	)
 );
 ```
+
+### Full usage with tool mediation, completion policy, persistence, and events
+
+When `tool_executor` and `tool_declarations` are provided, the loop handles the tool-call → validate → execute → message assembly cycle internally. The turn runner becomes the AI request adapter only — it sends messages to the provider and returns a response with optional `tool_calls`:
+
+```php
+$result = AgentsAPI\AI\AgentConversationLoop::run(
+	$messages,
+	static function ( array $messages, array $context ): array {
+		// Turn runner dispatches to the AI provider and returns:
+		// - 'messages': current transcript
+		// - 'content': assistant text response (optional)
+		// - 'tool_calls': array of {name, parameters} (optional)
+		$response = $ai_client->prompt( $messages );
+		return array(
+			'messages'   => $messages,
+			'content'    => $response->text(),
+			'tool_calls' => $response->tool_calls(),
+		);
+	},
+	array(
+		'max_turns'         => 10,
+		'context'           => array( 'agent_id' => 'my-agent' ),
+
+		// Tool execution mediation (#45)
+		'tool_executor'     => $my_tool_executor,      // ToolExecutorInterface
+		'tool_declarations' => $available_tools,        // array keyed by tool name
+
+		// Typed completion policy (#42)
+		'completion_policy' => $my_completion_policy,   // AgentConversationCompletionPolicyInterface
+
+		// Transcript persistence (#43)
+		'transcript_persister' => $my_persister,        // AgentConversationTranscriptPersisterInterface
+
+		// Lifecycle events (#44)
+		'on_event' => static function ( string $event, array $payload ): void {
+			// Events: turn_started, tool_call, tool_result, completed, failed
+			$logger->log( $event, $payload );
+		},
+
+		// Legacy escape hatch — both can coexist, typed policy takes precedence
+		'should_continue' => static function ( array $result, array $context ): bool {
+			return ! empty( $result['tool_execution_results'] );
+		},
+
+		// Compaction (unchanged)
+		'compaction_policy' => $agent->conversation_compaction_policy,
+		'summarizer'         => $summarizer,
+
+		// Optional: pass the original request for transcript persistence context
+		'request' => $conversation_request,            // AgentConversationRequest
+	)
+);
+```
+
+All new options are opt-in. Existing callers passing only the original options continue to work identically.
 
 The loop treats all adapter inputs and outputs as JSON-friendly arrays so products can map them to their own storage, streaming, audit, and transport layers without Agents API owning those layers.
 
