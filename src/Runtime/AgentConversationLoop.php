@@ -64,7 +64,9 @@ class AgentConversationLoop {
 		$completion_policy     = self::resolve_completion_policy( $options );
 		$transcript_persister  = self::resolve_transcript_persister( $options );
 		$on_event              = self::resolve_event_sink( $options );
-		$budgets               = self::resolve_budgets( $options, $max_turns );
+		$budget_resolution     = self::resolve_budgets( $options, $max_turns );
+		$budgets               = $budget_resolution['budgets'];
+		$has_explicit_turns    = $budget_resolution['has_explicit_turns'];
 		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
 		$messages              = AgentMessageEnvelope::normalize_many( $messages );
 		$events                = array();
@@ -178,8 +180,14 @@ class AgentConversationLoop {
 			}
 
 			// Increment the turns budget after a completed turn.
-			$exceeded_budget = self::increment_budget( $budgets, 'turns', $on_event );
-			if ( null !== $exceeded_budget ) {
+			// Synthesized turns budgets (from max_turns) break the loop silently
+			// to preserve backwards compatibility. Explicit turns budgets signal
+			// budget_exceeded so callers know the stop reason.
+			$turns_exceeded = self::increment_budget( $budgets, 'turns', $has_explicit_turns ? $on_event : null );
+			if ( null !== $turns_exceeded ) {
+				if ( $has_explicit_turns ) {
+					$exceeded_budget = $turns_exceeded;
+				}
 				break;
 			}
 
@@ -486,7 +494,7 @@ class AgentConversationLoop {
 	 *
 	 * @param array $options   Loop options.
 	 * @param int   $max_turns Resolved max turns value.
-	 * @return array<string, IterationBudget> Budgets keyed by name.
+	 * @return array{budgets: array<string, IterationBudget>, has_explicit_turns: bool}
 	 */
 	private static function resolve_budgets( array $options, int $max_turns ): array {
 		$raw     = $options['budgets'] ?? array();
@@ -500,12 +508,17 @@ class AgentConversationLoop {
 			}
 		}
 
+		$has_explicit_turns = isset( $budgets['turns'] );
+
 		// Synthesize a turns budget from max_turns when none was explicitly provided.
-		if ( ! isset( $budgets['turns'] ) ) {
+		if ( ! $has_explicit_turns ) {
 			$budgets['turns'] = new IterationBudget( 'turns', $max_turns );
 		}
 
-		return $budgets;
+		return array(
+			'budgets'            => $budgets,
+			'has_explicit_turns' => $has_explicit_turns,
+		);
 	}
 
 	/**
