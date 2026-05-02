@@ -52,6 +52,7 @@ require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationTranscriptPersister
 require_once AGENTS_API_PATH . 'src/Runtime/NullAgentConversationTranscriptPersister.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationCompaction.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentMarkdownSectionCompactionAdapter.php';
+require_once AGENTS_API_PATH . 'src/Runtime/IterationBudget.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationResult.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationLoop.php';
 require_once AGENTS_API_PATH . 'src/Tools/ToolCall.php';
