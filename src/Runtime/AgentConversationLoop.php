@@ -39,6 +39,7 @@ class AgentConversationLoop {
 	 * Supported options:
 	 *
 	 * - `max_turns` (int): Maximum turns to run. Defaults to 1.
+	 * - `budgets` (IterationBudget[]): Named iteration budgets for bounded execution.
 	 * - `context` (array): Caller-owned context passed to adapters.
 	 * - `should_continue` (callable|null): Caller-owned continuation policy.
 	 * - `compaction_policy` (array|null): Optional compaction policy.
@@ -63,11 +64,15 @@ class AgentConversationLoop {
 		$completion_policy     = self::resolve_completion_policy( $options );
 		$transcript_persister  = self::resolve_transcript_persister( $options );
 		$on_event              = self::resolve_event_sink( $options );
+		$budget_resolution     = self::resolve_budgets( $options, $max_turns );
+		$budgets               = $budget_resolution['budgets'];
+		$has_explicit_turns    = $budget_resolution['has_explicit_turns'];
 		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
 		$messages              = AgentMessageEnvelope::normalize_many( $messages );
 		$events                = array();
 		$tool_results          = array();
 		$conversation_complete = false;
+		$exceeded_budget       = null;
 
 		for ( $turn = 1; $turn <= $max_turns; ++$turn ) {
 			$turn_context         = $context;
@@ -128,13 +133,15 @@ class AgentConversationLoop {
 					$completion_policy,
 					$turn_context,
 					$turn,
-					$on_event
+					$on_event,
+					$budgets
 				);
 
 				$messages              = $mediation_result['messages'];
 				$tool_results          = array_merge( $tool_results, $mediation_result['tool_execution_results'] );
 				$events                = array_merge( $events, $mediation_result['events'] );
 				$conversation_complete = $mediation_result['conversation_complete'];
+				$exceeded_budget       = $mediation_result['exceeded_budget'];
 			} else {
 				// Legacy path: turn runner handles everything internally.
 				$result       = AgentConversationResult::normalize( $result );
@@ -163,8 +170,24 @@ class AgentConversationLoop {
 				}
 			}
 
-			// Stop conditions: completion policy said stop, or legacy should_continue.
+			// Stop conditions: budget exceeded, completion policy, or legacy should_continue.
+			if ( null !== $exceeded_budget ) {
+				break;
+			}
+
 			if ( $conversation_complete ) {
+				break;
+			}
+
+			// Increment the turns budget after a completed turn.
+			// Synthesized turns budgets (from max_turns) break the loop silently
+			// to preserve backwards compatibility. Explicit turns budgets signal
+			// budget_exceeded so callers know the stop reason.
+			$turns_exceeded = self::increment_budget( $budgets, 'turns', $has_explicit_turns ? $on_event : null );
+			if ( null !== $turns_exceeded ) {
+				if ( $has_explicit_turns ) {
+					$exceeded_budget = $turns_exceeded;
+				}
 				break;
 			}
 
@@ -173,11 +196,18 @@ class AgentConversationLoop {
 			}
 		}
 
-		$final_result = AgentConversationResult::normalize( array(
+		$final_result_data = array(
 			'messages'               => $messages,
 			'tool_execution_results' => $tool_results,
 			'events'                 => $events,
-		) );
+		);
+
+		if ( null !== $exceeded_budget ) {
+			$final_result_data['status'] = 'budget_exceeded';
+			$final_result_data['budget'] = $exceeded_budget;
+		}
+
+		$final_result = AgentConversationResult::normalize( $final_result_data );
 
 		self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
 
@@ -202,7 +232,8 @@ class AgentConversationLoop {
 	 * @param array                                             $turn_context    Turn context.
 	 * @param int                                               $turn            Current turn number.
 	 * @param callable|null                                     $on_event        Event sink.
-	 * @return array{messages: array, tool_execution_results: array, events: array, conversation_complete: bool}
+	 * @param array<string, IterationBudget>                    $budgets         Named iteration budgets.
+	 * @return array{messages: array, tool_execution_results: array, events: array, conversation_complete: bool, exceeded_budget: string|null}
 	 */
 	private static function mediate_tool_calls(
 		array $result,
@@ -211,7 +242,8 @@ class AgentConversationLoop {
 		?AgentConversationCompletionPolicyInterface $policy,
 		array $turn_context,
 		int $turn,
-		?callable $on_event
+		?callable $on_event,
+		array $budgets = array()
 	): array {
 		$core                   = new ToolExecutionCore();
 		$messages               = isset( $result['messages'] ) && is_array( $result['messages'] )
@@ -221,6 +253,7 @@ class AgentConversationLoop {
 		$tool_execution_results = array();
 		$events                 = array();
 		$complete               = false;
+		$exceeded_budget        = null;
 
 		// If the turn runner returned text content, add it as an assistant message.
 		if ( isset( $result['content'] ) && is_string( $result['content'] ) && '' !== $result['content'] ) {
@@ -285,6 +318,17 @@ class AgentConversationLoop {
 				$exec_result
 			);
 
+			// Increment tool-call budgets: total and per-tool-name.
+			$exceeded_budget = self::increment_budget( $budgets, 'tool_calls', $on_event );
+			if ( null === $exceeded_budget ) {
+				$exceeded_budget = self::increment_budget( $budgets, 'tool_calls_' . $tool_name, $on_event );
+			}
+
+			if ( null !== $exceeded_budget ) {
+				$complete = true;
+				break;
+			}
+
 			// Consult completion policy.
 			if ( null !== $policy ) {
 				$decision = $policy->recordToolResult(
@@ -321,6 +365,7 @@ class AgentConversationLoop {
 			'tool_execution_results' => $tool_execution_results,
 			'events'                 => $events,
 			'conversation_complete'  => $complete,
+			'exceeded_budget'        => $exceeded_budget,
 		);
 	}
 
@@ -439,6 +484,73 @@ class AgentConversationLoop {
 	private static function resolve_event_sink( array $options ): ?callable {
 		$sink = $options['on_event'] ?? null;
 		return is_callable( $sink ) ? $sink : null;
+	}
+
+	/**
+	 * Resolve iteration budgets from options.
+	 *
+	 * Synthesizes a `turns` budget from `max_turns` when no explicit `turns`
+	 * budget is provided, preserving backwards compatibility.
+	 *
+	 * @param array $options   Loop options.
+	 * @param int   $max_turns Resolved max turns value.
+	 * @return array{budgets: array<string, IterationBudget>, has_explicit_turns: bool}
+	 */
+	private static function resolve_budgets( array $options, int $max_turns ): array {
+		$raw     = $options['budgets'] ?? array();
+		$budgets = array();
+
+		if ( is_array( $raw ) ) {
+			foreach ( $raw as $budget ) {
+				if ( $budget instanceof IterationBudget ) {
+					$budgets[ $budget->name() ] = $budget;
+				}
+			}
+		}
+
+		$has_explicit_turns = isset( $budgets['turns'] );
+
+		// Synthesize a turns budget from max_turns when none was explicitly provided.
+		if ( ! $has_explicit_turns ) {
+			$budgets['turns'] = new IterationBudget( 'turns', $max_turns );
+		}
+
+		return array(
+			'budgets'            => $budgets,
+			'has_explicit_turns' => $has_explicit_turns,
+		);
+	}
+
+	/**
+	 * Increment a named budget and check for exceedance.
+	 *
+	 * When the budget is exceeded, emits a `budget_exceeded` event and returns
+	 * the budget name. Returns null when the budget is not exceeded or does not exist.
+	 *
+	 * @param array<string, IterationBudget> $budgets  Named budgets.
+	 * @param string                         $name     Budget name to increment.
+	 * @param callable|null                  $on_event Event sink.
+	 * @return string|null Exceeded budget name, or null.
+	 */
+	private static function increment_budget( array $budgets, string $name, ?callable $on_event ): ?string {
+		if ( ! isset( $budgets[ $name ] ) ) {
+			return null;
+		}
+
+		$budget = $budgets[ $name ];
+		$budget->increment();
+
+		if ( $budget->exceeded() ) {
+			self::emit_event( $on_event, 'budget_exceeded', array(
+				'budget'  => $name,
+				'current' => $budget->current(),
+				'ceiling' => $budget->ceiling(),
+			) );
+
+			return $name;
+		}
+
+		return null;
 	}
 
 	/**

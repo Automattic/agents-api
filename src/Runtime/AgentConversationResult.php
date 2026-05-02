@@ -88,6 +88,15 @@ class AgentConversationResult {
 			}
 		}
 
+		// Validate optional budget-exceeded status fields.
+		if ( array_key_exists( 'status', $result ) && ! is_string( $result['status'] ) ) {
+			throw self::invalid( 'status', 'must be a string when present' );
+		}
+
+		if ( array_key_exists( 'budget', $result ) && ! is_string( $result['budget'] ) ) {
+			throw self::invalid( 'budget', 'must be a string when present' );
+		}
+
 		return $result;
 	}
 
