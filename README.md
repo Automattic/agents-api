@@ -27,6 +27,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Agent memory store contracts and value objects.
 - Conversation compaction policy and transcript transformation contracts.
 - Generic multi-turn conversation loop sequencing around caller-owned adapters.
+- Iteration budget primitives for bounded execution across configurable dimensions.
 - Tool-call mediation contracts and runtime tool declaration value objects.
 - Conversation transcript store contracts.
 - Tool source registration, parameter normalization, tool-call mediation, and execution result contracts.
@@ -103,6 +104,7 @@ wp_register_agent(
 - `AgentsAPI\AI\AgentConversationTranscriptPersisterInterface`
 - `AgentsAPI\AI\NullAgentConversationTranscriptPersister`
 - `AgentsAPI\AI\AgentConversationCompaction`
+- `AgentsAPI\AI\IterationBudget`
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\AgentConversationLoop`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
@@ -234,9 +236,15 @@ $result = AgentsAPI\AI\AgentConversationLoop::run(
 		// Transcript persistence (#43)
 		'transcript_persister' => $my_persister,        // AgentConversationTranscriptPersisterInterface
 
+		// Iteration budgets (#47)
+		'budgets' => array(
+			new AgentsAPI\AI\IterationBudget( 'tool_calls', 20 ),
+			new AgentsAPI\AI\IterationBudget( 'tool_calls_progress_story', 5 ),
+		),
+
 		// Lifecycle events (#44)
 		'on_event' => static function ( string $event, array $payload ): void {
-			// Events: turn_started, tool_call, tool_result, completed, failed
+			// Events: turn_started, tool_call, tool_result, budget_exceeded, completed, failed
 			$logger->log( $event, $payload );
 		},
 
@@ -258,6 +266,64 @@ $result = AgentsAPI\AI\AgentConversationLoop::run(
 All new options are opt-in. Existing callers passing only the original options continue to work identically.
 
 The loop treats all adapter inputs and outputs as JSON-friendly arrays so products can map them to their own storage, streaming, audit, and transport layers without Agents API owning those layers.
+
+## Iteration Budgets
+
+`AgentsAPI\AI\IterationBudget` is a generic bounded-iteration primitive. It counts a named dimension (turns, tool calls, chain depth, retries) and exposes a uniform API for checking exceedance. A budget is a stateful value object — call `increment()` at each iteration, then `exceeded()` to decide whether to continue.
+
+```php
+$budget = new AgentsAPI\AI\IterationBudget( 'chain_depth', 3 );
+
+$budget->name();      // 'chain_depth'
+$budget->ceiling();   // 3
+$budget->current();   // 0
+$budget->exceeded();  // false
+$budget->remaining(); // 3
+
+$budget->increment();
+$budget->current();   // 1
+$budget->exceeded();  // false
+
+$budget->increment();
+$budget->increment();
+$budget->exceeded();  // true (current >= ceiling)
+$budget->remaining(); // 0
+```
+
+### Loop integration
+
+Pass budgets to `AgentConversationLoop::run()` via the `budgets` option. The loop enforces them at the appropriate seams:
+
+- **`turns`** — incremented after each turn. When an explicit `IterationBudget('turns', N)` is provided, it overrides `max_turns` and produces a `budget_exceeded` status when tripped.
+- **`tool_calls`** — incremented after each tool call when tool mediation is enabled.
+- **`tool_calls_<name>`** — incremented per tool name for ping-pong protection (e.g. `tool_calls_progress_story`).
+
+```php
+$result = AgentsAPI\AI\AgentConversationLoop::run(
+	$messages,
+	$turn_runner,
+	array(
+		'max_turns' => 10,
+		'budgets'   => array(
+			new AgentsAPI\AI\IterationBudget( 'tool_calls', 20 ),
+			new AgentsAPI\AI\IterationBudget( 'tool_calls_progress_story', 5 ),
+		),
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+	)
+);
+
+if ( ( $result['status'] ?? null ) === 'budget_exceeded' ) {
+	// $result['budget'] contains the name of the exceeded budget.
+	$logger->warn( 'Budget exceeded: ' . $result['budget'] );
+}
+```
+
+When a budget trips, the loop returns early with `status: 'budget_exceeded'` and `budget: '<name>'` in the result. A `budget_exceeded` event is also emitted through the `on_event` sink with `budget`, `current`, and `ceiling` in the payload.
+
+External observers tracking exotic dimensions (token cost, wall-clock, custom chain depth) can use the `on_event` hook to increment their own `IterationBudget` instances and signal the loop through the existing `should_continue` or completion policy escape hatches.
+
+The substrate ships only the per-execution value object. Registries, configuration persistence, and ceiling policies are consumer concerns.
 
 ## Tests
 
