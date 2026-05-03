@@ -267,6 +267,21 @@ All new options are opt-in. Existing callers passing only the original options c
 
 The loop treats all adapter inputs and outputs as JSON-friendly arrays so products can map them to their own storage, streaming, audit, and transport layers without Agents API owning those layers.
 
+## Pending Action Approval Boundary
+
+Agents API owns generic approval primitives for runtime actions that need explicit user or policy approval before a consumer applies them. The lifecycle is:
+
+- A runtime or tool proposes an action instead of applying it immediately.
+- The proposal is emitted or stored as a generic pending action value.
+- A UI or user accepts or rejects the pending action.
+- The consumer adapter resolves the decision and applies or discards the proposal through its own product-specific handler.
+
+Agents API owns the reusable contract shape only: value objects and interfaces for pending actions, the JSON-friendly proposal and decision shape, policy vocabulary for approval requirements, and a typed `approval_required` envelope that runtimes can return without knowing where the proposal will be stored or displayed.
+
+Consuming products own the concrete materialization: durable storage, REST routes, abilities or tool surfaces, chat/admin UI, permission ceilings, audit records, queues, jobs, workflows, and product-specific apply/reject handlers. Those concerns belong in adapters because they depend on each product's UX, authorization model, and operational semantics.
+
+Package artifacts can also describe a `diff_callback` so packages can generate reviewable diffs for installer or updater flows. That artifact is related to approval because it helps produce human-reviewable change previews, but it is not the same primitive as runtime pending-action approval. `diff_callback` belongs to package artifact review; `approval_required` belongs to a live runtime/tool proposal that must be accepted or rejected before the consumer applies it.
+
 ## Iteration Budgets
 
 `AgentsAPI\AI\IterationBudget` is a generic bounded-iteration primitive. It counts a named dimension (turns, tool calls, chain depth, retries) and exposes a uniform API for checking exceedance. A budget is a stateful value object — call `increment()` at each iteration, then `exceeded()` to decide whether to continue.
