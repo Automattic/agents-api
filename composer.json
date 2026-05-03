@@ -16,6 +16,7 @@
       "php tests/bootstrap-smoke.php",
       "php tests/registry-smoke.php",
       "php tests/execution-principal-smoke.php",
+      "php tests/action-policy-values-smoke.php",
       "php tests/tool-runtime-smoke.php",
       "php tests/pending-action-store-contract-smoke.php",
       "php tests/identity-smoke.php",

@@ -57,6 +57,7 @@ require_once AGENTS_API_PATH . 'src/Runtime/IterationBudget.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationResult.php';
 require_once AGENTS_API_PATH . 'src/Runtime/AgentConversationLoop.php';
 require_once AGENTS_API_PATH . 'src/Tools/ToolCall.php';
+require_once AGENTS_API_PATH . 'src/Tools/ActionPolicy.php';
 require_once AGENTS_API_PATH . 'src/Tools/ToolParameters.php';
 require_once AGENTS_API_PATH . 'src/Tools/ToolExecutionResult.php';
 require_once AGENTS_API_PATH . 'src/Tools/ToolExecutorInterface.php';
