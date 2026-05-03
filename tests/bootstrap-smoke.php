@@ -66,6 +66,7 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifacts_
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_PLUGIN_FILE' ), 'plugin file constant is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter' ), 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentConversationLoop' ), 'AgentConversationLoop facade is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\AI\\Approvals\\PendingActionStoreInterface' ), 'AgentsAPI\\AI\\Approvals\\PendingActionStoreInterface contract is available', $failures, $passes );
 foreach ( $namespace_map as $legacy_class => $target_class ) {
 	agents_api_smoke_assert_equals( true, class_exists( $target_class ) || interface_exists( $target_class ), $target_class . ' contract is available', $failures, $passes );
 	agents_api_smoke_assert_equals( false, class_exists( $legacy_class, false ) || interface_exists( $legacy_class, false ), $legacy_class . ' compatibility alias is not loaded', $failures, $passes );
@@ -108,6 +109,7 @@ agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Dat
 
 echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
+	'Approvals',
 	'Guidelines',
 	'Identity',
 	'Memory',
