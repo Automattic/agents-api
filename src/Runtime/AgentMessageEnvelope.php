@@ -103,6 +103,21 @@ class AgentMessageEnvelope {
 	}
 
 	/**
+	 * Build a canonical approval-required envelope.
+	 *
+	 * The payload is intentionally generic so consumers can describe any pending
+	 * action without coupling the envelope contract to a specific runtime.
+	 *
+	 * @param string $content  Human-readable approval request content.
+	 * @param array  $payload  Approval payload, for example action_id, kind, summary, preview, resolve, expires_at.
+	 * @param array  $metadata Extension metadata.
+	 * @return array<string, mixed>
+	 */
+	public static function approvalRequired( string $content, array $payload, array $metadata = array() ): array {
+		return self::buildEnvelope( self::roleForType( self::TYPE_APPROVAL_REQUIRED ), $content, self::TYPE_APPROVAL_REQUIRED, $payload, $metadata, array() );
+	}
+
+	/**
 	 * Normalize a legacy message or typed envelope to the canonical envelope.
 	 *
 	 * @param array $message Message array.

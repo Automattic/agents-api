@@ -14,6 +14,7 @@
   "scripts": {
     "test": [
       "php tests/bootstrap-smoke.php",
+      "php tests/message-envelope-smoke.php",
       "php tests/registry-smoke.php",
       "php tests/execution-principal-smoke.php",
       "php tests/action-policy-values-smoke.php",
