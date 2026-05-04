@@ -31,6 +31,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Iteration budget primitives for bounded execution across configurable dimensions.
 - Tool-call mediation contracts and runtime tool declaration value objects.
 - Conversation transcript store contracts.
+- Consent policy contracts for memory, transcripts, sharing, and escalation.
 - Tool source registration, parameter normalization, tool-call mediation, and execution result contracts.
 - Session and persistence contracts where they are provider-neutral.
 
@@ -43,6 +44,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Public REST controllers in v1 unless they are separately designed.
 - Product runner adapters that assemble prompts, choose concrete tools, materialize storage, or decide product policy.
 - Concrete tool execution adapters, prompt assembly policy, or product storage/materialization policy.
+- Product-specific consent UX, support routing, escalation targets, or transcript-sharing policy.
 
 Products can require Agents API because they build on the substrate. Agents API must not depend on any product plugin, import product classes, mirror a product source tree, or encode product vocabulary as generic runtime API.
 
@@ -116,6 +118,10 @@ wp_register_agent(
 - `AgentsAPI\AI\IterationBudget`
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\AgentConversationLoop`
+- `WP_Agent_Consent_Policy_Interface`
+- `WP_Agent_Default_Consent_Policy`
+- `AgentsAPI\AI\Consent\AgentConsentOperation`
+- `AgentsAPI\AI\Consent\AgentConsentDecision`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
 - `AgentsAPI\AI\Tools\ToolCall`
 - `AgentsAPI\AI\Tools\ToolSourceRegistry`
@@ -211,6 +217,42 @@ request bearer token
 - The acting/owner WordPress user has the requested capability via `user_can()`.
 
 Hosts can replace this policy by implementing `WP_Agent_Authorization_Policy_Interface`, or pass host-owned access/token stores while keeping the generic value objects.
+
+## Consent Policy Boundary
+
+Agents API owns a generic consent contract for runtime operations that carry different user expectations:
+
+- `store_memory` — store consolidated agent memory.
+- `use_memory` — use existing agent memory during a run.
+- `store_transcript` — store a raw conversation transcript.
+- `share_transcript` — share a raw transcript outside its owning context.
+- `escalate_to_human` — escalate a run or transcript to a human/support adapter.
+
+Memory consent and transcript consent are intentionally separate. Allowing an agent to store or use consolidated memory does not imply consent to persist or share raw transcripts. Escalation is also separate so support-mode adapters can ask their own product questions without adding support-product logic to Agents API.
+
+Policies implement `WP_Agent_Consent_Policy_Interface` and return `AgentConsentDecision` values with `allowed`, `operation`, `reason`, and `audit_metadata` fields. Consumers should store those decision arrays alongside any memory write, transcript persistence/share event, or escalation event they apply.
+
+```php
+$policy = new WP_Agent_Default_Consent_Policy();
+
+$decision = $policy->can_store_transcript(
+	array(
+		'mode'    => 'chat',
+		'user_id' => get_current_user_id(),
+		'agent_id' => 'example-agent',
+		'consent' => array(
+			'store_transcript' => true,
+		),
+	)
+);
+
+if ( $decision->is_allowed() ) {
+	$transcript_id = $transcript_persister->persist( $messages, $request, $result );
+	$audit_store->record( $decision->to_array() + array( 'transcript_id' => $transcript_id ) );
+}
+```
+
+`WP_Agent_Default_Consent_Policy` is conservative: non-interactive modes are denied by default, and interactive modes still require explicit per-operation consent. Products can supply adapter-specific policies for their own UX, authorization ceilings, support routing, retention rules, and audit stores.
 
 ## Conversation Compaction
 
