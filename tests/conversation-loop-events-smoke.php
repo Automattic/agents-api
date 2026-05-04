@@ -146,7 +146,64 @@ $crashing_sink_result = AgentsAPI\AI\AgentConversationLoop::run(
 
 agents_api_smoke_assert_equals( 2, count( $crashing_sink_result['messages'] ), 'loop result is unaffected by event sink crash', $failures, $passes );
 
-echo "\n[4] No event sink = no events emitted (backwards compatible):\n";
+echo "\n[4] WordPress action observers receive events without caller sink:\n";
+$action_event_log = array();
+
+add_action(
+	'agents_api_loop_event',
+	static function ( string $event, array $payload ) use ( &$action_event_log ): void {
+		$action_event_log[] = array( 'event' => $event, 'payload' => $payload );
+	},
+	10,
+	2
+);
+
+$action_observed_result = AgentsAPI\AI\AgentConversationLoop::run(
+	array( array( 'role' => 'user', 'content' => 'observe' ) ),
+	static function ( array $messages ): array {
+		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'observed' );
+
+		return array(
+			'messages'               => $messages,
+			'tool_execution_results' => array(),
+			'events'                 => array(),
+		);
+	},
+	array( 'max_turns' => 1 )
+);
+
+$action_event_names = array_column( $action_event_log, 'event' );
+agents_api_smoke_assert_equals( 2, count( $action_observed_result['messages'] ), 'loop works with action observer and no caller sink', $failures, $passes );
+agents_api_smoke_assert_equals( true, in_array( 'turn_started', $action_event_names, true ), 'action observer receives turn_started event', $failures, $passes );
+agents_api_smoke_assert_equals( true, in_array( 'completed', $action_event_names, true ), 'action observer receives completed event', $failures, $passes );
+
+echo "\n[5] WordPress action observer failure does not affect loop result:\n";
+add_action(
+	'agents_api_loop_event',
+	static function (): void {
+		throw new \RuntimeException( 'action observer crash' );
+	},
+	20,
+	2
+);
+
+$crashing_action_result = AgentsAPI\AI\AgentConversationLoop::run(
+	array( array( 'role' => 'user', 'content' => 'hello' ) ),
+	static function ( array $messages ): array {
+		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'hi' );
+
+		return array(
+			'messages'               => $messages,
+			'tool_execution_results' => array(),
+			'events'                 => array(),
+		);
+	},
+	array( 'max_turns' => 1 )
+);
+
+agents_api_smoke_assert_equals( 2, count( $crashing_action_result['messages'] ), 'loop result is unaffected by action observer crash', $failures, $passes );
+
+echo "\n[6] No caller event sink remains optional:\n";
 $no_event_result = AgentsAPI\AI\AgentConversationLoop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages ): array {
