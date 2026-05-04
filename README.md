@@ -31,6 +31,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Iteration budget primitives for bounded execution across configurable dimensions.
 - Tool-call mediation contracts and runtime tool declaration value objects.
 - Conversation transcript store contracts.
+- Consent policy contracts for memory, transcripts, sharing, and escalation.
 - Tool source registration, parameter normalization, tool-call mediation, and execution result contracts.
 - Session and persistence contracts where they are provider-neutral.
 
@@ -43,6 +44,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Public REST controllers in v1 unless they are separately designed.
 - Product runner adapters that assemble prompts, choose concrete tools, materialize storage, or decide product policy.
 - Concrete tool execution adapters, prompt assembly policy, or product storage/materialization policy.
+- Product-specific consent UX, support routing, escalation targets, or transcript-sharing policy.
 
 Products can require Agents API because they build on the substrate. Agents API must not depend on any product plugin, import product classes, mirror a product source tree, or encode product vocabulary as generic runtime API.
 
@@ -116,6 +118,10 @@ wp_register_agent(
 - `AgentsAPI\AI\IterationBudget`
 - `AgentsAPI\AI\AgentConversationResult`
 - `AgentsAPI\AI\AgentConversationLoop`
+- `WP_Agent_Consent_Policy_Interface`
+- `WP_Agent_Default_Consent_Policy`
+- `AgentsAPI\AI\Consent\AgentConsentOperation`
+- `AgentsAPI\AI\Consent\AgentConsentDecision`
 - `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
 - `AgentsAPI\AI\Tools\ToolCall`
 - `AgentsAPI\AI\Tools\ToolSourceRegistry`
@@ -131,7 +137,83 @@ wp_register_agent(
 - `AgentsAPI\AI\Approvals\PendingActionHandlerInterface`
 - `AgentsAPI\Core\Workspace\AgentWorkspaceScope`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
-- `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects
+- `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects, including provenance/trust metadata contracts
+
+## Memory Provenance Metadata
+
+Memory stores can carry first-class metadata alongside content so callers can distinguish direct user assertions from agent inferences, workspace extraction, curated facts, system-generated facts, or imports.
+
+`AgentMemoryMetadata` standardizes these fields:
+
+- `source_type`: `user_asserted`, `agent_inferred`, `workspace_extracted`, `system_generated`, `curated`, or `imported`.
+- `source_ref`: caller-owned source reference, such as a URL, file path, record ID, or content hash.
+- `created_by_user_id` and `created_by_agent_id`: identities responsible for the memory write.
+- `workspace`: optional `AgentWorkspaceScope` identity for revalidation.
+- `confidence`: trust score from `0.0` to `1.0`.
+- `validator`: validator identifier that can re-check the memory against current substrate state.
+- `authority_tier`: `low`, `medium`, `high`, or `canonical`.
+- `created_at` and `updated_at`: Unix timestamps for metadata/content lifecycle.
+
+Default trust is intentionally conservative. `agent_inferred` defaults to `0.5` confidence and `low` authority, while `user_asserted`, `curated`, and `system_generated` memories rank higher by default.
+
+Stores declare metadata support through `AgentMemoryStoreCapabilities`:
+
+```php
+$capabilities = $store->capabilities();
+
+$unsupported = $capabilities->unsupported_metadata_fields(
+	array( 'source_type', 'workspace', 'confidence' ),
+	'read'
+);
+```
+
+Writes, reads, and list entries include `unsupported_metadata_fields` so a caller can tell the difference between missing metadata and a store that cannot persist, return, filter, or rank the requested fields.
+
+Retrieval filters and ranking hints use `AgentMemoryQuery`:
+
+```php
+$entries = $store->list_layer(
+	new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
+		'user',
+		$workspace->workspace_type,
+		$workspace->workspace_id,
+		123,
+		456,
+		''
+	),
+	new AgentsAPI\Core\FilesRepository\AgentMemoryQuery(
+		source_types: array( AgentsAPI\Core\FilesRepository\AgentMemoryMetadata::SOURCE_USER_ASSERTED ),
+		min_confidence: 0.8,
+		authority_tiers: array( AgentsAPI\Core\FilesRepository\AgentMemoryMetadata::AUTHORITY_HIGH ),
+		order_by: 'confidence'
+	)
+);
+```
+
+Validators are pluggable and workspace-aware without being tied to a specific product or host:
+
+```php
+final class RepoMemoryValidator implements AgentsAPI\Core\FilesRepository\AgentMemoryValidatorInterface {
+	public function id(): string {
+		return 'repo_state';
+	}
+
+	public function validate(
+		AgentsAPI\Core\FilesRepository\AgentMemoryScope $scope,
+		string $content,
+		AgentsAPI\Core\FilesRepository\AgentMemoryMetadata $metadata,
+		array $workspace_context = array()
+	): AgentsAPI\Core\FilesRepository\AgentMemoryValidationResult {
+		unset( $scope, $content, $metadata );
+
+		return ! empty( $workspace_context['current'] )
+			? AgentsAPI\Core\FilesRepository\AgentMemoryValidationResult::valid()
+			: AgentsAPI\Core\FilesRepository\AgentMemoryValidationResult::stale( 'Repository state changed.' );
+	}
+}
+```
+
+Agents API defines the contracts only. Concrete stores decide how metadata is physically materialized, how ranking is executed, and which workspace facts are supplied to validators.
 
 ## Workspace Scope
 
@@ -166,6 +248,30 @@ $scope = new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
 ```
 
 Transcript sessions are also workspace-stamped. `ConversationTranscriptStoreInterface::create_session()` and `::get_recent_pending_session()` both receive an `AgentWorkspaceScope`, and `AgentConversationRequest` can carry a workspace so runtime persisters can stamp the session they materialize.
+
+## Guideline Capabilities
+
+When Agents API provides the `wp_guideline` polyfill, guideline access is scoped by explicit capabilities instead of ordinary post/private-post semantics:
+
+- `read_agent_memory`
+- `edit_agent_memory`
+- `read_private_agent_memory`
+- `edit_private_agent_memory`
+- `read_workspace_guidelines`
+- `edit_workspace_guidelines`
+- `promote_agent_memory`
+
+Private user-workspace memory is identified with guideline metadata, not by `post_status=private` alone:
+
+- `_wp_guideline_scope=private_user_workspace_memory`
+- `_wp_guideline_user_id=<owner user id>`
+- `_wp_guideline_workspace_id=<workspace id>`
+
+Workspace-shared guidance is identified with `_wp_guideline_scope=workspace_shared_guidance` and `_wp_guideline_workspace_id=<workspace id>`.
+
+The substrate maps private memory reads/edits through the explicit owner metadata, so editors and administrators do not gain access merely because they can read private posts. Workspace-shared guidance reads map to the editorial threshold (`edit_posts`), edits map to the publishing threshold (`publish_posts`), and promotion from private memory to shared guidance requires the owner plus the explicit `promote_agent_memory` capability.
+
+Hosts that provide their own guideline substrate can disable the polyfill with the `wp_guidelines_substrate_enabled` filter or register `wp_guideline` before Agents API does.
 
 ## Execution Principals
 
@@ -217,6 +323,42 @@ request bearer token
 - The acting/owner WordPress user has the requested capability via `user_can()`.
 
 Hosts can replace this policy by implementing `WP_Agent_Authorization_Policy_Interface`, or pass host-owned access/token stores while keeping the generic value objects.
+
+## Consent Policy Boundary
+
+Agents API owns a generic consent contract for runtime operations that carry different user expectations:
+
+- `store_memory` — store consolidated agent memory.
+- `use_memory` — use existing agent memory during a run.
+- `store_transcript` — store a raw conversation transcript.
+- `share_transcript` — share a raw transcript outside its owning context.
+- `escalate_to_human` — escalate a run or transcript to a human/support adapter.
+
+Memory consent and transcript consent are intentionally separate. Allowing an agent to store or use consolidated memory does not imply consent to persist or share raw transcripts. Escalation is also separate so support-mode adapters can ask their own product questions without adding support-product logic to Agents API.
+
+Policies implement `WP_Agent_Consent_Policy_Interface` and return `AgentConsentDecision` values with `allowed`, `operation`, `reason`, and `audit_metadata` fields. Consumers should store those decision arrays alongside any memory write, transcript persistence/share event, or escalation event they apply.
+
+```php
+$policy = new WP_Agent_Default_Consent_Policy();
+
+$decision = $policy->can_store_transcript(
+	array(
+		'mode'    => 'chat',
+		'user_id' => get_current_user_id(),
+		'agent_id' => 'example-agent',
+		'consent' => array(
+			'store_transcript' => true,
+		),
+	)
+);
+
+if ( $decision->is_allowed() ) {
+	$transcript_id = $transcript_persister->persist( $messages, $request, $result );
+	$audit_store->record( $decision->to_array() + array( 'transcript_id' => $transcript_id ) );
+}
+```
+
+`WP_Agent_Default_Consent_Policy` is conservative: non-interactive modes are denied by default, and interactive modes still require explicit per-operation consent. Products can supply adapter-specific policies for their own UX, authorization ceilings, support routing, retention rules, and audit stores.
 
 ## Conversation Compaction
 

@@ -43,6 +43,10 @@ $namespace_map = array(
 	'DataMachine\\Core\\Workspace\\AgentWorkspaceScope'                       => 'AgentsAPI\\Core\\Workspace\\AgentWorkspaceScope',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreInterface'           => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreInterface',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryScope'                    => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryScope',
+	'DataMachine\\Core\\FilesRepository\\AgentMemoryMetadata'                 => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryMetadata',
+	'DataMachine\\Core\\FilesRepository\\AgentMemoryQuery'                    => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryQuery',
+	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreCapabilities'        => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreCapabilities',
+	'DataMachine\\Core\\FilesRepository\\AgentMemoryValidatorInterface'        => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryValidatorInterface',
 );
 
 echo "\n[1] Module bootstrap exposes registration facade without Data Machine product code:\n";
@@ -77,6 +81,10 @@ agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentMarkdow
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentConversationLoop' ), 'AgentConversationLoop facade is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\AI\\Approvals\\PendingActionStoreInterface' ), 'AgentsAPI\\AI\\Approvals\\PendingActionStoreInterface contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Approvals\\PendingActionStatus' ), 'AgentsAPI\\AI\\Approvals\\PendingActionStatus vocabulary is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Consent_Policy_Interface' ), 'WP_Agent_Consent_Policy_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Default_Consent_Policy' ), 'WP_Agent_Default_Consent_Policy implementation is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Consent\\AgentConsentOperation' ), 'AgentConsentOperation vocabulary is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Consent\\AgentConsentDecision' ), 'AgentConsentDecision value object is available', $failures, $passes );
 foreach ( $namespace_map as $legacy_class => $target_class ) {
 	agents_api_smoke_assert_equals( true, class_exists( $target_class ) || interface_exists( $target_class ), $target_class . ' contract is available', $failures, $passes );
 	agents_api_smoke_assert_equals( false, class_exists( $legacy_class, false ) || interface_exists( $legacy_class, false ), $legacy_class . ' compatibility alias is not loaded', $failures, $passes );
@@ -121,6 +129,7 @@ echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
 	'Approvals',
 	'Auth',
+	'Consent',
 	'Guidelines',
 	'Identity',
 	'Memory',
