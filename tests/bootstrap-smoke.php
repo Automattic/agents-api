@@ -64,6 +64,14 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agents_Registry' ), 'WP_
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact' ), 'WP_Agent_Package_Artifact value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact_Type' ), 'WP_Agent_Package_Artifact_Type value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifacts_Registry' ), 'WP_Agent_Package_Artifacts_Registry facade is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Access_Grant' ), 'WP_Agent_Access_Grant value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Access_Store_Interface' ), 'WP_Agent_Access_Store_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token' ), 'WP_Agent_Token value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Token_Store_Interface' ), 'WP_Agent_Token_Store_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token_Authenticator' ), 'WP_Agent_Token_Authenticator service is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Authorization_Policy_Interface' ), 'WP_Agent_Authorization_Policy_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_WordPress_Authorization_Policy' ), 'WP_Agent_WordPress_Authorization_Policy service is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Capability_Ceiling' ), 'WP_Agent_Capability_Ceiling value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_PLUGIN_FILE' ), 'plugin file constant is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter' ), 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentConversationLoop' ), 'AgentConversationLoop facade is available', $failures, $passes );
@@ -111,6 +119,7 @@ agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Dat
 echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
 	'Approvals',
+	'Auth',
 	'Guidelines',
 	'Identity',
 	'Memory',

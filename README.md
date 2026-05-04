@@ -21,6 +21,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Agent registration and lookup.
 - Runtime message, request, result, and completion value objects.
 - Agent execution principal/context value objects.
+- Agent access grant, token, token authenticator, authorization policy, and capability ceiling contracts.
 - Multi-turn orchestration contracts.
 - Agent package and package-artifact contracts.
 - Shared `wp_guideline` / `wp_guideline_type` storage substrate polyfill when Core/Gutenberg do not provide it.
@@ -94,6 +95,14 @@ wp_register_agent(
 - `WP_Agent`
 - `WP_Agents_Registry`
 - `WP_Agent_Package*` value objects and artifact registry helpers
+- `WP_Agent_Access_Grant`
+- `WP_Agent_Access_Store_Interface`
+- `WP_Agent_Token`
+- `WP_Agent_Token_Store_Interface`
+- `WP_Agent_Token_Authenticator`
+- `WP_Agent_Authorization_Policy_Interface`
+- `WP_Agent_WordPress_Authorization_Policy`
+- `WP_Agent_Capability_Ceiling`
 - `wp_guideline_types()` and `WP_Guidelines_Substrate`
 - `AgentsAPI\AI\AgentMessageEnvelope`
 - `AgentsAPI\AI\AgentExecutionPrincipal`
@@ -154,7 +163,7 @@ Transcript sessions are also workspace-stamped. `ConversationTranscriptStoreInte
 
 ## Execution Principals
 
-`AgentsAPI\AI\AgentExecutionPrincipal` represents the actor and agent context for one runtime request. It records the acting WordPress user ID, effective agent ID/slug, auth source, request context, optional token ID, and JSON-friendly request metadata.
+`AgentsAPI\AI\AgentExecutionPrincipal` represents the actor and agent context for one runtime request. It records the acting WordPress user ID, effective agent ID/slug, auth source, request context, optional token ID, workspace ID, client ID, capability ceiling, and JSON-friendly request metadata.
 
 Host plugins can resolve the current principal from REST, CLI, cron, bearer-token, or session state through the `agents_api_execution_principal` filter:
 
@@ -176,6 +185,32 @@ add_filter(
 	2
 );
 ```
+
+## Agent Authorization
+
+Agents API provides generic authorization substrate shapes without owning product tables, workflows, or UI.
+
+```text
+request bearer token
+  -> WP_Agent_Token_Authenticator
+  -> WP_Agent_Token_Store_Interface resolves hash only
+  -> AgentExecutionPrincipal records actor, agent, token, workspace, client
+  -> WP_Agent_Capability_Ceiling intersects token/client restrictions
+  -> WP_Agent_WordPress_Authorization_Policy calls user_can() for the owner/user ceiling
+```
+
+`WP_Agent_Access_Grant` models a role-based grant between a WordPress user and an agent, optionally scoped by a host workspace. Roles are generic and ordered: `viewer`, `operator`, `admin`. Concrete storage belongs to hosts via `WP_Agent_Access_Store_Interface`.
+
+`WP_Agent_Token` models token metadata for bearer-token authentication. It stores token hash, prefix, label, expiry, last-used timestamp, optional client/workspace identifiers, and optional capability restrictions. It never exposes raw token material in metadata exports.
+
+`WP_Agent_Token_Authenticator` accepts a raw bearer token at the request edge, hashes it, asks a host token store to resolve the hash, rejects expired tokens, touches successful tokens, and returns an `AgentExecutionPrincipal` populated with token/client/workspace context.
+
+`WP_Agent_WordPress_Authorization_Policy` is the default WordPress-shaped policy. It denies a capability unless both are true:
+
+- The token/client ceiling allows the requested capability, when a ceiling allow-list exists.
+- The acting/owner WordPress user has the requested capability via `user_can()`.
+
+Hosts can replace this policy by implementing `WP_Agent_Authorization_Policy_Interface`, or pass host-owned access/token stores while keeping the generic value objects.
 
 ## Conversation Compaction
 
