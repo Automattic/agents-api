@@ -55,6 +55,7 @@ require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentity.php';
 require_once AGENTS_API_PATH . 'src/Identity/MaterializedAgentIdentityStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/ConversationTranscriptStoreInterface.php';
 require_once AGENTS_API_PATH . 'src/Approvals/PendingActionStoreInterface.php';
+require_once AGENTS_API_PATH . 'src/Approvals/PendingActionStatus.php';
 require_once AGENTS_API_PATH . 'src/Approvals/PendingAction.php';
 require_once AGENTS_API_PATH . 'src/Approvals/ApprovalDecision.php';
 require_once AGENTS_API_PATH . 'src/Approvals/PendingActionHandlerInterface.php';
