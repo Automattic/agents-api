@@ -43,6 +43,10 @@ $namespace_map = array(
 	'DataMachine\\Core\\Workspace\\AgentWorkspaceScope'                       => 'AgentsAPI\\Core\\Workspace\\AgentWorkspaceScope',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreInterface'           => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreInterface',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryScope'                    => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryScope',
+	'DataMachine\\Core\\FilesRepository\\AgentMemoryMetadata'                 => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryMetadata',
+	'DataMachine\\Core\\FilesRepository\\AgentMemoryQuery'                    => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryQuery',
+	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreCapabilities'        => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreCapabilities',
+	'DataMachine\\Core\\FilesRepository\\AgentMemoryValidatorInterface'        => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryValidatorInterface',
 );
 
 echo "\n[1] Module bootstrap exposes registration facade without Data Machine product code:\n";
