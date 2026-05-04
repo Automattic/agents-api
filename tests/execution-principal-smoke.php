@@ -27,7 +27,10 @@ $principal = AgentsAPI\AI\AgentExecutionPrincipal::agent_token(
 	array(
 		'request_id' => 'req-abc',
 		'transport'  => AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST,
-	)
+	),
+	'site:42',
+	'kimaki',
+	new WP_Agent_Capability_Ceiling( 123, array( 'edit_posts' ) )
 );
 
 agents_api_smoke_assert_equals( 123, $principal->acting_user_id, 'principal records acting user id', $failures, $passes );
@@ -36,6 +39,9 @@ agents_api_smoke_assert_equals( AgentsAPI\AI\AgentExecutionPrincipal::AUTH_SOURC
 agents_api_smoke_assert_equals( AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST, $principal->request_context, 'principal records request context', $failures, $passes );
 agents_api_smoke_assert_equals( 456, $principal->token_id, 'principal records optional token id', $failures, $passes );
 agents_api_smoke_assert_equals( 'req-abc', $principal->request_metadata['request_id'], 'principal records request metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'site:42', $principal->workspace_id, 'principal records workspace id', $failures, $passes );
+agents_api_smoke_assert_equals( 'kimaki', $principal->client_id, 'principal records client id', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'edit_posts' ), $principal->capability_ceiling->allowed_capabilities, 'principal records capability ceiling', $failures, $passes );
 
 $principal_array = $principal->to_array();
 agents_api_smoke_assert_equals( 123, $principal_array['acting_user_id'], 'principal exports acting user id', $failures, $passes );
@@ -43,6 +49,9 @@ agents_api_smoke_assert_equals( 'content-helper', $principal_array['effective_ag
 agents_api_smoke_assert_equals( AgentsAPI\AI\AgentExecutionPrincipal::AUTH_SOURCE_AGENT_TOKEN, $principal_array['auth_source'], 'principal exports auth source', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST, $principal_array['request_context'], 'principal exports request context', $failures, $passes );
 agents_api_smoke_assert_equals( 456, $principal_array['token_id'], 'principal exports token id without token contents', $failures, $passes );
+agents_api_smoke_assert_equals( 'site:42', $principal_array['workspace_id'], 'principal exports workspace id', $failures, $passes );
+agents_api_smoke_assert_equals( 'kimaki', $principal_array['client_id'], 'principal exports client id', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'edit_posts' ), $principal_array['capability_ceiling']['allowed_capabilities'], 'principal exports capability ceiling', $failures, $passes );
 
 $from_array = AgentsAPI\AI\AgentExecutionPrincipal::from_array(
 	array(
@@ -51,6 +60,12 @@ $from_array = AgentsAPI\AI\AgentExecutionPrincipal::from_array(
 		'auth_source'          => AgentsAPI\AI\AgentExecutionPrincipal::AUTH_SOURCE_USER,
 		'request_context'      => AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_CHAT,
 		'request_metadata'     => array( 'ip_hash' => 'abc123' ),
+		'workspace_id'         => 'site:99',
+		'client_id'            => 'browser',
+		'capability_ceiling'   => array(
+			'user_id'              => 7,
+			'allowed_capabilities' => array( 'read' ),
+		),
 	)
 );
 agents_api_smoke_assert_equals( 7, $from_array->acting_user_id, 'from_array normalizes acting user id', $failures, $passes );
@@ -58,6 +73,9 @@ agents_api_smoke_assert_equals( 'support-agent', $from_array->effective_agent_id
 agents_api_smoke_assert_equals( null, $from_array->token_id, 'from_array allows absent token id', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_CHAT, $from_array->request_context, 'from_array normalizes request context', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'ip_hash' => 'abc123' ), $from_array->request_metadata, 'from_array keeps metadata array', $failures, $passes );
+agents_api_smoke_assert_equals( 'site:99', $from_array->workspace_id, 'from_array normalizes workspace id', $failures, $passes );
+agents_api_smoke_assert_equals( 'browser', $from_array->client_id, 'from_array normalizes client id', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'read' ), $from_array->capability_ceiling->allowed_capabilities, 'from_array normalizes capability ceiling', $failures, $passes );
 
 $user_session = AgentsAPI\AI\AgentExecutionPrincipal::user_session(
 	99,

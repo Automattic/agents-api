@@ -33,6 +33,7 @@ $persister     = new class( $persister_log ) implements AgentsAPI\AI\AgentConver
 		$this->log[] = array(
 			'message_count' => count( $messages ),
 			'request_turns' => $request->maxTurns(),
+			'workspace'     => $request->workspace() ? $request->workspace()->to_array() : null,
 			'result_keys'   => array_keys( $result ),
 		);
 
@@ -138,7 +139,9 @@ $request = new AgentsAPI\AI\AgentConversationRequest(
 	null,
 	array( 'mode' => 'test' ),
 	array(),
-	3
+	3,
+	false,
+	AgentsAPI\Core\Workspace\AgentWorkspaceScope::from_parts( 'runtime', 'intelligence-chubes4' )
 );
 
 $result5 = AgentsAPI\AI\AgentConversationLoop::run(
@@ -160,5 +163,15 @@ $result5 = AgentsAPI\AI\AgentConversationLoop::run(
 
 agents_api_smoke_assert_equals( 1, count( $persister_log ), 'persister was called with original request', $failures, $passes );
 agents_api_smoke_assert_equals( 3, $persister_log[0]['request_turns'], 'persister received original request max_turns', $failures, $passes );
+agents_api_smoke_assert_equals(
+	array(
+		'workspace_type' => 'runtime',
+		'workspace_id'   => 'intelligence-chubes4',
+	),
+	$persister_log[0]['workspace'],
+	'persister received original request workspace scope',
+	$failures,
+	$passes
+);
 
 agents_api_smoke_finish( 'Agents API conversation loop transcript persister', $failures, $passes );
