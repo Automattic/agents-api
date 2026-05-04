@@ -77,7 +77,9 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 		 * @return self
 		 */
 		public static function top_of_chain( ?string $chain_root_request_id = null ): self {
-			return new self( '', 0, self::SELF_HOST, 0, $chain_root_request_id ?: self::generate_request_id() );
+			$chain_root_request_id = null !== $chain_root_request_id && '' !== $chain_root_request_id ? $chain_root_request_id : self::generate_request_id();
+
+			return new self( '', 0, self::SELF_HOST, 0, $chain_root_request_id );
 		}
 
 		/**
@@ -97,10 +99,10 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 
 			$get = self::header_accessor( $source );
 			$raw = array(
-				'caller_agent_id'      => trim( $get( self::HEADER_CALLER_AGENT ) ),
-				'caller_user_id'       => trim( $get( self::HEADER_CALLER_USER ) ),
-				'caller_host'          => trim( $get( self::HEADER_CALLER_HOST ) ),
-				'chain_depth'          => trim( $get( self::HEADER_CHAIN_DEPTH ) ),
+				'caller_agent_id'       => trim( $get( self::HEADER_CALLER_AGENT ) ),
+				'caller_user_id'        => trim( $get( self::HEADER_CALLER_USER ) ),
+				'caller_host'           => trim( $get( self::HEADER_CALLER_HOST ) ),
+				'chain_depth'           => trim( $get( self::HEADER_CHAIN_DEPTH ) ),
 				'chain_root_request_id' => trim( $get( self::HEADER_CHAIN_ROOT ) ),
 			);
 
@@ -128,7 +130,9 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 					throw self::invalid( 'chain_depth', 'top-of-chain context cannot include remote caller identity' );
 				}
 
-				return new self( '', 0, self::SELF_HOST, 0, $raw['chain_root_request_id'] ?: self::generate_request_id() );
+				$chain_root_request_id = '' !== $raw['chain_root_request_id'] ? $raw['chain_root_request_id'] : self::generate_request_id();
+
+				return new self( '', 0, self::SELF_HOST, 0, $chain_root_request_id );
 			}
 
 			if ( '' === $raw['caller_agent_id'] ) {
@@ -200,10 +204,10 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 		 */
 		public function to_array(): array {
 			return array(
-				'caller_agent_id'      => $this->caller_agent_id,
-				'caller_user_id'       => $this->caller_user_id,
-				'caller_host'          => $this->caller_host,
-				'chain_depth'          => $this->chain_depth,
+				'caller_agent_id'       => $this->caller_agent_id,
+				'caller_user_id'        => $this->caller_user_id,
+				'caller_host'           => $this->caller_host,
+				'chain_depth'           => $this->chain_depth,
 				'chain_root_request_id' => $this->chain_root_request_id,
 				'metadata'              => $this->metadata,
 			);
@@ -248,6 +252,7 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 			}
 
 			if ( ! ctype_digit( $value ) ) {
+				// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Validation exceptions are not rendered output.
 				throw self::invalid( $path, 'must be zero or a positive integer' );
 			}
 
@@ -261,8 +266,8 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 		 * @return bool
 		 */
 		private static function is_absolute_url( string $value ): bool {
-			$scheme = parse_url( $value, PHP_URL_SCHEME );
-			$host   = parse_url( $value, PHP_URL_HOST );
+			$scheme = wp_parse_url( $value, PHP_URL_SCHEME );
+			$host   = wp_parse_url( $value, PHP_URL_HOST );
 
 			return is_string( $host ) && '' !== $host && in_array( $scheme, array( 'http', 'https' ), true );
 		}
