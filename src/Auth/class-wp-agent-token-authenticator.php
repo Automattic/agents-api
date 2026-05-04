@@ -29,7 +29,7 @@ if ( ! class_exists( 'WP_Agent_Token_Authenticator' ) ) {
 		 * @param string              $request_context Request context such as rest, cli, cron, or chat.
 		 * @param array<string,mixed> $metadata        Additional request metadata.
 		 */
-		public function authenticate_bearer_token( string $raw_token, string $request_context = AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST, array $metadata = array() ): ?AgentsAPI\AI\AgentExecutionPrincipal {
+		public function authenticate_bearer_token( string $raw_token, string $request_context = AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST, array $metadata = array(), $caller_context_source = null, int $max_chain_depth = WP_Agent_Caller_Context::DEFAULT_MAX_CHAIN_DEPTH ): ?AgentsAPI\AI\AgentExecutionPrincipal {
 			$raw_token = trim( $raw_token );
 			if ( '' === $raw_token ) {
 				return null;
@@ -41,6 +41,12 @@ if ( ! class_exists( 'WP_Agent_Token_Authenticator' ) ) {
 
 			$token = $this->token_store->resolve_token_hash( WP_Agent_Token::hash_token( $raw_token ) );
 			if ( null === $token || $token->is_expired() ) {
+				return null;
+			}
+
+			try {
+				$caller_context = WP_Agent_Caller_Context::from_headers( $caller_context_source, $max_chain_depth );
+			} catch ( InvalidArgumentException $e ) {
 				return null;
 			}
 
@@ -65,7 +71,8 @@ if ( ! class_exists( 'WP_Agent_Token_Authenticator' ) ) {
 				$metadata,
 				$token->workspace_id,
 				$token->client_id,
-				$token->capability_ceiling()
+				$token->capability_ceiling(),
+				$caller_context
 			);
 		}
 	}

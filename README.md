@@ -475,7 +475,7 @@ The generic layer vocabulary uses `workspace` rather than `site`. Products that 
 
 ## Execution Principals
 
-`AgentsAPI\AI\AgentExecutionPrincipal` represents the actor and agent context for one runtime request. It records the acting WordPress user ID, effective agent ID/slug, auth source, request context, optional token ID, workspace ID, client ID, capability ceiling, and JSON-friendly request metadata.
+`AgentsAPI\AI\AgentExecutionPrincipal` represents the actor and agent context for one runtime request. It records the acting WordPress user ID, effective agent ID/slug, auth source, request context, optional token ID, workspace ID, client ID, capability ceiling, optional caller context, and JSON-friendly request metadata.
 
 Host plugins can resolve the current principal from REST, CLI, cron, bearer-token, or session state through the `agents_api_execution_principal` filter:
 
@@ -516,6 +516,36 @@ request bearer token
 `WP_Agent_Token` models token metadata for bearer-token authentication. It stores token hash, prefix, label, expiry, last-used timestamp, optional client/workspace identifiers, and optional capability restrictions. It never exposes raw token material in metadata exports.
 
 `WP_Agent_Token_Authenticator` accepts a raw bearer token at the request edge, hashes it, asks a host token store to resolve the hash, rejects expired tokens, touches successful tokens, and returns an `AgentExecutionPrincipal` populated with token/client/workspace context.
+
+## Caller Context
+
+`WP_Agent_Caller_Context` carries cross-site agent-to-agent caller claims alongside an execution principal. It is a value object and parser only; hosts remain responsible for deciding whether the caller host and token are trusted.
+
+Canonical inbound header names:
+
+- `X-Agents-Api-Caller-Agent` — agent ID/slug on the caller host.
+- `X-Agents-Api-Caller-User` — user ID on the caller host, or `0` when no caller-host user applies.
+- `X-Agents-Api-Caller-Host` — `self` or an absolute URL for the remote caller host.
+- `X-Agents-Api-Chain-Depth` — non-negative chain depth, where `0` is top-of-chain.
+- `X-Agents-Api-Chain-Root` — stable identifier for the originating request.
+
+Requests with no caller headers parse as a top-of-chain context: no caller agent, caller user `0`, caller host `self`, chain depth `0`, and a generated chain root request ID. Requests with malformed caller headers are rejected fail-closed by `WP_Agent_Token_Authenticator` before the token is touched.
+
+```php
+$principal = $authenticator->authenticate_bearer_token(
+	$raw_token,
+	AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST,
+	array(),
+	$request // WP_REST_Request or array of request headers.
+);
+
+if ( $principal && $principal->caller_context?->is_cross_site() ) {
+	// Host-owned trust policy: verify caller_host through shared keys, mTLS,
+	// allow-lists, or another product-specific mechanism before honoring claims.
+}
+```
+
+The default parser depth ceiling is `WP_Agent_Caller_Context::DEFAULT_MAX_CHAIN_DEPTH` (`16`). Hosts can pass a stricter maximum to `authenticate_bearer_token()` or parse with `WP_Agent_Caller_Context::from_headers( $headers, $max_depth )` before applying their own loop policy.
 
 `WP_Agent_WordPress_Authorization_Policy` is the default WordPress-shaped policy. It denies a capability unless both are true:
 

@@ -39,6 +39,7 @@ final class AgentExecutionPrincipal {
 	 * @param string|null $workspace_id      Optional host workspace/scope identifier.
 	 * @param string|null $client_id         Optional client/login identifier.
 	 * @param \WP_Agent_Capability_Ceiling|null $capability_ceiling Optional capability ceiling for this execution.
+	 * @param \WP_Agent_Caller_Context|null     $caller_context     Optional cross-site caller context claims.
 	 */
 	public function __construct(
 		public readonly int $acting_user_id,
@@ -50,6 +51,7 @@ final class AgentExecutionPrincipal {
 		public readonly ?string $workspace_id = null,
 		public readonly ?string $client_id = null,
 		public readonly ?\WP_Agent_Capability_Ceiling $capability_ceiling = null,
+		public readonly ?\WP_Agent_Caller_Context $caller_context = null,
 	) {
 		if ( $this->acting_user_id < 0 ) {
 			throw self::invalid( 'acting_user_id', 'must be zero or a positive integer' );
@@ -113,8 +115,8 @@ final class AgentExecutionPrincipal {
 	 * @param array  $request_metadata  Request metadata.
 	 * @return self
 	 */
-	public static function user_session( int $acting_user_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, ?\WP_Agent_Capability_Ceiling $capability_ceiling = null ): self {
-		return new self( $acting_user_id, $effective_agent_id, self::AUTH_SOURCE_USER, $request_context, null, $request_metadata, $workspace_id, $client_id, $capability_ceiling );
+	public static function user_session( int $acting_user_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, ?\WP_Agent_Capability_Ceiling $capability_ceiling = null, ?\WP_Agent_Caller_Context $caller_context = null ): self {
+		return new self( $acting_user_id, $effective_agent_id, self::AUTH_SOURCE_USER, $request_context, null, $request_metadata, $workspace_id, $client_id, $capability_ceiling, $caller_context );
 	}
 
 	/**
@@ -127,8 +129,8 @@ final class AgentExecutionPrincipal {
 	 * @param array  $request_metadata  Request metadata.
 	 * @return self
 	 */
-	public static function agent_token( int $acting_user_id, string $effective_agent_id, int $token_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, ?\WP_Agent_Capability_Ceiling $capability_ceiling = null ): self {
-		return new self( $acting_user_id, $effective_agent_id, self::AUTH_SOURCE_AGENT_TOKEN, $request_context, $token_id, $request_metadata, $workspace_id, $client_id, $capability_ceiling );
+	public static function agent_token( int $acting_user_id, string $effective_agent_id, int $token_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, ?\WP_Agent_Capability_Ceiling $capability_ceiling = null, ?\WP_Agent_Caller_Context $caller_context = null ): self {
+		return new self( $acting_user_id, $effective_agent_id, self::AUTH_SOURCE_AGENT_TOKEN, $request_context, $token_id, $request_metadata, $workspace_id, $client_id, $capability_ceiling, $caller_context );
 	}
 
 	/**
@@ -147,6 +149,15 @@ final class AgentExecutionPrincipal {
 			}
 		}
 
+		$caller_context = null;
+		if ( isset( $principal['caller_context'] ) ) {
+			if ( $principal['caller_context'] instanceof \WP_Agent_Caller_Context ) {
+				$caller_context = $principal['caller_context'];
+			} elseif ( is_array( $principal['caller_context'] ) && class_exists( '\WP_Agent_Caller_Context' ) ) {
+				$caller_context = \WP_Agent_Caller_Context::from_array( $principal['caller_context'] );
+			}
+		}
+
 		return new self(
 			isset( $principal['acting_user_id'] ) ? (int) $principal['acting_user_id'] : 0,
 			isset( $principal['effective_agent_id'] ) ? (string) $principal['effective_agent_id'] : '',
@@ -156,7 +167,8 @@ final class AgentExecutionPrincipal {
 			isset( $principal['request_metadata'] ) && is_array( $principal['request_metadata'] ) ? $principal['request_metadata'] : array(),
 			array_key_exists( 'workspace_id', $principal ) && null !== $principal['workspace_id'] ? (string) $principal['workspace_id'] : null,
 			array_key_exists( 'client_id', $principal ) && null !== $principal['client_id'] ? (string) $principal['client_id'] : null,
-			$capability_ceiling
+			$capability_ceiling,
+			$caller_context
 		);
 	}
 
@@ -176,6 +188,7 @@ final class AgentExecutionPrincipal {
 			'workspace_id'       => $this->workspace_id,
 			'client_id'          => $this->client_id,
 			'capability_ceiling' => $this->capability_ceiling instanceof \WP_Agent_Capability_Ceiling ? $this->capability_ceiling->to_array() : null,
+			'caller_context'     => $this->caller_context instanceof \WP_Agent_Caller_Context ? $this->caller_context->to_array() : null,
 		);
 	}
 
@@ -195,7 +208,8 @@ final class AgentExecutionPrincipal {
 			$request_metadata,
 			$this->workspace_id,
 			$this->client_id,
-			$this->capability_ceiling
+			$this->capability_ceiling,
+			$this->caller_context
 		);
 	}
 
