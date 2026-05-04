@@ -49,6 +49,15 @@ $namespace_map = array(
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryValidatorInterface'        => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryValidatorInterface',
 );
 
+$context_contracts = array(
+	'AgentsAPI\\AI\\Context\\ContextAuthorityTier',
+	'AgentsAPI\\AI\\Context\\ContextConflictKind',
+	'AgentsAPI\\AI\\Context\\RetrievedContextItem',
+	'AgentsAPI\\AI\\Context\\ContextConflictResolution',
+	'AgentsAPI\\AI\\Context\\ContextConflictResolverInterface',
+	'AgentsAPI\\AI\\Context\\DefaultContextConflictResolver',
+);
+
 echo "\n[1] Module bootstrap exposes registration facade without Data Machine product code:\n";
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_LOADED' ), 'module marks itself loaded', $failures, $passes );
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_PATH' ), 'module path constant is available', $failures, $passes );
@@ -92,6 +101,9 @@ agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Consent\\Age
 foreach ( $namespace_map as $legacy_class => $target_class ) {
 	agents_api_smoke_assert_equals( true, class_exists( $target_class ) || interface_exists( $target_class ), $target_class . ' contract is available', $failures, $passes );
 	agents_api_smoke_assert_equals( false, class_exists( $legacy_class, false ) || interface_exists( $legacy_class, false ), $legacy_class . ' compatibility alias is not loaded', $failures, $passes );
+}
+foreach ( $context_contracts as $context_contract ) {
+	agents_api_smoke_assert_equals( true, class_exists( $context_contract ) || interface_exists( $context_contract ), $context_contract . ' contract is available', $failures, $passes );
 }
 agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Engine\\Agents\\AgentRegistry', false ), 'Data Machine registry is not loaded by module bootstrap', $failures, $passes );
 agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Core\\Database\\Jobs\\Jobs', false ), 'Data Machine jobs repository is not loaded by module bootstrap', $failures, $passes );

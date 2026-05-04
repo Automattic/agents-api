@@ -35,6 +35,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Consent policy contracts for memory, transcripts, sharing, and escalation.
 - Tool source registration, parameter normalization, tool-call mediation, and execution result contracts.
 - Session and persistence contracts where they are provider-neutral.
+- Retrieved context authority vocabulary, context item shape, and conflict resolution contracts.
 
 ## What Agents API Does Not Own
 
@@ -136,6 +137,12 @@ wp_register_agent(
 - `AgentsAPI\AI\Tools\ToolExecutorInterface`
 - `AgentsAPI\AI\Tools\ToolExecutionCore`
 - `AgentsAPI\AI\Tools\ToolExecutionResult`
+- `AgentsAPI\AI\Context\ContextAuthorityTier`
+- `AgentsAPI\AI\Context\ContextConflictKind`
+- `AgentsAPI\AI\Context\RetrievedContextItem`
+- `AgentsAPI\AI\Context\ContextConflictResolution`
+- `AgentsAPI\AI\Context\ContextConflictResolverInterface`
+- `AgentsAPI\AI\Context\DefaultContextConflictResolver`
 - `AgentsAPI\Core\Workspace\AgentWorkspaceScope`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects, including provenance/trust metadata contracts
@@ -249,6 +256,55 @@ $scope = new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
 ```
 
 Transcript sessions are also workspace-stamped. `ConversationTranscriptStoreInterface::create_session()` and `::get_recent_pending_session()` both receive an `AgentWorkspaceScope`, and `AgentConversationRequest` can carry a workspace so runtime persisters can stamp the session they materialize.
+
+## Retrieved Context Authority
+
+Retrieved context is not only ordered text. Consumers may retrieve memory, identity, conversation, workspace, platform, or support-mode context that conflicts. Agents API provides generic vocabulary and value objects so products can preserve source authority without encoding product-specific policy into this substrate.
+
+Authority tiers, highest authority first:
+
+```text
+platform_authority
+support_authority
+workspace_shared
+user_workspace_private
+user_global
+agent_identity
+agent_memory
+conversation
+```
+
+`platform_authority` and `support_authority` are generic governance tiers. Consumers decide when those sources are enabled and mode-gated. Agents API does not define a WP.com-specific source, storage path, or activation condition.
+
+`AgentsAPI\AI\Context\RetrievedContextItem` is the transport shape for one retrieved item:
+
+```php
+$item = new AgentsAPI\AI\Context\RetrievedContextItem(
+	'Use concise replies.',
+	array( 'workspace' => 'example', 'user_id' => 12 ),
+	AgentsAPI\AI\Context\ContextAuthorityTier::USER_WORKSPACE_PRIVATE,
+	array( 'source' => 'memory', 'uri' => 'memory:user/12/preferences.md' ),
+	AgentsAPI\AI\Context\ContextConflictKind::PREFERENCE,
+	'response_style'
+);
+```
+
+The exported shape is JSON-friendly and includes:
+
+- `content` - retrieved text or serialized context payload.
+- `scope` - product-defined scope metadata such as workspace, user, agent, mode, or site.
+- `authority_tier` - one of the generic authority tiers above.
+- `provenance` - source metadata such as provider, URI, content hash, timestamp, or retrieval score.
+- `conflict_kind` - `preference` or `authoritative_fact`.
+- `conflict_key` - optional shared key for mutually conflicting items.
+- `metadata` - optional caller-owned JSON-friendly metadata.
+
+Conflict semantics are intentionally explicit:
+
+- **Preferences** may resolve by specificity. A user workspace preference can override a broad platform default preference because it is more specific to the current run.
+- **Authoritative facts** resolve by authority tier. Lower-scope memory, identity, or conversation context cannot override a higher platform/support/workspace fact.
+
+`ContextConflictResolverInterface` defines the resolver contract. `DefaultContextConflictResolver` provides the generic behavior above: authoritative facts use `authority_tier`; preferences use `specificity_then_authority`.
 
 ## Guideline Capabilities
 
