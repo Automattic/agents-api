@@ -167,6 +167,30 @@ $scope = new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
 
 Transcript sessions are also workspace-stamped. `ConversationTranscriptStoreInterface::create_session()` and `::get_recent_pending_session()` both receive an `AgentWorkspaceScope`, and `AgentConversationRequest` can carry a workspace so runtime persisters can stamp the session they materialize.
 
+## Guideline Capabilities
+
+When Agents API provides the `wp_guideline` polyfill, guideline access is scoped by explicit capabilities instead of ordinary post/private-post semantics:
+
+- `read_agent_memory`
+- `edit_agent_memory`
+- `read_private_agent_memory`
+- `edit_private_agent_memory`
+- `read_workspace_guidelines`
+- `edit_workspace_guidelines`
+- `promote_agent_memory`
+
+Private user-workspace memory is identified with guideline metadata, not by `post_status=private` alone:
+
+- `_wp_guideline_scope=private_user_workspace_memory`
+- `_wp_guideline_user_id=<owner user id>`
+- `_wp_guideline_workspace_id=<workspace id>`
+
+Workspace-shared guidance is identified with `_wp_guideline_scope=workspace_shared_guidance` and `_wp_guideline_workspace_id=<workspace id>`.
+
+The substrate maps private memory reads/edits through the explicit owner metadata, so editors and administrators do not gain access merely because they can read private posts. Workspace-shared guidance reads map to the editorial threshold (`edit_posts`), edits map to the publishing threshold (`publish_posts`), and promotion from private memory to shared guidance requires the owner plus the explicit `promote_agent_memory` capability.
+
+Hosts that provide their own guideline substrate can disable the polyfill with the `wp_guidelines_substrate_enabled` filter or register `wp_guideline` before Agents API does.
+
 ## Execution Principals
 
 `AgentsAPI\AI\AgentExecutionPrincipal` represents the actor and agent context for one runtime request. It records the acting WordPress user ID, effective agent ID/slug, auth source, request context, optional token ID, workspace ID, client ID, capability ceiling, and JSON-friendly request metadata.

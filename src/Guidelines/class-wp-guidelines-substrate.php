@@ -27,14 +27,54 @@ class WP_Guidelines_Substrate {
 	const TAXONOMY = 'wp_guideline_type';
 
 	/**
+	 * Meta key describing the guideline access scope.
+	 *
+	 * @var string
+	 */
+	const META_SCOPE = '_wp_guideline_scope';
+
+	/**
+	 * Meta key holding the owning user for private user-workspace memory.
+	 *
+	 * @var string
+	 */
+	const META_USER_ID = '_wp_guideline_user_id';
+
+	/**
+	 * Meta key holding the workspace identifier for scoped memory/guidance.
+	 *
+	 * @var string
+	 */
+	const META_WORKSPACE_ID = '_wp_guideline_workspace_id';
+
+	/**
+	 * Scope value for private memory owned by one user within one workspace.
+	 *
+	 * @var string
+	 */
+	const SCOPE_PRIVATE_MEMORY = 'private_user_workspace_memory';
+
+	/**
+	 * Scope value for guidance shared across a workspace.
+	 *
+	 * @var string
+	 */
+	const SCOPE_WORKSPACE_GUIDANCE = 'workspace_shared_guidance';
+
+	/**
 	 * Register the shared guideline substrate.
 	 */
 	public static function register(): void {
+		if ( ! apply_filters( 'wp_guidelines_substrate_enabled', true ) ) {
+			return;
+		}
+
 		self::register_post_type();
 		self::register_taxonomy();
 
 		add_action( 'save_post_' . self::POST_TYPE, '_wp_guidelines_ensure_default_type_term' );
 		add_filter( 'wp_insert_term_data', '_wp_guidelines_maybe_map_term_label', 10, 2 );
+		add_filter( 'map_meta_cap', '_wp_guidelines_map_meta_cap', 10, 4 );
 	}
 
 	/**
@@ -79,18 +119,18 @@ class WP_Guidelines_Substrate {
 				'capability_type'    => 'guideline',
 				'map_meta_cap'       => true,
 				'capabilities'       => array(
-					'read'                   => 'edit_posts',
-					'create_posts'           => 'publish_posts',
-					'edit_posts'             => 'edit_posts',
-					'publish_posts'          => 'publish_posts',
-					'read_private_posts'     => 'read_private_posts',
-					'edit_private_posts'     => 'edit_private_posts',
-					'edit_published_posts'   => 'edit_published_posts',
-					'delete_private_posts'   => 'delete_private_posts',
-					'delete_published_posts' => 'delete_published_posts',
-					'delete_posts'           => 'delete_posts',
-					'edit_others_posts'      => 'edit_others_posts',
-					'delete_others_posts'    => 'delete_others_posts',
+					'read'                   => 'read_workspace_guidelines',
+					'create_posts'           => 'edit_workspace_guidelines',
+					'edit_posts'             => 'edit_workspace_guidelines',
+					'publish_posts'          => 'edit_workspace_guidelines',
+					'read_private_posts'     => 'read_workspace_guidelines',
+					'edit_private_posts'     => 'edit_workspace_guidelines',
+					'edit_published_posts'   => 'edit_workspace_guidelines',
+					'delete_private_posts'   => 'edit_workspace_guidelines',
+					'delete_published_posts' => 'edit_workspace_guidelines',
+					'delete_posts'           => 'edit_workspace_guidelines',
+					'edit_others_posts'      => 'edit_workspace_guidelines',
+					'delete_others_posts'    => 'edit_workspace_guidelines',
 				),
 				'supports'           => array( 'title', 'editor', 'excerpt', 'author', 'revisions' ),
 				'hierarchical'       => false,
