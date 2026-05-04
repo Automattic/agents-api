@@ -19,6 +19,7 @@
       "php tests/execution-principal-smoke.php",
       "php tests/authorization-smoke.php",
       "php tests/action-policy-values-smoke.php",
+      "php tests/consent-policy-smoke.php",
       "php tests/tool-runtime-smoke.php",
       "php tests/pending-action-store-contract-smoke.php",
       "php tests/approval-resolver-contract-smoke.php",
