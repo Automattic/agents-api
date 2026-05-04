@@ -31,6 +31,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Generic multi-turn conversation loop sequencing around caller-owned adapters.
 - Iteration budget primitives for bounded execution across configurable dimensions.
 - Tool-call mediation contracts and runtime tool declaration value objects.
+- Generic tool visibility policy and action policy resolver contracts.
 - Conversation transcript store contracts.
 - Consent policy contracts for memory, transcripts, sharing, and escalation.
 - Tool source registration, parameter normalization, tool-call mediation, and execution result contracts.
@@ -143,6 +144,11 @@ wp_register_agent(
 - `AgentsAPI\AI\Context\ContextConflictResolution`
 - `AgentsAPI\AI\Context\ContextConflictResolverInterface`
 - `AgentsAPI\AI\Context\DefaultContextConflictResolver`
+- `WP_Agent_Tool_Policy`
+- `WP_Agent_Tool_Policy_Filter`
+- `WP_Agent_Tool_Access_Policy_Interface`
+- `WP_Agent_Action_Policy_Resolver`
+- `WP_Agent_Action_Policy_Provider_Interface`
 - `AgentsAPI\Core\Workspace\AgentWorkspaceScope`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects, including provenance/trust metadata contracts
@@ -222,6 +228,67 @@ final class RepoMemoryValidator implements AgentsAPI\Core\FilesRepository\AgentM
 ```
 
 Agents API defines the contracts only. Concrete stores decide how metadata is physically materialized, how ranking is executed, and which workspace facts are supplied to validators.
+
+## Tool Visibility And Action Policy
+
+Agents API owns generic policy contracts for deciding which tools are visible to an agent and how a called tool is allowed to execute. Consumers still own concrete tool sources, concrete execution adapters, approval storage, UI, workflows, and any product-specific mandatory tools.
+
+Tool visibility is resolved by `WP_Agent_Tool_Policy` over an already-gathered tool map. The resolver applies generic layers only:
+
+- Tool-declared runtime modes through `mode` or `modes`.
+- Caller-owned access checks through `tool_access_checker`.
+- Registered agent or runtime `tool_policy` config with `allow` / `deny`, `tools`, and `categories`.
+- Host-provided `WP_Agent_Tool_Access_Policy_Interface` policy fragments.
+- Runtime `categories`, `allow_only`, and explicit `deny` lists.
+
+Mandatory tools are not hardcoded by Agents API. A consumer that needs mandatory runtime plumbing can return `mandatory_tools` or `mandatory_categories` from a policy provider, and explicit deny still wins.
+
+```php
+$visible_tools = ( new WP_Agent_Tool_Policy() )->resolve(
+	$all_tools,
+	array(
+		'mode'         => 'chat',
+		'agent_config' => array(
+			'tool_policy' => array(
+				'mode'       => 'allow',
+				'categories' => array( 'read' ),
+			),
+		),
+		'tool_policy_providers' => array( $consumer_policy_provider ),
+	)
+);
+```
+
+Action policy is resolved by `WP_Agent_Action_Policy_Resolver` and always returns one of the canonical values from `AgentsAPI\AI\Tools\ActionPolicy`: `direct`, `preview`, or `forbidden`.
+
+Resolution order is:
+
+1. Explicit runtime `deny` list resolves a tool to `forbidden`.
+2. Registered agent or runtime `action_policy.tools[tool_name]`.
+3. Registered agent or runtime `action_policy.categories[category]`.
+4. Host-provided `WP_Agent_Action_Policy_Provider_Interface` providers.
+5. Tool-declared `action_policy` default.
+6. Tool-declared mode-specific `action_policy_<mode>` default.
+7. Global default `direct`.
+8. Final `agents_api_tool_action_policy` filter, if present.
+
+```php
+$policy = ( new WP_Agent_Action_Policy_Resolver() )->resolve_for_tool(
+	array(
+		'tool_name'    => 'example/publish',
+		'tool_def'     => $visible_tools['example/publish'],
+		'mode'         => 'chat',
+		'agent_config' => array(
+			'action_policy' => array(
+				'categories' => array(
+					'publishing' => 'preview',
+				),
+			),
+		),
+		'action_policy_providers' => array( $consumer_action_policy_provider ),
+	)
+);
+```
 
 ## Workspace Scope
 
