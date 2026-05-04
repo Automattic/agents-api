@@ -344,6 +344,8 @@ $scope = new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
 
 Transcript sessions are also workspace-stamped. `ConversationTranscriptStoreInterface::create_session()` and `::get_recent_pending_session()` both receive an `AgentWorkspaceScope`, and `AgentConversationRequest` can carry a workspace so runtime persisters can stamp the session they materialize.
 
+Transcript stores preserve provider continuity metadata as part of the complete session state. `ConversationTranscriptStoreInterface::update_session()` accepts an optional opaque `provider_response_id`, and `::get_session()` returns the same key alongside `provider` and `model`. Consumers using provider-side state, such as the OpenAI Responses API `previous_response_id` flow, can pass the provider's response ID through this field without encoding per-consumer metadata keys. A `null` value means no provider-side response ID is associated with the current transcript state.
+
 ## Retrieved Context Authority
 
 Retrieved context is not only ordered text. Consumers may retrieve memory, identity, conversation, workspace, platform, or support-mode context that conflicts. Agents API provides generic vocabulary and value objects so products can preserve source authority without encoding product-specific policy into this substrate.

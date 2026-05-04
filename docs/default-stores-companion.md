@@ -68,7 +68,7 @@ The class names above are placeholders for the companion repository. They are no
 
 - Implements `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`.
 - Stores transcript sessions in a companion-owned CPT or table chosen by the companion.
-- Preserves `AgentWorkspaceScope`, `user_id`, `agent_id`, title, metadata, provider, model, timestamps, and pending-session dedup fields from the contract.
+- Preserves `AgentWorkspaceScope`, `user_id`, `agent_id`, title, metadata, provider, model, `provider_response_id`, timestamps, and pending-session dedup fields from the contract.
 - Leaves chat UI listing, read state, retention scheduling, and analytics outside the generic store unless a future contract promotes them.
 
 ## Interop Tests
