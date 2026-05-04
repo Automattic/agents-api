@@ -52,7 +52,7 @@ class AgentConversationLoop {
 	 * - `transcript_session_id` (string): Session ID to lock when a lock store is provided.
 	 * - `transcript_lock_ttl` (int): Lock TTL in seconds. Defaults to 300.
 	 * - `transcript_persister` (AgentConversationTranscriptPersisterInterface|null): Transcript persister.
-	 * - `on_event` (callable|null): Lifecycle event sink `fn(string $event, array $payload)`.
+	 * - `on_event` (callable|null): Caller-owned lifecycle event sink `fn(string $event, array $payload)`.
 	 *
 	 * @param array    $messages    Initial transcript messages.
 	 * @param callable $turn_runner Caller-owned turn adapter.
@@ -457,24 +457,42 @@ class AgentConversationLoop {
 	}
 
 	/**
-	 * Emit a lifecycle event through the event sink.
+	 * Emit a lifecycle event through the caller sink and WordPress observers.
 	 *
-	 * Observer failures are swallowed to prevent changing loop results.
+	 * The caller-owned `on_event` sink and the `agents_api_loop_event` action are
+	 * observational surfaces. Event payloads are read-only snapshots for observers;
+	 * observer failures are swallowed to prevent changing loop results.
 	 *
 	 * @param callable|null $on_event Event sink.
 	 * @param string        $event    Event name.
 	 * @param array         $payload  Event payload.
 	 */
 	private static function emit_event( ?callable $on_event, string $event, array $payload = array() ): void {
-		if ( null === $on_event ) {
-			return;
+		if ( null !== $on_event ) {
+			try {
+				call_user_func( $on_event, $event, $payload );
+			} catch ( \Throwable $error ) {
+				// Observer failures must not change loop results.
+				unset( $error );
+			}
 		}
 
-		try {
-			call_user_func( $on_event, $event, $payload );
-		} catch ( \Throwable $error ) {
-			// Observer failures must not change loop results.
-			unset( $error );
+		if ( function_exists( 'do_action' ) ) {
+			try {
+				/**
+				 * Fires when AgentConversationLoop emits a lifecycle event.
+				 *
+				 * Observers receive read-only event snapshots. Exceptions thrown by
+				 * observers are swallowed and cannot change loop results.
+				 *
+				 * @param string $event   Event name.
+				 * @param array  $payload Event payload snapshot.
+				 */
+				do_action( 'agents_api_loop_event', $event, $payload );
+			} catch ( \Throwable $error ) {
+				// Observer failures must not change loop results.
+				unset( $error );
+			}
 		}
 	}
 
