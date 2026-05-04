@@ -97,6 +97,7 @@ wp_register_agent(
 ## Public Surface
 
 - `wp_agents_api_init`
+- `agents_api_loop_event`
 - `wp_register_agent()` / `wp_get_agent()` / `wp_get_agents()` / `wp_has_agent()` / `wp_unregister_agent()`
 - `WP_Agent`
 - `WP_Agents_Registry`
@@ -158,6 +159,17 @@ wp_register_agent(
 - `AgentsAPI\Core\Workspace\AgentWorkspaceScope`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects, including provenance/trust metadata contracts
+
+## Conversation Loop Events
+
+`AgentConversationLoop` exposes lifecycle events through two observer surfaces:
+
+- The caller-owned `on_event` option: `fn( string $event, array $payload ): void`.
+- The WordPress `agents_api_loop_event` action: `do_action( 'agents_api_loop_event', $event, $payload )`.
+
+The callable sink is for the component that directly invokes the loop. The WordPress action is for independent observers such as logging, tracing, metrics, or transcript diagnostics.
+
+Event payloads are read-only snapshots. Observers must not rely on mutating payloads to affect loop behavior. Exceptions thrown by either observer surface are swallowed by the loop, so logging or tracing failures cannot break provider execution, tool mediation, budget enforcement, transcript persistence, or the returned result.
 
 ## Memory Provenance Metadata
 
