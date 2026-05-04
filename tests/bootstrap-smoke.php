@@ -40,6 +40,7 @@ $namespace_map = array(
 	'DataMachine\\Core\\Identity\\AgentIdentityScope'                         => 'AgentsAPI\\Core\\Identity\\AgentIdentityScope',
 	'DataMachine\\Core\\Identity\\MaterializedAgentIdentity'                  => 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentity',
 	'DataMachine\\Core\\Identity\\MaterializedAgentIdentityStoreInterface'     => 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentityStoreInterface',
+	'DataMachine\\Core\\Workspace\\AgentWorkspaceScope'                       => 'AgentsAPI\\Core\\Workspace\\AgentWorkspaceScope',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreInterface'           => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreInterface',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryScope'                    => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryScope',
 );
@@ -72,6 +73,14 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agents_Registry' ), 'WP_
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact' ), 'WP_Agent_Package_Artifact value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact_Type' ), 'WP_Agent_Package_Artifact_Type value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifacts_Registry' ), 'WP_Agent_Package_Artifacts_Registry facade is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Access_Grant' ), 'WP_Agent_Access_Grant value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Access_Store_Interface' ), 'WP_Agent_Access_Store_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token' ), 'WP_Agent_Token value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Token_Store_Interface' ), 'WP_Agent_Token_Store_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token_Authenticator' ), 'WP_Agent_Token_Authenticator service is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Authorization_Policy_Interface' ), 'WP_Agent_Authorization_Policy_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_WordPress_Authorization_Policy' ), 'WP_Agent_WordPress_Authorization_Policy service is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Capability_Ceiling' ), 'WP_Agent_Capability_Ceiling value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_PLUGIN_FILE' ), 'plugin file constant is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter' ), 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentConversationLoop' ), 'AgentConversationLoop facade is available', $failures, $passes );
@@ -122,6 +131,7 @@ agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Dat
 echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
 	'Approvals',
+	'Auth',
 	'Context',
 	'Guidelines',
 	'Identity',
@@ -131,6 +141,7 @@ $expected_source_directories = array(
 	'Runtime',
 	'Tools',
 	'Transcripts',
+	'Workspace',
 );
 $actual_source_directories   = array();
 $source_directory_iterator   = new DirectoryIterator( AGENTS_API_PATH . 'src' );

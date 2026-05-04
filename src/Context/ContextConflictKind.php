@@ -35,7 +35,7 @@ final class ContextConflictKind {
 	public static function normalize( string $kind ): string {
 		$normalized = strtolower( trim( $kind ) );
 		if ( ! in_array( $normalized, self::values(), true ) ) {
-			throw new InvalidArgumentException( 'Unknown context conflict kind: ' . $kind );
+			throw new InvalidArgumentException( 'Unknown context conflict kind.' );
 		}
 
 		return $normalized;

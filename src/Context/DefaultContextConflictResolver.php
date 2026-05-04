@@ -24,7 +24,7 @@ final class DefaultContextConflictResolver implements ContextConflictResolverInt
 
 		$groups = array();
 		foreach ( $items as $index => $item ) {
-			if ( ! $item instanceof RetrievedContextItem || null === $item->conflict_key || '' === $item->conflict_key ) {
+			if ( null === $item->conflict_key || '' === $item->conflict_key ) {
 				continue;
 			}
 

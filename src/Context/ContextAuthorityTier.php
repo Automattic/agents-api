@@ -52,7 +52,7 @@ final class ContextAuthorityTier {
 	public static function normalize( string $tier ): string {
 		$normalized = strtolower( trim( $tier ) );
 		if ( ! in_array( $normalized, self::ordered(), true ) ) {
-			throw new InvalidArgumentException( 'Unknown context authority tier: ' . $tier );
+			throw new InvalidArgumentException( 'Unknown context authority tier.' );
 		}
 
 		return $normalized;
@@ -87,6 +87,7 @@ final class ContextAuthorityTier {
 			self::AGENT_IDENTITY         => 3,
 			self::SUPPORT_AUTHORITY      => 2,
 			self::PLATFORM_AUTHORITY     => 1,
+			default                      => 0,
 		};
 	}
 

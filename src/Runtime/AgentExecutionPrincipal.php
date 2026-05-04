@@ -12,9 +12,9 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Immutable identity context for one agent execution.
  *
- * This class records who is acting, which agent is effective for the run, and
- * how the request was authenticated. It intentionally does not decide access,
- * grant scoped resources, or persist tokens.
+ * This class records who is acting, which agent is effective for the run, which
+ * workspace/client scope applies, and how the request was authenticated. It
+ * intentionally does not decide access, grant scoped resources, or persist tokens.
  */
 // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Validation exceptions are not rendered output.
 final class AgentExecutionPrincipal {
@@ -36,6 +36,9 @@ final class AgentExecutionPrincipal {
 	 * @param string      $request_context   Request context such as rest, cli, cron, or chat.
 	 * @param int|null    $token_id          Optional caller-owned token identifier. Agents API does not load or store the token.
 	 * @param array       $request_metadata  JSON-serializable request metadata supplied by the caller.
+	 * @param string|null $workspace_id      Optional host workspace/scope identifier.
+	 * @param string|null $client_id         Optional client/login identifier.
+	 * @param \WP_Agent_Capability_Ceiling|null $capability_ceiling Optional capability ceiling for this execution.
 	 */
 	public function __construct(
 		public readonly int $acting_user_id,
@@ -44,6 +47,9 @@ final class AgentExecutionPrincipal {
 		public readonly string $request_context,
 		public readonly ?int $token_id = null,
 		public readonly array $request_metadata = array(),
+		public readonly ?string $workspace_id = null,
+		public readonly ?string $client_id = null,
+		public readonly ?\WP_Agent_Capability_Ceiling $capability_ceiling = null,
 	) {
 		if ( $this->acting_user_id < 0 ) {
 			throw self::invalid( 'acting_user_id', 'must be zero or a positive integer' );
@@ -107,8 +113,8 @@ final class AgentExecutionPrincipal {
 	 * @param array  $request_metadata  Request metadata.
 	 * @return self
 	 */
-	public static function user_session( int $acting_user_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array() ): self {
-		return new self( $acting_user_id, $effective_agent_id, self::AUTH_SOURCE_USER, $request_context, null, $request_metadata );
+	public static function user_session( int $acting_user_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, ?\WP_Agent_Capability_Ceiling $capability_ceiling = null ): self {
+		return new self( $acting_user_id, $effective_agent_id, self::AUTH_SOURCE_USER, $request_context, null, $request_metadata, $workspace_id, $client_id, $capability_ceiling );
 	}
 
 	/**
@@ -121,8 +127,8 @@ final class AgentExecutionPrincipal {
 	 * @param array  $request_metadata  Request metadata.
 	 * @return self
 	 */
-	public static function agent_token( int $acting_user_id, string $effective_agent_id, int $token_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array() ): self {
-		return new self( $acting_user_id, $effective_agent_id, self::AUTH_SOURCE_AGENT_TOKEN, $request_context, $token_id, $request_metadata );
+	public static function agent_token( int $acting_user_id, string $effective_agent_id, int $token_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, ?\WP_Agent_Capability_Ceiling $capability_ceiling = null ): self {
+		return new self( $acting_user_id, $effective_agent_id, self::AUTH_SOURCE_AGENT_TOKEN, $request_context, $token_id, $request_metadata, $workspace_id, $client_id, $capability_ceiling );
 	}
 
 	/**
@@ -132,13 +138,25 @@ final class AgentExecutionPrincipal {
 	 * @return self
 	 */
 	public static function from_array( array $principal ): self {
+		$capability_ceiling = null;
+		if ( isset( $principal['capability_ceiling'] ) ) {
+			if ( $principal['capability_ceiling'] instanceof \WP_Agent_Capability_Ceiling ) {
+				$capability_ceiling = $principal['capability_ceiling'];
+			} elseif ( is_array( $principal['capability_ceiling'] ) && class_exists( '\WP_Agent_Capability_Ceiling' ) ) {
+				$capability_ceiling = \WP_Agent_Capability_Ceiling::from_array( $principal['capability_ceiling'] );
+			}
+		}
+
 		return new self(
 			isset( $principal['acting_user_id'] ) ? (int) $principal['acting_user_id'] : 0,
 			isset( $principal['effective_agent_id'] ) ? (string) $principal['effective_agent_id'] : '',
 			isset( $principal['auth_source'] ) ? (string) $principal['auth_source'] : '',
 			isset( $principal['request_context'] ) ? (string) $principal['request_context'] : '',
 			isset( $principal['token_id'] ) ? (int) $principal['token_id'] : null,
-			isset( $principal['request_metadata'] ) && is_array( $principal['request_metadata'] ) ? $principal['request_metadata'] : array()
+			isset( $principal['request_metadata'] ) && is_array( $principal['request_metadata'] ) ? $principal['request_metadata'] : array(),
+			array_key_exists( 'workspace_id', $principal ) && null !== $principal['workspace_id'] ? (string) $principal['workspace_id'] : null,
+			array_key_exists( 'client_id', $principal ) && null !== $principal['client_id'] ? (string) $principal['client_id'] : null,
+			$capability_ceiling
 		);
 	}
 
@@ -155,6 +173,9 @@ final class AgentExecutionPrincipal {
 			'request_context'    => $this->request_context,
 			'token_id'           => $this->token_id,
 			'request_metadata'   => $this->request_metadata,
+			'workspace_id'       => $this->workspace_id,
+			'client_id'          => $this->client_id,
+			'capability_ceiling' => $this->capability_ceiling instanceof \WP_Agent_Capability_Ceiling ? $this->capability_ceiling->to_array() : null,
 		);
 	}
 
@@ -171,7 +192,10 @@ final class AgentExecutionPrincipal {
 			$this->auth_source,
 			$this->request_context,
 			$this->token_id,
-			$request_metadata
+			$request_metadata,
+			$this->workspace_id,
+			$this->client_id,
+			$this->capability_ceiling
 		);
 	}
 
