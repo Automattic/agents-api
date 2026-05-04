@@ -383,46 +383,7 @@ class WP_Agent_Conversation_Compaction {
 	 * @return array<string, mixed>
 	 */
 	private static function metadata( array $policy, array $original_stats, array $compacted_stats = array(), array $retained_stats = array(), array $archived_stats = array(), array $extra = array() ): array {
-		$empty_stats = array(
-			'item_count' => 0,
-			'byte_count' => 0,
-		);
-
-		$compacted_stats = array_merge( $empty_stats, $compacted_stats );
-		$retained_stats  = array_merge( $empty_stats, $retained_stats );
-		$archived_stats  = array_merge( $empty_stats, $archived_stats );
-
-		$conserved_bytes = $compacted_stats['byte_count'] + $retained_stats['byte_count'] + $archived_stats['byte_count'];
-		$required_bytes  = (int) ceil( $original_stats['byte_count'] * $policy['minimum_conserved_byte_ratio'] );
-		$passed          = ! $policy['conservation_enabled'] || $conserved_bytes >= $required_bytes;
-
-		$metadata = array_merge(
-			$extra,
-			array(
-				'policy'       => $policy,
-				'provenance'   => array(
-					'original'  => $original_stats,
-					'compacted' => $compacted_stats,
-					'retained'  => $retained_stats,
-					'archived'  => $archived_stats,
-				),
-				'summarizer'   => array(
-					'provider' => $policy['summary_provider'],
-					'model'    => $policy['summary_model'],
-				),
-				'conservation' => array(
-					'enabled'                      => $policy['conservation_enabled'],
-					'minimum_conserved_byte_ratio' => $policy['minimum_conserved_byte_ratio'],
-					'required_byte_count'          => $required_bytes,
-					'conserved_byte_count'         => $conserved_bytes,
-					'conserved_byte_ratio'         => 0 === $original_stats['byte_count'] ? 1.0 : $conserved_bytes / $original_stats['byte_count'],
-					'passed'                       => $passed,
-					'failed_closed'                => $policy['conservation_enabled'] && $policy['fail_on_conservation_failure'] && ! $passed,
-				),
-			)
-		);
-
-		return $metadata;
+		return WP_Agent_Compaction_Conservation::metadata( $policy, array(), array(), array(), array(), $extra, $original_stats, $compacted_stats, $retained_stats, $archived_stats );
 	}
 
 	/**
@@ -432,8 +393,7 @@ class WP_Agent_Conversation_Compaction {
 	 * @return bool
 	 */
 	private static function conservation_failed( array $metadata ): bool {
-		$conservation = $metadata['conservation'] ?? array();
-		return true === ( $conservation['failed_closed'] ?? false );
+		return WP_Agent_Compaction_Conservation::failed_closed( $metadata );
 	}
 
 	/**
@@ -471,48 +431,7 @@ class WP_Agent_Conversation_Compaction {
 	 * @return array{item_count: int, byte_count: int}
 	 */
 	private static function item_stats( array $items ): array {
-		$bytes = 0;
-
-		foreach ( $items as $item ) {
-			$bytes += self::item_bytes( $item );
-		}
-
-		return array(
-			'item_count' => count( $items ),
-			'byte_count' => $bytes,
-		);
-	}
-
-	/**
-	 * Count bytes for an item's durable content.
-	 *
-	 * @param mixed $item Item.
-	 * @return int
-	 */
-	private static function item_bytes( $item ): int {
-		$content = is_array( $item ) && array_key_exists( 'content', $item ) ? $item['content'] : $item;
-
-		if ( is_string( $content ) ) {
-			return strlen( $content );
-		}
-
-		$encoded = self::json_encode( $content );
-		return false === $encoded ? 0 : strlen( $encoded );
-	}
-
-	/**
-	 * Encode data with a pure-PHP fallback for smoke tests.
-	 *
-	 * @param mixed $data Data.
-	 * @return string|false
-	 */
-	private static function json_encode( $data ) {
-		if ( function_exists( 'wp_json_encode' ) ) {
-			return wp_json_encode( $data );
-		}
-
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- Pure-PHP smoke tests run without WordPress loaded.
-		return json_encode( $data );
+		return WP_Agent_Compaction_Conservation::item_stats( $items );
 	}
 
 	/**
