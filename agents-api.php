@@ -41,6 +41,11 @@ require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-token-store-interface.ph
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-authorization-policy-interface.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-token-authenticator.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-wordpress-authorization-policy.php';
+require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-context-injection-policy.php';
+require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-memory-layer.php';
+require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-memory-registry.php';
+require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-composable-context.php';
+require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-context-section-registry.php';
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agents-registry.php';
 require_once AGENTS_API_PATH . 'src/Registry/register-agents.php';
 require_once AGENTS_API_PATH . 'src/Packages/register-agent-package-artifacts.php';

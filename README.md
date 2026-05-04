@@ -26,6 +26,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Agent package and package-artifact contracts.
 - Shared `wp_guideline` / `wp_guideline_type` storage substrate polyfill when Core/Gutenberg do not provide it.
 - Agent memory store contracts and value objects.
+- Generic memory/context source registry, context section registry, injection policy vocabulary, and composable context value object.
 - Conversation compaction policy and transcript transformation contracts.
 - Generic multi-turn conversation loop sequencing around caller-owned adapters.
 - Iteration budget primitives for bounded execution across configurable dimensions.
@@ -45,6 +46,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Product runner adapters that assemble prompts, choose concrete tools, materialize storage, or decide product policy.
 - Concrete tool execution adapters, prompt assembly policy, or product storage/materialization policy.
 - Product-specific consent UX, support routing, escalation targets, or transcript-sharing policy.
+- Concrete memory retrieval, file projection, convention-path writing, or filesystem layout adapters.
 
 Products can require Agents API because they build on the substrate. Agents API must not depend on any product plugin, import product classes, mirror a product source tree, or encode product vocabulary as generic runtime API.
 
@@ -105,6 +107,11 @@ wp_register_agent(
 - `WP_Agent_Authorization_Policy_Interface`
 - `WP_Agent_WordPress_Authorization_Policy`
 - `WP_Agent_Capability_Ceiling`
+- `WP_Agent_Memory_Registry`
+- `WP_Agent_Memory_Layer`
+- `WP_Agent_Context_Section_Registry`
+- `WP_Agent_Context_Injection_Policy`
+- `WP_Agent_Composable_Context`
 - `wp_guideline_types()` and `WP_Guidelines_Substrate`
 - `AgentsAPI\AI\AgentMessageEnvelope`
 - `AgentsAPI\AI\AgentExecutionPrincipal`
@@ -266,6 +273,62 @@ Workspace-shared guidance is identified with `_wp_guideline_scope=workspace_shar
 The substrate maps private memory reads/edits through the explicit owner metadata, so editors and administrators do not gain access merely because they can read private posts. Workspace-shared guidance reads map to the editorial threshold (`edit_posts`), edits map to the publishing threshold (`publish_posts`), and promotion from private memory to shared guidance requires the owner plus the explicit `promote_agent_memory` capability.
 
 Hosts that provide their own guideline substrate can disable the polyfill with the `wp_guidelines_substrate_enabled` filter or register `wp_guideline` before Agents API does.
+
+## Memory And Context Registry
+
+Agents API separates memory identity, retrieval policy, composable context assembly, and storage projection:
+
+```text
+Memory/context source registry -> what can exist and when it is eligible
+Context section registry       -> ordered pieces that can compose a context
+Composable context             -> runtime assembly result
+Consumer adapters              -> file paths, database rows, guidelines, external stores
+```
+
+`WP_Agent_Memory_Registry` registers memory/context sources by layer and mode without assuming they are files. File conventions are metadata for adapters, not the identity model:
+
+```php
+WP_Agent_Memory_Registry::register(
+	'workspace/instructions',
+	array(
+		'layer'            => WP_Agent_Memory_Layer::WORKSPACE,
+		'priority'         => 20,
+		'protected'        => true,
+		'editable'         => false,
+		'modes'            => array( 'chat', 'pipeline' ),
+		'retrieval_policy' => WP_Agent_Context_Injection_Policy::ALWAYS,
+		'composable'       => true,
+		'context_slug'     => 'workspace-instructions',
+		'convention_path'  => 'AGENTS.md',
+	)
+);
+```
+
+Supported retrieval policies are `always`, `on_intent`, `on_tool_need`, `manual`, and `never`. Agents API only defines vocabulary and filtering; dynamic retrieval heuristics remain consumer/runtime policy.
+
+`WP_Agent_Context_Section_Registry` registers composable sections independently from any projection target:
+
+```php
+WP_Agent_Context_Section_Registry::register(
+	'workspace-instructions',
+	'agent-memory-policy',
+	20,
+	static function ( array $context, array $section ): string {
+		return "## Memory Policy\nUse only context sources allowed for " . ( $context['mode'] ?? 'runtime' ) . '.';
+	},
+	array(
+		'modes'            => array( 'chat' ),
+		'retrieval_policy' => WP_Agent_Context_Injection_Policy::ALWAYS,
+	)
+);
+
+$composed = WP_Agent_Context_Section_Registry::compose(
+	'workspace-instructions',
+	array( 'mode' => 'chat' )
+);
+```
+
+The generic layer vocabulary uses `workspace` rather than `site`. Products that need site or network files should map them through adapters or registration metadata such as `convention_path` or `external_projection_target`.
 
 ## Execution Principals
 
