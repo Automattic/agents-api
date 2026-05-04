@@ -16,6 +16,8 @@ $GLOBALS['__agents_api_smoke_done']    = array();
 $GLOBALS['__agents_api_smoke_post_types'] = array();
 $GLOBALS['__agents_api_smoke_taxonomies'] = array();
 $GLOBALS['__agents_api_smoke_terms']      = array();
+$GLOBALS['__agents_api_smoke_posts']      = array();
+$GLOBALS['__agents_api_smoke_post_meta']  = array();
 
 function __( string $text, string $domain = 'default' ): string {
 	unset( $domain );
@@ -112,6 +114,21 @@ function register_post_type( string $post_type, array $args = array() ) {
 		'name' => $post_type,
 		'args' => $args,
 	);
+}
+
+function get_post( int $post_id ) {
+	return $GLOBALS['__agents_api_smoke_posts'][ $post_id ] ?? null;
+}
+
+function get_post_meta( int $post_id, string $key = '', bool $single = false ) {
+	$meta = $GLOBALS['__agents_api_smoke_post_meta'][ $post_id ] ?? array();
+
+	if ( '' === $key ) {
+		return $meta;
+	}
+
+	$value = $meta[ $key ] ?? ( $single ? '' : array() );
+	return $single && is_array( $value ) ? reset( $value ) : $value;
 }
 
 function taxonomy_exists( string $taxonomy ): bool {
