@@ -32,7 +32,10 @@ $raw = array(
 		'target_id' => 'content-42',
 		'changes'   => array( 'summary' => 'New summary' ),
 	),
-	'workspace'           => 'workspace-1',
+	'workspace'           => array(
+		'workspace_type' => 'code_workspace',
+		'workspace_id'   => 'Automattic/agents-api@durable-approvals',
+	),
 	'agent'               => 'agent-reviewer',
 	'creator'             => 'user-7',
 	'status'              => AgentsAPI\AI\Approvals\PendingActionStatus::PENDING,
@@ -55,7 +58,7 @@ $array  = $action->to_array();
 agents_api_smoke_assert_equals( $raw, $array, 'canonical array preserves all public fields', $failures, $passes );
 agents_api_smoke_assert_equals( 'approve-123', $action->get_action_id(), 'action id getter returns canonical id', $failures, $passes );
 agents_api_smoke_assert_equals( 'content_update', $action->get_kind(), 'kind getter returns generic kind', $failures, $passes );
-agents_api_smoke_assert_equals( 'workspace-1', $action->get_workspace(), 'workspace getter returns generic workspace', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'workspace_type' => 'code_workspace', 'workspace_id' => 'Automattic/agents-api@durable-approvals' ), $action->get_workspace()->to_array(), 'workspace getter returns generic workspace scope', $failures, $passes );
 agents_api_smoke_assert_equals( 'agent-reviewer', $action->get_agent(), 'agent getter returns generic agent', $failures, $passes );
 agents_api_smoke_assert_equals( 'user-7', $action->get_creator(), 'creator getter returns generic creator', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\Approvals\PendingActionStatus::PENDING, $action->get_status(), 'status getter returns canonical status', $failures, $passes );
@@ -93,7 +96,10 @@ $resolved = AgentsAPI\AI\Approvals\PendingAction::from_array(
 		'summary'            => 'Apply a patch.',
 		'preview'            => array( 'diff' => '...' ),
 		'apply_input'        => array( 'patch' => '...' ),
-		'workspace'          => 'workspace-1',
+		'workspace'          => array(
+			'workspace_type' => 'code_workspace',
+			'workspace_id'   => 'Automattic/agents-api@durable-approvals',
+		),
 		'agent'              => 'agent-reviewer',
 		'creator'            => 'user-7',
 		'status'             => AgentsAPI\AI\Approvals\PendingActionStatus::ACCEPTED,
@@ -116,6 +122,7 @@ $invalid_cases = array(
 	'invalid action_id'       => array( 'action_id' => 123, 'kind' => 'update', 'summary' => 'Summary', 'preview' => array(), 'apply_input' => array(), 'created_at' => 'now' ),
 	'empty kind'              => array( 'action_id' => 'approve-1', 'kind' => '', 'summary' => 'Summary', 'preview' => array(), 'apply_input' => array(), 'created_at' => 'now' ),
 	'invalid metadata'        => array( 'action_id' => 'approve-1', 'kind' => 'update', 'summary' => 'Summary', 'preview' => array(), 'apply_input' => array(), 'metadata' => 'nope', 'created_at' => 'now' ),
+	'invalid workspace'       => array( 'action_id' => 'approve-1', 'kind' => 'update', 'summary' => 'Summary', 'preview' => array(), 'apply_input' => array(), 'workspace' => array( 'workspace_type' => '', 'workspace_id' => '' ), 'created_at' => 'now' ),
 	'invalid status'          => array( 'action_id' => 'approve-1', 'kind' => 'update', 'summary' => 'Summary', 'preview' => array(), 'apply_input' => array(), 'status' => 'approved', 'created_at' => 'now' ),
 	'non-serializable input'  => array( 'action_id' => 'approve-1', 'kind' => 'update', 'summary' => 'Summary', 'preview' => array(), 'apply_input' => tmpfile(), 'created_at' => 'now' ),
 	'invalid optional string' => array( 'action_id' => 'approve-1', 'kind' => 'update', 'summary' => 'Summary', 'preview' => array(), 'apply_input' => array(), 'creator' => '', 'created_at' => 'now' ),

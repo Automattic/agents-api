@@ -7,6 +7,8 @@
 
 namespace AgentsAPI\AI\Approvals;
 
+use AgentsAPI\Core\Workspace\AgentWorkspaceScope;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -38,7 +40,7 @@ class PendingAction {
 			'summary'             => self::normalize_string( self::required_value( $action, 'summary' ), 'summary' ),
 			'preview'             => self::normalize_json_value( self::required_value( $action, 'preview' ), 'preview' ),
 			'apply_input'         => self::normalize_json_value( self::required_value( $action, 'apply_input' ), 'apply_input' ),
-			'workspace'           => self::normalize_optional_string( $action['workspace'] ?? null, 'workspace' ),
+			'workspace'           => self::normalize_optional_workspace( $action['workspace'] ?? null ),
 			'agent'               => self::normalize_optional_string( $action['agent'] ?? null, 'agent' ),
 			'creator'             => self::normalize_optional_string( $action['creator'] ?? null, 'creator' ),
 			'status'              => self::normalize_status( $action['status'] ?? PendingActionStatus::PENDING ),
@@ -86,8 +88,8 @@ class PendingAction {
 		return $this->data['apply_input'];
 	}
 
-	public function get_workspace(): ?string {
-		return $this->data['workspace'];
+	public function get_workspace(): ?AgentWorkspaceScope {
+		return null === $this->data['workspace'] ? null : AgentWorkspaceScope::from_array( $this->data['workspace'] );
 	}
 
 	public function get_agent(): ?string {
@@ -183,6 +185,28 @@ class PendingAction {
 		}
 
 		return self::normalize_string( $value, $field );
+	}
+
+	/**
+	 * Normalize an optional workspace identity.
+	 *
+	 * @param mixed $value Raw workspace value.
+	 * @return array{workspace_type:string,workspace_id:string}|null
+	 */
+	private static function normalize_optional_workspace( $value ): ?array {
+		if ( null === $value ) {
+			return null;
+		}
+
+		if ( ! is_array( $value ) ) {
+			throw new \InvalidArgumentException( 'invalid_ai_pending_action: workspace must be an AgentWorkspaceScope array' );
+		}
+
+		try {
+			return AgentWorkspaceScope::from_array( $value )->to_array();
+		} catch ( \InvalidArgumentException $error ) {
+			throw new \InvalidArgumentException( 'invalid_ai_pending_action: workspace must include valid workspace_type and workspace_id', 0, $error );
+		}
 	}
 
 	/**

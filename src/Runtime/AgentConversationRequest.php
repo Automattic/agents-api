@@ -8,6 +8,7 @@
 namespace AgentsAPI\AI;
 
 use AgentsAPI\AI\Tools\RuntimeToolDeclaration;
+use AgentsAPI\Core\Workspace\AgentWorkspaceScope;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -40,6 +41,9 @@ class AgentConversationRequest {
 	/** @var bool Whether to stop after one orchestration turn. */
 	private bool $single_turn;
 
+	/** @var AgentWorkspaceScope|null Workspace scope for persistence/audit adapters. */
+	private ?AgentWorkspaceScope $workspace;
+
 	/**
 	 * @param array                         $messages        Initial conversation messages.
 	 * @param array                         $tools           Runtime tool declarations available to the run.
@@ -48,6 +52,7 @@ class AgentConversationRequest {
 	 * @param array<string, mixed>          $metadata        Caller-owned metadata.
 	 * @param int                           $max_turns       Maximum conversation turns.
 	 * @param bool                          $single_turn     Single-turn orchestration flag.
+	 * @param AgentWorkspaceScope|null      $workspace       Workspace scope for persistence/audit adapters.
 	 */
 	public function __construct(
 		array $messages,
@@ -56,7 +61,8 @@ class AgentConversationRequest {
 		array $runtime_context = array(),
 		array $metadata = array(),
 		int $max_turns = self::DEFAULT_MAX_TURNS,
-		bool $single_turn = false
+		bool $single_turn = false,
+		?AgentWorkspaceScope $workspace = null
 	) {
 		$this->messages        = AgentMessageEnvelope::normalize_many( $messages );
 		$this->tools           = self::normalize_tools( $tools );
@@ -65,6 +71,7 @@ class AgentConversationRequest {
 		$this->metadata        = self::normalize_json_array( $metadata, 'metadata' );
 		$this->max_turns       = max( 1, $max_turns );
 		$this->single_turn     = $single_turn;
+		$this->workspace       = $workspace;
 	}
 
 	/** @return array<int, array<string, mixed>> Initial conversation messages. */
@@ -102,6 +109,11 @@ class AgentConversationRequest {
 		return $this->single_turn;
 	}
 
+	/** @return AgentWorkspaceScope|null Workspace scope for persistence/audit adapters. */
+	public function workspace(): ?AgentWorkspaceScope {
+		return $this->workspace;
+	}
+
 	/**
 	 * Return a normalized array representation.
 	 *
@@ -116,6 +128,7 @@ class AgentConversationRequest {
 			'metadata'        => $this->metadata,
 			'max_turns'       => $this->max_turns,
 			'single_turn'     => $this->single_turn,
+			'workspace'       => $this->workspace ? $this->workspace->to_array() : null,
 		);
 	}
 

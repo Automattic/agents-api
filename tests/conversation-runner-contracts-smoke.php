@@ -48,9 +48,9 @@ agents_api_smoke_assert_equals( true, $request->singleTurn(), 'request preserves
 agents_api_smoke_assert_equals( 'abc123', $request->metadata()['trace_id'], 'request preserves caller metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/lookup', $request->tools()[0]['name'], 'request preserves normalized tool list', $failures, $passes );
 agents_api_smoke_assert_equals(
-	array( 'messages', 'tools', 'principal', 'runtime_context', 'metadata', 'max_turns', 'single_turn' ),
+	array( 'messages', 'tools', 'principal', 'runtime_context', 'metadata', 'max_turns', 'single_turn', 'workspace' ),
 	array_keys( $request->to_array() ),
-	'request array exposes only neutral runner keys',
+	'request array exposes neutral runner and workspace keys',
 	$failures,
 	$passes
 );

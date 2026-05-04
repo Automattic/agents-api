@@ -42,8 +42,9 @@ interface PendingActionStoreInterface {
 	 * List durable pending action records for queue and audit surfaces.
 	 *
 	 * Supported filters are implementation-defined, but SHOULD include status,
-	 * kind, workspace, agent, creator, resolver, created/resolved date ranges,
-	 * limit, and offset when the backing store can express them.
+	 * kind, workspace_type, workspace_id, agent, creator, resolver,
+	 * created/resolved date ranges, limit, and offset when the backing store can
+	 * express them.
 	 *
 	 * @param array<string,mixed> $filters Query filters.
 	 * @return array<int,PendingAction>

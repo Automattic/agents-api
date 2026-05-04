@@ -39,7 +39,10 @@ $action = AgentsAPI\AI\Approvals\PendingAction::from_array(
 		'summary'     => 'Apply a patch.',
 		'preview'     => array( 'diff' => '...' ),
 		'apply_input' => array( 'target' => 'diff-123' ),
-		'workspace'   => 'workspace-main',
+		'workspace'   => array(
+			'workspace_type' => 'code_workspace',
+			'workspace_id'   => 'Automattic/agents-api@durable-approvals',
+		),
 		'agent'       => 'agent-reviewer',
 		'creator'     => 'user-7',
 		'created_at'  => '2026-05-03T15:00:00Z',
@@ -48,14 +51,14 @@ $action = AgentsAPI\AI\Approvals\PendingAction::from_array(
 
 $handler = new class() implements AgentsAPI\AI\Approvals\PendingActionHandlerInterface {
 	public function can_resolve_pending_action( AgentsAPI\AI\Approvals\PendingAction $action, AgentsAPI\AI\Approvals\ApprovalDecision $decision, array $payload = array(), array $context = array() ): bool {
-		return 'blocked' !== ( $payload['reason'] ?? null ) && 'workspace-main' === $action->get_workspace();
+		return 'blocked' !== ( $payload['reason'] ?? null ) && 'Automattic/agents-api@durable-approvals' === $action->get_workspace()->workspace_id;
 	}
 
 	public function handle_pending_action( AgentsAPI\AI\Approvals\PendingAction $action, AgentsAPI\AI\Approvals\ApprovalDecision $decision, array $payload = array(), array $context = array() ): mixed {
 		return array(
 			'decision'  => $decision->value(),
 			'target'    => $action->get_apply_input()['target'] ?? null,
-			'workspace' => $action->get_workspace(),
+			'workspace' => $action->get_workspace()->to_array(),
 			'reason'    => $payload['reason'] ?? null,
 			'actor'     => $context['actor'] ?? null,
 		);
@@ -73,7 +76,7 @@ agents_api_smoke_assert_equals( true, $handler->can_resolve_pending_action( $act
 agents_api_smoke_assert_equals( false, $handler->can_resolve_pending_action( $action, $accepted, array( 'reason' => 'blocked' ) ), 'handler-level permission check can deny resolution', $failures, $passes );
 agents_api_smoke_assert_equals( 'accepted', $handled['decision'], 'handler receives decision object', $failures, $passes );
 agents_api_smoke_assert_equals( 'diff-123', $handled['target'], 'handler receives stored action apply input', $failures, $passes );
-agents_api_smoke_assert_equals( 'workspace-main', $handled['workspace'], 'handler receives stored workspace', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'workspace_type' => 'code_workspace', 'workspace_id' => 'Automattic/agents-api@durable-approvals' ), $handled['workspace'], 'handler receives stored workspace scope', $failures, $passes );
 agents_api_smoke_assert_equals( 'looks-good', $handled['reason'], 'handler receives resolver payload', $failures, $passes );
 agents_api_smoke_assert_equals( 'reviewer', $handled['actor'], 'handler receives optional context', $failures, $passes );
 
@@ -88,7 +91,10 @@ $resolver = new class( $handler ) implements AgentsAPI\AI\Approvals\PendingActio
 				'summary'     => 'Apply a patch.',
 				'preview'     => array( 'diff' => '...' ),
 				'apply_input' => array( 'target' => $pending_action_id ),
-				'workspace'   => 'workspace-main',
+				'workspace'   => array(
+					'workspace_type' => 'code_workspace',
+					'workspace_id'   => 'Automattic/agents-api@durable-approvals',
+				),
 				'created_at'  => '2026-05-03T15:00:00Z',
 			)
 		);
