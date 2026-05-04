@@ -29,10 +29,6 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 
 			$filtered = array();
 			foreach ( $tools as $name => $tool ) {
-				if ( ! is_array( $tool ) ) {
-					continue;
-				}
-
 				$modes = $tool['modes'] ?? ( $tool['mode'] ?? null );
 				if ( null === $modes ) {
 					$filtered[ $name ] = $tool;
@@ -58,7 +54,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		public function filter_by_access_checker( array $tools, callable $access_checker ): array {
 			$filtered = array();
 			foreach ( $tools as $name => $tool ) {
-				if ( is_array( $tool ) && $access_checker( $tool, $name ) ) {
+				if ( $access_checker( $tool, $name ) ) {
 					$filtered[ $name ] = $tool;
 				}
 			}
@@ -118,10 +114,6 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 
 			$filtered = array();
 			foreach ( $tools as $name => $tool ) {
-				if ( ! is_array( $tool ) ) {
-					continue;
-				}
-
 				if ( $preserve_tool && $preserve_tool( $tool, $name ) ) {
 					$filtered[ $name ] = $tool;
 					continue;
@@ -192,7 +184,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 				$registry = WP_Abilities_Registry::get_instance();
 				foreach ( $this->ability_slugs( $tool ) as $slug ) {
 					$ability = $registry->get_registered( $slug );
-					if ( $ability && method_exists( $ability, 'get_category' ) ) {
+					if ( $ability ) {
 						$categories[] = $ability->get_category();
 					}
 				}
@@ -238,7 +230,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 			$preserved = array();
 			$optional  = array();
 			foreach ( $tools as $name => $tool ) {
-				if ( is_array( $tool ) && $preserve_tool( $tool, $name ) ) {
+				if ( $preserve_tool( $tool, $name ) ) {
 					$preserved[ $name ] = $tool;
 				} else {
 					$optional[ $name ] = $tool;
