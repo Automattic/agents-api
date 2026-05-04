@@ -235,6 +235,8 @@ final class RepoMemoryValidator implements AgentsAPI\Core\FilesRepository\AgentM
 
 Agents API defines the contracts only. Concrete stores decide how metadata is physically materialized, how ranking is executed, and which workspace facts are supplied to validators.
 
+For the proposed optional reference implementations, see [Default Stores Companion Proposal](docs/default-stores-companion.md). The proposal keeps concrete persistence policy outside this canonical substrate while documenting the package boundary, test expectations, and extraction order for issue #78.
+
 ## Tool Visibility And Action Policy
 
 Agents API owns generic policy contracts for deciding which tools are visible to an agent and how a called tool is allowed to execute. Consumers still own concrete tool sources, concrete execution adapters, approval storage, UI, workflows, and any product-specific mandatory tools.
