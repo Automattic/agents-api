@@ -10,8 +10,8 @@
  * - translating an {@see AgentMemoryScope} to a physical key (path, row, URL);
  * - returning a stable content hash so callers can implement
  *   compare-and-swap concurrency via the `if_match` write parameter;
- * - honoring the layer + user_id + agent_id + filename four-tuple as the
- *   identity model.
+ * - honoring the layer + workspace_type + workspace_id + user_id + agent_id
+ *   + filename identity model.
  *
  * Section parsing, scaffold/default-file creation, editability gating,
  * ability permissions, prompt-injection policy, and registry-driven
@@ -74,7 +74,7 @@ interface AgentMemoryStoreInterface {
 	 * List all top-level files in a single layer for the given identity.
 	 *
 	 * The $scope_query's `filename` field is ignored — list operations
-	 * return all files matching `(layer, user_id, agent_id)`. The
+	 * return all files matching `(layer, workspace_type, workspace_id, user_id, agent_id)`. The
 	 * `layer` field is required.
 	 *
 	 * Top-level only: subdirectories under the layer (e.g. `daily/`,

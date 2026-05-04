@@ -40,6 +40,7 @@ $namespace_map = array(
 	'DataMachine\\Core\\Identity\\AgentIdentityScope'                         => 'AgentsAPI\\Core\\Identity\\AgentIdentityScope',
 	'DataMachine\\Core\\Identity\\MaterializedAgentIdentity'                  => 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentity',
 	'DataMachine\\Core\\Identity\\MaterializedAgentIdentityStoreInterface'     => 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentityStoreInterface',
+	'DataMachine\\Core\\Workspace\\AgentWorkspaceScope'                       => 'AgentsAPI\\Core\\Workspace\\AgentWorkspaceScope',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreInterface'           => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreInterface',
 	'DataMachine\\Core\\FilesRepository\\AgentMemoryScope'                    => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryScope',
 );
@@ -118,6 +119,7 @@ $expected_source_directories = array(
 	'Runtime',
 	'Tools',
 	'Transcripts',
+	'Workspace',
 );
 $actual_source_directories   = array();
 $source_directory_iterator   = new DirectoryIterator( AGENTS_API_PATH . 'src' );

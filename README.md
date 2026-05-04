@@ -114,8 +114,43 @@ wp_register_agent(
 - `AgentsAPI\AI\Tools\ToolExecutorInterface`
 - `AgentsAPI\AI\Tools\ToolExecutionCore`
 - `AgentsAPI\AI\Tools\ToolExecutionResult`
+- `AgentsAPI\Core\Workspace\AgentWorkspaceScope`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects
+
+## Workspace Scope
+
+`AgentsAPI\Core\Workspace\AgentWorkspaceScope` is the generic workspace identity shared by memory, transcript, persistence, and audit adapters. It is deliberately broader than a WordPress site ID:
+
+```php
+$workspace = AgentsAPI\Core\Workspace\AgentWorkspaceScope::from_parts(
+	'code_workspace',
+	'Automattic/intelligence@contexta8c-read-coverage'
+);
+
+$workspace->to_array();
+// array(
+// 	'workspace_type' => 'code_workspace',
+// 	'workspace_id'   => 'Automattic/intelligence@contexta8c-read-coverage',
+// )
+```
+
+Consumers may map WordPress sites, networks, headless runtimes, Studio sites, code workspaces, pull requests, or ephemeral execution environments into that pair. Agents API keeps those mappings in consumer adapters; the generic contracts only depend on `workspace_type` + `workspace_id`.
+
+Memory scope uses `(layer, workspace_type, workspace_id, user_id, agent_id, filename)` as its identity model:
+
+```php
+$scope = new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
+	'user',
+	$workspace->workspace_type,
+	$workspace->workspace_id,
+	123,
+	456,
+	'MEMORY.md'
+);
+```
+
+Transcript sessions are also workspace-stamped. `ConversationTranscriptStoreInterface::create_session()` and `::get_recent_pending_session()` both receive an `AgentWorkspaceScope`, and `AgentConversationRequest` can carry a workspace so runtime persisters can stamp the session they materialize.
 
 ## Execution Principals
 
