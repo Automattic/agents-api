@@ -10,8 +10,10 @@
  * - translating an {@see AgentMemoryScope} to a physical key (path, row, URL);
  * - returning a stable content hash so callers can implement
  *   compare-and-swap concurrency via the `if_match` write parameter;
- * - honoring the layer + workspace_type + workspace_id + user_id + agent_id
- *   + filename identity model.
+	 * - honoring the layer + workspace_type + workspace_id + user_id + agent_id
+	 *   + filename identity model;
+	 * - declaring which provenance, confidence, validator, and authority
+	 *   metadata fields it can persist/read/filter/rank.
  *
  * Section parsing, scaffold/default-file creation, editability gating,
  * ability permissions, prompt-injection policy, and registry-driven
@@ -29,12 +31,20 @@ defined( 'ABSPATH' ) || exit;
 interface AgentMemoryStoreInterface {
 
 	/**
+	 * Declare memory metadata support for this store.
+	 *
+	 * @return AgentMemoryStoreCapabilities
+	 */
+	public function capabilities(): AgentMemoryStoreCapabilities;
+
+	/**
 	 * Read the full content of the file identified by $scope.
 	 *
-	 * @param AgentMemoryScope $scope Identifies the target file.
+	 * @param AgentMemoryScope $scope           Identifies the target file.
+	 * @param string[]         $metadata_fields Metadata fields the caller wants returned.
 	 * @return AgentMemoryReadResult Returns ::not_found() when the file does not exist.
 	 */
-	public function read( AgentMemoryScope $scope ): AgentMemoryReadResult;
+	public function read( AgentMemoryScope $scope, array $metadata_fields = AgentMemoryMetadata::FIELDS ): AgentMemoryReadResult;
 
 	/**
 	 * Write the full content of the file identified by $scope.
@@ -44,14 +54,15 @@ interface AgentMemoryStoreInterface {
 	 * a matching hash. On hash mismatch, return a failure result with
 	 * error = 'conflict'.
 	 *
- * Implementations without concurrency support MAY ignore $if_match.
+	 * Implementations without concurrency support MAY ignore $if_match.
 	 *
-	 * @param AgentMemoryScope $scope    Identifies the target file.
-	 * @param string           $content  Full content to persist.
-	 * @param string|null      $if_match Optional content hash for compare-and-swap.
+	 * @param AgentMemoryScope         $scope    Identifies the target file.
+	 * @param string                   $content  Full content to persist.
+	 * @param string|null              $if_match Optional content hash for compare-and-swap.
+	 * @param AgentMemoryMetadata|null $metadata Optional provenance/trust metadata to persist.
 	 * @return AgentMemoryWriteResult
 	 */
-	public function write( AgentMemoryScope $scope, string $content, ?string $if_match = null ): AgentMemoryWriteResult;
+	public function write( AgentMemoryScope $scope, string $content, ?string $if_match = null, ?AgentMemoryMetadata $metadata = null ): AgentMemoryWriteResult;
 
 	/**
 	 * Check whether the file identified by $scope exists in the store.
@@ -81,10 +92,11 @@ interface AgentMemoryStoreInterface {
 	 * `contexts/`) are NOT recursed into. Use {@see self::list_subtree()}
 	 * to enumerate those.
 	 *
-	 * @param AgentMemoryScope $scope_query Layer + identity to enumerate.
+	 * @param AgentMemoryScope      $scope_query Layer + identity to enumerate.
+	 * @param AgentMemoryQuery|null $query       Optional metadata filters/ranking hints.
 	 * @return AgentMemoryListEntry[]
 	 */
-	public function list_layer( AgentMemoryScope $scope_query ): array;
+	public function list_layer( AgentMemoryScope $scope_query, ?AgentMemoryQuery $query = null ): array;
 
 	/**
 	 * List all files under a path prefix within a layer.
@@ -99,10 +111,11 @@ interface AgentMemoryStoreInterface {
 	 *
 	 * @since next
 	 *
-	 * @param AgentMemoryScope $scope_query Layer + identity. `filename` is ignored.
-	 * @param string           $prefix      Path prefix without trailing slash
-	 *                                      (e.g. 'daily', 'contexts'). Required.
+	 * @param AgentMemoryScope      $scope_query Layer + identity. `filename` is ignored.
+	 * @param string                $prefix      Path prefix without trailing slash
+	 *                                           (e.g. 'daily', 'contexts'). Required.
+	 * @param AgentMemoryQuery|null $query       Optional metadata filters/ranking hints.
 	 * @return AgentMemoryListEntry[]
 	 */
-	public function list_subtree( AgentMemoryScope $scope_query, string $prefix ): array;
+	public function list_subtree( AgentMemoryScope $scope_query, string $prefix, ?AgentMemoryQuery $query = null ): array;
 }

@@ -125,7 +125,83 @@ wp_register_agent(
 - `AgentsAPI\AI\Tools\ToolExecutionResult`
 - `AgentsAPI\Core\Workspace\AgentWorkspaceScope`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
-- `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects
+- `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects, including provenance/trust metadata contracts
+
+## Memory Provenance Metadata
+
+Memory stores can carry first-class metadata alongside content so callers can distinguish direct user assertions from agent inferences, workspace extraction, curated facts, system-generated facts, or imports.
+
+`AgentMemoryMetadata` standardizes these fields:
+
+- `source_type`: `user_asserted`, `agent_inferred`, `workspace_extracted`, `system_generated`, `curated`, or `imported`.
+- `source_ref`: caller-owned source reference, such as a URL, file path, record ID, or content hash.
+- `created_by_user_id` and `created_by_agent_id`: identities responsible for the memory write.
+- `workspace`: optional `AgentWorkspaceScope` identity for revalidation.
+- `confidence`: trust score from `0.0` to `1.0`.
+- `validator`: validator identifier that can re-check the memory against current substrate state.
+- `authority_tier`: `low`, `medium`, `high`, or `canonical`.
+- `created_at` and `updated_at`: Unix timestamps for metadata/content lifecycle.
+
+Default trust is intentionally conservative. `agent_inferred` defaults to `0.5` confidence and `low` authority, while `user_asserted`, `curated`, and `system_generated` memories rank higher by default.
+
+Stores declare metadata support through `AgentMemoryStoreCapabilities`:
+
+```php
+$capabilities = $store->capabilities();
+
+$unsupported = $capabilities->unsupported_metadata_fields(
+	array( 'source_type', 'workspace', 'confidence' ),
+	'read'
+);
+```
+
+Writes, reads, and list entries include `unsupported_metadata_fields` so a caller can tell the difference between missing metadata and a store that cannot persist, return, filter, or rank the requested fields.
+
+Retrieval filters and ranking hints use `AgentMemoryQuery`:
+
+```php
+$entries = $store->list_layer(
+	new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
+		'user',
+		$workspace->workspace_type,
+		$workspace->workspace_id,
+		123,
+		456,
+		''
+	),
+	new AgentsAPI\Core\FilesRepository\AgentMemoryQuery(
+		source_types: array( AgentsAPI\Core\FilesRepository\AgentMemoryMetadata::SOURCE_USER_ASSERTED ),
+		min_confidence: 0.8,
+		authority_tiers: array( AgentsAPI\Core\FilesRepository\AgentMemoryMetadata::AUTHORITY_HIGH ),
+		order_by: 'confidence'
+	)
+);
+```
+
+Validators are pluggable and workspace-aware without being tied to a specific product or host:
+
+```php
+final class RepoMemoryValidator implements AgentsAPI\Core\FilesRepository\AgentMemoryValidatorInterface {
+	public function id(): string {
+		return 'repo_state';
+	}
+
+	public function validate(
+		AgentsAPI\Core\FilesRepository\AgentMemoryScope $scope,
+		string $content,
+		AgentsAPI\Core\FilesRepository\AgentMemoryMetadata $metadata,
+		array $workspace_context = array()
+	): AgentsAPI\Core\FilesRepository\AgentMemoryValidationResult {
+		unset( $scope, $content, $metadata );
+
+		return ! empty( $workspace_context['current'] )
+			? AgentsAPI\Core\FilesRepository\AgentMemoryValidationResult::valid()
+			: AgentsAPI\Core\FilesRepository\AgentMemoryValidationResult::stale( 'Repository state changed.' );
+	}
+}
+```
+
+Agents API defines the contracts only. Concrete stores decide how metadata is physically materialized, how ranking is executed, and which workspace facts are supplied to validators.
 
 ## Workspace Scope
 
