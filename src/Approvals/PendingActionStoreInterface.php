@@ -22,26 +22,68 @@ defined( 'ABSPATH' ) || exit;
 interface PendingActionStoreInterface {
 
 	/**
-	 * Persist a pending action payload under a caller-provided action ID.
+	 * Persist a pending action record.
 	 *
-	 * @param string              $action_id Durable action identifier.
-	 * @param array<string,mixed> $payload   JSON-serializable pending action payload.
+	 * @param PendingAction $action Durable pending action record.
 	 * @return bool Whether the payload was stored successfully.
 	 */
-	public function store( string $action_id, array $payload ): bool;
+	public function store( PendingAction $action ): bool;
 
 	/**
-	 * Retrieve a pending action payload by action ID.
+	 * Retrieve a pending action by action ID.
 	 *
-	 * @param string $action_id Durable action identifier.
-	 * @return array<string,mixed>|null Pending action payload, or null when not found.
+	 * @param string $action_id        Durable action identifier.
+	 * @param bool   $include_resolved Whether terminal audit rows may be returned.
+	 * @return PendingAction|null Pending action, or null when not found.
 	 */
-	public function get( string $action_id ): ?array;
+	public function get( string $action_id, bool $include_resolved = false ): ?PendingAction;
 
 	/**
-	 * Delete a pending action payload by action ID.
+	 * List durable pending action records for queue and audit surfaces.
 	 *
-	 * Implementations SHOULD make delete idempotent for missing action IDs.
+	 * Supported filters are implementation-defined, but SHOULD include status,
+	 * kind, workspace, agent, creator, resolver, created/resolved date ranges,
+	 * limit, and offset when the backing store can express them.
+	 *
+	 * @param array<string,mixed> $filters Query filters.
+	 * @return array<int,PendingAction>
+	 */
+	public function list( array $filters = array() ): array;
+
+	/**
+	 * Summarize durable pending action records for operator inspection.
+	 *
+	 * @param array<string,mixed> $filters Query filters.
+	 * @return array<string,mixed>
+	 */
+	public function summary( array $filters = array() ): array;
+
+	/**
+	 * Record a terminal resolution while retaining the action for audit.
+	 *
+	 * @param string           $action_id Durable action identifier.
+	 * @param ApprovalDecision $decision  Accepted/rejected decision.
+	 * @param string           $resolver  Resolver identifier, such as a user, token, or service actor.
+	 * @param mixed|null       $result    JSON-serializable resolution result.
+	 * @param string|null      $error     Human-readable resolution error.
+	 * @param array<string,mixed> $metadata JSON-serializable resolution metadata.
+	 * @return bool Whether the audit update completed successfully.
+	 */
+	public function record_resolution( string $action_id, ApprovalDecision $decision, string $resolver, $result = null, ?string $error = null, array $metadata = array() ): bool;
+
+	/**
+	 * Mark due pending actions as expired.
+	 *
+	 * @param string|null $before Timestamp boundary; defaults to implementation time.
+	 * @return int Number of actions expired.
+	 */
+	public function expire( ?string $before = null ): int;
+
+	/**
+	 * Delete a pending action by action ID.
+	 *
+	 * Implementations SHOULD retain an audit row with `deleted` status when the
+	 * backing store supports durable audit history.
 	 *
 	 * @param string $action_id Durable action identifier.
 	 * @return bool Whether the delete operation completed successfully.

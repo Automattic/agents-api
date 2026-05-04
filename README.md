@@ -114,6 +114,12 @@ wp_register_agent(
 - `AgentsAPI\AI\Tools\ToolExecutorInterface`
 - `AgentsAPI\AI\Tools\ToolExecutionCore`
 - `AgentsAPI\AI\Tools\ToolExecutionResult`
+- `AgentsAPI\AI\Approvals\ApprovalDecision`
+- `AgentsAPI\AI\Approvals\PendingAction`
+- `AgentsAPI\AI\Approvals\PendingActionStatus`
+- `AgentsAPI\AI\Approvals\PendingActionStoreInterface`
+- `AgentsAPI\AI\Approvals\PendingActionResolverInterface`
+- `AgentsAPI\AI\Approvals\PendingActionHandlerInterface`
 - `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
 - `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects
 
@@ -272,13 +278,24 @@ The loop treats all adapter inputs and outputs as JSON-friendly arrays so produc
 Agents API owns generic approval primitives for runtime actions that need explicit user or policy approval before a consumer applies them. The lifecycle is:
 
 - A runtime or tool proposes an action instead of applying it immediately.
-- The proposal is emitted or stored as a generic pending action value.
-- A UI or user accepts or rejects the pending action.
-- The consumer adapter resolves the decision and applies or discards the proposal through its own product-specific handler.
+- The proposal is emitted or stored as a generic `PendingAction` value.
+- A UI, user, policy service, or resolver actor accepts or rejects the pending action.
+- The consumer adapter resolves the decision, runs handler-level permission checks, applies or discards the proposal through its own product-specific handler, and records terminal audit metadata.
 
-Agents API owns the reusable contract shape only: value objects and interfaces for pending actions, the JSON-friendly proposal and decision shape, policy vocabulary for approval requirements, and a typed `approval_required` envelope that runtimes can return without knowing where the proposal will be stored or displayed.
+Agents API owns the reusable contract shape only: value objects and interfaces for pending actions, the JSON-friendly proposal and decision shape, status vocabulary, policy vocabulary for approval requirements, and a typed `approval_required` envelope that runtimes can return without knowing where the proposal will be stored or displayed.
 
-Consuming products own the concrete materialization: durable storage, REST routes, abilities or tool surfaces, chat/admin UI, permission ceilings, audit records, queues, jobs, workflows, and product-specific apply/reject handlers. Those concerns belong in adapters because they depend on each product's UX, authorization model, and operational semantics.
+Durable pending action records include:
+
+- `action_id`, `kind`, `summary`, `preview`, and `apply_input`.
+- `workspace`, `agent`, and `creator` actor/provenance fields.
+- `status` using `PendingActionStatus`: `pending`, `accepted`, `rejected`, `expired`, or `deleted`.
+- `created_at`, `expires_at`, and terminal `resolved_at` timestamps.
+- `resolver`, `resolution_result`, `resolution_error`, and `resolution_metadata` audit fields.
+- Generic `metadata` for JSON-serializable caller context that is not part of handler replay input.
+
+`PendingActionStoreInterface` defines the durable queue/audit surface: `store`, `get`, `list`, `summary`, `record_resolution`, `expire`, and `delete`. `PendingActionResolverInterface` defines accept/reject resolution with an explicit resolver identity. `PendingActionHandlerInterface` lets product handlers enforce handler-level permission checks before applying or rejecting a stored action.
+
+Consuming products own the concrete materialization: database tables, REST routes, abilities or tool surfaces, chat/admin UI, permission ceilings, queues, jobs, workflows, and product-specific apply/reject handlers. Those concerns belong in adapters because they depend on each product's UX, authorization model, and operational semantics.
 
 Package artifacts can also describe a `diff_callback` so packages can generate reviewable diffs for installer or updater flows. That artifact is related to approval because it helps produce human-reviewable change previews, but it is not the same primitive as runtime pending-action approval. `diff_callback` belongs to package artifact review; `approval_required` belongs to a live runtime/tool proposal that must be accepted or rejected before the consumer applies it.
 

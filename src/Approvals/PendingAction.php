@@ -10,75 +10,19 @@ namespace AgentsAPI\AI\Approvals;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Represents a proposed action awaiting approval.
+ * Represents a proposed action and its durable resolution audit fields.
  */
 // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Validation exceptions are not rendered output.
 class PendingAction {
 
-	/** @var string */
-	private $action_id;
-
-	/** @var string */
-	private $kind;
-
-	/** @var string */
-	private $summary;
-
-	/** @var mixed */
-	private $preview;
-
-	/** @var mixed */
-	private $apply_input;
-
-	/** @var string|null */
-	private $created_by;
-
-	/** @var string|null */
-	private $agent_id;
-
-	/** @var array<string, mixed> */
-	private $context;
-
-	/** @var string */
-	private $created_at;
-
-	/** @var string|null */
-	private $expires_at;
+	/** @var array<string,mixed> */
+	private array $data;
 
 	/**
-	 * @param string               $action_id   Stable action identifier.
-	 * @param string               $kind        Generic action kind.
-	 * @param string               $summary     Human-readable summary.
-	 * @param mixed                $preview     JSON-serializable preview payload.
-	 * @param mixed                $apply_input JSON-serializable apply payload.
-	 * @param string|null          $created_by  Optional creator identifier.
-	 * @param string|null          $agent_id    Optional agent identifier.
-	 * @param mixed                $context     Optional JSON-serializable context array.
-	 * @param string               $created_at  Creation timestamp string.
-	 * @param string|null          $expires_at  Optional expiration timestamp string.
+	 * @param array<string,mixed> $data Canonical pending action data.
 	 */
-	public function __construct(
-		$action_id,
-		$kind,
-		$summary,
-		$preview,
-		$apply_input,
-		$created_by,
-		$agent_id,
-		$context,
-		$created_at,
-		$expires_at
-	) {
-		$this->action_id   = self::normalize_string( $action_id, 'action_id' );
-		$this->kind        = self::normalize_string( $kind, 'kind' );
-		$this->summary     = self::normalize_string( $summary, 'summary' );
-		$this->preview     = self::normalize_json_value( $preview, 'preview' );
-		$this->apply_input = self::normalize_json_value( $apply_input, 'apply_input' );
-		$this->created_by  = self::normalize_optional_string( $created_by, 'created_by' );
-		$this->agent_id    = self::normalize_optional_string( $agent_id, 'agent_id' );
-		$this->context     = self::normalize_json_array( $context, 'context' );
-		$this->created_at  = self::normalize_string( $created_at, 'created_at' );
-		$this->expires_at  = self::normalize_optional_string( $expires_at, 'expires_at' );
+	private function __construct( array $data ) {
+		$this->data = $data;
 	}
 
 	/**
@@ -88,18 +32,29 @@ class PendingAction {
 	 * @return self
 	 */
 	public static function from_array( array $action ): self {
-		return new self(
-			self::required_value( $action, 'action_id' ),
-			self::required_value( $action, 'kind' ),
-			self::required_value( $action, 'summary' ),
-			self::required_value( $action, 'preview' ),
-			self::required_value( $action, 'apply_input' ),
-			$action['created_by'] ?? null,
-			$action['agent_id'] ?? null,
-			$action['context'] ?? array(),
-			self::required_value( $action, 'created_at' ),
-			$action['expires_at'] ?? null
+		$data = array(
+			'action_id'           => self::normalize_string( self::required_value( $action, 'action_id' ), 'action_id' ),
+			'kind'                => self::normalize_string( self::required_value( $action, 'kind' ), 'kind' ),
+			'summary'             => self::normalize_string( self::required_value( $action, 'summary' ), 'summary' ),
+			'preview'             => self::normalize_json_value( self::required_value( $action, 'preview' ), 'preview' ),
+			'apply_input'         => self::normalize_json_value( self::required_value( $action, 'apply_input' ), 'apply_input' ),
+			'workspace'           => self::normalize_optional_string( $action['workspace'] ?? null, 'workspace' ),
+			'agent'               => self::normalize_optional_string( $action['agent'] ?? null, 'agent' ),
+			'creator'             => self::normalize_optional_string( $action['creator'] ?? null, 'creator' ),
+			'status'              => self::normalize_status( $action['status'] ?? PendingActionStatus::PENDING ),
+			'created_at'          => self::normalize_string( self::required_value( $action, 'created_at' ), 'created_at' ),
+			'expires_at'          => self::normalize_optional_string( $action['expires_at'] ?? null, 'expires_at' ),
+			'resolved_at'         => self::normalize_optional_string( $action['resolved_at'] ?? null, 'resolved_at' ),
+			'resolver'            => self::normalize_optional_string( $action['resolver'] ?? null, 'resolver' ),
+			'resolution_result'   => self::normalize_json_value( $action['resolution_result'] ?? null, 'resolution_result' ),
+			'resolution_error'    => self::normalize_optional_string( $action['resolution_error'] ?? null, 'resolution_error' ),
+			'resolution_metadata' => self::normalize_json_array( $action['resolution_metadata'] ?? array(), 'resolution_metadata' ),
+			'metadata'            => self::normalize_json_array( $action['metadata'] ?? array(), 'metadata' ),
 		);
+
+		self::assert_resolution_audit_is_consistent( $data );
+
+		return new self( $data );
 	}
 
 	/**
@@ -108,88 +63,81 @@ class PendingAction {
 	 * @return array<string, mixed>
 	 */
 	public function to_array(): array {
-		return array(
-			'action_id'   => $this->action_id,
-			'kind'        => $this->kind,
-			'summary'     => $this->summary,
-			'preview'     => $this->preview,
-			'apply_input' => $this->apply_input,
-			'created_by'  => $this->created_by,
-			'agent_id'    => $this->agent_id,
-			'context'     => $this->context,
-			'created_at'  => $this->created_at,
-			'expires_at'  => $this->expires_at,
-		);
+		return $this->data;
 	}
 
-	/**
-	 * @return string
-	 */
 	public function get_action_id(): string {
-		return $this->action_id;
+		return $this->data['action_id'];
 	}
 
-	/**
-	 * @return string
-	 */
 	public function get_kind(): string {
-		return $this->kind;
+		return $this->data['kind'];
 	}
 
-	/**
-	 * @return string
-	 */
 	public function get_summary(): string {
-		return $this->summary;
+		return $this->data['summary'];
 	}
 
-	/**
-	 * @return mixed
-	 */
 	public function get_preview() {
-		return $this->preview;
+		return $this->data['preview'];
 	}
 
-	/**
-	 * @return mixed
-	 */
 	public function get_apply_input() {
-		return $this->apply_input;
+		return $this->data['apply_input'];
 	}
 
-	/**
-	 * @return string|null
-	 */
-	public function get_created_by(): ?string {
-		return $this->created_by;
+	public function get_workspace(): ?string {
+		return $this->data['workspace'];
 	}
 
-	/**
-	 * @return string|null
-	 */
-	public function get_agent_id(): ?string {
-		return $this->agent_id;
+	public function get_agent(): ?string {
+		return $this->data['agent'];
 	}
 
-	/**
-	 * @return array<string, mixed>
-	 */
-	public function get_context(): array {
-		return $this->context;
+	public function get_creator(): ?string {
+		return $this->data['creator'];
 	}
 
-	/**
-	 * @return string
-	 */
+	public function get_status(): string {
+		return $this->data['status'];
+	}
+
 	public function get_created_at(): string {
-		return $this->created_at;
+		return $this->data['created_at'];
+	}
+
+	public function get_expires_at(): ?string {
+		return $this->data['expires_at'];
+	}
+
+	public function get_resolved_at(): ?string {
+		return $this->data['resolved_at'];
+	}
+
+	public function get_resolver(): ?string {
+		return $this->data['resolver'];
+	}
+
+	public function get_resolution_result() {
+		return $this->data['resolution_result'];
+	}
+
+	public function get_resolution_error(): ?string {
+		return $this->data['resolution_error'];
 	}
 
 	/**
-	 * @return string|null
+	 * @return array<string,mixed>
 	 */
-	public function get_expires_at(): ?string {
-		return $this->expires_at;
+	public function get_resolution_metadata(): array {
+		return $this->data['resolution_metadata'];
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function get_metadata(): array {
+		return $this->data['metadata'];
 	}
 
 	/**
@@ -263,6 +211,43 @@ class PendingAction {
 	private static function normalize_json_value( $value, string $field ) {
 		self::assert_json_serializable( $value, $field );
 		return $value;
+	}
+
+	/**
+	 * Normalize a pending action status with the value-object error prefix.
+	 *
+	 * @param mixed $value Raw status.
+	 * @return string
+	 */
+	private static function normalize_status( $value ): string {
+		if ( ! is_string( $value ) ) {
+			throw new \InvalidArgumentException( 'invalid_ai_pending_action: status must be a string' );
+		}
+
+		try {
+			return PendingActionStatus::normalize( $value );
+		} catch ( \InvalidArgumentException $error ) {
+			throw new \InvalidArgumentException( 'invalid_ai_pending_action: status must be pending, accepted, rejected, expired, or deleted', 0, $error );
+		}
+	}
+
+	/**
+	 * Terminal statuses must carry resolver and resolved_at audit fields.
+	 *
+	 * @param array<string,mixed> $data Normalized data.
+	 */
+	private static function assert_resolution_audit_is_consistent( array $data ): void {
+		if ( ! PendingActionStatus::is_terminal( $data['status'] ) ) {
+			return;
+		}
+
+		if ( null === $data['resolved_at'] ) {
+			throw new \InvalidArgumentException( 'invalid_ai_pending_action: resolved_at is required for terminal status' );
+		}
+
+		if ( null === $data['resolver'] && PendingActionStatus::EXPIRED !== $data['status'] ) {
+			throw new \InvalidArgumentException( 'invalid_ai_pending_action: resolver is required for terminal status' );
+		}
 	}
 
 	/**
