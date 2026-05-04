@@ -104,8 +104,42 @@ agents_api_smoke_assert_equals( 'editor-agent', $principal->effective_agent_id, 
 agents_api_smoke_assert_equals( 33, $principal->token_id, 'authenticator records token id', $failures, $passes );
 agents_api_smoke_assert_equals( 'site:42', $principal->workspace_id, 'authenticator records workspace id', $failures, $passes );
 agents_api_smoke_assert_equals( 'ci', $principal->client_id, 'authenticator records client id', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $principal->caller_context->chain_depth, 'authenticator records top-of-chain caller context by default', $failures, $passes );
 agents_api_smoke_assert_equals( 1, $token_store->touches, 'authenticator touches successful token', $failures, $passes );
 agents_api_smoke_assert_equals( null, $authenticator->authenticate_bearer_token( 'other_prefix_secret' ), 'authenticator ignores non-owned token prefix', $failures, $passes );
+
+$chain_principal = $authenticator->authenticate_bearer_token(
+	$raw_token,
+	AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST,
+	array(),
+	array(
+		WP_Agent_Caller_Context::HEADER_CALLER_AGENT => 'source-agent',
+		WP_Agent_Caller_Context::HEADER_CALLER_USER  => '42',
+		WP_Agent_Caller_Context::HEADER_CALLER_HOST  => 'https://source.example',
+		WP_Agent_Caller_Context::HEADER_CHAIN_DEPTH  => '2',
+		WP_Agent_Caller_Context::HEADER_CHAIN_ROOT   => 'root-request-123',
+	)
+);
+agents_api_smoke_assert_equals( 'source-agent', $chain_principal->caller_context->caller_agent_id, 'authenticator records caller agent from headers', $failures, $passes );
+agents_api_smoke_assert_equals( 42, $chain_principal->caller_context->caller_user_id, 'authenticator records caller user from headers', $failures, $passes );
+agents_api_smoke_assert_equals( 'https://source.example', $chain_principal->caller_context->caller_host, 'authenticator records caller host from headers', $failures, $passes );
+agents_api_smoke_assert_equals( 2, $chain_principal->caller_context->chain_depth, 'authenticator records caller chain depth from headers', $failures, $passes );
+agents_api_smoke_assert_equals( 'root-request-123', $chain_principal->caller_context->chain_root_request_id, 'authenticator records caller chain root from headers', $failures, $passes );
+
+$touches_before_malformed = $token_store->touches;
+$malformed_principal      = $authenticator->authenticate_bearer_token(
+	$raw_token,
+	AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST,
+	array(),
+	array(
+		WP_Agent_Caller_Context::HEADER_CALLER_AGENT => 'source-agent',
+		WP_Agent_Caller_Context::HEADER_CALLER_HOST  => 'https://source.example',
+		WP_Agent_Caller_Context::HEADER_CHAIN_DEPTH  => 'bogus',
+		WP_Agent_Caller_Context::HEADER_CHAIN_ROOT   => 'root-request-123',
+	)
+);
+agents_api_smoke_assert_equals( null, $malformed_principal, 'authenticator fails closed on malformed caller headers', $failures, $passes );
+agents_api_smoke_assert_equals( $touches_before_malformed, $token_store->touches, 'authenticator does not touch token after malformed caller headers', $failures, $passes );
 
 $policy = new WP_Agent_WordPress_Authorization_Policy(
 	null,

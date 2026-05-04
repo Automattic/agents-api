@@ -66,6 +66,13 @@ $from_array = AgentsAPI\AI\AgentExecutionPrincipal::from_array(
 			'user_id'              => 7,
 			'allowed_capabilities' => array( 'read' ),
 		),
+		'caller_context'       => array(
+			'caller_agent_id'      => 'caller-agent',
+			'caller_user_id'       => 5,
+			'caller_host'          => 'https://caller.example',
+			'chain_depth'          => 1,
+			'chain_root_request_id' => 'root-1',
+		),
 	)
 );
 agents_api_smoke_assert_equals( 7, $from_array->acting_user_id, 'from_array normalizes acting user id', $failures, $passes );
@@ -76,6 +83,8 @@ agents_api_smoke_assert_equals( array( 'ip_hash' => 'abc123' ), $from_array->req
 agents_api_smoke_assert_equals( 'site:99', $from_array->workspace_id, 'from_array normalizes workspace id', $failures, $passes );
 agents_api_smoke_assert_equals( 'browser', $from_array->client_id, 'from_array normalizes client id', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'read' ), $from_array->capability_ceiling->allowed_capabilities, 'from_array normalizes capability ceiling', $failures, $passes );
+agents_api_smoke_assert_equals( 'caller-agent', $from_array->caller_context->caller_agent_id, 'from_array restores caller context', $failures, $passes );
+agents_api_smoke_assert_equals( 'root-1', $from_array->to_array()['caller_context']['chain_root_request_id'], 'principal exports caller context', $failures, $passes );
 
 $user_session = AgentsAPI\AI\AgentExecutionPrincipal::user_session(
 	99,
