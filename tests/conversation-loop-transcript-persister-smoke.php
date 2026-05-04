@@ -174,4 +174,115 @@ agents_api_smoke_assert_equals(
 	$passes
 );
 
+echo "\n[6] Transcript lock wraps turn execution and persistence when available:\n";
+$lock_log      = array();
+$persister_log = array();
+$locking_store = new class( $lock_log ) implements AgentsAPI\Core\Database\Chat\ConversationTranscriptLockInterface {
+	/** @var array Log reference. */
+	private array $log;
+
+	public function __construct( array &$log ) {
+		$this->log = &$log;
+	}
+
+	public function acquire_session_lock( string $session_id, int $ttl_seconds = 300 ): ?string {
+		$this->log[] = array( 'acquire', $session_id, $ttl_seconds );
+		return 'lock-token';
+	}
+
+	public function release_session_lock( string $session_id, string $lock_token ): bool {
+		$this->log[] = array( 'release', $session_id, $lock_token );
+		return true;
+	}
+};
+$locking_persister = new class( $persister_log, $lock_log ) implements AgentsAPI\AI\AgentConversationTranscriptPersisterInterface {
+	/** @var array Persister log reference. */
+	private array $persister_log;
+
+	/** @var array Lock sequencing log reference. */
+	private array $lock_log;
+
+	public function __construct( array &$persister_log, array &$lock_log ) {
+		$this->persister_log = &$persister_log;
+		$this->lock_log      = &$lock_log;
+	}
+
+	public function persist( array $messages, AgentsAPI\AI\AgentConversationRequest $request, array $result ): string {
+		unset( $request, $result );
+		$this->persister_log[] = count( $messages );
+		$this->lock_log[]      = array( 'persist' );
+
+		return 'locked-transcript';
+	}
+};
+
+$result6 = AgentsAPI\AI\AgentConversationLoop::run(
+	array( array( 'role' => 'user', 'content' => 'locked' ) ),
+	static function ( array $messages ) use ( &$lock_log ): array {
+		$lock_log[] = array( 'runner' );
+		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'locked ok' );
+
+		return array(
+			'messages'               => $messages,
+			'tool_execution_results' => array(),
+			'events'                 => array(),
+		);
+	},
+	array(
+		'max_turns'             => 1,
+		'transcript_session_id' => 'session-lock-1',
+		'transcript_lock'       => $locking_store,
+		'transcript_lock_ttl'   => 45,
+		'transcript_persister'  => $locking_persister,
+	)
+);
+
+agents_api_smoke_assert_equals( 2, count( $result6['messages'] ), 'locked loop still returns runner result', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $persister_log ), 'persister still runs while lock is held', $failures, $passes );
+agents_api_smoke_assert_equals(
+	array(
+		array( 'acquire', 'session-lock-1', 45 ),
+		array( 'runner' ),
+		array( 'persist' ),
+		array( 'release', 'session-lock-1', 'lock-token' ),
+	),
+	$lock_log,
+	'lock is acquired before runner and released after persistence',
+	$failures,
+	$passes
+);
+
+echo "\n[7] Lock contention returns without running the turn or persister:\n";
+$persister_log   = array();
+$contention_runs = 0;
+$contention_lock = new class() implements AgentsAPI\Core\Database\Chat\ConversationTranscriptLockInterface {
+	public function acquire_session_lock( string $session_id, int $ttl_seconds = 300 ): ?string {
+		unset( $session_id, $ttl_seconds );
+		return null;
+	}
+
+	public function release_session_lock( string $session_id, string $lock_token ): bool {
+		unset( $session_id, $lock_token );
+		return false;
+	}
+};
+
+$result7 = AgentsAPI\AI\AgentConversationLoop::run(
+	array( array( 'role' => 'user', 'content' => 'contended' ) ),
+	static function () use ( &$contention_runs ): array {
+		++$contention_runs;
+		return array( 'messages' => array() );
+	},
+	array(
+		'max_turns'             => 1,
+		'transcript_session_id' => 'session-lock-2',
+		'transcript_lock'       => $contention_lock,
+		'transcript_persister'  => $persister,
+	)
+);
+
+agents_api_smoke_assert_equals( 'transcript_lock_contention', $result7['status'] ?? '', 'contention result is explicit', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $contention_runs, 'turn runner is skipped on lock contention', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $persister_log ), 'persister is skipped on lock contention', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API conversation loop transcript persister', $failures, $passes );

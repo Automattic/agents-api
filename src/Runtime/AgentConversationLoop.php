@@ -11,6 +11,7 @@ use AgentsAPI\AI\Tools\ToolCall;
 use AgentsAPI\AI\Tools\ToolExecutionCore;
 use AgentsAPI\AI\Tools\ToolExecutionResult;
 use AgentsAPI\AI\Tools\ToolExecutorInterface;
+use AgentsAPI\Core\Database\Chat\ConversationTranscriptLockInterface;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -47,6 +48,9 @@ class AgentConversationLoop {
 	 * - `tool_executor` (ToolExecutorInterface|null): Tool execution adapter.
 	 * - `tool_declarations` (array|null): Tool declarations keyed by name.
 	 * - `completion_policy` (AgentConversationCompletionPolicyInterface|null): Typed completion policy.
+	 * - `transcript_lock` or `transcript_lock_store` (ConversationTranscriptLockInterface|null): Optional transcript lock.
+	 * - `transcript_session_id` (string): Session ID to lock when a lock store is provided.
+	 * - `transcript_lock_ttl` (int): Lock TTL in seconds. Defaults to 300.
 	 * - `transcript_persister` (AgentConversationTranscriptPersisterInterface|null): Transcript persister.
 	 * - `on_event` (callable|null): Caller-owned lifecycle event sink `fn(string $event, array $payload)`.
 	 *
@@ -63,7 +67,12 @@ class AgentConversationLoop {
 		$tool_declarations     = self::resolve_tool_declarations( $options );
 		$completion_policy     = self::resolve_completion_policy( $options );
 		$transcript_persister  = self::resolve_transcript_persister( $options );
+		$transcript_lock       = self::resolve_transcript_lock( $options );
 		$on_event              = self::resolve_event_sink( $options );
+		$request               = self::resolve_request( $messages, $options );
+		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
+		$lock_ttl              = self::resolve_lock_ttl( $options );
+		$lock_token            = null;
 		$budget_resolution     = self::resolve_budgets( $options, $max_turns );
 		$budgets               = $budget_resolution['budgets'];
 		$has_explicit_turns    = $budget_resolution['has_explicit_turns'];
@@ -74,150 +83,177 @@ class AgentConversationLoop {
 		$conversation_complete = false;
 		$exceeded_budget       = null;
 
-		for ( $turn = 1; $turn <= $max_turns; ++$turn ) {
-			$turn_context         = $context;
-			$turn_context['turn'] = $turn;
-
-			self::emit_event( $on_event, 'turn_started', array(
-				'turn'          => $turn,
-				'max_turns'     => $max_turns,
-				'message_count' => count( $messages ),
-			) );
-
-			$compaction = self::maybe_compact( $messages, $options );
-			$messages   = $compaction['messages'];
-			$events     = array_merge( $events, $compaction['events'] );
-
-			try {
-				$result = call_user_func( $turn_runner, $messages, $turn_context );
-			} catch ( \Throwable $error ) {
-				self::emit_event( $on_event, 'failed', array(
-					'turn'  => $turn,
-					'error' => $error->getMessage(),
+		if ( null !== $transcript_lock && '' !== $lock_session_id ) {
+			$lock_token = $transcript_lock->acquire_session_lock( $lock_session_id, $lock_ttl );
+			if ( null === $lock_token || '' === $lock_token ) {
+				self::emit_event( $on_event, 'transcript_lock_contention', array(
+					'session_id' => $lock_session_id,
 				) );
 
-				$failure_result = AgentConversationResult::normalize( array(
+				return AgentConversationResult::normalize( array(
 					'messages'               => $messages,
-					'tool_execution_results' => $tool_results,
-					'events'                 => $events,
+					'tool_execution_results' => array(),
+					'events'                 => array(),
+					'status'                 => 'transcript_lock_contention',
 				) );
-
-				self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
-				throw $error;
 			}
+		}
 
-			if ( ! is_array( $result ) ) {
-				$error = new \InvalidArgumentException( 'invalid_agent_conversation_loop: turn runner must return an array' );
+		try {
+			for ( $turn = 1; $turn <= $max_turns; ++$turn ) {
+				$turn_context         = $context;
+				$turn_context['turn'] = $turn;
 
-				self::emit_event( $on_event, 'failed', array(
-					'turn'  => $turn,
-					'error' => $error->getMessage(),
+				self::emit_event( $on_event, 'turn_started', array(
+					'turn'          => $turn,
+					'max_turns'     => $max_turns,
+					'message_count' => count( $messages ),
 				) );
 
-				self::persist_transcript( $transcript_persister, $messages, $options, array(
-					'messages'               => $messages,
-					'tool_execution_results' => $tool_results,
-					'events'                 => $events,
-				) );
+				$compaction = self::maybe_compact( $messages, $options );
+				$messages   = $compaction['messages'];
+				$events     = array_merge( $events, $compaction['events'] );
 
-				throw $error;
-			}
+				try {
+					$result = call_user_func( $turn_runner, $messages, $turn_context );
+				} catch ( \Throwable $error ) {
+					self::emit_event( $on_event, 'failed', array(
+						'turn'  => $turn,
+						'error' => $error->getMessage(),
+					) );
 
-			// When mediation is enabled, the turn runner returns tool_calls
-			// and the loop handles execution. Otherwise, the legacy path applies.
-			if ( $mediation_enabled && isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ) {
-				$mediation_result = self::mediate_tool_calls(
-					$result,
-					$tool_executor,
-					$tool_declarations,
-					$completion_policy,
-					$turn_context,
-					$turn,
-					$on_event,
-					$budgets
-				);
+					$failure_result = AgentConversationResult::normalize( array(
+						'messages'               => $messages,
+						'tool_execution_results' => $tool_results,
+						'events'                 => $events,
+					) );
 
-				$messages              = $mediation_result['messages'];
-				$tool_results          = array_merge( $tool_results, $mediation_result['tool_execution_results'] );
-				$events                = array_merge( $events, $mediation_result['events'] );
-				$conversation_complete = $mediation_result['conversation_complete'];
-				$exceeded_budget       = $mediation_result['exceeded_budget'];
-			} else {
-				// Legacy path: turn runner handles everything internally.
-				$result       = AgentConversationResult::normalize( $result );
-				$messages     = $result['messages'];
-				$tool_results = array_merge( $tool_results, $result['tool_execution_results'] );
-				$events       = array_merge( $events, self::normalize_events( $result['events'] ?? array() ) );
+					self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
+					throw $error;
+				}
 
-				// Apply completion policy to tool results from the turn runner
-				// when the loop owns policy but the turn runner handled execution.
-				if ( null !== $completion_policy && ! empty( $result['tool_execution_results'] ) ) {
-					foreach ( $result['tool_execution_results'] as $tool_exec_result ) {
-						$tool_name = $tool_exec_result['tool_name'] ?? '';
-						$tool_def  = $tool_declarations[ $tool_name ] ?? null;
-						$decision  = $completion_policy->recordToolResult(
-							$tool_name,
-							is_array( $tool_def ) ? $tool_def : null,
-							$tool_exec_result,
-							$turn_context,
-							$turn
-						);
-						if ( $decision->isComplete() ) {
-							$conversation_complete = true;
-							break;
+				if ( ! is_array( $result ) ) {
+					$error = new \InvalidArgumentException( 'invalid_agent_conversation_loop: turn runner must return an array' );
+
+					self::emit_event( $on_event, 'failed', array(
+						'turn'  => $turn,
+						'error' => $error->getMessage(),
+					) );
+
+					self::persist_transcript( $transcript_persister, $messages, $options, array(
+						'messages'               => $messages,
+						'tool_execution_results' => $tool_results,
+						'events'                 => $events,
+					) );
+
+					throw $error;
+				}
+
+				// When mediation is enabled, the turn runner returns tool_calls
+				// and the loop handles execution. Otherwise, the legacy path applies.
+				if ( $mediation_enabled && isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ) {
+					$mediation_result = self::mediate_tool_calls(
+						$result,
+						$tool_executor,
+						$tool_declarations,
+						$completion_policy,
+						$turn_context,
+						$turn,
+						$on_event,
+						$budgets
+					);
+
+					$messages              = $mediation_result['messages'];
+					$tool_results          = array_merge( $tool_results, $mediation_result['tool_execution_results'] );
+					$events                = array_merge( $events, $mediation_result['events'] );
+					$conversation_complete = $mediation_result['conversation_complete'];
+					$exceeded_budget       = $mediation_result['exceeded_budget'];
+				} else {
+					// Legacy path: turn runner handles everything internally.
+					$result       = AgentConversationResult::normalize( $result );
+					$messages     = $result['messages'];
+					$tool_results = array_merge( $tool_results, $result['tool_execution_results'] );
+					$events       = array_merge( $events, self::normalize_events( $result['events'] ?? array() ) );
+
+					// Apply completion policy to tool results from the turn runner
+					// when the loop owns policy but the turn runner handled execution.
+					if ( null !== $completion_policy && ! empty( $result['tool_execution_results'] ) ) {
+						foreach ( $result['tool_execution_results'] as $tool_exec_result ) {
+							$tool_name = $tool_exec_result['tool_name'] ?? '';
+							$tool_def  = $tool_declarations[ $tool_name ] ?? null;
+							$decision  = $completion_policy->recordToolResult(
+								$tool_name,
+								is_array( $tool_def ) ? $tool_def : null,
+								$tool_exec_result,
+								$turn_context,
+								$turn
+							);
+							if ( $decision->isComplete() ) {
+								$conversation_complete = true;
+								break;
+							}
 						}
 					}
 				}
-			}
 
-			// Stop conditions: budget exceeded, completion policy, or legacy should_continue.
-			if ( null !== $exceeded_budget ) {
-				break;
-			}
-
-			if ( $conversation_complete ) {
-				break;
-			}
-
-			// Increment the turns budget after a completed turn.
-			// Synthesized turns budgets (from max_turns) break the loop silently
-			// to preserve backwards compatibility. Explicit turns budgets signal
-			// budget_exceeded so callers know the stop reason.
-			$turns_exceeded = self::increment_budget( $budgets, 'turns', $has_explicit_turns ? $on_event : null );
-			if ( null !== $turns_exceeded ) {
-				if ( $has_explicit_turns ) {
-					$exceeded_budget = $turns_exceeded;
+				// Stop conditions: budget exceeded, completion policy, or legacy should_continue.
+				if ( null !== $exceeded_budget ) {
+					break;
 				}
-				break;
+
+				if ( $conversation_complete ) {
+					break;
+				}
+
+				// Increment the turns budget after a completed turn.
+				// Synthesized turns budgets (from max_turns) break the loop silently
+				// to preserve backwards compatibility. Explicit turns budgets signal
+				// budget_exceeded so callers know the stop reason.
+				$turns_exceeded = self::increment_budget( $budgets, 'turns', $has_explicit_turns ? $on_event : null );
+				if ( null !== $turns_exceeded ) {
+					if ( $has_explicit_turns ) {
+						$exceeded_budget = $turns_exceeded;
+					}
+					break;
+				}
+
+				if ( ! is_callable( $should_continue ) || ! call_user_func( $should_continue, $result, $turn_context ) ) {
+					break;
+				}
 			}
 
-			if ( ! is_callable( $should_continue ) || ! call_user_func( $should_continue, $result, $turn_context ) ) {
-				break;
+			$final_result_data = array(
+				'messages'               => $messages,
+				'tool_execution_results' => $tool_results,
+				'events'                 => $events,
+			);
+
+			if ( null !== $exceeded_budget ) {
+				$final_result_data['status'] = 'budget_exceeded';
+				$final_result_data['budget'] = $exceeded_budget;
+			}
+
+			$final_result = AgentConversationResult::normalize( $final_result_data );
+
+			self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
+
+			self::emit_event( $on_event, 'completed', array(
+				'turn'          => $turn,
+				'message_count' => count( $messages ),
+				'tool_results'  => count( $tool_results ),
+			) );
+
+			return $final_result;
+		} finally {
+			if ( null !== $transcript_lock && null !== $lock_token && '' !== $lock_session_id ) {
+				try {
+					$transcript_lock->release_session_lock( $lock_session_id, $lock_token );
+				} catch ( \Throwable $error ) {
+					// Lock release failures must not change loop results.
+					unset( $error );
+				}
 			}
 		}
-
-		$final_result_data = array(
-			'messages'               => $messages,
-			'tool_execution_results' => $tool_results,
-			'events'                 => $events,
-		);
-
-		if ( null !== $exceeded_budget ) {
-			$final_result_data['status'] = 'budget_exceeded';
-			$final_result_data['budget'] = $exceeded_budget;
-		}
-
-		$final_result = AgentConversationResult::normalize( $final_result_data );
-
-		self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
-
-		self::emit_event( $on_event, 'completed', array(
-			'turn'          => $turn,
-			'message_count' => count( $messages ),
-			'tool_results'  => count( $tool_results ),
-		) );
-
-		return $final_result;
 	}
 
 	/**
@@ -387,19 +423,7 @@ class AgentConversationLoop {
 			return;
 		}
 
-		$request = $options['request'] ?? null;
-
-		if ( ! $request instanceof AgentConversationRequest ) {
-			// Build a minimal request from the loop options for persistence context.
-			$request = new AgentConversationRequest(
-				$messages,
-				array(),
-				null,
-				isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array(),
-				array(),
-				self::max_turns( $options['max_turns'] ?? 1 )
-			);
-		}
+		$request = self::resolve_request( $messages, $options );
 
 		try {
 			$persister->persist( $messages, $request, $result );
@@ -407,6 +431,29 @@ class AgentConversationLoop {
 			// Persister failures must not change loop results.
 			unset( $error );
 		}
+	}
+
+	/**
+	 * Resolve the request object from options, or build a minimal one.
+	 *
+	 * @param array $messages Current messages.
+	 * @param array $options  Loop options.
+	 * @return AgentConversationRequest
+	 */
+	private static function resolve_request( array $messages, array $options ): AgentConversationRequest {
+		$request = $options['request'] ?? null;
+		if ( $request instanceof AgentConversationRequest ) {
+			return $request;
+		}
+
+		return new AgentConversationRequest(
+			$messages,
+			array(),
+			null,
+			isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array(),
+			array(),
+			self::max_turns( $options['max_turns'] ?? 1 )
+		);
 	}
 
 	/**
@@ -491,6 +538,59 @@ class AgentConversationLoop {
 	private static function resolve_transcript_persister( array $options ): ?AgentConversationTranscriptPersisterInterface {
 		$persister = $options['transcript_persister'] ?? null;
 		return $persister instanceof AgentConversationTranscriptPersisterInterface ? $persister : null;
+	}
+
+	/**
+	 * Resolve the transcript lock primitive from options.
+	 *
+	 * @param array $options Loop options.
+	 * @return ConversationTranscriptLockInterface|null
+	 */
+	private static function resolve_transcript_lock( array $options ): ?ConversationTranscriptLockInterface {
+		foreach ( array( 'transcript_lock', 'transcript_lock_store', 'transcript_store' ) as $key ) {
+			$lock = $options[ $key ] ?? null;
+			if ( $lock instanceof ConversationTranscriptLockInterface ) {
+				return $lock;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Resolve the transcript session ID to lock.
+	 *
+	 * @param array                    $options Loop options.
+	 * @param AgentConversationRequest $request Request object.
+	 * @return string
+	 */
+	private static function resolve_lock_session_id( array $options, AgentConversationRequest $request ): string {
+		foreach ( array( 'transcript_session_id', 'session_id', 'transcript_id' ) as $key ) {
+			$value = $options[ $key ] ?? null;
+			if ( is_string( $value ) && '' !== trim( $value ) ) {
+				return trim( $value );
+			}
+		}
+
+		$metadata = $request->metadata();
+		foreach ( array( 'transcript_session_id', 'session_id', 'transcript_id' ) as $key ) {
+			$value = $metadata[ $key ] ?? null;
+			if ( is_string( $value ) && '' !== trim( $value ) ) {
+				return trim( $value );
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Resolve transcript lock TTL.
+	 *
+	 * @param array $options Loop options.
+	 * @return int TTL in seconds.
+	 */
+	private static function resolve_lock_ttl( array $options ): int {
+		return max( 1, (int) ( $options['transcript_lock_ttl'] ?? 300 ) );
 	}
 
 	/**
