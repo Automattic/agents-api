@@ -79,12 +79,15 @@ agents_api_smoke_assert_equals( $workspace->to_array(), $request->to_array()['wo
 echo "\n[4] Transcript store contract requires workspace scope on session creation and pending dedup:\n";
 
 $reflection       = new ReflectionClass( AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface::class );
-$create_params    = $reflection->getMethod( 'create_session' )->getParameters();
-$pending_params   = $reflection->getMethod( 'get_recent_pending_session' )->getParameters();
-$workspace_class  = AgentsAPI\Core\Workspace\AgentWorkspaceScope::class;
+$create_params   = $reflection->getMethod( 'create_session' )->getParameters();
+$update_params   = $reflection->getMethod( 'update_session' )->getParameters();
+$pending_params  = $reflection->getMethod( 'get_recent_pending_session' )->getParameters();
+$workspace_class = AgentsAPI\Core\Workspace\AgentWorkspaceScope::class;
 
 agents_api_smoke_assert_equals( 'workspace', $create_params[0]->getName(), 'create_session first parameter is workspace', $failures, $passes );
 agents_api_smoke_assert_equals( $workspace_class, $create_params[0]->getType()->getName(), 'create_session workspace parameter is typed', $failures, $passes );
+agents_api_smoke_assert_equals( 'provider_response_id', $update_params[5]->getName(), 'update_session accepts provider response ID', $failures, $passes );
+agents_api_smoke_assert_equals( true, $update_params[5]->allowsNull(), 'provider response ID can be null when no provider state exists', $failures, $passes );
 agents_api_smoke_assert_equals( 'workspace', $pending_params[0]->getName(), 'get_recent_pending_session first parameter is workspace', $failures, $passes );
 agents_api_smoke_assert_equals( $workspace_class, $pending_params[0]->getType()->getName(), 'get_recent_pending_session workspace parameter is typed', $failures, $passes );
 

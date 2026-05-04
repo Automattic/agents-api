@@ -36,7 +36,7 @@ interface ConversationTranscriptStoreInterface {
 	 *
 	 * Returns the session as an associative array with keys:
 	 * session_id, workspace_type, workspace_id, user_id, agent_id, title, messages (decoded array),
-	 * metadata (decoded array), provider, model, context/mode, created_at,
+	 * metadata (decoded array), provider, model, provider_response_id, context/mode, created_at,
 	 * updated_at, last_read_at, expires_at.
 	 *
 	 * @param string $session_id Session UUID.
@@ -52,9 +52,10 @@ interface ConversationTranscriptStoreInterface {
 	 * @param array  $metadata   Updated metadata.
 	 * @param string $provider   Optional AI provider identifier.
 	 * @param string $model      Optional AI model identifier.
+	 * @param string|null $provider_response_id Opaque provider-side response/state ID, or null when none.
 	 * @return bool True on success.
 	 */
-	public function update_session( string $session_id, array $messages, array $metadata = array(), string $provider = '', string $model = '' ): bool;
+	public function update_session( string $session_id, array $messages, array $metadata = array(), string $provider = '', string $model = '', ?string $provider_response_id = null ): bool;
 
 	/**
 	 * Delete a session by ID. Idempotent.
