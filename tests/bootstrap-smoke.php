@@ -30,6 +30,7 @@ $namespace_map = array(
 	'DataMachine\\Engine\\AI\\NullAgentConversationTranscriptPersister'     => 'AgentsAPI\\AI\\NullAgentConversationTranscriptPersister',
 	'DataMachine\\Engine\\AI\\AgentConversationCompaction'                  => 'AgentsAPI\\AI\\AgentConversationCompaction',
 	'DataMachine\\Engine\\AI\\AgentConversationResult'                      => 'AgentsAPI\\AI\\AgentConversationResult',
+	'DataMachine\\Core\\Database\\Chat\\ConversationTranscriptLockInterface' => 'AgentsAPI\\Core\\Database\\Chat\\ConversationTranscriptLockInterface',
 	'DataMachine\\Engine\\AI\\Tools\\RuntimeToolDeclaration'                => 'AgentsAPI\\AI\\Tools\\RuntimeToolDeclaration',
 	'DataMachine\\Engine\\AI\\Tools\\ToolCall'                              => 'AgentsAPI\\AI\\Tools\\ToolCall',
 	'DataMachine\\Engine\\AI\\Tools\\ToolParameters'                         => 'AgentsAPI\\AI\\Tools\\ToolParameters',
