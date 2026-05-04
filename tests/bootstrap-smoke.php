@@ -76,6 +76,11 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token_Authenticato
 agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Authorization_Policy_Interface' ), 'WP_Agent_Authorization_Policy_Interface contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_WordPress_Authorization_Policy' ), 'WP_Agent_WordPress_Authorization_Policy service is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Capability_Ceiling' ), 'WP_Agent_Capability_Ceiling value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Memory_Registry' ), 'WP_Agent_Memory_Registry facade is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Memory_Layer' ), 'WP_Agent_Memory_Layer vocabulary is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Context_Section_Registry' ), 'WP_Agent_Context_Section_Registry facade is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Context_Injection_Policy' ), 'WP_Agent_Context_Injection_Policy vocabulary is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Composable_Context' ), 'WP_Agent_Composable_Context value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_PLUGIN_FILE' ), 'plugin file constant is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter' ), 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentConversationLoop' ), 'AgentConversationLoop facade is available', $failures, $passes );
@@ -129,6 +134,7 @@ $expected_source_directories = array(
 	'Approvals',
 	'Auth',
 	'Consent',
+	'Context',
 	'Guidelines',
 	'Identity',
 	'Memory',

@@ -31,6 +31,7 @@
       "php tests/conversation-runner-contracts-smoke.php",
       "php tests/conversation-compaction-smoke.php",
       "php tests/markdown-section-compaction-smoke.php",
+      "php tests/context-registry-smoke.php",
       "php tests/conversation-loop-smoke.php",
       "php tests/conversation-loop-tool-execution-smoke.php",
       "php tests/conversation-loop-completion-policy-smoke.php",
