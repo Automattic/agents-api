@@ -20,11 +20,11 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Access_Grant' ), 'access grant value object is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Access_Store_Interface' ), 'access store interface is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Access_Store' ), 'access store interface is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token' ), 'token value object is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Token_Store_Interface' ), 'token store interface is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Token_Store' ), 'token store interface is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token_Authenticator' ), 'token authenticator is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Authorization_Policy_Interface' ), 'authorization policy interface is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Authorization_Policy' ), 'authorization policy interface is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Capability_Ceiling' ), 'capability ceiling value object is available', $failures, $passes );
 
 $grant = new WP_Agent_Access_Grant( 'editor-agent', 7, WP_Agent_Access_Grant::ROLE_OPERATOR, 'site:42', 5, 1, '2026-05-04 00:00:00' );
@@ -58,7 +58,7 @@ agents_api_smoke_assert_equals( false, $token->is_expired( strtotime( '2026-05-0
 $expired = new WP_Agent_Token( 34, 'editor-agent', 7, WP_Agent_Token::hash_token( 'expired' ), 'wp_agent_ex', 'Expired', null, '2020-01-01 00:00:00' );
 agents_api_smoke_assert_equals( true, $expired->is_expired( strtotime( '2026-05-04 00:00:00' ) ), 'expired token is expired', $failures, $passes );
 
-$token_store = new class( $token ) implements WP_Agent_Token_Store_Interface {
+$token_store = new class( $token ) implements WP_Agent_Token_Store {
 	public int $touches = 0;
 
 	public function __construct( private WP_Agent_Token $token ) {}
@@ -110,7 +110,7 @@ agents_api_smoke_assert_equals( null, $authenticator->authenticate_bearer_token(
 
 $chain_principal = $authenticator->authenticate_bearer_token(
 	$raw_token,
-	AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST,
+	AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
 	array(),
 	array(
 		WP_Agent_Caller_Context::HEADER_CALLER_AGENT => 'source-agent',
@@ -129,7 +129,7 @@ agents_api_smoke_assert_equals( 'root-request-123', $chain_principal->caller_con
 $touches_before_malformed = $token_store->touches;
 $malformed_principal      = $authenticator->authenticate_bearer_token(
 	$raw_token,
-	AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST,
+	AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
 	array(),
 	array(
 		WP_Agent_Caller_Context::HEADER_CALLER_AGENT => 'source-agent',
@@ -152,7 +152,7 @@ agents_api_smoke_assert_equals( true, $policy->can( $principal, 'edit_posts' ), 
 agents_api_smoke_assert_equals( false, $policy->can( $principal, 'delete_posts' ), 'policy denies WordPress capability outside token ceiling', $failures, $passes );
 agents_api_smoke_assert_equals( false, $policy->can( $principal, 'read' ), 'policy denies token capability absent from WordPress user capabilities', $failures, $passes );
 
-$access_store = new class( $grant ) implements WP_Agent_Access_Store_Interface {
+$access_store = new class( $grant ) implements WP_Agent_Access_Store {
 	public function __construct( private WP_Agent_Access_Grant $grant ) {}
 
 	public function grant_access( WP_Agent_Access_Grant $grant ): WP_Agent_Access_Grant {
@@ -182,7 +182,7 @@ $access_store = new class( $grant ) implements WP_Agent_Access_Store_Interface {
 };
 
 $access_policy = new WP_Agent_WordPress_Authorization_Policy( $access_store );
-$other_agent   = AgentsAPI\AI\AgentExecutionPrincipal::user_session( 7, 'other-agent', AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST, array(), 'site:42' );
+$other_agent   = AgentsAPI\AI\WP_Agent_Execution_Principal::user_session( 7, 'other-agent', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, array(), 'site:42' );
 
 agents_api_smoke_assert_equals( true, $access_policy->can_access_agent( $other_agent, 'editor-agent', WP_Agent_Access_Grant::ROLE_VIEWER ), 'policy accepts access grant at viewer level', $failures, $passes );
 agents_api_smoke_assert_equals( true, $access_policy->can_access_agent( $other_agent, 'editor-agent', WP_Agent_Access_Grant::ROLE_OPERATOR ), 'policy accepts access grant at operator level', $failures, $passes );

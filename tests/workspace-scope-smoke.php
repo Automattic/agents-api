@@ -21,7 +21,7 @@ agents_api_smoke_require_module();
 
 echo "\n[1] Workspace scope normalizes to a generic type + ID shape:\n";
 
-$workspace = AgentsAPI\Core\Workspace\AgentWorkspaceScope::from_parts(
+$workspace = AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope::from_parts(
 	' Code_Workspace ',
 	' Automattic/intelligence@contexta8c-read-coverage '
 );
@@ -42,7 +42,7 @@ agents_api_smoke_assert_equals( 'code_workspace:Automattic/intelligence@contexta
 
 echo "\n[2] Memory scope carries workspace identity in its stable key:\n";
 
-$memory_scope = new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
+$memory_scope = new AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Scope(
 	'user',
 	$workspace->workspace_type,
 	$workspace->workspace_id,
@@ -62,7 +62,7 @@ agents_api_smoke_assert_equals(
 
 echo "\n[3] Conversation requests carry workspace identity for transcript persisters:\n";
 
-$request = new AgentsAPI\AI\AgentConversationRequest(
+$request = new AgentsAPI\AI\WP_Agent_Conversation_Request(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	array(),
 	null,
@@ -78,11 +78,11 @@ agents_api_smoke_assert_equals( $workspace->to_array(), $request->to_array()['wo
 
 echo "\n[4] Transcript store contract requires workspace scope on session creation and pending dedup:\n";
 
-$reflection       = new ReflectionClass( AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface::class );
+$reflection       = new ReflectionClass( AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store::class );
 $create_params   = $reflection->getMethod( 'create_session' )->getParameters();
 $update_params   = $reflection->getMethod( 'update_session' )->getParameters();
 $pending_params  = $reflection->getMethod( 'get_recent_pending_session' )->getParameters();
-$workspace_class = AgentsAPI\Core\Workspace\AgentWorkspaceScope::class;
+$workspace_class = AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope::class;
 
 agents_api_smoke_assert_equals( 'workspace', $create_params[0]->getName(), 'create_session first parameter is workspace', $failures, $passes );
 agents_api_smoke_assert_equals( $workspace_class, $create_params[0]->getType()->getName(), 'create_session workspace parameter is typed', $failures, $passes );
@@ -95,14 +95,14 @@ echo "\n[5] Invalid workspace scopes fail fast:\n";
 
 $invalid_type = false;
 try {
-	AgentsAPI\Core\Workspace\AgentWorkspaceScope::from_parts( 'site id', '217002206' );
+	AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope::from_parts( 'site id', '217002206' );
 } catch ( InvalidArgumentException $e ) {
 	$invalid_type = true;
 }
 
 $invalid_id = false;
 try {
-	AgentsAPI\Core\Workspace\AgentWorkspaceScope::from_parts( 'site', '   ' );
+	AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope::from_parts( 'site', '   ' );
 } catch ( InvalidArgumentException $e ) {
 	$invalid_id = true;
 }

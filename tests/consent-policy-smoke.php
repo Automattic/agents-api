@@ -19,7 +19,7 @@ echo "agents-api-consent-policy-smoke\n";
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
-$operation_class = AgentsAPI\AI\Consent\AgentConsentOperation::class;
+$operation_class = AgentsAPI\AI\Consent\WP_Agent_Consent_Operation::class;
 
 echo "\n[1] Consent operation vocabulary is stable and separate:\n";
 agents_api_smoke_assert_equals(
@@ -35,7 +35,7 @@ agents_api_smoke_assert_equals( null, $operation_class::normalize( 'share_memory
 agents_api_smoke_assert_equals( true, $operation_class::isValid( 'escalate_to_human' ), 'operation validates escalation', $failures, $passes );
 
 echo "\n[2] Consent decisions carry audit metadata:\n";
-$decision = AgentsAPI\AI\Consent\AgentConsentDecision::allowed(
+$decision = AgentsAPI\AI\Consent\WP_Agent_Consent_Decision::allowed(
 	$operation_class::STORE_MEMORY,
 	'Explicit Consent',
 	array(
@@ -65,7 +65,7 @@ agents_api_smoke_assert_equals(
 
 echo "\n[3] Default policy is conservative for non-interactive modes:\n";
 $policy = new WP_Agent_Default_Consent_Policy();
-agents_api_smoke_assert_equals( true, $policy instanceof WP_Agent_Consent_Policy_Interface, 'default policy implements public interface', $failures, $passes );
+agents_api_smoke_assert_equals( true, $policy instanceof WP_Agent_Consent_Policy, 'default policy implements public interface', $failures, $passes );
 
 $non_interactive_context = array(
 	'mode'    => 'pipeline',

@@ -1,6 +1,6 @@
 <?php
 /**
- * Pure-PHP smoke test for IterationBudget enforcement in AgentConversationLoop.
+ * Pure-PHP smoke test for WP_Agent_Iteration_Budget enforcement in WP_Agent_Conversation_Loop.
  *
  * Run with: php tests/conversation-loop-budgets-smoke.php
  *
@@ -20,8 +20,8 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 // Reusable tool executor for mediated tests.
-$executor = new class() implements AgentsAPI\AI\Tools\ToolExecutorInterface {
-	public function executeToolCall( array $tool_call, array $tool_definition, array $context = array() ): array {
+$executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
+	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
 		return array(
 			'success'   => true,
 			'tool_name' => $tool_call['tool_name'],
@@ -51,11 +51,11 @@ $tools = array(
 
 echo "\n[1] max_turns only — existing behavior preserved:\n";
 $turn_count = 0;
-$result     = AgentsAPI\AI\AgentConversationLoop::run(
+$result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages, array $context ) use ( &$turn_count ): array {
 		++$turn_count;
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'turn ' . $context['turn'] );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'turn ' . $context['turn'] );
 
 		return array(
 			'messages'               => $messages,
@@ -76,11 +76,11 @@ agents_api_smoke_assert_equals( false, isset( $result['status'] ), 'no budget_ex
 
 echo "\n[2] Explicit turns budget stops loop with budget_exceeded status:\n";
 $turn_count = 0;
-$result     = AgentsAPI\AI\AgentConversationLoop::run(
+$result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages, array $context ) use ( &$turn_count ): array {
 		++$turn_count;
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'turn ' . $context['turn'] );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'turn ' . $context['turn'] );
 
 		return array(
 			'messages'               => $messages,
@@ -91,7 +91,7 @@ $result     = AgentsAPI\AI\AgentConversationLoop::run(
 	array(
 		'max_turns'       => 10,
 		'budgets'         => array(
-			new AgentsAPI\AI\IterationBudget( 'turns', 2 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'turns', 2 ),
 		),
 		'should_continue' => static function (): bool {
 			return true;
@@ -106,7 +106,7 @@ agents_api_smoke_assert_equals( 'turns', $result['budget'] ?? null, 'result iden
 echo "\n[3] tool_calls budget stops loop mid-execution:\n";
 $tool_call_count = 0;
 $event_log       = array();
-$result          = AgentsAPI\AI\AgentConversationLoop::run(
+$result          = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages, array $context ) use ( &$tool_call_count ): array {
 		++$tool_call_count;
@@ -125,7 +125,7 @@ $result          = AgentsAPI\AI\AgentConversationLoop::run(
 		'tool_executor'     => $executor,
 		'tool_declarations' => $tools,
 		'budgets'           => array(
-			new AgentsAPI\AI\IterationBudget( 'tool_calls', 2 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'tool_calls', 2 ),
 		),
 		'should_continue'   => static function (): bool {
 			return true;
@@ -151,7 +151,7 @@ agents_api_smoke_assert_equals( 2, $budget_event['payload']['current'], 'budget_
 agents_api_smoke_assert_equals( 2, $budget_event['payload']['ceiling'], 'budget_exceeded event carries ceiling', $failures, $passes );
 
 echo "\n[4] Per-tool-name budget stops specific tool ping-pong:\n";
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages, array $context ): array {
 		return array(
@@ -169,7 +169,7 @@ $result = AgentsAPI\AI\AgentConversationLoop::run(
 		'tool_executor'     => $executor,
 		'tool_declarations' => $tools,
 		'budgets'           => array(
-			new AgentsAPI\AI\IterationBudget( 'tool_calls_client/ping', 2 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'tool_calls_client/ping', 2 ),
 		),
 		'should_continue'   => static function (): bool {
 			return true;
@@ -183,7 +183,7 @@ agents_api_smoke_assert_equals( 'tool_calls_client/ping', $result['budget'] ?? n
 agents_api_smoke_assert_equals( 3, count( $result['tool_execution_results'] ), 'per-tool budget stops after the tool hits ceiling', $failures, $passes );
 
 echo "\n[5] Multiple budgets — any one exceeded stops the loop:\n";
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages, array $context ): array {
 		return array(
@@ -200,8 +200,8 @@ $result = AgentsAPI\AI\AgentConversationLoop::run(
 		'tool_executor'     => $executor,
 		'tool_declarations' => $tools,
 		'budgets'           => array(
-			new AgentsAPI\AI\IterationBudget( 'tool_calls', 10 ),
-			new AgentsAPI\AI\IterationBudget( 'tool_calls_client/work', 2 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'tool_calls', 10 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'tool_calls_client/work', 2 ),
 		),
 		'should_continue'   => static function (): bool {
 			return true;
@@ -213,19 +213,19 @@ agents_api_smoke_assert_equals( 'budget_exceeded', $result['status'] ?? null, 'f
 agents_api_smoke_assert_equals( 'tool_calls_client/work', $result['budget'] ?? null, 'result identifies the per-tool budget that exceeded', $failures, $passes );
 
 echo "\n[6] Budget works alongside completion policy (budget checked first):\n";
-$policy = new class() implements AgentsAPI\AI\AgentConversationCompletionPolicyInterface {
+$policy = new class() implements AgentsAPI\AI\WP_Agent_Conversation_Completion_Policy {
 	public function recordToolResult(
 		string $tool_name,
 		?array $tool_definition,
 		array $result,
 		array $context,
 		int $turn
-	): AgentsAPI\AI\AgentConversationCompletionDecision {
-		return AgentsAPI\AI\AgentConversationCompletionDecision::notComplete();
+	): AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision {
+		return AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision::notComplete();
 	}
 };
 
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages ): array {
 		return array(
@@ -241,7 +241,7 @@ $result = AgentsAPI\AI\AgentConversationLoop::run(
 		'tool_declarations' => $tools,
 		'completion_policy' => $policy,
 		'budgets'           => array(
-			new AgentsAPI\AI\IterationBudget( 'tool_calls', 1 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'tool_calls', 1 ),
 		),
 		'should_continue'   => static function (): bool {
 			return true;
@@ -254,7 +254,7 @@ agents_api_smoke_assert_equals( 'tool_calls', $result['budget'] ?? null, 'budget
 
 echo "\n[7] No budgets and no max_turns — default 1-turn behavior unchanged:\n";
 $turn_count = 0;
-$result     = AgentsAPI\AI\AgentConversationLoop::run(
+$result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages ) use ( &$turn_count ): array {
 		++$turn_count;
@@ -272,11 +272,11 @@ agents_api_smoke_assert_equals( false, isset( $result['status'] ), 'no budget_ex
 
 echo "\n[8] Explicit turns budget overrides max_turns:\n";
 $turn_count = 0;
-$result     = AgentsAPI\AI\AgentConversationLoop::run(
+$result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages, array $context ) use ( &$turn_count ): array {
 		++$turn_count;
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'turn ' . $context['turn'] );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'turn ' . $context['turn'] );
 
 		return array(
 			'messages'               => $messages,
@@ -287,7 +287,7 @@ $result     = AgentsAPI\AI\AgentConversationLoop::run(
 	array(
 		'max_turns'       => 10,
 		'budgets'         => array(
-			new AgentsAPI\AI\IterationBudget( 'turns', 3 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'turns', 3 ),
 		),
 		'should_continue' => static function (): bool {
 			return true;

@@ -26,14 +26,14 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		private WP_Agent_Tool_Policy_Filter $filter;
 
 		/**
-		 * @var WP_Agent_Tool_Access_Policy_Interface[]
+		 * @var WP_Agent_Tool_Access_Policy[]
 		 */
 		private array $policy_providers;
 
 		/**
 		 * Constructor.
 		 *
-		 * @param WP_Agent_Tool_Access_Policy_Interface[]|null $policy_providers Host policy providers.
+		 * @param WP_Agent_Tool_Access_Policy[]|null $policy_providers Host policy providers.
 		 * @param WP_Agent_Tool_Policy_Filter|null             $filter           Tool policy filter.
 		 */
 		public function __construct( ?array $policy_providers = null, ?WP_Agent_Tool_Policy_Filter $filter = null ) {
@@ -131,7 +131,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		 * Return policy providers from constructor, context, and filter.
 		 *
 		 * @param array<string, mixed> $context Runtime context.
-		 * @return WP_Agent_Tool_Access_Policy_Interface[] Providers.
+		 * @return WP_Agent_Tool_Access_Policy[] Providers.
 		 */
 		private function get_policy_providers( array $context ): array {
 			$providers = $this->policy_providers;
@@ -146,7 +146,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 			return array_values(
 				array_filter(
 					is_array( $providers ) ? $providers : array(),
-					static fn( $provider ): bool => $provider instanceof WP_Agent_Tool_Access_Policy_Interface
+					static fn( $provider ): bool => $provider instanceof WP_Agent_Tool_Access_Policy
 				)
 			);
 		}

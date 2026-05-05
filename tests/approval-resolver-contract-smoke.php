@@ -19,20 +19,20 @@ echo "agents-api-approval-resolver-contract-smoke\n";
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
-$accepted = AgentsAPI\AI\Approvals\ApprovalDecision::accepted();
-$rejected = AgentsAPI\AI\Approvals\ApprovalDecision::from_string( AgentsAPI\AI\Approvals\ApprovalDecision::REJECTED );
+$accepted = AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision::accepted();
+$rejected = AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision::from_string( AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision::REJECTED );
 
-agents_api_smoke_assert_equals( 'accepted', AgentsAPI\AI\Approvals\ApprovalDecision::ACCEPTED, 'accepted vocabulary is stable', $failures, $passes );
-agents_api_smoke_assert_equals( 'rejected', AgentsAPI\AI\Approvals\ApprovalDecision::REJECTED, 'rejected vocabulary is stable', $failures, $passes );
+agents_api_smoke_assert_equals( 'accepted', AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision::ACCEPTED, 'accepted vocabulary is stable', $failures, $passes );
+agents_api_smoke_assert_equals( 'rejected', AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision::REJECTED, 'rejected vocabulary is stable', $failures, $passes );
 agents_api_smoke_assert_equals( 'accepted', $accepted->value(), 'accepted decision exposes normalized value', $failures, $passes );
 agents_api_smoke_assert_equals( true, $accepted->is_accepted(), 'accepted decision reports accepted', $failures, $passes );
 agents_api_smoke_assert_equals( false, $accepted->is_rejected(), 'accepted decision does not report rejected', $failures, $passes );
 agents_api_smoke_assert_equals( 'rejected', (string) $rejected, 'rejected decision stringifies to normalized value', $failures, $passes );
 agents_api_smoke_assert_equals( true, $rejected->is_rejected(), 'rejected decision reports rejected', $failures, $passes );
-agents_api_smoke_assert_equals( array( 'pending', 'accepted', 'rejected', 'expired', 'deleted' ), AgentsAPI\AI\Approvals\PendingActionStatus::values(), 'status vocabulary is stable', $failures, $passes );
-agents_api_smoke_assert_equals( true, AgentsAPI\AI\Approvals\PendingActionStatus::is_terminal( AgentsAPI\AI\Approvals\PendingActionStatus::ACCEPTED ), 'accepted status is terminal', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'pending', 'accepted', 'rejected', 'expired', 'deleted' ), AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status::values(), 'status vocabulary is stable', $failures, $passes );
+agents_api_smoke_assert_equals( true, AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status::is_terminal( AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status::ACCEPTED ), 'accepted status is terminal', $failures, $passes );
 
-$action = AgentsAPI\AI\Approvals\PendingAction::from_array(
+$action = AgentsAPI\AI\Approvals\WP_Agent_Pending_Action::from_array(
 	array(
 		'action_id'   => 'diff-123',
 		'kind'        => 'file_patch',
@@ -49,12 +49,12 @@ $action = AgentsAPI\AI\Approvals\PendingAction::from_array(
 	)
 );
 
-$handler = new class() implements AgentsAPI\AI\Approvals\PendingActionHandlerInterface {
-	public function can_resolve_pending_action( AgentsAPI\AI\Approvals\PendingAction $action, AgentsAPI\AI\Approvals\ApprovalDecision $decision, array $payload = array(), array $context = array() ): bool {
+$handler = new class() implements AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Handler {
+	public function can_resolve_pending_action( AgentsAPI\AI\Approvals\WP_Agent_Pending_Action $action, AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision $decision, array $payload = array(), array $context = array() ): bool {
 		return 'blocked' !== ( $payload['reason'] ?? null ) && 'Automattic/agents-api@durable-approvals' === $action->get_workspace()->workspace_id;
 	}
 
-	public function handle_pending_action( AgentsAPI\AI\Approvals\PendingAction $action, AgentsAPI\AI\Approvals\ApprovalDecision $decision, array $payload = array(), array $context = array() ): mixed {
+	public function handle_pending_action( AgentsAPI\AI\Approvals\WP_Agent_Pending_Action $action, AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision $decision, array $payload = array(), array $context = array() ): mixed {
 		return array(
 			'decision'  => $decision->value(),
 			'target'    => $action->get_apply_input()['target'] ?? null,
@@ -80,11 +80,11 @@ agents_api_smoke_assert_equals( array( 'workspace_type' => 'code_workspace', 'wo
 agents_api_smoke_assert_equals( 'looks-good', $handled['reason'], 'handler receives resolver payload', $failures, $passes );
 agents_api_smoke_assert_equals( 'reviewer', $handled['actor'], 'handler receives optional context', $failures, $passes );
 
-$resolver = new class( $handler ) implements AgentsAPI\AI\Approvals\PendingActionResolverInterface {
-	public function __construct( private AgentsAPI\AI\Approvals\PendingActionHandlerInterface $handler ) {}
+$resolver = new class( $handler ) implements AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Resolver {
+	public function __construct( private AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Handler $handler ) {}
 
-	public function resolve_pending_action( string $pending_action_id, AgentsAPI\AI\Approvals\ApprovalDecision $decision, string $resolver, array $payload = array(), array $context = array() ): mixed {
-		$action = AgentsAPI\AI\Approvals\PendingAction::from_array(
+	public function resolve_pending_action( string $pending_action_id, AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision $decision, string $resolver, array $payload = array(), array $context = array() ): mixed {
+		$action = AgentsAPI\AI\Approvals\WP_Agent_Pending_Action::from_array(
 			array(
 				'action_id'   => $pending_action_id,
 				'kind'        => 'file_patch',
@@ -114,7 +114,7 @@ $resolver = new class( $handler ) implements AgentsAPI\AI\Approvals\PendingActio
 
 $resolved = $resolver->resolve_pending_action(
 	'diff-456',
-	AgentsAPI\AI\Approvals\ApprovalDecision::rejected(),
+	AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision::rejected(),
 	'user-9',
 	array( 'reason' => 'needs-work' )
 );
@@ -125,7 +125,7 @@ agents_api_smoke_assert_equals( 'needs-work', $resolved['reason'], 'resolver for
 agents_api_smoke_assert_equals( 'user-9', $resolved['resolver'], 'resolver receives resolver audit identity', $failures, $passes );
 
 try {
-	AgentsAPI\AI\Approvals\ApprovalDecision::from_string( 'approved' );
+	AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision::from_string( 'approved' );
 	agents_api_smoke_assert_equals( true, false, 'unknown decision is rejected', $failures, $passes );
 } catch ( InvalidArgumentException $e ) {
 	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'accepted or rejected' ), 'unknown decision is rejected', $failures, $passes );

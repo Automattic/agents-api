@@ -5,49 +5,49 @@
  * @package AgentsAPI
  */
 
-use AgentsAPI\AI\Consent\AgentConsentDecision;
-use AgentsAPI\AI\Consent\AgentConsentOperation;
+use AgentsAPI\AI\Consent\WP_Agent_Consent_Decision;
+use AgentsAPI\AI\Consent\WP_Agent_Consent_Operation;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
  * Default policy: deny unless an interactive caller supplies explicit consent.
  */
-class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy_Interface {
+class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy {
 
 	/**
 	 * @inheritDoc
 	 */
-	public function can_store_memory( array $context = array() ): AgentConsentDecision {
-		return $this->decide( AgentConsentOperation::STORE_MEMORY, $context );
+	public function can_store_memory( array $context = array() ): WP_Agent_Consent_Decision {
+		return $this->decide( WP_Agent_Consent_Operation::STORE_MEMORY, $context );
 	}
 
 	/**
 	 * @inheritDoc
 	 */
-	public function can_use_memory( array $context = array() ): AgentConsentDecision {
-		return $this->decide( AgentConsentOperation::USE_MEMORY, $context );
+	public function can_use_memory( array $context = array() ): WP_Agent_Consent_Decision {
+		return $this->decide( WP_Agent_Consent_Operation::USE_MEMORY, $context );
 	}
 
 	/**
 	 * @inheritDoc
 	 */
-	public function can_store_transcript( array $context = array() ): AgentConsentDecision {
-		return $this->decide( AgentConsentOperation::STORE_TRANSCRIPT, $context );
+	public function can_store_transcript( array $context = array() ): WP_Agent_Consent_Decision {
+		return $this->decide( WP_Agent_Consent_Operation::STORE_TRANSCRIPT, $context );
 	}
 
 	/**
 	 * @inheritDoc
 	 */
-	public function can_share_transcript( array $context = array() ): AgentConsentDecision {
-		return $this->decide( AgentConsentOperation::SHARE_TRANSCRIPT, $context );
+	public function can_share_transcript( array $context = array() ): WP_Agent_Consent_Decision {
+		return $this->decide( WP_Agent_Consent_Operation::SHARE_TRANSCRIPT, $context );
 	}
 
 	/**
 	 * @inheritDoc
 	 */
-	public function can_escalate_to_human( array $context = array() ): AgentConsentDecision {
-		return $this->decide( AgentConsentOperation::ESCALATE_TO_HUMAN, $context );
+	public function can_escalate_to_human( array $context = array() ): WP_Agent_Consent_Decision {
+		return $this->decide( WP_Agent_Consent_Operation::ESCALATE_TO_HUMAN, $context );
 	}
 
 	/**
@@ -55,20 +55,20 @@ class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy_Interfa
 	 *
 	 * @param string $operation Consent operation value.
 	 * @param array  $context   JSON-friendly policy context.
-	 * @return AgentConsentDecision
+	 * @return WP_Agent_Consent_Decision
 	 */
-	private function decide( string $operation, array $context ): AgentConsentDecision {
+	private function decide( string $operation, array $context ): WP_Agent_Consent_Decision {
 		$audit_metadata = $this->audit_metadata( $operation, $context );
 
 		if ( ! $this->is_interactive( $context ) ) {
-			return AgentConsentDecision::denied( $operation, 'non_interactive_default_denied', $audit_metadata );
+			return WP_Agent_Consent_Decision::denied( $operation, 'non_interactive_default_denied', $audit_metadata );
 		}
 
 		if ( true === $this->explicit_consent( $operation, $context ) ) {
-			return AgentConsentDecision::allowed( $operation, 'explicit_consent', $audit_metadata );
+			return WP_Agent_Consent_Decision::allowed( $operation, 'explicit_consent', $audit_metadata );
 		}
 
-		return AgentConsentDecision::denied( $operation, 'explicit_consent_missing', $audit_metadata );
+		return WP_Agent_Consent_Decision::denied( $operation, 'explicit_consent_missing', $audit_metadata );
 	}
 
 	/**

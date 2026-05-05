@@ -22,7 +22,7 @@ agents_api_smoke_require_module();
 echo "\n[1] Generic tool visibility contracts are available:\n";
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Tool_Policy' ), 'WP_Agent_Tool_Policy is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Tool_Policy_Filter' ), 'WP_Agent_Tool_Policy_Filter is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Tool_Access_Policy_Interface' ), 'WP_Agent_Tool_Access_Policy_Interface is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Tool_Access_Policy' ), 'WP_Agent_Tool_Access_Policy is available', $failures, $passes );
 
 $tools = array(
 	'client/read'      => array(
@@ -61,7 +61,7 @@ $resolved = $resolver->resolve(
 			),
 		),
 		'tool_policy_providers' => array(
-			new class() implements WP_Agent_Tool_Access_Policy_Interface {
+			new class() implements WP_Agent_Tool_Access_Policy {
 				public function get_tool_policy( array $context ): ?array {
 					unset( $context );
 					return array(
@@ -97,7 +97,7 @@ $resolved = $resolver->resolve(
 			'tools' => array( 'client/read' ),
 		),
 		'tool_policy_providers' => array(
-			new class() implements WP_Agent_Tool_Access_Policy_Interface {
+			new class() implements WP_Agent_Tool_Access_Policy {
 				public function get_tool_policy( array $context ): ?array {
 					unset( $context );
 					return array(

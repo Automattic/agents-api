@@ -19,7 +19,7 @@ echo "agents-api-action-policy-values-smoke\n";
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
-$policy_class = AgentsAPI\AI\Tools\ActionPolicy::class;
+$policy_class = AgentsAPI\AI\Tools\WP_Agent_Action_Policy::class;
 
 agents_api_smoke_assert_equals(
 	array( 'direct', 'preview', 'forbidden' ),

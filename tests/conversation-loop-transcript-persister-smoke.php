@@ -1,6 +1,6 @@
 <?php
 /**
- * Pure-PHP smoke test for AgentConversationLoop transcript persister wiring.
+ * Pure-PHP smoke test for WP_Agent_Conversation_Loop transcript persister wiring.
  *
  * Run with: php tests/conversation-loop-transcript-persister-smoke.php
  *
@@ -21,7 +21,7 @@ agents_api_smoke_require_module();
 
 // Build a persister that records calls.
 $persister_log = array();
-$persister     = new class( $persister_log ) implements AgentsAPI\AI\AgentConversationTranscriptPersisterInterface {
+$persister     = new class( $persister_log ) implements AgentsAPI\AI\WP_Agent_Transcript_Persister {
 	/** @var array Log reference. */
 	private array $log;
 
@@ -29,7 +29,7 @@ $persister     = new class( $persister_log ) implements AgentsAPI\AI\AgentConver
 		$this->log = &$log;
 	}
 
-	public function persist( array $messages, AgentsAPI\AI\AgentConversationRequest $request, array $result ): string {
+	public function persist( array $messages, AgentsAPI\AI\WP_Agent_Conversation_Request $request, array $result ): string {
 		$this->log[] = array(
 			'message_count' => count( $messages ),
 			'request_turns' => $request->maxTurns(),
@@ -44,10 +44,10 @@ $persister     = new class( $persister_log ) implements AgentsAPI\AI\AgentConver
 echo "\n[1] Persister fires on the success path:\n";
 $persister_log = array();
 
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages ): array {
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'hi there' );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'hi there' );
 
 		return array(
 			'messages'               => $messages,
@@ -70,7 +70,7 @@ $persister_log = array();
 
 $threw = false;
 try {
-	AgentsAPI\AI\AgentConversationLoop::run(
+	AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 		array( array( 'role' => 'user', 'content' => 'fail' ) ),
 		static function (): array {
 			throw new \RuntimeException( 'provider error' );
@@ -90,7 +90,7 @@ agents_api_smoke_assert_equals( 1, count( $persister_log ), 'persister was calle
 echo "\n[3] No persister = no persistence calls (backwards compatible):\n";
 $persister_log = array();
 
-$result3 = AgentsAPI\AI\AgentConversationLoop::run(
+$result3 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages ): array {
 		return array(
@@ -105,16 +105,16 @@ $result3 = AgentsAPI\AI\AgentConversationLoop::run(
 agents_api_smoke_assert_equals( 0, count( $persister_log ), 'persister was not called when not provided', $failures, $passes );
 
 echo "\n[4] Persister failure does not change loop result:\n";
-$crashing_persister = new class() implements AgentsAPI\AI\AgentConversationTranscriptPersisterInterface {
-	public function persist( array $messages, AgentsAPI\AI\AgentConversationRequest $request, array $result ): string {
+$crashing_persister = new class() implements AgentsAPI\AI\WP_Agent_Transcript_Persister {
+	public function persist( array $messages, AgentsAPI\AI\WP_Agent_Conversation_Request $request, array $result ): string {
 		throw new \RuntimeException( 'database down' );
 	}
 };
 
-$result4 = AgentsAPI\AI\AgentConversationLoop::run(
+$result4 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages ): array {
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'ok' );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'ok' );
 
 		return array(
 			'messages'               => $messages,
@@ -133,7 +133,7 @@ agents_api_smoke_assert_equals( 2, count( $result4['messages'] ), 'loop result i
 echo "\n[5] Persister receives the original request when provided:\n";
 $persister_log = array();
 
-$request = new AgentsAPI\AI\AgentConversationRequest(
+$request = new AgentsAPI\AI\WP_Agent_Conversation_Request(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	array(),
 	null,
@@ -141,10 +141,10 @@ $request = new AgentsAPI\AI\AgentConversationRequest(
 	array(),
 	3,
 	false,
-	AgentsAPI\Core\Workspace\AgentWorkspaceScope::from_parts( 'runtime', 'intelligence-chubes4' )
+	AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope::from_parts( 'runtime', 'intelligence-chubes4' )
 );
 
-$result5 = AgentsAPI\AI\AgentConversationLoop::run(
+$result5 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	$request->messages(),
 	static function ( array $messages ): array {
 		return array(
@@ -177,7 +177,7 @@ agents_api_smoke_assert_equals(
 echo "\n[6] Transcript lock wraps turn execution and persistence when available:\n";
 $lock_log      = array();
 $persister_log = array();
-$locking_store = new class( $lock_log ) implements AgentsAPI\Core\Database\Chat\ConversationTranscriptLockInterface {
+$locking_store = new class( $lock_log ) implements AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Lock {
 	/** @var array Log reference. */
 	private array $log;
 
@@ -195,7 +195,7 @@ $locking_store = new class( $lock_log ) implements AgentsAPI\Core\Database\Chat\
 		return true;
 	}
 };
-$locking_persister = new class( $persister_log, $lock_log ) implements AgentsAPI\AI\AgentConversationTranscriptPersisterInterface {
+$locking_persister = new class( $persister_log, $lock_log ) implements AgentsAPI\AI\WP_Agent_Transcript_Persister {
 	/** @var array Persister log reference. */
 	private array $persister_log;
 
@@ -207,7 +207,7 @@ $locking_persister = new class( $persister_log, $lock_log ) implements AgentsAPI
 		$this->lock_log      = &$lock_log;
 	}
 
-	public function persist( array $messages, AgentsAPI\AI\AgentConversationRequest $request, array $result ): string {
+	public function persist( array $messages, AgentsAPI\AI\WP_Agent_Conversation_Request $request, array $result ): string {
 		unset( $request, $result );
 		$this->persister_log[] = count( $messages );
 		$this->lock_log[]      = array( 'persist' );
@@ -216,11 +216,11 @@ $locking_persister = new class( $persister_log, $lock_log ) implements AgentsAPI
 	}
 };
 
-$result6 = AgentsAPI\AI\AgentConversationLoop::run(
+$result6 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'locked' ) ),
 	static function ( array $messages ) use ( &$lock_log ): array {
 		$lock_log[] = array( 'runner' );
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'locked ok' );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'locked ok' );
 
 		return array(
 			'messages'               => $messages,
@@ -255,7 +255,7 @@ agents_api_smoke_assert_equals(
 echo "\n[7] Lock contention returns without running the turn or persister:\n";
 $persister_log   = array();
 $contention_runs = 0;
-$contention_lock = new class() implements AgentsAPI\Core\Database\Chat\ConversationTranscriptLockInterface {
+$contention_lock = new class() implements AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Lock {
 	public function acquire_session_lock( string $session_id, int $ttl_seconds = 300 ): ?string {
 		unset( $session_id, $ttl_seconds );
 		return null;
@@ -267,7 +267,7 @@ $contention_lock = new class() implements AgentsAPI\Core\Database\Chat\Conversat
 	}
 };
 
-$result7 = AgentsAPI\AI\AgentConversationLoop::run(
+$result7 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'contended' ) ),
 	static function () use ( &$contention_runs ): array {
 		++$contention_runs;

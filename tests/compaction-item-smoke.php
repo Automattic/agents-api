@@ -20,7 +20,7 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 echo "\n[1] Valid items normalize to the public contract:\n";
-$item = AgentsAPI\AI\AgentCompactionItem::normalize(
+$item = AgentsAPI\AI\WP_Agent_Compaction_Item::normalize(
 	array(
 		'id'       => 'section-intro',
 		'type'     => 'markdown_section',
@@ -33,8 +33,8 @@ $item = AgentsAPI\AI\AgentCompactionItem::normalize(
 		'boundary' => array( 'starts_group' => true ),
 	)
 );
-agents_api_smoke_assert_equals( AgentsAPI\AI\AgentCompactionItem::SCHEMA, $item['schema'], 'item schema is public', $failures, $passes );
-agents_api_smoke_assert_equals( AgentsAPI\AI\AgentCompactionItem::VERSION, $item['version'], 'item version is public', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Compaction_Item::SCHEMA, $item['schema'], 'item schema is public', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Compaction_Item::VERSION, $item['version'], 'item version is public', $failures, $passes );
 agents_api_smoke_assert_equals( 'section-intro', $item['id'], 'caller-provided id is preserved', $failures, $passes );
 agents_api_smoke_assert_equals( 'markdown_section', $item['type'], 'type is preserved', $failures, $passes );
 agents_api_smoke_assert_equals( 'Intro text', $item['content'], 'content is preserved', $failures, $passes );
@@ -43,7 +43,7 @@ agents_api_smoke_assert_equals( 'handbook-page', $item['group'], 'group hint is 
 agents_api_smoke_assert_equals( array( 'starts_group' => true ), $item['boundary'], 'boundary hint is preserved', $failures, $passes );
 
 echo "\n[2] Ordered item lists retain order and metadata:\n";
-$ordered = AgentsAPI\AI\AgentCompactionItem::normalize_many(
+$ordered = AgentsAPI\AI\WP_Agent_Compaction_Item::normalize_many(
 	array(
 		array(
 			'id'       => 'first',
@@ -69,8 +69,8 @@ $without_id = array(
 	'content'  => array( 'text' => 'Remember this' ),
 	'metadata' => array( 'source' => 'runtime' ),
 );
-$generated_one = AgentsAPI\AI\AgentCompactionItem::normalize( $without_id, 3 );
-$generated_two = AgentsAPI\AI\AgentCompactionItem::normalize( $without_id, 3 );
+$generated_one = AgentsAPI\AI\WP_Agent_Compaction_Item::normalize( $without_id, 3 );
+$generated_two = AgentsAPI\AI\WP_Agent_Compaction_Item::normalize( $without_id, 3 );
 agents_api_smoke_assert_equals( $generated_one['id'], $generated_two['id'], 'generated id is stable for the same item and index', $failures, $passes );
 agents_api_smoke_assert_equals( 'item-', substr( $generated_one['id'], 0, 5 ), 'generated id uses item prefix', $failures, $passes );
 
@@ -87,7 +87,7 @@ $invalid_cases = array(
 foreach ( $invalid_cases as $name => $invalid_item ) {
 	$thrown = false;
 	try {
-		AgentsAPI\AI\AgentCompactionItem::normalize( $invalid_item );
+		AgentsAPI\AI\WP_Agent_Compaction_Item::normalize( $invalid_item );
 	} catch ( InvalidArgumentException $error ) {
 		$thrown = 0 === strpos( $error->getMessage(), 'invalid_ai_compaction_item:' );
 	}
@@ -95,7 +95,7 @@ foreach ( $invalid_cases as $name => $invalid_item ) {
 }
 
 echo "\n[5] Message envelopes can be projected without fake chat-message inputs:\n";
-$message_item = AgentsAPI\AI\AgentCompactionItem::from_message(
+$message_item = AgentsAPI\AI\WP_Agent_Compaction_Item::from_message(
 	array(
 		'id'       => 'message-1',
 		'role'     => 'assistant',

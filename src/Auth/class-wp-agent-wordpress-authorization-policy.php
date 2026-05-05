@@ -11,25 +11,25 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 	/**
 	 * Default authorization policy that composes token ceilings with WordPress caps.
 	 */
-	final class WP_Agent_WordPress_Authorization_Policy implements WP_Agent_Authorization_Policy_Interface {
+	final class WP_Agent_WordPress_Authorization_Policy implements WP_Agent_Authorization_Policy {
 
 		/**
-		 * @param WP_Agent_Access_Store_Interface|null $access_store     Optional access-grant store.
+		 * @param WP_Agent_Access_Store|null $access_store     Optional access-grant store.
 		 * @param callable|null                       $user_can_callback Optional user capability checker for tests/hosts.
 		 */
 		public function __construct(
-			private readonly ?WP_Agent_Access_Store_Interface $access_store = null,
+			private readonly ?WP_Agent_Access_Store $access_store = null,
 			private $user_can_callback = null,
 		) {}
 
 		/**
 		 * Check whether a principal can use a WordPress capability.
 		 *
-		 * @param AgentsAPI\AI\AgentExecutionPrincipal $principal  Execution principal.
+		 * @param AgentsAPI\AI\WP_Agent_Execution_Principal $principal  Execution principal.
 		 * @param string                               $capability Required WordPress capability.
 		 * @param array<string,mixed>                  $context    Host-owned authorization context.
 		 */
-		public function can( AgentsAPI\AI\AgentExecutionPrincipal $principal, string $capability, array $context = array() ): bool {
+		public function can( AgentsAPI\AI\WP_Agent_Execution_Principal $principal, string $capability, array $context = array() ): bool {
 			$capability = trim( $capability );
 			if ( '' === $capability ) {
 				return false;
@@ -55,12 +55,12 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 		/**
 		 * Check whether a principal can access an agent at a minimum role.
 		 *
-		 * @param AgentsAPI\AI\AgentExecutionPrincipal $principal    Execution principal.
+		 * @param AgentsAPI\AI\WP_Agent_Execution_Principal $principal    Execution principal.
 		 * @param string                               $agent_id     Agent identifier.
 		 * @param string                               $minimum_role Minimum access role.
 		 * @param array<string,mixed>                  $context      Host-owned authorization context.
 		 */
-		public function can_access_agent( AgentsAPI\AI\AgentExecutionPrincipal $principal, string $agent_id, string $minimum_role = WP_Agent_Access_Grant::ROLE_VIEWER, array $context = array() ): bool {
+		public function can_access_agent( AgentsAPI\AI\WP_Agent_Execution_Principal $principal, string $agent_id, string $minimum_role = WP_Agent_Access_Grant::ROLE_VIEWER, array $context = array() ): bool {
 			if ( '' === trim( $agent_id ) || ! WP_Agent_Access_Grant::is_valid_role( $minimum_role ) ) {
 				return false;
 			}
@@ -70,7 +70,7 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 			}
 
 			$access_store = $context['access_store'] ?? $this->access_store;
-			if ( ! $access_store instanceof WP_Agent_Access_Store_Interface ) {
+			if ( ! $access_store instanceof WP_Agent_Access_Store ) {
 				return false;
 			}
 

@@ -1,6 +1,6 @@
 <?php
 /**
- * Pure-PHP smoke test for AgentConversationLoop tool-call mediation.
+ * Pure-PHP smoke test for WP_Agent_Conversation_Loop tool-call mediation.
  *
  * Run with: php tests/conversation-loop-tool-execution-smoke.php
  *
@@ -20,11 +20,11 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 // Build a reusable in-memory tool executor.
-$executor = new class() implements AgentsAPI\AI\Tools\ToolExecutorInterface {
+$executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
 	/** @var array Log of executed calls. */
 	public array $executed = array();
 
-	public function executeToolCall( array $tool_call, array $tool_definition, array $context = array() ): array {
+	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
 		$this->executed[] = $tool_call;
 
 		return array(
@@ -55,10 +55,10 @@ $tools = array(
 	),
 );
 
-echo "\n[1] Loop mediates tool calls through ToolExecutionCore when tool_executor is provided:\n";
+echo "\n[1] Loop mediates tool calls through WP_Agent_Tool_Execution_Core when tool_executor is provided:\n";
 $executor->executed = array();
 
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'summarize this' ) ),
 	static function ( array $messages, array $context ): array {
 		// Turn runner returns tool calls for the loop to mediate.
@@ -93,10 +93,10 @@ agents_api_smoke_assert_equals( true, $message_count >= 4, 'transcript contains 
 echo "\n[2] Loop runs without mediation when no tool_executor is provided (backwards compatible):\n";
 $executor->executed = array();
 
-$legacy_result = AgentsAPI\AI\AgentConversationLoop::run(
+$legacy_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages, array $context ): array {
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'turn ' . $context['turn'] );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'turn ' . $context['turn'] );
 
 		return array(
 			'messages'               => $messages,
@@ -119,7 +119,7 @@ echo "\n[3] Multi-turn mediation continues when tool calls are present:\n";
 $executor->executed = array();
 $turn_count         = 0;
 
-$multi_result = AgentsAPI\AI\AgentConversationLoop::run(
+$multi_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'start' ) ),
 	static function ( array $messages, array $context ) use ( &$turn_count ): array {
 		++$turn_count;
@@ -160,7 +160,7 @@ agents_api_smoke_assert_equals( 2, count( $multi_result['tool_execution_results'
 echo "\n[4] Tool validation errors are returned as error results without crashing:\n";
 $executor->executed = array();
 
-$validation_result = AgentsAPI\AI\AgentConversationLoop::run(
+$validation_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'test' ) ),
 	static function ( array $messages ): array {
 		return array(

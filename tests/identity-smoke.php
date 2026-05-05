@@ -20,7 +20,7 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 echo "\n[1] Agent identity scope normalizes logical identity tuples:\n";
-$scope            = new AgentsAPI\Core\Identity\AgentIdentityScope( 'Research Assistant', 12, ' Site:42 / Primary ' );
+$scope            = new AgentsAPI\Core\Identity\WP_Agent_Identity_Scope( 'Research Assistant', 12, ' Site:42 / Primary ' );
 $normalized_scope = $scope->normalize();
 agents_api_smoke_assert_equals( 'research-assistant', $normalized_scope->agent_slug, 'agent slug is normalized like registered agents', $failures, $passes );
 agents_api_smoke_assert_equals( 12, $normalized_scope->owner_user_id, 'owner user ID is preserved', $failures, $passes );
@@ -28,7 +28,7 @@ agents_api_smoke_assert_equals( 'site:42/primary', $normalized_scope->instance_k
 agents_api_smoke_assert_equals( 'research-assistant:12:site:42/primary', $scope->key(), 'scope key is stable', $failures, $passes );
 
 echo "\n[2] Materialized identity exposes durable store identity without backend coupling:\n";
-$identity = new AgentsAPI\Core\Identity\MaterializedAgentIdentity(
+$identity = new AgentsAPI\Core\Identity\WP_Agent_Materialized_Identity(
 	23,
 	$scope,
 	array( 'temperature' => 0.2 ),
@@ -60,7 +60,7 @@ agents_api_smoke_assert_equals( array( 'source' => 'updated' ), $updated->meta, 
 agents_api_smoke_assert_equals( array( 'temperature' => 0.2 ), $identity->config, 'original identity remains immutable', $failures, $passes );
 
 echo "\n[3] Identity store contract is available without a concrete backend:\n";
-agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentityStoreInterface' ), 'materialized identity store interface is available', $failures, $passes );
-agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Core\\Identity\\MaterializedAgentIdentityStoreInterface', false ) || interface_exists( 'DataMachine\\Core\\Identity\\MaterializedAgentIdentityStoreInterface', false ), 'Data Machine identity store alias is not loaded', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\Core\\Identity\\WP_Agent_Identity_Store' ), 'materialized identity store interface is available', $failures, $passes );
+agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Core\\Identity\\WP_Agent_Identity_Store', false ) || interface_exists( 'DataMachine\\Core\\Identity\\WP_Agent_Identity_Store', false ), 'Data Machine identity store alias is not loaded', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API materialized identity', $failures, $passes );

@@ -20,43 +20,43 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 $namespace_map = array(
-	'DataMachine\\Engine\\AI\\AgentMessageEnvelope'                         => 'AgentsAPI\\AI\\AgentMessageEnvelope',
-	'DataMachine\\Engine\\AI\\AgentExecutionPrincipal'                      => 'AgentsAPI\\AI\\AgentExecutionPrincipal',
-	'DataMachine\\Engine\\AI\\AgentConversationRequest'                    => 'AgentsAPI\\AI\\AgentConversationRequest',
-	'DataMachine\\Engine\\AI\\AgentConversationRunnerInterface'            => 'AgentsAPI\\AI\\AgentConversationRunnerInterface',
-	'DataMachine\\Engine\\AI\\AgentConversationCompletionDecision'         => 'AgentsAPI\\AI\\AgentConversationCompletionDecision',
-	'DataMachine\\Engine\\AI\\AgentConversationCompletionPolicyInterface'  => 'AgentsAPI\\AI\\AgentConversationCompletionPolicyInterface',
-	'DataMachine\\Engine\\AI\\AgentConversationTranscriptPersisterInterface' => 'AgentsAPI\\AI\\AgentConversationTranscriptPersisterInterface',
-	'DataMachine\\Engine\\AI\\NullAgentConversationTranscriptPersister'     => 'AgentsAPI\\AI\\NullAgentConversationTranscriptPersister',
-	'DataMachine\\Engine\\AI\\AgentConversationCompaction'                  => 'AgentsAPI\\AI\\AgentConversationCompaction',
-	'DataMachine\\Engine\\AI\\AgentConversationResult'                      => 'AgentsAPI\\AI\\AgentConversationResult',
-	'DataMachine\\Core\\Database\\Chat\\ConversationTranscriptLockInterface' => 'AgentsAPI\\Core\\Database\\Chat\\ConversationTranscriptLockInterface',
-	'DataMachine\\Engine\\AI\\Tools\\RuntimeToolDeclaration'                => 'AgentsAPI\\AI\\Tools\\RuntimeToolDeclaration',
-	'DataMachine\\Engine\\AI\\Tools\\ToolCall'                              => 'AgentsAPI\\AI\\Tools\\ToolCall',
-	'DataMachine\\Engine\\AI\\Tools\\ToolParameters'                         => 'AgentsAPI\\AI\\Tools\\ToolParameters',
-	'DataMachine\\Engine\\AI\\Tools\\Execution\\ToolExecutionCore'           => 'AgentsAPI\\AI\\Tools\\ToolExecutionCore',
-	'DataMachine\\Engine\\AI\\Tools\\Execution\\ToolExecutorInterface'      => 'AgentsAPI\\AI\\Tools\\ToolExecutorInterface',
-	'DataMachine\\Engine\\AI\\Tools\\ToolSourceRegistry'                     => 'AgentsAPI\\AI\\Tools\\ToolSourceRegistry',
-	'DataMachine\\Core\\Database\\Chat\\ConversationTranscriptStoreInterface' => 'AgentsAPI\\Core\\Database\\Chat\\ConversationTranscriptStoreInterface',
-	'DataMachine\\Core\\Identity\\AgentIdentityScope'                         => 'AgentsAPI\\Core\\Identity\\AgentIdentityScope',
-	'DataMachine\\Core\\Identity\\MaterializedAgentIdentity'                  => 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentity',
-	'DataMachine\\Core\\Identity\\MaterializedAgentIdentityStoreInterface'     => 'AgentsAPI\\Core\\Identity\\MaterializedAgentIdentityStoreInterface',
-	'DataMachine\\Core\\Workspace\\AgentWorkspaceScope'                       => 'AgentsAPI\\Core\\Workspace\\AgentWorkspaceScope',
-	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreInterface'           => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreInterface',
-	'DataMachine\\Core\\FilesRepository\\AgentMemoryScope'                    => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryScope',
-	'DataMachine\\Core\\FilesRepository\\AgentMemoryMetadata'                 => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryMetadata',
-	'DataMachine\\Core\\FilesRepository\\AgentMemoryQuery'                    => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryQuery',
-	'DataMachine\\Core\\FilesRepository\\AgentMemoryStoreCapabilities'        => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryStoreCapabilities',
-	'DataMachine\\Core\\FilesRepository\\AgentMemoryValidatorInterface'        => 'AgentsAPI\\Core\\FilesRepository\\AgentMemoryValidatorInterface',
+	'DataMachine\\Engine\\AI\\WP_Agent_Message'                         => 'AgentsAPI\\AI\\WP_Agent_Message',
+	'DataMachine\\Engine\\AI\\WP_Agent_Execution_Principal'                      => 'AgentsAPI\\AI\\WP_Agent_Execution_Principal',
+	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Request'                    => 'AgentsAPI\\AI\\WP_Agent_Conversation_Request',
+	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Runner'            => 'AgentsAPI\\AI\\WP_Agent_Conversation_Runner',
+	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Completion_Decision'         => 'AgentsAPI\\AI\\WP_Agent_Conversation_Completion_Decision',
+	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Completion_Policy'  => 'AgentsAPI\\AI\\WP_Agent_Conversation_Completion_Policy',
+	'DataMachine\\Engine\\AI\\WP_Agent_Transcript_Persister' => 'AgentsAPI\\AI\\WP_Agent_Transcript_Persister',
+	'DataMachine\\Engine\\AI\\WP_Agent_Null_Transcript_Persister'     => 'AgentsAPI\\AI\\WP_Agent_Null_Transcript_Persister',
+	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Compaction'                  => 'AgentsAPI\\AI\\WP_Agent_Conversation_Compaction',
+	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Result'                      => 'AgentsAPI\\AI\\WP_Agent_Conversation_Result',
+	'DataMachine\\Core\\Database\\Chat\\WP_Agent_Conversation_Lock' => 'AgentsAPI\\Core\\Database\\Chat\\WP_Agent_Conversation_Lock',
+	'DataMachine\\Engine\\AI\\Tools\\WP_Agent_Tool_Declaration'                => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Declaration',
+	'DataMachine\\Engine\\AI\\Tools\\WP_Agent_Tool_Call'                              => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Call',
+	'DataMachine\\Engine\\AI\\Tools\\WP_Agent_Tool_Parameters'                         => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Parameters',
+	'DataMachine\\Engine\\AI\\Tools\\Execution\\WP_Agent_Tool_Execution_Core'           => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Execution_Core',
+	'DataMachine\\Engine\\AI\\Tools\\Execution\\WP_Agent_Tool_Executor'      => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Executor',
+	'DataMachine\\Engine\\AI\\Tools\\WP_Agent_Tool_Source_Registry'                     => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Source_Registry',
+	'DataMachine\\Core\\Database\\Chat\\WP_Agent_Conversation_Store' => 'AgentsAPI\\Core\\Database\\Chat\\WP_Agent_Conversation_Store',
+	'DataMachine\\Core\\Identity\\WP_Agent_Identity_Scope'                         => 'AgentsAPI\\Core\\Identity\\WP_Agent_Identity_Scope',
+	'DataMachine\\Core\\Identity\\WP_Agent_Materialized_Identity'                  => 'AgentsAPI\\Core\\Identity\\WP_Agent_Materialized_Identity',
+	'DataMachine\\Core\\Identity\\WP_Agent_Identity_Store'     => 'AgentsAPI\\Core\\Identity\\WP_Agent_Identity_Store',
+	'DataMachine\\Core\\Workspace\\WP_Agent_Workspace_Scope'                       => 'AgentsAPI\\Core\\Workspace\\WP_Agent_Workspace_Scope',
+	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Store'           => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Store',
+	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Scope'                    => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Scope',
+	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Metadata'                 => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Metadata',
+	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Query'                    => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Query',
+	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Store_Capabilities'        => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Store_Capabilities',
+	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Validator'        => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Validator',
 );
 
 $context_contracts = array(
-	'AgentsAPI\\AI\\Context\\ContextAuthorityTier',
-	'AgentsAPI\\AI\\Context\\ContextConflictKind',
-	'AgentsAPI\\AI\\Context\\RetrievedContextItem',
-	'AgentsAPI\\AI\\Context\\ContextConflictResolution',
-	'AgentsAPI\\AI\\Context\\ContextConflictResolverInterface',
-	'AgentsAPI\\AI\\Context\\DefaultContextConflictResolver',
+	'AgentsAPI\\AI\\Context\\WP_Agent_Context_Authority_Tier',
+	'AgentsAPI\\AI\\Context\\WP_Agent_Context_Conflict_Kind',
+	'AgentsAPI\\AI\\Context\\WP_Agent_Context_Item',
+	'AgentsAPI\\AI\\Context\\WP_Agent_Context_Conflict_Resolution',
+	'AgentsAPI\\AI\\Context\\WP_Agent_Context_Conflict_Resolver',
+	'AgentsAPI\\AI\\Context\\WP_Agent_Default_Context_Conflict_Resolver',
 );
 
 echo "\n[1] Module bootstrap exposes registration facade without Data Machine product code:\n";
@@ -79,11 +79,11 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact' 
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact_Type' ), 'WP_Agent_Package_Artifact_Type value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifacts_Registry' ), 'WP_Agent_Package_Artifacts_Registry facade is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Access_Grant' ), 'WP_Agent_Access_Grant value object is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Access_Store_Interface' ), 'WP_Agent_Access_Store_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Access_Store' ), 'WP_Agent_Access_Store contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token' ), 'WP_Agent_Token value object is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Token_Store_Interface' ), 'WP_Agent_Token_Store_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Token_Store' ), 'WP_Agent_Token_Store contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token_Authenticator' ), 'WP_Agent_Token_Authenticator service is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Authorization_Policy_Interface' ), 'WP_Agent_Authorization_Policy_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Authorization_Policy' ), 'WP_Agent_Authorization_Policy contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_WordPress_Authorization_Policy' ), 'WP_Agent_WordPress_Authorization_Policy service is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Capability_Ceiling' ), 'WP_Agent_Capability_Ceiling value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Memory_Registry' ), 'WP_Agent_Memory_Registry facade is available', $failures, $passes );
@@ -92,19 +92,19 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Context_Section_Re
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Context_Injection_Policy' ), 'WP_Agent_Context_Injection_Policy vocabulary is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Composable_Context' ), 'WP_Agent_Composable_Context value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_PLUGIN_FILE' ), 'plugin file constant is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter' ), 'AgentsAPI\\AI\\AgentMarkdownSectionCompactionAdapter contract is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\AgentConversationLoop' ), 'AgentConversationLoop facade is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\AI\\Approvals\\PendingActionStoreInterface' ), 'AgentsAPI\\AI\\Approvals\\PendingActionStoreInterface contract is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Approvals\\PendingActionStatus' ), 'AgentsAPI\\AI\\Approvals\\PendingActionStatus vocabulary is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Consent_Policy_Interface' ), 'WP_Agent_Consent_Policy_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\WP_Agent_Markdown_Section_Compaction_Adapter' ), 'AgentsAPI\\AI\\WP_Agent_Markdown_Section_Compaction_Adapter contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\WP_Agent_Conversation_Loop' ), 'WP_Agent_Conversation_Loop facade is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Store' ), 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Store contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Status' ), 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Status vocabulary is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Consent_Policy' ), 'WP_Agent_Consent_Policy contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Default_Consent_Policy' ), 'WP_Agent_Default_Consent_Policy implementation is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Consent\\AgentConsentOperation' ), 'AgentConsentOperation vocabulary is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Consent\\AgentConsentDecision' ), 'AgentConsentDecision value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Consent\\WP_Agent_Consent_Operation' ), 'WP_Agent_Consent_Operation vocabulary is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Consent\\WP_Agent_Consent_Decision' ), 'WP_Agent_Consent_Decision value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Tool_Policy' ), 'WP_Agent_Tool_Policy contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Tool_Policy_Filter' ), 'WP_Agent_Tool_Policy_Filter contract is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Tool_Access_Policy_Interface' ), 'WP_Agent_Tool_Access_Policy_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Tool_Access_Policy' ), 'WP_Agent_Tool_Access_Policy contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Action_Policy_Resolver' ), 'WP_Agent_Action_Policy_Resolver contract is available', $failures, $passes );
-agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Action_Policy_Provider_Interface' ), 'WP_Agent_Action_Policy_Provider_Interface contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Action_Policy_Provider' ), 'WP_Agent_Action_Policy_Provider contract is available', $failures, $passes );
 foreach ( $namespace_map as $legacy_class => $target_class ) {
 	agents_api_smoke_assert_equals( true, class_exists( $target_class ) || interface_exists( $target_class ), $target_class . ' contract is available', $failures, $passes );
 	agents_api_smoke_assert_equals( false, class_exists( $legacy_class, false ) || interface_exists( $legacy_class, false ), $legacy_class . ' compatibility alias is not loaded', $failures, $passes );

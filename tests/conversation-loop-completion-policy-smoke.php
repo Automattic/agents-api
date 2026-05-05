@@ -1,6 +1,6 @@
 <?php
 /**
- * Pure-PHP smoke test for AgentConversationLoop completion policy wiring.
+ * Pure-PHP smoke test for WP_Agent_Conversation_Loop completion policy wiring.
  *
  * Run with: php tests/conversation-loop-completion-policy-smoke.php
  *
@@ -20,8 +20,8 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 // Build a tool executor.
-$executor = new class() implements AgentsAPI\AI\Tools\ToolExecutorInterface {
-	public function executeToolCall( array $tool_call, array $tool_definition, array $context = array() ): array {
+$executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
+	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
 		return array(
 			'success'   => true,
 			'tool_name' => $tool_call['tool_name'],
@@ -32,7 +32,7 @@ $executor = new class() implements AgentsAPI\AI\Tools\ToolExecutorInterface {
 
 // Build a completion policy that stops after seeing a specific tool.
 $policy_log = array();
-$policy     = new class( $policy_log ) implements AgentsAPI\AI\AgentConversationCompletionPolicyInterface {
+$policy     = new class( $policy_log ) implements AgentsAPI\AI\WP_Agent_Conversation_Completion_Policy {
 	/** @var array Log reference. */
 	private array $log;
 
@@ -40,7 +40,7 @@ $policy     = new class( $policy_log ) implements AgentsAPI\AI\AgentConversation
 		$this->log = &$log;
 	}
 
-	public function recordToolResult( string $tool_name, ?array $tool_def, array $tool_result, array $runtime_context, int $turn_count ): AgentsAPI\AI\AgentConversationCompletionDecision {
+	public function recordToolResult( string $tool_name, ?array $tool_def, array $tool_result, array $runtime_context, int $turn_count ): AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision {
 		$this->log[] = array(
 			'tool_name'  => $tool_name,
 			'turn_count' => $turn_count,
@@ -48,13 +48,13 @@ $policy     = new class( $policy_log ) implements AgentsAPI\AI\AgentConversation
 		);
 
 		if ( 'client/finish' === $tool_name ) {
-			return AgentsAPI\AI\AgentConversationCompletionDecision::complete(
+			return AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision::complete(
 				'finish tool called',
 				array( 'tool_name' => $tool_name, 'turn' => $turn_count )
 			);
 		}
 
-		return AgentsAPI\AI\AgentConversationCompletionDecision::incomplete();
+		return AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision::incomplete();
 	}
 };
 
@@ -81,7 +81,7 @@ echo "\n[1] Completion policy stops the loop when it returns complete:\n";
 $policy_log = array();
 $turn_count = 0;
 
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'start' ) ),
 	static function ( array $messages, array $context ) use ( &$turn_count ): array {
 		++$turn_count;
@@ -122,7 +122,7 @@ echo "\n[2] Completion policy coexists with should_continue — policy takes pre
 $policy_log       = array();
 $continue_called  = 0;
 
-$result2 = AgentsAPI\AI\AgentConversationLoop::run(
+$result2 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages ): array {
 		return array(
@@ -151,18 +151,18 @@ echo "\n[3] Completion policy works in legacy path (turn runner handles tool exe
 $policy_log = array();
 
 // Build a policy that completes on any tool.
-$always_complete_policy = new class() implements AgentsAPI\AI\AgentConversationCompletionPolicyInterface {
-	public function recordToolResult( string $tool_name, ?array $tool_def, array $tool_result, array $runtime_context, int $turn_count ): AgentsAPI\AI\AgentConversationCompletionDecision {
-		return AgentsAPI\AI\AgentConversationCompletionDecision::complete( 'always stop' );
+$always_complete_policy = new class() implements AgentsAPI\AI\WP_Agent_Conversation_Completion_Policy {
+	public function recordToolResult( string $tool_name, ?array $tool_def, array $tool_result, array $runtime_context, int $turn_count ): AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision {
+		return AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision::complete( 'always stop' );
 	}
 };
 
 $legacy_turns = 0;
-$result3      = AgentsAPI\AI\AgentConversationLoop::run(
+$result3      = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages, array $context ) use ( &$legacy_turns ): array {
 		++$legacy_turns;
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'calling tool' );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'calling tool' );
 
 		return array(
 			'messages'               => $messages,

@@ -34,21 +34,21 @@ $metadata = array(
 	'source' => 'smoke',
 );
 
-$envelope = AgentsAPI\AI\AgentMessageEnvelope::approvalRequired( 'Approval required before applying changes.', $payload, $metadata );
-agents_api_smoke_assert_equals( AgentsAPI\AI\AgentMessageEnvelope::SCHEMA, $envelope['schema'], 'approval envelope uses canonical schema', $failures, $passes );
-agents_api_smoke_assert_equals( AgentsAPI\AI\AgentMessageEnvelope::TYPE_APPROVAL_REQUIRED, $envelope['type'], 'approval envelope has approval_required type', $failures, $passes );
+$envelope = AgentsAPI\AI\WP_Agent_Message::approvalRequired( 'Approval required before applying changes.', $payload, $metadata );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Message::SCHEMA, $envelope['schema'], 'approval envelope uses canonical schema', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Message::TYPE_APPROVAL_REQUIRED, $envelope['type'], 'approval envelope has approval_required type', $failures, $passes );
 agents_api_smoke_assert_equals( 'tool', $envelope['role'], 'approval envelope uses action role', $failures, $passes );
 agents_api_smoke_assert_equals( $payload, $envelope['payload'], 'approval envelope preserves generic payload', $failures, $passes );
 agents_api_smoke_assert_equals( $metadata, $envelope['metadata'], 'approval envelope preserves metadata', $failures, $passes );
 
 echo "\n[2] Normalization and provider projection preserve the typed envelope:\n";
-$normalized = AgentsAPI\AI\AgentMessageEnvelope::normalize( $envelope );
+$normalized = AgentsAPI\AI\WP_Agent_Message::normalize( $envelope );
 agents_api_smoke_assert_equals( $envelope, $normalized, 'normalization preserves approval envelope', $failures, $passes );
 
-$provider_message = AgentsAPI\AI\AgentMessageEnvelope::to_provider_message( $envelope );
+$provider_message = AgentsAPI\AI\WP_Agent_Message::to_provider_message( $envelope );
 agents_api_smoke_assert_equals( 'tool', $provider_message['role'], 'provider projection preserves role', $failures, $passes );
 agents_api_smoke_assert_equals( 'Approval required before applying changes.', $provider_message['content'], 'provider projection preserves content', $failures, $passes );
-agents_api_smoke_assert_equals( AgentsAPI\AI\AgentMessageEnvelope::TYPE_APPROVAL_REQUIRED, $provider_message['metadata']['type'], 'provider projection preserves type metadata', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Message::TYPE_APPROVAL_REQUIRED, $provider_message['metadata']['type'], 'provider projection preserves type metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'approve-diff-123', $provider_message['metadata']['action_id'], 'provider projection exposes action_id metadata', $failures, $passes );
 agents_api_smoke_assert_equals( $payload['preview'], $provider_message['metadata']['preview'], 'provider projection exposes preview metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'smoke', $provider_message['metadata']['source'], 'provider projection keeps extension metadata', $failures, $passes );
