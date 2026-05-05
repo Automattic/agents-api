@@ -1,0 +1,113 @@
+<?php
+/**
+ * Generic tool-call mediation core.
+ *
+ * @package AgentsAPI
+ */
+
+namespace AgentsAPI\AI\Tools;
+
+defined( 'ABSPATH' ) || exit;
+
+/**
+ * Validates and mediates product-neutral tool calls.
+ */
+class WP_Agent_Tool_Execution_Core {
+
+	public const EXECUTOR_CLIENT   = WP_Agent_Tool_Declaration::EXECUTOR_CLIENT;
+
+	/**
+	 * Prepare a tool call for a caller-supplied execution adapter.
+	 *
+	 * @param string $tool_name       Tool identifier.
+	 * @param array  $tool_parameters Runtime tool-call parameters.
+	 * @param array  $available_tools Tool declarations keyed by name.
+	 * @param array  $context         Host runtime context for this invocation.
+	 * @return array<string, mixed> Prepared call or normalized error result.
+	 */
+	public function prepareWP_Agent_Tool_Call( string $tool_name, array $tool_parameters, array $available_tools, array $context = array() ): array {
+		$tool_definition = $available_tools[ $tool_name ] ?? null;
+		if ( ! is_array( $tool_definition ) ) {
+			return array_merge(
+				array( 'ready' => false ),
+				WP_Agent_Tool_Result::error( $tool_name, "Tool '{$tool_name}' not found" )
+			);
+		}
+
+		$validation = WP_Agent_Tool_Parameters::validateRequiredParameters( $tool_parameters, $tool_definition );
+		if ( ! $validation['valid'] ) {
+			return array_merge(
+				array( 'ready' => false ),
+				WP_Agent_Tool_Result::error(
+					$tool_name,
+					sprintf( 'Tool "%s" requires the following parameters: %s.', $tool_name, implode( ', ', $validation['missing'] ) ),
+					array( 'missing_parameters' => $validation['missing'] )
+				)
+			);
+		}
+
+		return array(
+			'ready'      => true,
+			'tool_call'  => WP_Agent_Tool_Call::normalize(
+				array(
+					'tool_name'  => $tool_name,
+					'parameters' => WP_Agent_Tool_Parameters::buildParameters( $tool_parameters, $context, $tool_definition ),
+					'metadata'   => array(
+						'source' => $tool_definition['source'] ?? WP_Agent_Tool_Declaration::sourceFromName( $tool_name ),
+					),
+				)
+			),
+			'tool_def'   => $tool_definition,
+		);
+	}
+
+	/**
+	 * Execute a prepared tool call through a caller-supplied adapter.
+	 *
+	 * @param array  $tool_call       Prepared tool call.
+	 * @param array  $tool_definition Normalized tool declaration.
+	 * @param WP_Agent_Tool_Executor $executor Host runtime execution adapter.
+	 * @param array  $context         Host runtime context for this invocation.
+	 * @return array<string, mixed> Normalized execution result.
+	 */
+	public function executePreparedTool( array $tool_call, array $tool_definition, WP_Agent_Tool_Executor $executor, array $context = array() ): array {
+		$tool_call = WP_Agent_Tool_Call::normalize( $tool_call );
+		try {
+			$result = $executor->executeWP_Agent_Tool_Call( $tool_call, $tool_definition, $context );
+		} catch ( \Throwable $throwable ) {
+			return WP_Agent_Tool_Result::error( $tool_call['tool_name'], $throwable->getMessage() );
+		}
+
+		if ( ! array_key_exists( 'success', $result ) ) {
+			$result = array(
+				'success'   => true,
+				'tool_name' => $tool_call['tool_name'],
+				'result'    => $result,
+			);
+		}
+
+		$result['tool_name'] = is_string( $result['tool_name'] ?? null ) ? $result['tool_name'] : $tool_call['tool_name'];
+
+		return WP_Agent_Tool_Result::normalize( $result );
+	}
+
+	/**
+	 * Prepare and execute a tool call through a caller-supplied adapter.
+	 *
+	 * @param string $tool_name       Tool identifier.
+	 * @param array  $tool_parameters Runtime tool-call parameters.
+	 * @param array  $available_tools Tool declarations keyed by name.
+	 * @param WP_Agent_Tool_Executor $executor Host runtime execution adapter.
+	 * @param array  $context         Host runtime context for this invocation.
+	 * @return array<string, mixed> Normalized execution result.
+	 */
+	public function executeTool( string $tool_name, array $tool_parameters, array $available_tools, WP_Agent_Tool_Executor $executor, array $context = array() ): array {
+		$prepared = $this->prepareWP_Agent_Tool_Call( $tool_name, $tool_parameters, $available_tools, $context );
+		if ( empty( $prepared['ready'] ) ) {
+			unset( $prepared['ready'] );
+			return $prepared;
+		}
+
+		return $this->executePreparedTool( $prepared['tool_call'], $prepared['tool_def'], $executor, $context );
+	}
+}

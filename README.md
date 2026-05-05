@@ -103,11 +103,11 @@ wp_register_agent(
 - `WP_Agents_Registry`
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `WP_Agent_Access_Grant`
-- `WP_Agent_Access_Store_Interface`
+- `WP_Agent_Access_Store`
 - `WP_Agent_Token`
-- `WP_Agent_Token_Store_Interface`
+- `WP_Agent_Token_Store`
 - `WP_Agent_Token_Authenticator`
-- `WP_Agent_Authorization_Policy_Interface`
+- `WP_Agent_Authorization_Policy`
 - `WP_Agent_WordPress_Authorization_Policy`
 - `WP_Agent_Capability_Ceiling`
 - `WP_Agent_Memory_Registry`
@@ -116,53 +116,55 @@ wp_register_agent(
 - `WP_Agent_Context_Injection_Policy`
 - `WP_Agent_Composable_Context`
 - `wp_guideline_types()` and `WP_Guidelines_Substrate`
-- `AgentsAPI\AI\AgentMessageEnvelope`
-- `AgentsAPI\AI\AgentExecutionPrincipal`
-- `AgentsAPI\AI\AgentConversationRequest`
-- `AgentsAPI\AI\AgentConversationRunnerInterface`
-- `AgentsAPI\AI\AgentConversationCompletionDecision`
-- `AgentsAPI\AI\AgentConversationCompletionPolicyInterface`
-- `AgentsAPI\AI\AgentConversationTranscriptPersisterInterface`
-- `AgentsAPI\AI\NullAgentConversationTranscriptPersister`
-- `AgentsAPI\AI\AgentConversationCompaction`
-- `AgentsAPI\AI\IterationBudget`
-- `AgentsAPI\AI\AgentConversationResult`
-- `AgentsAPI\AI\AgentConversationLoop`
-- `WP_Agent_Consent_Policy_Interface`
+- `AgentsAPI\AI\WP_Agent_Message`
+- `AgentsAPI\AI\WP_Agent_Execution_Principal`
+- `AgentsAPI\AI\WP_Agent_Conversation_Request`
+- `AgentsAPI\AI\WP_Agent_Conversation_Runner`
+- `AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision`
+- `AgentsAPI\AI\WP_Agent_Conversation_Completion_Policy`
+- `AgentsAPI\AI\WP_Agent_Transcript_Persister`
+- `AgentsAPI\AI\WP_Agent_Null_Transcript_Persister`
+- `AgentsAPI\AI\WP_Agent_Conversation_Compaction`
+- `AgentsAPI\AI\WP_Agent_Iteration_Budget`
+- `AgentsAPI\AI\WP_Agent_Conversation_Result`
+- `AgentsAPI\AI\WP_Agent_Conversation_Loop`
+- `WP_Agent_Consent_Policy`
 - `WP_Agent_Default_Consent_Policy`
-- `AgentsAPI\AI\Consent\AgentConsentOperation`
-- `AgentsAPI\AI\Consent\AgentConsentDecision`
-- `AgentsAPI\AI\Tools\RuntimeToolDeclaration`
-- `AgentsAPI\AI\Tools\ToolCall`
-- `AgentsAPI\AI\Tools\ToolSourceRegistry`
-- `AgentsAPI\AI\Tools\ToolParameters`
-- `AgentsAPI\AI\Tools\ToolExecutorInterface`
-- `AgentsAPI\AI\Tools\ToolExecutionCore`
-- `AgentsAPI\AI\Tools\ToolExecutionResult`
-- `AgentsAPI\AI\Approvals\ApprovalDecision`
-- `AgentsAPI\AI\Approvals\PendingAction`
-- `AgentsAPI\AI\Approvals\PendingActionStatus`
-- `AgentsAPI\AI\Approvals\PendingActionStoreInterface`
-- `AgentsAPI\AI\Approvals\PendingActionResolverInterface`
-- `AgentsAPI\AI\Approvals\PendingActionHandlerInterface`
-- `AgentsAPI\AI\Context\ContextAuthorityTier`
-- `AgentsAPI\AI\Context\ContextConflictKind`
-- `AgentsAPI\AI\Context\RetrievedContextItem`
-- `AgentsAPI\AI\Context\ContextConflictResolution`
-- `AgentsAPI\AI\Context\ContextConflictResolverInterface`
-- `AgentsAPI\AI\Context\DefaultContextConflictResolver`
+- `AgentsAPI\AI\Consent\WP_Agent_Consent_Operation`
+- `AgentsAPI\AI\Consent\WP_Agent_Consent_Decision`
+- `AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration`
+- `AgentsAPI\AI\Tools\WP_Agent_Tool_Call`
+- `AgentsAPI\AI\Tools\WP_Agent_Tool_Source_Registry`
+- `AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters`
+- `AgentsAPI\AI\Tools\WP_Agent_Tool_Executor`
+- `AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core`
+- `AgentsAPI\AI\Tools\WP_Agent_Tool_Result`
+- `AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision`
+- `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action`
+- `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status`
+- `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Store`
+- `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Resolver`
+- `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Handler`
+- `AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier`
+- `AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Kind`
+- `AgentsAPI\AI\Context\WP_Agent_Context_Item`
+- `AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Resolution`
+- `AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Resolver`
+- `AgentsAPI\AI\Context\WP_Agent_Default_Context_Conflict_Resolver`
 - `WP_Agent_Tool_Policy`
 - `WP_Agent_Tool_Policy_Filter`
-- `WP_Agent_Tool_Access_Policy_Interface`
+- `WP_Agent_Tool_Access_Policy`
 - `WP_Agent_Action_Policy_Resolver`
-- `WP_Agent_Action_Policy_Provider_Interface`
-- `AgentsAPI\Core\Workspace\AgentWorkspaceScope`
-- `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`
-- `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface` and memory value objects, including provenance/trust metadata contracts
+- `WP_Agent_Action_Policy_Provider`
+- `AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope`
+- `AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store`
+- `AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Lock`
+- `AgentsAPI\Core\Database\Chat\WP_Agent_Null_Conversation_Lock`
+- `AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Store` and memory value objects, including provenance/trust metadata contracts
 
 ## Conversation Loop Events
 
-`AgentConversationLoop` exposes lifecycle events through two observer surfaces:
+`WP_Agent_Conversation_Loop` exposes lifecycle events through two observer surfaces:
 
 - The caller-owned `on_event` option: `fn( string $event, array $payload ): void`.
 - The WordPress `agents_api_loop_event` action: `do_action( 'agents_api_loop_event', $event, $payload )`.
@@ -175,12 +177,12 @@ Event payloads are read-only snapshots. Observers must not rely on mutating payl
 
 Memory stores can carry first-class metadata alongside content so callers can distinguish direct user assertions from agent inferences, workspace extraction, curated facts, system-generated facts, or imports.
 
-`AgentMemoryMetadata` standardizes these fields:
+`WP_Agent_Memory_Metadata` standardizes these fields:
 
 - `source_type`: `user_asserted`, `agent_inferred`, `workspace_extracted`, `system_generated`, `curated`, or `imported`.
 - `source_ref`: caller-owned source reference, such as a URL, file path, record ID, or content hash.
 - `created_by_user_id` and `created_by_agent_id`: identities responsible for the memory write.
-- `workspace`: optional `AgentWorkspaceScope` identity for revalidation.
+- `workspace`: optional `WP_Agent_Workspace_Scope` identity for revalidation.
 - `confidence`: trust score from `0.0` to `1.0`.
 - `validator`: validator identifier that can re-check the memory against current substrate state.
 - `authority_tier`: `low`, `medium`, `high`, or `canonical`.
@@ -188,7 +190,7 @@ Memory stores can carry first-class metadata alongside content so callers can di
 
 Default trust is intentionally conservative. `agent_inferred` defaults to `0.5` confidence and `low` authority, while `user_asserted`, `curated`, and `system_generated` memories rank higher by default.
 
-Stores declare metadata support through `AgentMemoryStoreCapabilities`:
+Stores declare metadata support through `WP_Agent_Memory_Store_Capabilities`:
 
 ```php
 $capabilities = $store->capabilities();
@@ -201,11 +203,11 @@ $unsupported = $capabilities->unsupported_metadata_fields(
 
 Writes, reads, and list entries include `unsupported_metadata_fields` so a caller can tell the difference between missing metadata and a store that cannot persist, return, filter, or rank the requested fields.
 
-Retrieval filters and ranking hints use `AgentMemoryQuery`:
+Retrieval filters and ranking hints use `WP_Agent_Memory_Query`:
 
 ```php
 $entries = $store->list_layer(
-	new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
+	new AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Scope(
 		'user',
 		$workspace->workspace_type,
 		$workspace->workspace_id,
@@ -213,10 +215,10 @@ $entries = $store->list_layer(
 		456,
 		''
 	),
-	new AgentsAPI\Core\FilesRepository\AgentMemoryQuery(
-		source_types: array( AgentsAPI\Core\FilesRepository\AgentMemoryMetadata::SOURCE_USER_ASSERTED ),
+	new AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Query(
+		source_types: array( AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Metadata::SOURCE_USER_ASSERTED ),
 		min_confidence: 0.8,
-		authority_tiers: array( AgentsAPI\Core\FilesRepository\AgentMemoryMetadata::AUTHORITY_HIGH ),
+		authority_tiers: array( AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Metadata::AUTHORITY_HIGH ),
 		order_by: 'confidence'
 	)
 );
@@ -225,22 +227,22 @@ $entries = $store->list_layer(
 Validators are pluggable and workspace-aware without being tied to a specific product or host:
 
 ```php
-final class RepoMemoryValidator implements AgentsAPI\Core\FilesRepository\AgentMemoryValidatorInterface {
+final class RepoMemoryValidator implements AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Validator {
 	public function id(): string {
 		return 'repo_state';
 	}
 
 	public function validate(
-		AgentsAPI\Core\FilesRepository\AgentMemoryScope $scope,
+		AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Scope $scope,
 		string $content,
-		AgentsAPI\Core\FilesRepository\AgentMemoryMetadata $metadata,
+		AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Metadata $metadata,
 		array $workspace_context = array()
-	): AgentsAPI\Core\FilesRepository\AgentMemoryValidationResult {
+	): AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Validation_Result {
 		unset( $scope, $content, $metadata );
 
 		return ! empty( $workspace_context['current'] )
-			? AgentsAPI\Core\FilesRepository\AgentMemoryValidationResult::valid()
-			: AgentsAPI\Core\FilesRepository\AgentMemoryValidationResult::stale( 'Repository state changed.' );
+			? AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Validation_Result::valid()
+			: AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Validation_Result::stale( 'Repository state changed.' );
 	}
 }
 ```
@@ -258,7 +260,7 @@ Tool visibility is resolved by `WP_Agent_Tool_Policy` over an already-gathered t
 - Tool-declared runtime modes through `mode` or `modes`.
 - Caller-owned access checks through `tool_access_checker`.
 - Registered agent or runtime `tool_policy` config with `allow` / `deny`, `tools`, and `categories`.
-- Host-provided `WP_Agent_Tool_Access_Policy_Interface` policy fragments.
+- Host-provided `WP_Agent_Tool_Access_Policy` policy fragments.
 - Runtime `categories`, `allow_only`, and explicit `deny` lists.
 
 Mandatory tools are not hardcoded by Agents API. A consumer that needs mandatory runtime plumbing can return `mandatory_tools` or `mandatory_categories` from a policy provider, and explicit deny still wins.
@@ -279,14 +281,14 @@ $visible_tools = ( new WP_Agent_Tool_Policy() )->resolve(
 );
 ```
 
-Action policy is resolved by `WP_Agent_Action_Policy_Resolver` and always returns one of the canonical values from `AgentsAPI\AI\Tools\ActionPolicy`: `direct`, `preview`, or `forbidden`.
+Action policy is resolved by `WP_Agent_Action_Policy_Resolver` and always returns one of the canonical values from `AgentsAPI\AI\Tools\WP_Agent_Action_Policy`: `direct`, `preview`, or `forbidden`.
 
 Resolution order is:
 
 1. Explicit runtime `deny` list resolves a tool to `forbidden`.
 2. Registered agent or runtime `action_policy.tools[tool_name]`.
 3. Registered agent or runtime `action_policy.categories[category]`.
-4. Host-provided `WP_Agent_Action_Policy_Provider_Interface` providers.
+4. Host-provided `WP_Agent_Action_Policy_Provider` providers.
 5. Tool-declared `action_policy` default.
 6. Tool-declared mode-specific `action_policy_<mode>` default.
 7. Global default `direct`.
@@ -312,10 +314,10 @@ $policy = ( new WP_Agent_Action_Policy_Resolver() )->resolve_for_tool(
 
 ## Workspace Scope
 
-`AgentsAPI\Core\Workspace\AgentWorkspaceScope` is the generic workspace identity shared by memory, transcript, persistence, and audit adapters. It is deliberately broader than a WordPress site ID:
+`AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope` is the generic workspace identity shared by memory, transcript, persistence, and audit adapters. It is deliberately broader than a WordPress site ID:
 
 ```php
-$workspace = AgentsAPI\Core\Workspace\AgentWorkspaceScope::from_parts(
+$workspace = AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope::from_parts(
 	'code_workspace',
 	'Automattic/intelligence@contexta8c-read-coverage'
 );
@@ -332,7 +334,7 @@ Consumers may map WordPress sites, networks, headless runtimes, Studio sites, co
 Memory scope uses `(layer, workspace_type, workspace_id, user_id, agent_id, filename)` as its identity model:
 
 ```php
-$scope = new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
+$scope = new AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Scope(
 	'user',
 	$workspace->workspace_type,
 	$workspace->workspace_id,
@@ -342,9 +344,9 @@ $scope = new AgentsAPI\Core\FilesRepository\AgentMemoryScope(
 );
 ```
 
-Transcript sessions are also workspace-stamped. `ConversationTranscriptStoreInterface::create_session()` and `::get_recent_pending_session()` both receive an `AgentWorkspaceScope`, and `AgentConversationRequest` can carry a workspace so runtime persisters can stamp the session they materialize.
+Transcript sessions are also workspace-stamped. `WP_Agent_Conversation_Store::create_session()` and `::get_recent_pending_session()` both receive an `WP_Agent_Workspace_Scope`, and `WP_Agent_Conversation_Request` can carry a workspace so runtime persisters can stamp the session they materialize.
 
-Transcript stores preserve provider continuity metadata as part of the complete session state. `ConversationTranscriptStoreInterface::update_session()` accepts an optional opaque `provider_response_id`, and `::get_session()` returns the same key alongside `provider` and `model`. Consumers using provider-side state, such as the OpenAI Responses API `previous_response_id` flow, can pass the provider's response ID through this field without encoding per-consumer metadata keys. A `null` value means no provider-side response ID is associated with the current transcript state.
+Transcript stores preserve provider continuity metadata as part of the complete session state. `WP_Agent_Conversation_Store::update_session()` accepts an optional opaque `provider_response_id`, and `::get_session()` returns the same key alongside `provider` and `model`. Consumers using provider-side state, such as the OpenAI Responses API `previous_response_id` flow, can pass the provider's response ID through this field without encoding per-consumer metadata keys. A `null` value means no provider-side response ID is associated with the current transcript state.
 
 ## Retrieved Context Authority
 
@@ -365,15 +367,15 @@ conversation
 
 `platform_authority` and `support_authority` are generic governance tiers. Consumers decide when those sources are enabled and mode-gated. Agents API does not define a WP.com-specific source, storage path, or activation condition.
 
-`AgentsAPI\AI\Context\RetrievedContextItem` is the transport shape for one retrieved item:
+`AgentsAPI\AI\Context\WP_Agent_Context_Item` is the transport shape for one retrieved item:
 
 ```php
-$item = new AgentsAPI\AI\Context\RetrievedContextItem(
+$item = new AgentsAPI\AI\Context\WP_Agent_Context_Item(
 	'Use concise replies.',
 	array( 'workspace' => 'example', 'user_id' => 12 ),
-	AgentsAPI\AI\Context\ContextAuthorityTier::USER_WORKSPACE_PRIVATE,
+	AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier::USER_WORKSPACE_PRIVATE,
 	array( 'source' => 'memory', 'uri' => 'memory:user/12/preferences.md' ),
-	AgentsAPI\AI\Context\ContextConflictKind::PREFERENCE,
+	AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Kind::PREFERENCE,
 	'response_style'
 );
 ```
@@ -393,7 +395,7 @@ Conflict semantics are intentionally explicit:
 - **Preferences** may resolve by specificity. A user workspace preference can override a broad platform default preference because it is more specific to the current run.
 - **Authoritative facts** resolve by authority tier. Lower-scope memory, identity, or conversation context cannot override a higher platform/support/workspace fact.
 
-`ContextConflictResolverInterface` defines the resolver contract. `DefaultContextConflictResolver` provides the generic behavior above: authoritative facts use `authority_tier`; preferences use `specificity_then_authority`.
+`WP_Agent_Context_Conflict_Resolver` defines the resolver contract. `WP_Agent_Default_Context_Conflict_Resolver` provides the generic behavior above: authoritative facts use `authority_tier`; preferences use `specificity_then_authority`.
 
 ## Guideline Capabilities
 
@@ -477,7 +479,7 @@ The generic layer vocabulary uses `workspace` rather than `site`. Products that 
 
 ## Execution Principals
 
-`AgentsAPI\AI\AgentExecutionPrincipal` represents the actor and agent context for one runtime request. It records the acting WordPress user ID, effective agent ID/slug, auth source, request context, optional token ID, workspace ID, client ID, capability ceiling, optional caller context, and JSON-friendly request metadata.
+`AgentsAPI\AI\WP_Agent_Execution_Principal` represents the actor and agent context for one runtime request. It records the acting WordPress user ID, effective agent ID/slug, auth source, request context, optional token ID, workspace ID, client ID, capability ceiling, optional caller context, and JSON-friendly request metadata.
 
 Host plugins can resolve the current principal from REST, CLI, cron, bearer-token, or session state through the `agents_api_execution_principal` filter:
 
@@ -489,7 +491,7 @@ add_filter(
 			return $principal;
 		}
 
-		return AgentsAPI\AI\AgentExecutionPrincipal::user_session(
+		return AgentsAPI\AI\WP_Agent_Execution_Principal::user_session(
 			get_current_user_id(),
 			(string) ( $context['agent_id'] ?? '' ),
 			'rest'
@@ -507,17 +509,17 @@ Agents API provides generic authorization substrate shapes without owning produc
 ```text
 request bearer token
   -> WP_Agent_Token_Authenticator
-  -> WP_Agent_Token_Store_Interface resolves hash only
-  -> AgentExecutionPrincipal records actor, agent, token, workspace, client
+  -> WP_Agent_Token_Store resolves hash only
+  -> WP_Agent_Execution_Principal records actor, agent, token, workspace, client
   -> WP_Agent_Capability_Ceiling intersects token/client restrictions
   -> WP_Agent_WordPress_Authorization_Policy calls user_can() for the owner/user ceiling
 ```
 
-`WP_Agent_Access_Grant` models a role-based grant between a WordPress user and an agent, optionally scoped by a host workspace. Roles are generic and ordered: `viewer`, `operator`, `admin`. Concrete storage belongs to hosts via `WP_Agent_Access_Store_Interface`.
+`WP_Agent_Access_Grant` models a role-based grant between a WordPress user and an agent, optionally scoped by a host workspace. Roles are generic and ordered: `viewer`, `operator`, `admin`. Concrete storage belongs to hosts via `WP_Agent_Access_Store`.
 
 `WP_Agent_Token` models token metadata for bearer-token authentication. It stores token hash, prefix, label, expiry, last-used timestamp, optional client/workspace identifiers, and optional capability restrictions. It never exposes raw token material in metadata exports.
 
-`WP_Agent_Token_Authenticator` accepts a raw bearer token at the request edge, hashes it, asks a host token store to resolve the hash, rejects expired tokens, touches successful tokens, and returns an `AgentExecutionPrincipal` populated with token/client/workspace context.
+`WP_Agent_Token_Authenticator` accepts a raw bearer token at the request edge, hashes it, asks a host token store to resolve the hash, rejects expired tokens, touches successful tokens, and returns an `WP_Agent_Execution_Principal` populated with token/client/workspace context.
 
 ## Caller Context
 
@@ -536,7 +538,7 @@ Requests with no caller headers parse as a top-of-chain context: no caller agent
 ```php
 $principal = $authenticator->authenticate_bearer_token(
 	$raw_token,
-	AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST,
+	AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
 	array(),
 	$request // WP_REST_Request or array of request headers.
 );
@@ -554,7 +556,7 @@ The default parser depth ceiling is `WP_Agent_Caller_Context::DEFAULT_MAX_CHAIN_
 - The token/client ceiling allows the requested capability, when a ceiling allow-list exists.
 - The acting/owner WordPress user has the requested capability via `user_can()`.
 
-Hosts can replace this policy by implementing `WP_Agent_Authorization_Policy_Interface`, or pass host-owned access/token stores while keeping the generic value objects.
+Hosts can replace this policy by implementing `WP_Agent_Authorization_Policy`, or pass host-owned access/token stores while keeping the generic value objects.
 
 ## Consent Policy Boundary
 
@@ -568,7 +570,7 @@ Agents API owns a generic consent contract for runtime operations that carry dif
 
 Memory consent and transcript consent are intentionally separate. Allowing an agent to store or use consolidated memory does not imply consent to persist or share raw transcripts. Escalation is also separate so support-mode adapters can ask their own product questions without adding support-product logic to Agents API.
 
-Policies implement `WP_Agent_Consent_Policy_Interface` and return `AgentConsentDecision` values with `allowed`, `operation`, `reason`, and `audit_metadata` fields. Consumers should store those decision arrays alongside any memory write, transcript persistence/share event, or escalation event they apply.
+Policies implement `WP_Agent_Consent_Policy` and return `WP_Agent_Consent_Decision` values with `allowed`, `operation`, `reason`, and `audit_metadata` fields. Consumers should store those decision arrays alongside any memory write, transcript persistence/share event, or escalation event they apply.
 
 ```php
 $policy = new WP_Agent_Default_Consent_Policy();
@@ -610,7 +612,7 @@ wp_register_agent(
 );
 ```
 
-`AgentsAPI\AI\AgentConversationCompaction::compact()` transforms a transcript before model dispatch. The caller supplies a summarizer callable, keeping low-level model execution outside Agents API. The result includes:
+`AgentsAPI\AI\WP_Agent_Conversation_Compaction::compact()` transforms a transcript before model dispatch. The caller supplies a summarizer callable, keeping low-level model execution outside Agents API. The result includes:
 
 - `messages`: the transformed transcript, with a synthetic summary message followed by retained recent messages.
 - `metadata.compaction`: status, compacted boundary, retained count, and summary metadata for persisted transcripts.
@@ -620,15 +622,15 @@ Boundary selection preserves tool-call/tool-result integrity by default. If summ
 
 ## Conversation Loop Boundary
 
-`AgentsAPI\AI\AgentConversationLoop` is a generic loop facade. It owns the reusable mechanics that every multi-turn agent run needs:
+`AgentsAPI\AI\WP_Agent_Conversation_Loop` is a generic loop facade. It owns the reusable mechanics that every multi-turn agent run needs:
 
-- Normalizing inbound messages to `AgentMessageEnvelope`.
+- Normalizing inbound messages to `WP_Agent_Message`.
 - Optionally applying caller-supplied compaction before each turn.
 - Calling a runner adapter once per turn.
-- Validating each runner response with `AgentConversationResult`.
-- Tool-call mediation through `ToolExecutionCore` + `ToolExecutorInterface` when enabled.
-- Typed completion policy via `AgentConversationCompletionPolicyInterface`.
-- Transcript persistence via `AgentConversationTranscriptPersisterInterface`.
+- Validating each runner response with `WP_Agent_Conversation_Result`.
+- Tool-call mediation through `WP_Agent_Tool_Execution_Core` + `WP_Agent_Tool_Executor` when enabled.
+- Typed completion policy via `WP_Agent_Conversation_Completion_Policy`.
+- Transcript persistence via `WP_Agent_Transcript_Persister`.
 - Lifecycle event emission via an `on_event` callable.
 - Asking a caller-supplied `should_continue` continuation policy whether another turn is needed.
 
@@ -637,7 +639,7 @@ It does not assemble prompts, select a provider/model, implement concrete tools,
 ### Minimal usage (legacy, fully backwards compatible)
 
 ```php
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	$messages,
 	static function ( array $messages, array $context ): array {
 		return $runner->run_turn( $messages, $context );
@@ -658,7 +660,7 @@ $result = AgentsAPI\AI\AgentConversationLoop::run(
 When `tool_executor` and `tool_declarations` are provided, the loop handles the tool-call → validate → execute → message assembly cycle internally. The turn runner becomes the AI request adapter only — it sends messages to the provider and returns a response with optional `tool_calls`:
 
 ```php
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	$messages,
 	static function ( array $messages, array $context ): array {
 		// Turn runner dispatches to the AI provider and returns:
@@ -677,19 +679,19 @@ $result = AgentsAPI\AI\AgentConversationLoop::run(
 		'context'           => array( 'agent_id' => 'my-agent' ),
 
 		// Tool execution mediation (#45)
-		'tool_executor'     => $my_tool_executor,      // ToolExecutorInterface
+		'tool_executor'     => $my_tool_executor,      // WP_Agent_Tool_Executor
 		'tool_declarations' => $available_tools,        // array keyed by tool name
 
 		// Typed completion policy (#42)
-		'completion_policy' => $my_completion_policy,   // AgentConversationCompletionPolicyInterface
+		'completion_policy' => $my_completion_policy,   // WP_Agent_Conversation_Completion_Policy
 
 		// Transcript persistence (#43)
-		'transcript_persister' => $my_persister,        // AgentConversationTranscriptPersisterInterface
+		'transcript_persister' => $my_persister,        // WP_Agent_Transcript_Persister
 
 		// Iteration budgets (#47)
 		'budgets' => array(
-			new AgentsAPI\AI\IterationBudget( 'tool_calls', 20 ),
-			new AgentsAPI\AI\IterationBudget( 'tool_calls_progress_story', 5 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'tool_calls', 20 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'tool_calls_progress_story', 5 ),
 		),
 
 		// Lifecycle events (#44)
@@ -708,7 +710,7 @@ $result = AgentsAPI\AI\AgentConversationLoop::run(
 		'summarizer'         => $summarizer,
 
 		// Optional: pass the original request for transcript persistence context
-		'request' => $conversation_request,            // AgentConversationRequest
+		'request' => $conversation_request,            // WP_Agent_Conversation_Request
 	)
 );
 ```
@@ -722,7 +724,7 @@ The loop treats all adapter inputs and outputs as JSON-friendly arrays so produc
 Agents API owns generic approval primitives for runtime actions that need explicit user or policy approval before a consumer applies them. The lifecycle is:
 
 - A runtime or tool proposes an action instead of applying it immediately.
-- The proposal is emitted or stored as a generic `PendingAction` value.
+- The proposal is emitted or stored as a generic `WP_Agent_Pending_Action` value.
 - A UI, user, policy service, or resolver actor accepts or rejects the pending action.
 - The consumer adapter resolves the decision, runs handler-level permission checks, applies or discards the proposal through its own product-specific handler, and records terminal audit metadata.
 
@@ -731,13 +733,13 @@ Agents API owns the reusable contract shape only: value objects and interfaces f
 Durable pending action records include:
 
 - `action_id`, `kind`, `summary`, `preview`, and `apply_input`.
-- `workspace` as an `AgentWorkspaceScope` array (`workspace_type` + `workspace_id`), plus `agent` and `creator` actor/provenance fields.
-- `status` using `PendingActionStatus`: `pending`, `accepted`, `rejected`, `expired`, or `deleted`.
+- `workspace` as an `WP_Agent_Workspace_Scope` array (`workspace_type` + `workspace_id`), plus `agent` and `creator` actor/provenance fields.
+- `status` using `WP_Agent_Pending_Action_Status`: `pending`, `accepted`, `rejected`, `expired`, or `deleted`.
 - `created_at`, `expires_at`, and terminal `resolved_at` timestamps.
 - `resolver`, `resolution_result`, `resolution_error`, and `resolution_metadata` audit fields.
 - Generic `metadata` for JSON-serializable caller context that is not part of handler replay input.
 
-`PendingActionStoreInterface` defines the durable queue/audit surface: `store`, `get`, `list`, `summary`, `record_resolution`, `expire`, and `delete`. `PendingActionResolverInterface` defines accept/reject resolution with an explicit resolver identity. `PendingActionHandlerInterface` lets product handlers enforce handler-level permission checks before applying or rejecting a stored action.
+`WP_Agent_Pending_Action_Store` defines the durable queue/audit surface: `store`, `get`, `list`, `summary`, `record_resolution`, `expire`, and `delete`. `WP_Agent_Pending_Action_Resolver` defines accept/reject resolution with an explicit resolver identity. `WP_Agent_Pending_Action_Handler` lets product handlers enforce handler-level permission checks before applying or rejecting a stored action.
 
 Consuming products own the concrete materialization: database tables, REST routes, abilities or tool surfaces, chat/admin UI, permission ceilings, queues, jobs, workflows, and product-specific apply/reject handlers. Those concerns belong in adapters because they depend on each product's UX, authorization model, and operational semantics.
 
@@ -745,10 +747,10 @@ Package artifacts can also describe a `diff_callback` so packages can generate r
 
 ## Iteration Budgets
 
-`AgentsAPI\AI\IterationBudget` is a generic bounded-iteration primitive. It counts a named dimension (turns, tool calls, chain depth, retries) and exposes a uniform API for checking exceedance. A budget is a stateful value object — call `increment()` at each iteration, then `exceeded()` to decide whether to continue.
+`AgentsAPI\AI\WP_Agent_Iteration_Budget` is a generic bounded-iteration primitive. It counts a named dimension (turns, tool calls, chain depth, retries) and exposes a uniform API for checking exceedance. A budget is a stateful value object — call `increment()` at each iteration, then `exceeded()` to decide whether to continue.
 
 ```php
-$budget = new AgentsAPI\AI\IterationBudget( 'chain_depth', 3 );
+$budget = new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'chain_depth', 3 );
 
 $budget->name();      // 'chain_depth'
 $budget->ceiling();   // 3
@@ -768,21 +770,21 @@ $budget->remaining(); // 0
 
 ### Loop integration
 
-Pass budgets to `AgentConversationLoop::run()` via the `budgets` option. The loop enforces them at the appropriate seams:
+Pass budgets to `WP_Agent_Conversation_Loop::run()` via the `budgets` option. The loop enforces them at the appropriate seams:
 
-- **`turns`** — incremented after each turn. When an explicit `IterationBudget('turns', N)` is provided, it overrides `max_turns` and produces a `budget_exceeded` status when tripped.
+- **`turns`** — incremented after each turn. When an explicit `WP_Agent_Iteration_Budget('turns', N)` is provided, it overrides `max_turns` and produces a `budget_exceeded` status when tripped.
 - **`tool_calls`** — incremented after each tool call when tool mediation is enabled.
 - **`tool_calls_<name>`** — incremented per tool name for ping-pong protection (e.g. `tool_calls_progress_story`).
 
 ```php
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	$messages,
 	$turn_runner,
 	array(
 		'max_turns' => 10,
 		'budgets'   => array(
-			new AgentsAPI\AI\IterationBudget( 'tool_calls', 20 ),
-			new AgentsAPI\AI\IterationBudget( 'tool_calls_progress_story', 5 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'tool_calls', 20 ),
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'tool_calls_progress_story', 5 ),
 		),
 		'tool_executor'     => $executor,
 		'tool_declarations' => $tools,
@@ -797,7 +799,7 @@ if ( ( $result['status'] ?? null ) === 'budget_exceeded' ) {
 
 When a budget trips, the loop returns early with `status: 'budget_exceeded'` and `budget: '<name>'` in the result. A `budget_exceeded` event is also emitted through the `on_event` sink with `budget`, `current`, and `ceiling` in the payload.
 
-External observers tracking exotic dimensions (token cost, wall-clock, custom chain depth) can use the `on_event` hook to increment their own `IterationBudget` instances and signal the loop through the existing `should_continue` or completion policy escape hatches.
+External observers tracking exotic dimensions (token cost, wall-clock, custom chain depth) can use the `on_event` hook to increment their own `WP_Agent_Iteration_Budget` instances and signal the loop through the existing `should_continue` or completion policy escape hatches.
 
 The substrate ships only the per-execution value object. Registries, configuration persistence, and ceiling policies are consumer concerns.
 

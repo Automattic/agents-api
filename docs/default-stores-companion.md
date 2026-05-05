@@ -8,11 +8,11 @@ Issue: https://github.com/Automattic/agents-api/issues/78
 
 | Stays in `Automattic/agents-api` | Belongs in the companion package |
 | --- | --- |
-| `AgentMemoryStoreInterface` | Guideline-backed memory store implementation |
+| `WP_Agent_Memory_Store` | Guideline-backed memory store implementation |
 | Memory value objects and metadata contracts | Markdown-file-backed memory store implementation |
-| `ConversationTranscriptStoreInterface` | CPT-backed transcript session store implementation |
-| `AgentConversationTranscriptPersisterInterface` | Wiring helpers that adapt default stores into consumer loops |
-| `AgentWorkspaceScope` | Store-specific schema/bootstrap routines |
+| `WP_Agent_Conversation_Store` | CPT-backed transcript session store implementation |
+| `WP_Agent_Transcript_Persister` | Wiring helpers that adapt default stores into consumer loops |
+| `WP_Agent_Workspace_Scope` | Store-specific schema/bootstrap routines |
 | `WP_Guidelines_Substrate` polyfill and capability constants | Store-specific migrations, retention defaults, and indexing policy |
 
 The companion package should require `agents-api`. `agents-api` must not require, import, autoload, or feature-detect the companion package.
@@ -50,25 +50,25 @@ The class names above are placeholders for the companion repository. They are no
 
 ### Guideline Memory Store
 
-- Implements `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface`.
+- Implements `AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Store`.
 - Uses `WP_Guidelines_Substrate::POST_TYPE` and related constants as its storage substrate.
-- Persists supported `AgentMemoryMetadata` fields as post meta or taxonomy data where appropriate.
-- Honors `AgentMemoryScope` identity dimensions without adding product-specific vocabulary.
+- Persists supported `WP_Agent_Memory_Metadata` fields as post meta or taxonomy data where appropriate.
+- Honors `WP_Agent_Memory_Scope` identity dimensions without adding product-specific vocabulary.
 - Defers capability semantics to the guideline substrate and WordPress capability checks.
 
 ### Markdown Memory Store
 
-- Implements `AgentsAPI\Core\FilesRepository\AgentMemoryStoreInterface`.
-- Encodes `AgentMemoryScope` into deterministic filesystem paths owned by the companion.
+- Implements `AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Store`.
+- Encodes `WP_Agent_Memory_Scope` into deterministic filesystem paths owned by the companion.
 - Documents path encoding as companion policy, not substrate policy.
 - Supports compare-and-swap writes when the backing filesystem state can provide stable content hashes.
-- Declares unsupported metadata fields through `AgentMemoryStoreCapabilities` instead of silently dropping them.
+- Declares unsupported metadata fields through `WP_Agent_Memory_Store_Capabilities` instead of silently dropping them.
 
 ### CPT Transcript Store
 
-- Implements `AgentsAPI\Core\Database\Chat\ConversationTranscriptStoreInterface`.
+- Implements `AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store`.
 - Stores transcript sessions in a companion-owned CPT or table chosen by the companion.
-- Preserves `AgentWorkspaceScope`, `user_id`, `agent_id`, title, metadata, provider, model, `provider_response_id`, timestamps, and pending-session dedup fields from the contract.
+- Preserves `WP_Agent_Workspace_Scope`, `user_id`, `agent_id`, title, metadata, provider, model, `provider_response_id`, timestamps, and pending-session dedup fields from the contract.
 - Leaves chat UI listing, read state, retention scheduling, and analytics outside the generic store unless a future contract promotes them.
 
 ## Interop Tests

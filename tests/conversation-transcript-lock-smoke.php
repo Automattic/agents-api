@@ -20,7 +20,7 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 $clock = 1000;
-$lock  = new class( $clock ) implements AgentsAPI\Core\Database\Chat\ConversationTranscriptLockInterface {
+$lock  = new class( $clock ) implements AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Lock {
 	/** @var int Clock reference. */
 	private int $now;
 
@@ -81,7 +81,7 @@ agents_api_smoke_assert_equals( false, $lock->release_session_lock( 'session-2',
 agents_api_smoke_assert_equals( true, $lock->release_session_lock( 'session-2', (string) $token_c ), 'current token still releases after stale rejection', $failures, $passes );
 
 echo "\n[5] Null lock explicitly declines lock ownership:\n";
-$null_lock = new AgentsAPI\Core\Database\Chat\NullConversationTranscriptLock();
+$null_lock = new AgentsAPI\Core\Database\Chat\WP_Agent_Null_Conversation_Lock();
 agents_api_smoke_assert_equals( null, $null_lock->acquire_session_lock( 'session-3', 30 ), 'null lock returns null on acquire', $failures, $passes );
 agents_api_smoke_assert_equals( false, $null_lock->release_session_lock( 'session-3', 'token' ), 'null lock returns false on release', $failures, $passes );
 

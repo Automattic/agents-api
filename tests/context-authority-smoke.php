@@ -31,22 +31,22 @@ agents_api_smoke_assert_equals(
 		'agent_memory',
 		'conversation',
 	),
-	AgentsAPI\AI\Context\ContextAuthorityTier::ordered(),
+	AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier::ordered(),
 	'authority tiers are exposed highest authority first',
 	$failures,
 	$passes
 );
-agents_api_smoke_assert_equals( true, AgentsAPI\AI\Context\ContextAuthorityTier::is_governance_authority( 'platform_authority' ), 'platform authority is generic governance authority', $failures, $passes );
-agents_api_smoke_assert_equals( true, AgentsAPI\AI\Context\ContextAuthorityTier::is_governance_authority( 'support_authority' ), 'support authority is generic governance authority', $failures, $passes );
-agents_api_smoke_assert_equals( false, AgentsAPI\AI\Context\ContextAuthorityTier::is_governance_authority( 'user_workspace_private' ), 'user memory is not governance authority', $failures, $passes );
+agents_api_smoke_assert_equals( true, AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier::is_governance_authority( 'platform_authority' ), 'platform authority is generic governance authority', $failures, $passes );
+agents_api_smoke_assert_equals( true, AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier::is_governance_authority( 'support_authority' ), 'support authority is generic governance authority', $failures, $passes );
+agents_api_smoke_assert_equals( false, AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier::is_governance_authority( 'user_workspace_private' ), 'user memory is not governance authority', $failures, $passes );
 
 echo "\n[2] Retrieved context item exports scope, authority, and provenance:\n";
-$item = new AgentsAPI\AI\Context\RetrievedContextItem(
+$item = new AgentsAPI\AI\Context\WP_Agent_Context_Item(
 	'Use concise replies.',
 	array( 'workspace' => 'example' ),
-	AgentsAPI\AI\Context\ContextAuthorityTier::USER_WORKSPACE_PRIVATE,
+	AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier::USER_WORKSPACE_PRIVATE,
 	array( 'source' => 'memory', 'uri' => 'memory:user/1/preferences.md' ),
-	AgentsAPI\AI\Context\ContextConflictKind::PREFERENCE,
+	AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Kind::PREFERENCE,
 	'response_style',
 	array( 'updated_at' => 1713370000 )
 );
@@ -67,23 +67,23 @@ agents_api_smoke_assert_equals(
 );
 
 echo "\n[3] Preferences resolve by specificity, not broad authority:\n";
-$resolver = new AgentsAPI\AI\Context\DefaultContextConflictResolver();
+$resolver = new AgentsAPI\AI\Context\WP_Agent_Default_Context_Conflict_Resolver();
 $preference_resolutions = $resolver->resolve(
 	array(
-		new AgentsAPI\AI\Context\RetrievedContextItem(
+		new AgentsAPI\AI\Context\WP_Agent_Context_Item(
 			'Use formal replies.',
 			array( 'mode' => 'default' ),
-			AgentsAPI\AI\Context\ContextAuthorityTier::PLATFORM_AUTHORITY,
+			AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier::PLATFORM_AUTHORITY,
 			array( 'source' => 'platform-policy' ),
-			AgentsAPI\AI\Context\ContextConflictKind::PREFERENCE,
+			AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Kind::PREFERENCE,
 			'response_style'
 		),
-		new AgentsAPI\AI\Context\RetrievedContextItem(
+		new AgentsAPI\AI\Context\WP_Agent_Context_Item(
 			'Use concise replies.',
 			array( 'workspace' => 'example', 'user_id' => 12 ),
-			AgentsAPI\AI\Context\ContextAuthorityTier::USER_WORKSPACE_PRIVATE,
+			AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier::USER_WORKSPACE_PRIVATE,
 			array( 'source' => 'user-memory' ),
-			AgentsAPI\AI\Context\ContextConflictKind::PREFERENCE,
+			AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Kind::PREFERENCE,
 			'response_style'
 		),
 	)
@@ -94,20 +94,20 @@ agents_api_smoke_assert_equals( 'specificity_then_authority', $preference_resolu
 echo "\n[4] Authoritative facts cannot be overridden by lower scopes:\n";
 $fact_resolutions = $resolver->resolve(
 	array(
-		new AgentsAPI\AI\Context\RetrievedContextItem(
+		new AgentsAPI\AI\Context\WP_Agent_Context_Item(
 			'External publishing is disabled.',
 			array( 'mode' => 'support' ),
-			AgentsAPI\AI\Context\ContextAuthorityTier::SUPPORT_AUTHORITY,
+			AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier::SUPPORT_AUTHORITY,
 			array( 'source' => 'support-policy' ),
-			AgentsAPI\AI\Context\ContextConflictKind::AUTHORITATIVE_FACT,
+			AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Kind::AUTHORITATIVE_FACT,
 			'external_publishing_state'
 		),
-		new AgentsAPI\AI\Context\RetrievedContextItem(
+		new AgentsAPI\AI\Context\WP_Agent_Context_Item(
 			'External publishing is enabled.',
 			array( 'workspace' => 'example', 'user_id' => 12 ),
-			AgentsAPI\AI\Context\ContextAuthorityTier::USER_WORKSPACE_PRIVATE,
+			AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier::USER_WORKSPACE_PRIVATE,
 			array( 'source' => 'user-memory' ),
-			AgentsAPI\AI\Context\ContextConflictKind::AUTHORITATIVE_FACT,
+			AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Kind::AUTHORITATIVE_FACT,
 			'external_publishing_state'
 		),
 	)

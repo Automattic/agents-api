@@ -20,8 +20,8 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 echo "\n[1] Conversation requests normalize runner inputs:\n";
-$principal = AgentsAPI\AI\AgentExecutionPrincipal::user_session( 123, 'example-agent', AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST );
-$request   = new AgentsAPI\AI\AgentConversationRequest(
+$principal = AgentsAPI\AI\WP_Agent_Execution_Principal::user_session( 123, 'example-agent', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );
+$request   = new AgentsAPI\AI\WP_Agent_Conversation_Request(
 	array(
 		array( 'role' => 'user', 'content' => 'Hello' ),
 	),
@@ -29,8 +29,8 @@ $request   = new AgentsAPI\AI\AgentConversationRequest(
 		array(
 			'name'        => 'client/lookup',
 			'description' => 'Look up something.',
-			'executor'    => AgentsAPI\AI\Tools\RuntimeToolDeclaration::EXECUTOR_CLIENT,
-			'scope'       => AgentsAPI\AI\Tools\RuntimeToolDeclaration::SCOPE_RUN,
+			'executor'    => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::EXECUTOR_CLIENT,
+			'scope'       => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::SCOPE_RUN,
 		),
 	),
 	$principal,
@@ -40,7 +40,7 @@ $request   = new AgentsAPI\AI\AgentConversationRequest(
 	true
 );
 
-agents_api_smoke_assert_equals( AgentsAPI\AI\AgentMessageEnvelope::SCHEMA, $request->messages()[0]['schema'], 'request messages normalize to envelopes', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Message::SCHEMA, $request->messages()[0]['schema'], 'request messages normalize to envelopes', $failures, $passes );
 agents_api_smoke_assert_equals( $principal, $request->principal(), 'request exposes execution principal', $failures, $passes );
 agents_api_smoke_assert_equals( 'interactive', $request->runtimeContext()['request_kind'], 'request preserves caller runtime context', $failures, $passes );
 agents_api_smoke_assert_equals( 1, $request->maxTurns(), 'request enforces a positive turn budget', $failures, $passes );
@@ -56,9 +56,9 @@ agents_api_smoke_assert_equals(
 );
 
 echo "\n[2] Runner interfaces accept request value objects and result arrays:\n";
-$runner = new class() implements AgentsAPI\AI\AgentConversationRunnerInterface {
-	public function run( AgentsAPI\AI\AgentConversationRequest $request ): array {
-		return AgentsAPI\AI\AgentConversationResult::normalize(
+$runner = new class() implements AgentsAPI\AI\WP_Agent_Conversation_Runner {
+	public function run( AgentsAPI\AI\WP_Agent_Conversation_Request $request ): array {
+		return AgentsAPI\AI\WP_Agent_Conversation_Result::normalize(
 			array(
 				'messages' => $request->messages(),
 			)
@@ -71,11 +71,11 @@ agents_api_smoke_assert_equals( 1, count( $runner_result['messages'] ), 'runner 
 agents_api_smoke_assert_equals( array(), $runner_result['tool_execution_results'], 'runner result normalization provides empty tool results', $failures, $passes );
 
 echo "\n[3] Completion decisions and policies are immutable value contracts:\n";
-$policy = new class() implements AgentsAPI\AI\AgentConversationCompletionPolicyInterface {
-	public function recordToolResult( string $tool_name, ?array $tool_def, array $tool_result, array $runtime_context, int $turn_count ): AgentsAPI\AI\AgentConversationCompletionDecision {
+$policy = new class() implements AgentsAPI\AI\WP_Agent_Conversation_Completion_Policy {
+	public function recordToolResult( string $tool_name, ?array $tool_def, array $tool_result, array $runtime_context, int $turn_count ): AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision {
 		unset( $tool_def );
 
-		return AgentsAPI\AI\AgentConversationCompletionDecision::complete(
+		return AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision::complete(
 			'tool completed',
 			array(
 				'tool_name'    => $tool_name,
@@ -93,16 +93,16 @@ agents_api_smoke_assert_equals( 'tool completed', $decision->message(), 'complet
 agents_api_smoke_assert_equals( 2, $decision->context()['turn_count'], 'completion decision exposes context', $failures, $passes );
 agents_api_smoke_assert_equals( 'interactive', $decision->context()['request_kind'], 'completion policy receives runtime context', $failures, $passes );
 agents_api_smoke_assert_equals( true, $decision->to_array()['complete'], 'completion decision has array projection', $failures, $passes );
-agents_api_smoke_assert_equals( false, AgentsAPI\AI\AgentConversationCompletionDecision::incomplete()->isComplete(), 'incomplete decision marks incomplete', $failures, $passes );
+agents_api_smoke_assert_equals( false, AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision::incomplete()->isComplete(), 'incomplete decision marks incomplete', $failures, $passes );
 
 echo "\n[4] Transcript persisters expose a no-op implementation:\n";
-$persister = new AgentsAPI\AI\NullAgentConversationTranscriptPersister();
+$persister = new AgentsAPI\AI\WP_Agent_Null_Transcript_Persister();
 agents_api_smoke_assert_equals( '', $persister->persist( $request->messages(), $request, $runner_result ), 'null persister declines persistence with empty ID', $failures, $passes );
 
 echo "\n[5] Invalid request inputs fail early:\n";
 $threw = false;
 try {
-	new AgentsAPI\AI\AgentConversationRequest(
+	new AgentsAPI\AI\WP_Agent_Conversation_Request(
 		array( array( 'role' => 'user', 'content' => 'Hello' ) ),
 		array( 'not-a-tool-array' )
 	);

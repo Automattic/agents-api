@@ -5,7 +5,7 @@
  * @package AgentsAPI
  */
 
-use AgentsAPI\AI\Tools\ActionPolicy;
+use AgentsAPI\AI\Tools\WP_Agent_Action_Policy;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -16,7 +16,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 	class WP_Agent_Action_Policy_Resolver {
 
 		/**
-		 * @var WP_Agent_Action_Policy_Provider_Interface[]
+		 * @var WP_Agent_Action_Policy_Provider[]
 		 */
 		private array $policy_providers;
 
@@ -28,7 +28,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		/**
 		 * Constructor.
 		 *
-		 * @param WP_Agent_Action_Policy_Provider_Interface[]|null $policy_providers Host policy providers.
+		 * @param WP_Agent_Action_Policy_Provider[]|null $policy_providers Host policy providers.
 		 * @param WP_Agent_Tool_Policy_Filter|null                 $tool_filter      Shared tool filter.
 		 */
 		public function __construct( ?array $policy_providers = null, ?WP_Agent_Tool_Policy_Filter $tool_filter = null ) {
@@ -48,11 +48,11 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 			$tool_def  = is_array( $context['tool_def'] ?? null ) ? $context['tool_def'] : array();
 
 			if ( '' === $tool_name ) {
-				return ActionPolicy::DIRECT;
+				return WP_Agent_Action_Policy::DIRECT;
 			}
 
 			if ( in_array( $tool_name, $this->string_list( $context['deny'] ?? array() ), true ) ) {
-				return $this->apply_filter( ActionPolicy::FORBIDDEN, $tool_name, $mode, $context );
+				return $this->apply_filter( WP_Agent_Action_Policy::FORBIDDEN, $tool_name, $mode, $context );
 			}
 
 			$agent_policy = $this->agent_action_policy_from_context( $context );
@@ -67,7 +67,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 			}
 
 			foreach ( $this->get_policy_providers( $context ) as $provider ) {
-				$provided = ActionPolicy::normalize( $provider->get_action_policy( $context ) );
+				$provided = WP_Agent_Action_Policy::normalize( $provider->get_action_policy( $context ) );
 				if ( null !== $provided ) {
 					return $this->apply_filter( $provided, $tool_name, $mode, $context );
 				}
@@ -83,14 +83,14 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 				return $this->apply_filter( $mode_default, $tool_name, $mode, $context );
 			}
 
-			return $this->apply_filter( ActionPolicy::DIRECT, $tool_name, $mode, $context );
+			return $this->apply_filter( WP_Agent_Action_Policy::DIRECT, $tool_name, $mode, $context );
 		}
 
 		/**
 		 * Return policy providers from constructor, context, and filters.
 		 *
 		 * @param array<string, mixed> $context Runtime context.
-		 * @return WP_Agent_Action_Policy_Provider_Interface[] Providers.
+		 * @return WP_Agent_Action_Policy_Provider[] Providers.
 		 */
 		private function get_policy_providers( array $context ): array {
 			$providers = $this->policy_providers;
@@ -105,7 +105,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 			return array_values(
 				array_filter(
 					is_array( $providers ) ? $providers : array(),
-					static fn( $provider ): bool => $provider instanceof WP_Agent_Action_Policy_Provider_Interface
+					static fn( $provider ): bool => $provider instanceof WP_Agent_Action_Policy_Provider
 				)
 			);
 		}
@@ -148,7 +148,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		 */
 		private function agent_tool_override( array $policy, string $tool_name ): ?string {
 			$tools = is_array( $policy['tools'] ?? null ) ? $policy['tools'] : array();
-			return ActionPolicy::normalize( $tools[ $tool_name ] ?? null );
+			return WP_Agent_Action_Policy::normalize( $tools[ $tool_name ] ?? null );
 		}
 
 		/**
@@ -165,7 +165,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 					continue;
 				}
 
-				$policy_value = ActionPolicy::normalize( $raw_policy );
+				$policy_value = WP_Agent_Action_Policy::normalize( $raw_policy );
 				if ( null !== $policy_value ) {
 					return $policy_value;
 				}
@@ -181,7 +181,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		 * @return string|null Normalized policy or null.
 		 */
 		private function tool_declared_default( array $tool_def ): ?string {
-			return ActionPolicy::normalize( $tool_def['action_policy'] ?? null );
+			return WP_Agent_Action_Policy::normalize( $tool_def['action_policy'] ?? null );
 		}
 
 		/**
@@ -192,7 +192,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		 * @return string|null Normalized policy or null.
 		 */
 		private function mode_declared_default( array $tool_def, string $mode ): ?string {
-			return ActionPolicy::normalize( $tool_def[ 'action_policy_' . $mode ] ?? null );
+			return WP_Agent_Action_Policy::normalize( $tool_def[ 'action_policy_' . $mode ] ?? null );
 		}
 
 		/**
@@ -210,7 +210,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 			}
 
 			$filtered = apply_filters( 'agents_api_tool_action_policy', $policy, $tool_name, $mode, $context, $this );
-			return ActionPolicy::normalize( $filtered ) ?? $policy;
+			return WP_Agent_Action_Policy::normalize( $filtered ) ?? $policy;
 		}
 
 		/**

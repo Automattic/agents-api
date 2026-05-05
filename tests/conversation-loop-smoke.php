@@ -21,11 +21,11 @@ agents_api_smoke_require_module();
 
 echo "\n[1] Loop delegates turn execution and continuation policy to callers:\n";
 $turns  = array();
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages, array $context ) use ( &$turns ): array {
 		$turns[]    = $context['turn'];
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'turn ' . $context['turn'] );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'turn ' . $context['turn'] );
 
 		return array(
 			'messages'               => $messages,
@@ -53,7 +53,7 @@ agents_api_smoke_assert_equals( 2, count( $result['events'] ), 'loop preserves c
 
 echo "\n[2] Loop can apply caller-supplied compaction without owning model dispatch:\n";
 $summarized_messages = array();
-$compacted_result    = AgentsAPI\AI\AgentConversationLoop::run(
+$compacted_result    = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array(
 		array( 'role' => 'user', 'content' => 'one' ),
 		array( 'role' => 'assistant', 'content' => 'two' ),
@@ -79,12 +79,12 @@ $compacted_result    = AgentsAPI\AI\AgentConversationLoop::run(
 );
 
 agents_api_smoke_assert_equals( 2, count( $summarized_messages ), 'turn runner receives compacted transcript', $failures, $passes );
-agents_api_smoke_assert_equals( AgentsAPI\AI\AgentConversationCompaction::EVENT_COMPLETED, $compacted_result['events'][1]['type'], 'loop surfaces compaction lifecycle events', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Compaction::EVENT_COMPLETED, $compacted_result['events'][1]['type'], 'loop surfaces compaction lifecycle events', $failures, $passes );
 
 echo "\n[3] Loop validates adapter result shape:\n";
 $threw = false;
 try {
-	AgentsAPI\AI\AgentConversationLoop::run(
+	AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 		array( array( 'role' => 'user', 'content' => 'hello' ) ),
 		static function (): string {
 			return 'not an array';

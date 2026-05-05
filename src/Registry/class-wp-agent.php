@@ -157,7 +157,7 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 					throw new InvalidArgumentException( 'Agent conversation_compaction_policy property must be an array.' );
 				}
 
-				$properties['conversation_compaction_policy'] = \AgentsAPI\AI\AgentConversationCompaction::normalize_policy( $args['conversation_compaction_policy'] );
+				$properties['conversation_compaction_policy'] = \AgentsAPI\AI\WP_Agent_Conversation_Compaction::normalize_policy( $args['conversation_compaction_policy'] );
 			}
 
 			if ( isset( $args['meta'] ) ) {

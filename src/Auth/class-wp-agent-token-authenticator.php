@@ -14,11 +14,11 @@ if ( ! class_exists( 'WP_Agent_Token_Authenticator' ) ) {
 	final class WP_Agent_Token_Authenticator {
 
 		/**
-		 * @param WP_Agent_Token_Store_Interface $token_store  Token store.
-		 * @param string|null                    $token_prefix Optional token prefix this authenticator owns. Null means accept any prefix.
+		 * @param WP_Agent_Token_Store $token_store  Token store.
+		 * @param string|null          $token_prefix Optional token prefix this authenticator owns. Null means accept any prefix.
 		 */
 		public function __construct(
-			private readonly WP_Agent_Token_Store_Interface $token_store,
+			private readonly WP_Agent_Token_Store $token_store,
 			private readonly ?string $token_prefix = null,
 		) {}
 
@@ -29,7 +29,7 @@ if ( ! class_exists( 'WP_Agent_Token_Authenticator' ) ) {
 		 * @param string              $request_context Request context such as rest, cli, cron, or chat.
 		 * @param array<string,mixed> $metadata        Additional request metadata.
 		 */
-		public function authenticate_bearer_token( string $raw_token, string $request_context = AgentsAPI\AI\AgentExecutionPrincipal::REQUEST_CONTEXT_REST, array $metadata = array(), $caller_context_source = null, int $max_chain_depth = WP_Agent_Caller_Context::DEFAULT_MAX_CHAIN_DEPTH ): ?AgentsAPI\AI\AgentExecutionPrincipal {
+		public function authenticate_bearer_token( string $raw_token, string $request_context = AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, array $metadata = array(), $caller_context_source = null, int $max_chain_depth = WP_Agent_Caller_Context::DEFAULT_MAX_CHAIN_DEPTH ): ?AgentsAPI\AI\WP_Agent_Execution_Principal {
 			$raw_token = trim( $raw_token );
 			if ( '' === $raw_token ) {
 				return null;
@@ -63,7 +63,7 @@ if ( ! class_exists( 'WP_Agent_Token_Authenticator' ) ) {
 				)
 			);
 
-			return AgentsAPI\AI\AgentExecutionPrincipal::agent_token(
+			return AgentsAPI\AI\WP_Agent_Execution_Principal::agent_token(
 				$token->owner_user_id,
 				$token->agent_id,
 				$token->token_id,

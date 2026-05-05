@@ -1,6 +1,6 @@
 <?php
 /**
- * Pure-PHP smoke test for AgentConversationLoop lifecycle event hooks.
+ * Pure-PHP smoke test for WP_Agent_Conversation_Loop lifecycle event hooks.
  *
  * Run with: php tests/conversation-loop-events-smoke.php
  *
@@ -20,8 +20,8 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 // Build a tool executor.
-$executor = new class() implements AgentsAPI\AI\Tools\ToolExecutorInterface {
-	public function executeToolCall( array $tool_call, array $tool_definition, array $context = array() ): array {
+$executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
+	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
 		return array(
 			'success'   => true,
 			'tool_name' => $tool_call['tool_name'],
@@ -44,7 +44,7 @@ $tools = array(
 echo "\n[1] Events emit at correct lifecycle points during mediated execution:\n";
 $event_log = array();
 
-$result = AgentsAPI\AI\AgentConversationLoop::run(
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
 	static function ( array $messages, array $context ): array {
 		if ( 1 === $context['turn'] ) {
@@ -101,7 +101,7 @@ $event_log = array();
 
 $threw = false;
 try {
-	AgentsAPI\AI\AgentConversationLoop::run(
+	AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 		array( array( 'role' => 'user', 'content' => 'fail' ) ),
 		static function (): array {
 			throw new \RuntimeException( 'provider down' );
@@ -125,10 +125,10 @@ $failed_event = $event_log[ array_search( 'failed', $event_names ) ];
 agents_api_smoke_assert_equals( 'provider down', $failed_event['payload']['error'], 'failed event carries error message', $failures, $passes );
 
 echo "\n[3] Event sink failure does not affect loop result:\n";
-$crashing_sink_result = AgentsAPI\AI\AgentConversationLoop::run(
+$crashing_sink_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages ): array {
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'hi' );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'hi' );
 
 		return array(
 			'messages'               => $messages,
@@ -158,10 +158,10 @@ add_action(
 	2
 );
 
-$action_observed_result = AgentsAPI\AI\AgentConversationLoop::run(
+$action_observed_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'observe' ) ),
 	static function ( array $messages ): array {
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'observed' );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'observed' );
 
 		return array(
 			'messages'               => $messages,
@@ -187,10 +187,10 @@ add_action(
 	2
 );
 
-$crashing_action_result = AgentsAPI\AI\AgentConversationLoop::run(
+$crashing_action_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages ): array {
-		$messages[] = AgentsAPI\AI\AgentMessageEnvelope::text( 'assistant', 'hi' );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'hi' );
 
 		return array(
 			'messages'               => $messages,
@@ -204,7 +204,7 @@ $crashing_action_result = AgentsAPI\AI\AgentConversationLoop::run(
 agents_api_smoke_assert_equals( 2, count( $crashing_action_result['messages'] ), 'loop result is unaffected by action observer crash', $failures, $passes );
 
 echo "\n[6] No caller event sink remains optional:\n";
-$no_event_result = AgentsAPI\AI\AgentConversationLoop::run(
+$no_event_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages ): array {
 		return array(

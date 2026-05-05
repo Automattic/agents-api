@@ -38,7 +38,7 @@ $raw = array(
 	),
 	'agent'               => 'agent-reviewer',
 	'creator'             => 'user-7',
-	'status'              => AgentsAPI\AI\Approvals\PendingActionStatus::PENDING,
+	'status'              => AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status::PENDING,
 	'created_at'          => '2026-05-03T15:00:00Z',
 	'expires_at'          => '2026-05-04T15:00:00Z',
 	'resolved_at'         => null,
@@ -52,7 +52,7 @@ $raw = array(
 	),
 );
 
-$action = AgentsAPI\AI\Approvals\PendingAction::from_array( $raw );
+$action = AgentsAPI\AI\Approvals\WP_Agent_Pending_Action::from_array( $raw );
 $array  = $action->to_array();
 
 agents_api_smoke_assert_equals( $raw, $array, 'canonical array preserves all public fields', $failures, $passes );
@@ -61,11 +61,11 @@ agents_api_smoke_assert_equals( 'content_update', $action->get_kind(), 'kind get
 agents_api_smoke_assert_equals( array( 'workspace_type' => 'code_workspace', 'workspace_id' => 'Automattic/agents-api@durable-approvals' ), $action->get_workspace()->to_array(), 'workspace getter returns generic workspace scope', $failures, $passes );
 agents_api_smoke_assert_equals( 'agent-reviewer', $action->get_agent(), 'agent getter returns generic agent', $failures, $passes );
 agents_api_smoke_assert_equals( 'user-7', $action->get_creator(), 'creator getter returns generic creator', $failures, $passes );
-agents_api_smoke_assert_equals( AgentsAPI\AI\Approvals\PendingActionStatus::PENDING, $action->get_status(), 'status getter returns canonical status', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status::PENDING, $action->get_status(), 'status getter returns canonical status', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'source' => 'runtime', 'trace' => array( 'request_id' => 'req-abc' ) ), $action->get_metadata(), 'metadata getter returns metadata', $failures, $passes );
 
 echo "\n[2] Optional identity and expiration fields can be absent:\n";
-$minimal = AgentsAPI\AI\Approvals\PendingAction::from_array(
+$minimal = AgentsAPI\AI\Approvals\WP_Agent_Pending_Action::from_array(
 	array(
 		'action_id'   => 'approve-124',
 		'kind'        => 'file_patch',
@@ -79,7 +79,7 @@ $minimal = AgentsAPI\AI\Approvals\PendingAction::from_array(
 agents_api_smoke_assert_equals( null, $minimal['workspace'], 'workspace defaults to null', $failures, $passes );
 agents_api_smoke_assert_equals( null, $minimal['agent'], 'agent defaults to null', $failures, $passes );
 agents_api_smoke_assert_equals( null, $minimal['creator'], 'creator defaults to null', $failures, $passes );
-agents_api_smoke_assert_equals( AgentsAPI\AI\Approvals\PendingActionStatus::PENDING, $minimal['status'], 'status defaults to pending', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status::PENDING, $minimal['status'], 'status defaults to pending', $failures, $passes );
 agents_api_smoke_assert_equals( null, $minimal['resolved_at'], 'resolved_at defaults to null', $failures, $passes );
 agents_api_smoke_assert_equals( null, $minimal['resolver'], 'resolver defaults to null', $failures, $passes );
 agents_api_smoke_assert_equals( null, $minimal['resolution_result'], 'resolution_result defaults to null', $failures, $passes );
@@ -89,7 +89,7 @@ agents_api_smoke_assert_equals( array(), $minimal['metadata'], 'metadata default
 agents_api_smoke_assert_equals( null, $minimal['expires_at'], 'expires_at defaults to null', $failures, $passes );
 
 echo "\n[3] Terminal audit fields are preserved:\n";
-$resolved = AgentsAPI\AI\Approvals\PendingAction::from_array(
+$resolved = AgentsAPI\AI\Approvals\WP_Agent_Pending_Action::from_array(
 	array(
 		'action_id'          => 'approve-125',
 		'kind'               => 'file_patch',
@@ -102,7 +102,7 @@ $resolved = AgentsAPI\AI\Approvals\PendingAction::from_array(
 		),
 		'agent'              => 'agent-reviewer',
 		'creator'            => 'user-7',
-		'status'             => AgentsAPI\AI\Approvals\PendingActionStatus::ACCEPTED,
+		'status'             => AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status::ACCEPTED,
 		'created_at'         => '2026-05-03T15:10:00Z',
 		'resolved_at'        => '2026-05-03T15:12:00Z',
 		'resolver'           => 'user-9',
@@ -111,7 +111,7 @@ $resolved = AgentsAPI\AI\Approvals\PendingAction::from_array(
 	)
 )->to_array();
 
-agents_api_smoke_assert_equals( AgentsAPI\AI\Approvals\PendingActionStatus::ACCEPTED, $resolved['status'], 'terminal status is preserved', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status::ACCEPTED, $resolved['status'], 'terminal status is preserved', $failures, $passes );
 agents_api_smoke_assert_equals( 'user-9', $resolved['resolver'], 'resolver audit field is preserved', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'applied' => true ), $resolved['resolution_result'], 'resolution result is preserved', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'request_id' => 'req-xyz' ), $resolved['resolution_metadata'], 'resolution metadata is preserved', $failures, $passes );
@@ -132,7 +132,7 @@ $invalid_cases = array(
 foreach ( $invalid_cases as $name => $invalid_action ) {
 	$thrown = false;
 	try {
-		AgentsAPI\AI\Approvals\PendingAction::from_array( $invalid_action );
+		AgentsAPI\AI\Approvals\WP_Agent_Pending_Action::from_array( $invalid_action );
 	} catch ( InvalidArgumentException $error ) {
 		$thrown = 0 === strpos( $error->getMessage(), 'invalid_ai_pending_action:' );
 	}
