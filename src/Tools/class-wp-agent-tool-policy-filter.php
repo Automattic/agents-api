@@ -249,7 +249,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		 * @param mixed $values Raw list.
 		 * @return string[] Non-empty strings.
 		 */
-		private function string_list( $values ): array {
+		public function string_list( $values ): array {
 			$values = is_array( $values ) ? $values : array( $values );
 			$values = array_filter(
 				array_map(

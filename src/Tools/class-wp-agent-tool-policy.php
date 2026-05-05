@@ -70,22 +70,22 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 				$tools = $this->filter->apply_named_policy( $tools, $this->normalize_named_policy( $policy ), $preserve_tool );
 			}
 
-			$categories = $this->string_list( $context['categories'] ?? array() );
+			$categories = $this->filter->string_list( $context['categories'] ?? array() );
 			if ( ! empty( $categories ) ) {
 				$tools = $this->filter->filter_by_categories( $tools, $categories, $preserve_tool );
 			}
 
-			$allow_only = $this->string_list( $context['allow_only'] ?? array() );
+			$allow_only = $this->filter->string_list( $context['allow_only'] ?? array() );
 			foreach ( $policies as $policy ) {
-				$allow_only = array_merge( $allow_only, $this->string_list( $policy['allow_only'] ?? array() ) );
+				$allow_only = array_merge( $allow_only, $this->filter->string_list( $policy['allow_only'] ?? array() ) );
 			}
 			if ( ! empty( $allow_only ) ) {
 				$tools = $this->filter->filter_by_allow_only( $tools, array_values( array_unique( $allow_only ) ), $preserve_tool );
 			}
 
-			$deny = $this->string_list( $context['deny'] ?? array() );
+			$deny = $this->filter->string_list( $context['deny'] ?? array() );
 			foreach ( $policies as $policy ) {
-				$deny = array_merge( $deny, $this->string_list( $policy['deny'] ?? array() ) );
+				$deny = array_merge( $deny, $this->filter->string_list( $policy['deny'] ?? array() ) );
 			}
 			if ( ! empty( $deny ) ) {
 				$tools = array_diff_key( $tools, array_flip( array_values( array_unique( $deny ) ) ) );
@@ -192,8 +192,8 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 
 			return array(
 				'mode'       => $mode,
-				'tools'      => $this->string_list( $policy['tools'] ?? array() ),
-				'categories' => $this->string_list( $policy['categories'] ?? array() ),
+				'tools'      => $this->filter->string_list( $policy['tools'] ?? array() ),
+				'categories' => $this->filter->string_list( $policy['categories'] ?? array() ),
 			);
 		}
 
@@ -207,27 +207,8 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		private function collect_policy_list( array $policies, string $key ): array {
 			$values = array();
 			foreach ( $policies as $policy ) {
-				$values = array_merge( $values, $this->string_list( $policy[ $key ] ?? array() ) );
+				$values = array_merge( $values, $this->filter->string_list( $policy[ $key ] ?? array() ) );
 			}
-
-			return array_values( array_unique( $values ) );
-		}
-
-		/**
-		 * Normalize a list of strings.
-		 *
-		 * @param mixed $values Raw list.
-		 * @return string[] Non-empty strings.
-		 */
-		private function string_list( $values ): array {
-			$values = is_array( $values ) ? $values : array( $values );
-			$values = array_filter(
-				array_map(
-					static fn( $value ) => is_string( $value ) ? trim( $value ) : '',
-					$values
-				),
-				static fn( string $value ): bool => '' !== $value
-			);
 
 			return array_values( array_unique( $values ) );
 		}
