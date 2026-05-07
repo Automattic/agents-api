@@ -186,6 +186,7 @@ abstract class WP_Agent_Channel {
 	 * @return WP_Error|null
 	 */
 	protected function validate( array $data ): ?WP_Error {
+		unset( $data );
 		return null;
 	}
 
@@ -290,6 +291,8 @@ abstract class WP_Agent_Channel {
 	 * @return array|WP_Error      `{ session_id, reply, completed? }` or WP_Error.
 	 */
 	protected function run_agent( string $message_text, array $data ): array|WP_Error {
+		unset( $data );
+
 		if ( ! function_exists( 'wp_get_ability' ) ) {
 			return new WP_Error( 'abilities_api_missing', 'Abilities API is not loaded.' );
 		}
@@ -320,7 +323,7 @@ abstract class WP_Agent_Channel {
 			array(
 				'agent'      => $this->agent_slug,
 				'message'    => $message_text,
-				'session_id' => $this->session_id ?: null,
+				'session_id' => '' === (string) $this->session_id ? null : $this->session_id,
 			)
 		);
 	}
@@ -338,13 +341,8 @@ abstract class WP_Agent_Channel {
 	protected function deliver_result( $result ): void {
 		if ( is_wp_error( $result ) ) {
 			$this->response_status = 'failed';
-			$this->send_error( $result->get_error_message() ?: 'Sorry, I could not process your message right now.' );
-			return;
-		}
-
-		if ( ! is_array( $result ) ) {
-			$this->response_status = 'failed';
-			$this->send_error( 'Agent returned an unexpected result.' );
+			$message               = $result->get_error_message();
+			$this->send_error( '' !== $message ? $message : 'Sorry, I could not process your message right now.' );
 			return;
 		}
 
