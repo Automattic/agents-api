@@ -1,0 +1,445 @@
+<?php
+/**
+ * Abstract base class for agent messaging channels.
+ *
+ * A "channel" is a transport that connects an external messaging surface
+ * (Telegram, Slack, WhatsApp, Email, …) to a chat ability registered through
+ * the WordPress Abilities API. The channel handles transport-specific I/O
+ * (how to extract a user message from a webhook payload, how to send a reply
+ * back) while delegating the actual agent run to the configured chat ability.
+ *
+ * Two entry points:
+ * - {@see receive()}: webhook side. Default schedules an async job; override
+ *   for concurrency control (per-conversation lock, debounced drain).
+ * - {@see handle()}: job side. Runs the full pipeline:
+ *     validate → extract message → look up session → run agent →
+ *     persist session → deliver responses → lifecycle hooks.
+ *
+ * This base class is intentionally agnostic about the agent runtime. The
+ * default `run_agent()` calls the chat ability registered under the slug
+ * returned by the `wp_agent_channel_chat_ability` filter (default
+ * `openclawp/chat`); override `run_agent()` to plug in a different runtime.
+ *
+ * Mirrors a similar pattern used internally at WordPress.com to drive
+ * Telegram, Slack, and other agent surfaces. The host-specific orchestration
+ * (multi-tenant user resolution, blog switching, internal agent runtime) is
+ * intentionally not part of this contract — implementations that need those
+ * concerns should add their own subclass layer between this base class and
+ * the concrete channel.
+ *
+ * @package AgentsAPI
+ */
+
+namespace AgentsAPI\AI\Channels;
+
+use WP_Error;
+
+defined( 'ABSPATH' ) || exit;
+
+abstract class WP_Agent_Channel {
+
+	/**
+	 * Sentinel error code that {@see validate()} can return to drop a
+	 * message silently — no send_error(), no agent invocation. Use for
+	 * loop-prevention (own-bot messages bouncing back), allowlist misses,
+	 * and well-formed-but-uninteresting webhook events. Anything else
+	 * returning a WP_Error from validate() will be reported via send_error.
+	 */
+	public const SILENT_SKIP_CODE = 'silent_skip';
+
+	/**
+	 * The agent slug this channel forwards messages to. Resolved against
+	 * the agent registry (`wp_register_agent`) by the chat ability.
+	 *
+	 * @var string
+	 */
+	protected string $agent_slug;
+
+	/**
+	 * Session ID for conversation continuity, resolved during handle().
+	 *
+	 * @var string|null
+	 */
+	protected ?string $session_id = null;
+
+	/**
+	 * Delivery outcome: null = no response attempted, 'sent' = delivered,
+	 * 'failed' = at least one send_response()/send_error() call failed.
+	 * Set by deliver_result(); checked in on_complete() for stats.
+	 *
+	 * @var string|null
+	 */
+	protected ?string $response_status = null;
+
+	/**
+	 * @param string $agent_slug Slug of the registered agent. Empty string is allowed
+	 *                           when the chat ability resolves the target agent itself.
+	 */
+	public function __construct( string $agent_slug = '' ) {
+		$this->agent_slug = $agent_slug;
+	}
+
+	// ─── Channel identity (abstract) ───────────────────────────────────
+
+	/**
+	 * Stable identifier for the channel type and instance. Used together with
+	 * the per-conversation `external_id` to scope sessions across redeploys.
+	 *
+	 * Convention: `<channel-type>` for single-instance channels (`slack`,
+	 * `whatsapp`); `<channel-type>_<bot-or-account>` when one site runs
+	 * multiple instances of the same channel (`telegram_<bot-name>`).
+	 *
+	 * @return string
+	 */
+	abstract public function get_external_id_provider(): string;
+
+	/**
+	 * The channel-side ID of the conversation. Telegram chat ID, Slack
+	 * channel ID, WhatsApp JID — whatever the channel uses to address a
+	 * single thread. Returning null disables per-conversation isolation.
+	 *
+	 * @return string|null
+	 */
+	abstract public function get_external_id(): ?string;
+
+	/**
+	 * Human-readable client name used for tracing, attribution, and any
+	 * agent-side behavior that varies per channel. Lowercase, hyphenated.
+	 *
+	 * @return string
+	 */
+	abstract public function get_client_name(): string;
+
+	// ─── I/O (abstract) ────────────────────────────────────────────────
+
+	/**
+	 * Convert the channel-specific webhook payload into the user message
+	 * string that gets handed to the agent. Override to extract text from
+	 * non-text messages (download images, transcribe voice, follow links).
+	 *
+	 * @param array $data The same map passed to receive() / handle().
+	 * @return string The user message to send to the agent.
+	 */
+	abstract protected function extract_message( array $data ): string;
+
+	/**
+	 * Send one assistant response back through the channel. Called once per
+	 * assistant message in the agent result (most chat abilities return a
+	 * single `reply`, but the contract supports multiple).
+	 *
+	 * Implementations should throw or log on send failure; the channel will
+	 * mark `response_status = 'failed'` if you set it explicitly.
+	 *
+	 * @param string $text The assistant's response text.
+	 */
+	abstract protected function send_response( string $text ): void;
+
+	/**
+	 * Send an error message back through the channel. Called by the pipeline
+	 * when validation, agent execution, or response generation fails.
+	 *
+	 * @param string $text Error message text.
+	 */
+	abstract protected function send_error( string $text ): void;
+
+	/**
+	 * Send a one-shot notification through the channel. Used for completion
+	 * pings from long-running tasks (deep research, scheduled jobs) that
+	 * already finished outside this channel's normal request/response loop
+	 * and need to deliver a result back to the user.
+	 *
+	 * Distinct from {@see send_response()} / {@see send_error()} because
+	 * those are protected lifecycle hooks bound to handle(); this is a
+	 * public, standalone entry point that does not require an active
+	 * agent run.
+	 *
+	 * Default body is a no-op so existing concrete subclasses don't fatal
+	 * on "contains 1 abstract method" during a deploy. Subclasses SHOULD
+	 * override.
+	 *
+	 * @param string $title Short title (one line).
+	 * @param string $body  Body text. May be multi-line plain text.
+	 * @param string $url   Optional URL to include / linkify. Empty for none.
+	 */
+	public function send_notification( string $title, string $body, string $url = '' ): void {}
+
+	// ─── Async dispatch (abstract) ─────────────────────────────────────
+
+	/**
+	 * The action hook fired by `receive()` to schedule the job side. The
+	 * subclass must register a handler for this hook that calls `handle()`
+	 * with the same payload, e.g.:
+	 *
+	 *     add_action( 'wp_agent_channel_my_channel', [ $this, 'handle' ] );
+	 *
+	 * @return string
+	 */
+	abstract protected function get_job_action(): string;
+
+	// ─── Lifecycle hooks (overridable, default no-ops) ─────────────────
+
+	/**
+	 * Validate the channel-specific webhook payload before processing.
+	 * Return a WP_Error to short-circuit; null to continue.
+	 *
+	 * @param array $data Per-message data from receive() / handle().
+	 * @return WP_Error|null
+	 */
+	protected function validate( array $data ): ?WP_Error {
+		return null;
+	}
+
+	/** Called before agent execution. Use for typing indicators, reactions. */
+	protected function on_processing_start(): void {}
+
+	/** Called after agent execution (success or failure). Use to clean up indicators. */
+	protected function on_processing_end(): void {}
+
+	/** Called after responses are delivered. Use for stats, lock release, post-run side effects. */
+	protected function on_complete(): void {}
+
+	// ─── Webhook side ──────────────────────────────────────────────────
+
+	/**
+	 * Receive an incoming message from the external platform. Default
+	 * schedules a single async job via `wp_schedule_single_event`; override
+	 * for concurrency control (per-conversation lock + pending queue,
+	 * debounced drain, durable persistence).
+	 *
+	 * @param array $data Channel-specific message data passed to the job.
+	 */
+	public function receive( array $data ): void {
+		$action = $this->get_job_action();
+		if ( '' === $action ) {
+			// No async dispatch configured — run synchronously.
+			$this->handle( $data );
+			return;
+		}
+		wp_schedule_single_event( time(), $action, array( $data ) );
+	}
+
+	// ─── Job side: full pipeline ───────────────────────────────────────
+
+	/**
+	 * Process an incoming message through the full pipeline.
+	 *
+	 *   validate
+	 *     → extract user message
+	 *     → look up session_id (if any) for this external_id
+	 *     → on_processing_start
+	 *     → run_agent (calls the chat ability)
+	 *     → on_processing_end
+	 *     → persist any new session_id
+	 *     → deliver_result (send_response / send_error)
+	 *     → on_complete
+	 *
+	 * @param array $data Channel-specific per-message data.
+	 * @return array|WP_Error Agent result or error.
+	 */
+	public function handle( array $data ): array|WP_Error {
+		$error = $this->validate( $data );
+		if ( null !== $error ) {
+			// 'silent_skip' code = the message is one we deliberately don't
+			// react to (loop-prevention drops, allowlist misses, malformed
+			// non-chat events). Skip send_error so the user isn't pinged
+			// with diagnostic noise.
+			if ( self::SILENT_SKIP_CODE !== $error->get_error_code() ) {
+				$this->send_error( $error->get_error_message() );
+			}
+			return $error;
+		}
+
+		$message_text = trim( $this->extract_message( $data ) );
+		if ( '' === $message_text ) {
+			return new WP_Error( 'empty_message', 'No message text to process.' );
+		}
+
+		$this->session_id = $this->lookup_session_id();
+
+		$this->on_processing_start();
+
+		try {
+			$result = $this->run_agent( $message_text, $data );
+		} finally {
+			$this->on_processing_end();
+		}
+
+		try {
+			$this->deliver_result( $result );
+		} finally {
+			$this->on_complete();
+		}
+
+		return $result;
+	}
+
+	// ─── Pluggable: agent runner ───────────────────────────────────────
+
+	/**
+	 * Run the agent for one user message and return its result.
+	 *
+	 * Default implementation calls the chat ability registered under the slug
+	 * returned by the `wp_agent_channel_chat_ability` filter (default
+	 * `openclawp/chat`). Override to plug in a different runtime — a
+	 * direct `wp_ai_client_prompt()` call, an external HTTP service, or a
+	 * host-specific agent factory.
+	 *
+	 * @param string $message_text The user-message string from extract_message().
+	 * @param array  $data         The original webhook payload, in case the runner
+	 *                             needs metadata beyond the text (sender, timestamp).
+	 * @return array|WP_Error      `{ session_id, reply, completed? }` or WP_Error.
+	 */
+	protected function run_agent( string $message_text, array $data ): array|WP_Error {
+		if ( ! function_exists( 'wp_get_ability' ) ) {
+			return new WP_Error( 'abilities_api_missing', 'Abilities API is not loaded.' );
+		}
+
+		/**
+		 * Filter the chat ability slug used by channels by default.
+		 *
+		 * @param string $slug       Ability slug. Default 'openclawp/chat'.
+		 * @param string $agent_slug The agent slug being targeted.
+		 * @param string $channel    Concrete channel class name.
+		 */
+		$slug = (string) apply_filters(
+			'wp_agent_channel_chat_ability',
+			'openclawp/chat',
+			$this->agent_slug,
+			static::class
+		);
+
+		$ability = wp_get_ability( $slug );
+		if ( ! $ability ) {
+			return new WP_Error(
+				'chat_ability_unavailable',
+				sprintf( 'Chat ability "%s" is not registered.', $slug )
+			);
+		}
+
+		return $ability->execute(
+			array(
+				'agent'      => $this->agent_slug,
+				'message'    => $message_text,
+				'session_id' => $this->session_id ?: null,
+			)
+		);
+	}
+
+	// ─── Result delivery ───────────────────────────────────────────────
+
+	/**
+	 * Extract assistant text from the agent result and dispatch it through
+	 * the channel via send_response() / send_error(). Persists any new
+	 * session_id returned in the result so the next inbound message
+	 * continues the same conversation.
+	 *
+	 * @param array|WP_Error $result Agent run result.
+	 */
+	protected function deliver_result( $result ): void {
+		if ( is_wp_error( $result ) ) {
+			$this->response_status = 'failed';
+			$this->send_error( $result->get_error_message() ?: 'Sorry, I could not process your message right now.' );
+			return;
+		}
+
+		if ( ! is_array( $result ) ) {
+			$this->response_status = 'failed';
+			$this->send_error( 'Agent returned an unexpected result.' );
+			return;
+		}
+
+		// Persist session continuity before delivering the reply, so a slow
+		// send_response() doesn't lose the new session if it errors.
+		if ( ! empty( $result['session_id'] ) && (string) $result['session_id'] !== $this->session_id ) {
+			$this->store_session_id( (string) $result['session_id'] );
+		}
+
+		$replies = $this->extract_replies( $result );
+		if ( empty( $replies ) ) {
+			$this->response_status = 'failed';
+			$this->send_error( 'Sorry, I could not generate a response.' );
+			return;
+		}
+
+		foreach ( $replies as $text ) {
+			$this->send_response( $text );
+		}
+		$this->response_status = 'sent';
+	}
+
+	/**
+	 * Pull assistant text out of the agent result. Default supports two
+	 * shapes: `{ reply: string }` (openclawp/chat single-turn) and
+	 * `{ messages: [ { role, content } ] }` (multi-message). Override for
+	 * exotic result shapes.
+	 *
+	 * @param array $result
+	 * @return string[]
+	 */
+	protected function extract_replies( array $result ): array {
+		if ( ! empty( $result['reply'] ) ) {
+			return array( (string) $result['reply'] );
+		}
+
+		if ( ! empty( $result['messages'] ) && is_array( $result['messages'] ) ) {
+			$texts = array();
+			foreach ( $result['messages'] as $message ) {
+				if ( ! is_array( $message ) ) {
+					continue;
+				}
+				$role = $message['role'] ?? '';
+				if ( 'assistant' !== $role ) {
+					continue;
+				}
+				$content = (string) ( $message['content'] ?? '' );
+				if ( '' !== $content ) {
+					$texts[] = $content;
+				}
+			}
+			return $texts;
+		}
+
+		return array();
+	}
+
+	// ─── Session persistence (option-based default) ────────────────────
+
+	/**
+	 * Storage key for the external_id ↔ session_id mapping. Subclasses can
+	 * override to change scope (per-user, per-blog, custom table). Default
+	 * is a single site option keyed by hashed `provider:external_id`.
+	 *
+	 * @return string
+	 */
+	protected function session_storage_key(): string {
+		$external_id = $this->get_external_id() ?? '';
+		return 'wp_agent_channel_session_' . md5(
+			$this->get_external_id_provider() . ':' . $external_id
+		);
+	}
+
+	/**
+	 * Read the persisted session_id for this channel + external_id.
+	 *
+	 * @return string|null
+	 */
+	protected function lookup_session_id(): ?string {
+		if ( null === $this->get_external_id() ) {
+			return null;
+		}
+		$value = get_option( $this->session_storage_key(), '' );
+		return '' === $value ? null : (string) $value;
+	}
+
+	/**
+	 * Persist the session_id for this channel + external_id.
+	 *
+	 * @param string $session_id
+	 */
+	protected function store_session_id( string $session_id ): void {
+		if ( null === $this->get_external_id() ) {
+			return;
+		}
+		update_option( $this->session_storage_key(), $session_id, false );
+	}
+}
