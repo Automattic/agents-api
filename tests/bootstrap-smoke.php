@@ -152,6 +152,7 @@ echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
 	'Approvals',
 	'Auth',
+	'Channels',
 	'Consent',
 	'Context',
 	'Guidelines',

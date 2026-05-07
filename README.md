@@ -19,6 +19,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 ## What Agents API Owns
 
 - Agent registration and lookup.
+- Messaging channel base class (`WP_Agent_Channel`) that maps an external transport (Telegram, Slack, WhatsApp, Email, …) onto the Abilities-API chat surface, with shared session continuity and lifecycle hooks.
 - Runtime message, request, result, and completion value objects.
 - Agent execution principal/context value objects.
 - Agent access grant, token, token authenticator, authorization policy, and capability ceiling contracts.

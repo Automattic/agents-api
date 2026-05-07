@@ -1,0 +1,269 @@
+<?php
+/**
+ * Pure-PHP smoke test for WP_Agent_Channel.
+ *
+ * Run with: php tests/channels-smoke.php
+ *
+ * Covers the full pipeline (validate → extract → run_agent → deliver →
+ * lifecycle hooks → session persistence) using a fake chat ability and
+ * an in-memory option store. No WordPress required.
+ *
+ * @package AgentsAPI\Tests
+ */
+
+defined( 'ABSPATH' ) || define( 'ABSPATH', __DIR__ . '/' );
+
+$failures = array();
+$passes   = 0;
+
+echo "agents-api-channels-smoke\n";
+
+// ─── Minimal WP stubs (this test does not load the full bootstrap) ──
+
+class WP_Error {
+	public function __construct(
+		private string $code = '',
+		private string $message = ''
+	) {}
+	public function get_error_code(): string { return $this->code; }
+	public function get_error_message(): string { return $this->message; }
+}
+
+function is_wp_error( $value ): bool {
+	return $value instanceof WP_Error;
+}
+
+$GLOBALS['__channel_smoke_options']   = array();
+$GLOBALS['__channel_smoke_scheduled'] = array();
+$GLOBALS['__channel_smoke_abilities'] = array();
+$GLOBALS['__channel_smoke_filters']   = array();
+
+function get_option( string $key, $default = '' ) {
+	return $GLOBALS['__channel_smoke_options'][ $key ] ?? $default;
+}
+
+function update_option( string $key, $value, $autoload = null ): bool {
+	unset( $autoload );
+	$GLOBALS['__channel_smoke_options'][ $key ] = $value;
+	return true;
+}
+
+function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool {
+	$GLOBALS['__channel_smoke_scheduled'][] = array(
+		'timestamp' => $timestamp,
+		'hook'      => $hook,
+		'args'      => $args,
+	);
+	return true;
+}
+
+function wp_get_ability( string $name ) {
+	return $GLOBALS['__channel_smoke_abilities'][ $name ] ?? null;
+}
+
+function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
+	unset( $accepted_args );
+	$GLOBALS['__channel_smoke_filters'][ $hook ][ $priority ][] = $cb;
+}
+
+function apply_filters( string $hook, $value, ...$args ) {
+	$callbacks = $GLOBALS['__channel_smoke_filters'][ $hook ] ?? array();
+	ksort( $callbacks );
+	foreach ( $callbacks as $priority_callbacks ) {
+		foreach ( $priority_callbacks as $cb ) {
+			$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
+		}
+	}
+	return $value;
+}
+
+function smoke_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {
+	if ( $expected === $actual ) {
+		++$passes;
+		echo "  PASS {$name}\n";
+		return;
+	}
+	$failures[] = $name;
+	echo "  FAIL {$name}\n";
+	echo '    expected: ' . var_export( $expected, true ) . "\n";
+	echo '    actual:   ' . var_export( $actual, true ) . "\n";
+}
+
+require_once __DIR__ . '/../src/Channels/class-wp-agent-channel.php';
+
+// ─── Fakes ──────────────────────────────────────────────────────────
+
+class Fake_Ability {
+	public array $calls = array();
+	public function __construct( private mixed $next_result ) {}
+	public function execute( array $input ) {
+		$this->calls[] = $input;
+		return $this->next_result;
+	}
+}
+
+class Test_Channel extends \AgentsAPI\AI\Channels\WP_Agent_Channel {
+
+	public string $external_id;
+	public array $sent      = array();
+	public array $errors    = array();
+	public array $lifecycle = array();
+
+	public function __construct( string $external_id, string $agent_slug = 'test-agent' ) {
+		parent::__construct( $agent_slug );
+		$this->external_id = $external_id;
+	}
+
+	public function get_external_id_provider(): string { return 'test-channel'; }
+	public function get_external_id(): ?string { return $this->external_id; }
+	public function get_client_name(): string { return 'test-channel'; }
+	protected function get_job_action(): string { return 'test_channel_handle'; }
+
+	protected function extract_message( array $data ): string {
+		return (string) ( $data['text'] ?? '' );
+	}
+
+	protected function send_response( string $text ): void {
+		$this->sent[] = $text;
+	}
+
+	protected function send_error( string $text ): void {
+		$this->errors[] = $text;
+	}
+
+	protected function on_processing_start(): void { $this->lifecycle[] = 'start'; }
+	protected function on_processing_end(): void { $this->lifecycle[] = 'end'; }
+	protected function on_complete(): void { $this->lifecycle[] = 'complete'; }
+}
+
+// ─── Tests ──────────────────────────────────────────────────────────
+
+// 1. Happy path: chat ability returns reply + session_id.
+$happy_ability = new Fake_Ability(
+	array( 'reply' => 'Hello from the agent', 'session_id' => 'sess-123', 'completed' => true )
+);
+$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $happy_ability;
+
+$ch = new Test_Channel( 'chat-A' );
+$ch->handle( array( 'text' => 'hi there' ) );
+
+smoke_assert( array( 'Hello from the agent' ), $ch->sent, 'happy_path_send_response', $failures, $passes );
+smoke_assert( array(), $ch->errors, 'happy_path_no_error', $failures, $passes );
+smoke_assert( array( 'start', 'end', 'complete' ), $ch->lifecycle, 'happy_path_lifecycle_order', $failures, $passes );
+smoke_assert(
+	array( array( 'agent' => 'test-agent', 'message' => 'hi there', 'session_id' => null ) ),
+	$happy_ability->calls,
+	'happy_path_ability_input_first_turn',
+	$failures,
+	$passes
+);
+
+// 2. Session continuity: second turn passes the stored session_id.
+$happy_ability2 = new Fake_Ability(
+	array( 'reply' => 'second reply', 'session_id' => 'sess-123', 'completed' => true )
+);
+$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $happy_ability2;
+
+$ch2 = new Test_Channel( 'chat-A' );
+$ch2->handle( array( 'text' => 'follow-up' ) );
+
+smoke_assert(
+	array( array( 'agent' => 'test-agent', 'message' => 'follow-up', 'session_id' => 'sess-123' ) ),
+	$happy_ability2->calls,
+	'second_turn_passes_stored_session_id',
+	$failures,
+	$passes
+);
+
+// 3. Different external_id gets its own session.
+$other_ability = new Fake_Ability(
+	array( 'reply' => 'reply for B', 'session_id' => 'sess-B-456', 'completed' => true )
+);
+$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $other_ability;
+
+$ch3 = new Test_Channel( 'chat-B' );
+$ch3->handle( array( 'text' => 'hi' ) );
+
+smoke_assert(
+	true,
+	array_key_exists( 'session_id', $other_ability->calls[0] ) && null === $other_ability->calls[0]['session_id'],
+	'different_external_id_starts_fresh_session',
+	$failures,
+	$passes
+);
+
+// 4. Empty message short-circuits with WP_Error, no agent call.
+$null_ability = new Fake_Ability( array( 'reply' => 'should not be called' ) );
+$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $null_ability;
+
+$ch4    = new Test_Channel( 'chat-empty' );
+$result = $ch4->handle( array( 'text' => '   ' ) );
+
+smoke_assert( true, $result instanceof WP_Error, 'empty_message_returns_wp_error', $failures, $passes );
+smoke_assert( 'empty_message', $result->get_error_code(), 'empty_message_error_code', $failures, $passes );
+smoke_assert( array(), $null_ability->calls, 'empty_message_skips_agent', $failures, $passes );
+
+// 5. Ability returns WP_Error → send_error fires.
+$error_ability = new Fake_Ability( new WP_Error( 'agent_blew_up', 'something exploded' ) );
+$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $error_ability;
+
+$ch5 = new Test_Channel( 'chat-err' );
+$ch5->handle( array( 'text' => 'try this' ) );
+
+smoke_assert( array( 'something exploded' ), $ch5->errors, 'agent_error_routed_to_send_error', $failures, $passes );
+smoke_assert( array(), $ch5->sent, 'agent_error_no_response', $failures, $passes );
+
+// 6. Filter overrides the chat ability slug.
+$GLOBALS['__channel_smoke_abilities']['my-plugin/custom-chat'] = new Fake_Ability(
+	array( 'reply' => 'from custom ability' )
+);
+add_filter( 'wp_agent_channel_chat_ability', static fn( $slug ) => 'my-plugin/custom-chat' );
+
+$ch6 = new Test_Channel( 'chat-custom' );
+$ch6->handle( array( 'text' => 'route me elsewhere' ) );
+
+smoke_assert(
+	array( 'from custom ability' ),
+	$ch6->sent,
+	'filter_overrides_chat_ability_slug',
+	$failures,
+	$passes
+);
+
+// 7. validate() returning 'silent_skip' WP_Error drops the message — no send_error, no agent call.
+class Silent_Skip_Channel extends Test_Channel {
+	protected function validate( array $data ): ?WP_Error {
+		if ( ! empty( $data['from_me'] ) ) {
+			return new WP_Error( \AgentsAPI\AI\Channels\WP_Agent_Channel::SILENT_SKIP_CODE, 'self_message' );
+		}
+		return null;
+	}
+}
+$silent_ability = new Fake_Ability( array( 'reply' => 'should not be called' ) );
+$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $silent_ability;
+
+$ch_silent = new Silent_Skip_Channel( 'chat-silent' );
+$result    = $ch_silent->handle( array( 'text' => 'echo of own reply', 'from_me' => true ) );
+
+smoke_assert( true, $result instanceof WP_Error, 'silent_skip_returns_wp_error', $failures, $passes );
+smoke_assert( array(), $ch_silent->errors, 'silent_skip_no_send_error', $failures, $passes );
+smoke_assert( array(), $ch_silent->sent, 'silent_skip_no_send_response', $failures, $passes );
+smoke_assert( array(), $silent_ability->calls, 'silent_skip_no_agent_call', $failures, $passes );
+
+// 8. receive() schedules an async event by default.
+$GLOBALS['__channel_smoke_scheduled'] = array();
+$ch7 = new Test_Channel( 'chat-async' );
+$ch7->receive( array( 'text' => 'queue me' ) );
+
+smoke_assert( 1, count( $GLOBALS['__channel_smoke_scheduled'] ), 'receive_schedules_one_event', $failures, $passes );
+smoke_assert( 'test_channel_handle', $GLOBALS['__channel_smoke_scheduled'][0]['hook'], 'receive_uses_job_action', $failures, $passes );
+smoke_assert( array( array( 'text' => 'queue me' ) ), $GLOBALS['__channel_smoke_scheduled'][0]['args'], 'receive_passes_payload', $failures, $passes );
+
+// ─── Done ───────────────────────────────────────────────────────────
+
+if ( $failures ) {
+	echo "\nFAILED: " . count( $failures ) . " channel assertions failed.\n";
+	exit( 1 );
+}
+
+echo "\nAll {$passes} channel assertions passed.\n";
