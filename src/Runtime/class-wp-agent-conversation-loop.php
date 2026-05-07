@@ -43,6 +43,13 @@ class WP_Agent_Conversation_Loop {
 	 * - `budgets` (WP_Agent_Iteration_Budget[]): Named iteration budgets for bounded execution.
 	 * - `context` (array): Caller-owned context passed to adapters.
 	 * - `should_continue` (callable|null): Caller-owned continuation policy.
+	 *   Defaults to `null` in the legacy path (which causes the loop to break
+	 *   after one turn unless the caller supplies a callback). When tool
+	 *   mediation is enabled (`tool_executor` + `tool_declarations` provided),
+	 *   defaults to a `__return_true` callable so the loop continues until
+	 *   `tool_calls` is empty (natural completion), `completion_policy` fires,
+	 *   `max_turns` is reached, or a budget is exceeded — i.e. the caller no
+	 *   longer needs to supply this option just to get multi-turn mediation.
 	 * - `compaction_policy` (array|null): Optional compaction policy.
 	 * - `summarizer` (callable|null): Optional compaction summarizer.
 	 * - `tool_executor` (WP_Agent_Tool_Executor|null): Tool execution adapter.
@@ -62,9 +69,9 @@ class WP_Agent_Conversation_Loop {
 	public static function run( array $messages, callable $turn_runner, array $options = array() ): array {
 		$max_turns             = self::max_turns( $options['max_turns'] ?? 1 );
 		$context               = isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array();
-		$should_continue       = $options['should_continue'] ?? null;
 		$tool_executor         = self::resolve_tool_executor( $options );
 		$tool_declarations     = self::resolve_tool_declarations( $options );
+		$should_continue       = self::resolve_should_continue( $options, $tool_executor, $tool_declarations );
 		$completion_policy     = self::resolve_completion_policy( $options );
 		$transcript_persister  = self::resolve_transcript_persister( $options );
 		$transcript_lock       = self::resolve_transcript_lock( $options );
@@ -505,6 +512,47 @@ class WP_Agent_Conversation_Loop {
 	private static function resolve_tool_executor( array $options ): ?WP_Agent_Tool_Executor {
 		$executor = $options['tool_executor'] ?? null;
 		return $executor instanceof WP_Agent_Tool_Executor ? $executor : null;
+	}
+
+	/**
+	 * Resolve the should_continue callable for this run.
+	 *
+	 * When tool mediation is enabled, defaults to a continue-always callable so
+	 * `max_turns`, `completion_policy`, budgets, and natural completion (empty
+	 * `tool_calls`) become the only stop conditions. In the legacy path (no
+	 * mediation), preserves the historical break-after-1 behavior unless the
+	 * caller supplies their own continuation policy.
+	 *
+	 * @param array                       $options           Loop options.
+	 * @param WP_Agent_Tool_Executor|null $tool_executor     Resolved tool executor.
+	 * @param array                       $tool_declarations Resolved tool declarations.
+	 * @return callable|null
+	 */
+	private static function resolve_should_continue(
+		array $options,
+		?WP_Agent_Tool_Executor $tool_executor,
+		array $tool_declarations
+	) {
+		if ( array_key_exists( 'should_continue', $options ) ) {
+			$caller_supplied = $options['should_continue'];
+			if ( is_callable( $caller_supplied ) ) {
+				return $caller_supplied;
+			}
+			// Caller passed a non-callable value (e.g. null) — preserve the
+			// legacy break-after-1 behavior they explicitly opted into.
+			return null;
+		}
+
+		// No caller-supplied policy. When mediation is enabled, default to
+		// "keep going" so the loop's other stop conditions can do their job.
+		$mediation_enabled = null !== $tool_executor && ! empty( $tool_declarations );
+		if ( $mediation_enabled ) {
+			return static function (): bool {
+				return true;
+			};
+		}
+
+		return null;
 	}
 
 	/**

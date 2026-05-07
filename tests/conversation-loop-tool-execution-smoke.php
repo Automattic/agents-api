@@ -184,4 +184,73 @@ agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'executor was n
 agents_api_smoke_assert_equals( 1, count( $validation_result['tool_execution_results'] ), 'validation error is recorded as tool result', $failures, $passes );
 agents_api_smoke_assert_equals( false, $validation_result['tool_execution_results'][0]['result']['success'], 'validation error marks result as failed', $failures, $passes );
 
+echo "\n[5] Multi-turn mediation runs without an explicit should_continue option:\n";
+$executor->executed   = array();
+$default_turn_count   = 0;
+
+$default_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'start' ) ),
+	static function ( array $messages, array $context ) use ( &$default_turn_count ): array {
+		++$default_turn_count;
+
+		if ( 1 === $context['turn'] ) {
+			return array(
+				'messages'   => $messages,
+				'tool_calls' => array(
+					array(
+						'name'       => 'client/summarize',
+						'parameters' => array( 'text' => 'turn ' . $context['turn'] ),
+					),
+				),
+			);
+		}
+
+		return array(
+			'messages'   => $messages,
+			'content'    => 'All done.',
+			'tool_calls' => array(),
+		);
+	},
+	array(
+		'max_turns'         => 5,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+		// NOTE: no should_continue option here — the loop should default to a
+		// continue-always policy when mediation is enabled, so this test fails
+		// before #96's fix and passes after.
+	)
+);
+
+agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'mediation executor ran once with no explicit should_continue', $failures, $passes );
+agents_api_smoke_assert_equals( 2, $default_turn_count, 'mediation loop ran two turns with no explicit should_continue', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $default_result['tool_execution_results'] ), 'mediation default returned the tool result', $failures, $passes );
+
+echo "\n[6] Legacy path (no mediation) preserves break-after-1 default:\n";
+$legacy_default_count = 0;
+
+$legacy_default_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'go' ) ),
+	static function ( array $messages, array $context ) use ( &$legacy_default_count ): array {
+		++$legacy_default_count;
+
+		$messages[] = array(
+			'role'    => 'assistant',
+			'content' => 'turn ' . $context['turn'],
+		);
+
+		return array(
+			'messages'               => $messages,
+			'tool_execution_results' => array(),
+			'events'                 => array(),
+		);
+	},
+	array(
+		'max_turns' => 3,
+		// No mediation, no should_continue → loop should still break after 1.
+	)
+);
+
+agents_api_smoke_assert_equals( 1, $legacy_default_count, 'legacy path still breaks after one turn without should_continue', $failures, $passes );
+agents_api_smoke_assert_equals( 2, count( $legacy_default_result['messages'] ), 'legacy transcript has user + one assistant message', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API conversation loop tool execution', $failures, $passes );
