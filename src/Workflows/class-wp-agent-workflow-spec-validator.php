@@ -95,12 +95,21 @@ final class WP_Agent_Workflow_Spec_Validator {
 			}
 		}
 
+		// Forward / unknown step-id binding references. Cheap structural
+		// pass: scan every `${steps.<id>.output.*}` token and verify <id>
+		// exists earlier in the list. Catches typos and re-orderings that
+		// would otherwise resolve to null silently at runtime.
+		if ( isset( $spec['steps'] ) && is_array( $spec['steps'] ) ) {
+			$binding_errors = self::validate_step_binding_references( $spec['steps'] );
+			$errors         = array_merge( $errors, $binding_errors );
+		}
+
 		return $errors;
 	}
 
 	/**
 	 * @param array<int,mixed> $steps
-	 * @return array<int,array>
+	 * @return array<int,array{path:string,code:string,message:string}>
 	 */
 	private static function validate_steps( array $steps ): array {
 		$errors = array();
@@ -201,8 +210,82 @@ final class WP_Agent_Workflow_Spec_Validator {
 	}
 
 	/**
+	 * Scan every `${steps.<id>.output.*}` reference inside step args and
+	 * fields, return errors for any id that's unknown or only appears
+	 * later in the list. Bindings to `inputs.*` aren't checked here — the
+	 * runner validates inputs against the spec at run time.
+	 *
+	 * @param array<int,mixed> $steps
+	 * @return array<int,array{path:string,code:string,message:string}>
+	 */
+	private static function validate_step_binding_references( array $steps ): array {
+		$errors = array();
+		$seen   = array();
+
+		foreach ( $steps as $idx => $step ) {
+			if ( ! is_array( $step ) ) {
+				continue;
+			}
+
+			$step_id = isset( $step['id'] ) ? (string) $step['id'] : '';
+			$tokens  = self::extract_step_binding_ids( $step );
+
+			foreach ( $tokens as $referenced_id ) {
+				if ( ! isset( $seen[ $referenced_id ] ) ) {
+					$errors[] = array(
+						'path'    => "steps.{$idx}",
+						'code'    => 'unknown_step_reference',
+						'message' => sprintf(
+							'step `%s` references `%s` which is not defined %s in the workflow',
+							'' !== $step_id ? $step_id : (string) $idx,
+							$referenced_id,
+							isset( $seen[ $step_id ] ) ? 'before this step' : 'before this step'
+						),
+					);
+				}
+			}
+
+			if ( '' !== $step_id ) {
+				$seen[ $step_id ] = true;
+			}
+		}
+
+		return $errors;
+	}
+
+	/**
+	 * Walk a step array and pull out every `${steps.<id>.output.*}` token's
+	 * id segment. Used by {@see validate_step_binding_references()}.
+	 *
+	 * @param mixed $value
+	 * @return array<int,string>
+	 */
+	private static function extract_step_binding_ids( $value ): array {
+		$ids = array();
+
+		if ( is_array( $value ) ) {
+			foreach ( $value as $inner ) {
+				$ids = array_merge( $ids, self::extract_step_binding_ids( $inner ) );
+			}
+			return $ids;
+		}
+
+		if ( ! is_string( $value ) ) {
+			return $ids;
+		}
+
+		if ( preg_match_all( '/\$\{\s*steps\.([a-zA-Z0-9_\-]+)\./', $value, $matches ) ) {
+			foreach ( $matches[1] as $found ) {
+				$ids[] = (string) $found;
+			}
+		}
+
+		return $ids;
+	}
+
+	/**
 	 * @param array<int,mixed> $triggers
-	 * @return array<int,array>
+	 * @return array<int,array{path:string,code:string,message:string}>
 	 */
 	private static function validate_triggers( array $triggers ): array {
 		$errors = array();

@@ -4,7 +4,7 @@ Agents API is a WordPress-shaped backend substrate for durable agent runtime beh
 
 Agents API is maintained by Automattic as a standalone WordPress substrate package.
 
-It provides generic contracts and value objects that product plugins can build on without copying agent runtime primitives into every product. It is not a workflow product, an admin application, or a provider-specific AI client.
+It provides generic contracts and value objects that product plugins can build on without copying agent runtime primitives into every product. It is not an admin application or a provider-specific AI client. It ships **workflow plumbing** (spec value object, validator, runner skeleton, in-memory registry, three abilities, optional Action Scheduler bridge) but does **not** ship a concrete workflow runtime, durable run history, scheduling stack, editor UI, or product-specific step types — those are consumer concerns.
 
 ## Layer Boundary
 
@@ -38,11 +38,12 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Tool source registration, parameter normalization, tool-call mediation, and execution result contracts.
 - Session and persistence contracts where they are provider-neutral.
 - Retrieved context authority vocabulary, context item shape, and conflict resolution contracts.
+- Workflow spec value object, structural validator, in-memory registry, abstract runner with `ability` and `agent` step types, `Store` and `Run_Recorder` interfaces, optional Action Scheduler bridge, and three canonical abilities (`agents/run-workflow`, `agents/validate-workflow`, `agents/describe-workflow`).
 
 ## What Agents API Does Not Own
 
 - Provider-specific request code. `wp-ai-client` owns provider/model prompt execution.
-- Product workflows such as flows, pipelines, jobs, handlers, queues, retention, and content operations.
+- Concrete workflow runtimes, durable workflow / run history, scheduling adapters beyond the optional Action Scheduler bridge, workflow editor UI, and product-specific step types (`branch`, `parallel`, nested `workflow`). The substrate provides the contract surface; consumers ship the persistence and product UX.
 - Product UI such as admin pages, settings screens, dashboards, or onboarding.
 - Product CLI commands beyond generic substrate needs.
 - Public REST controllers in v1 unless they are separately designed.
@@ -152,6 +153,17 @@ wp_register_agent(
 - `AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Resolution`
 - `AgentsAPI\AI\Context\WP_Agent_Context_Conflict_Resolver`
 - `AgentsAPI\AI\Context\WP_Agent_Default_Context_Conflict_Resolver`
+- `wp_register_workflow()` / `wp_get_workflow()`
+- `AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec`
+- `AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec_Validator`
+- `AgentsAPI\AI\Workflows\WP_Agent_Workflow_Bindings`
+- `AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result`
+- `AgentsAPI\AI\Workflows\WP_Agent_Workflow_Store`
+- `AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder`
+- `AgentsAPI\AI\Workflows\WP_Agent_Workflow_Runner`
+- `AgentsAPI\AI\Workflows\WP_Agent_Workflow_Registry`
+- `AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Bridge`
+- `AgentsAPI\AI\Workflows\register_workflow_handler()`
 - `WP_Agent_Tool_Policy`
 - `WP_Agent_Tool_Policy_Filter`
 - `WP_Agent_Tool_Access_Policy`

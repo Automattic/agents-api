@@ -103,7 +103,7 @@ add_action(
 					),
 				),
 				'execute_callback'    => __NAMESPACE__ . '\\agents_validate_workflow',
-				'permission_callback' => __NAMESPACE__ . '\\agents_run_workflow_permission',
+				'permission_callback' => __NAMESPACE__ . '\\agents_validate_workflow_permission',
 				'meta'                => array(
 					'show_in_rest' => true,
 					'annotations'  => array( 'idempotent' => true ),
@@ -234,7 +234,10 @@ function agents_describe_workflow( array $input ): array {
 	$workflow_id = (string) ( $input['workflow_id'] ?? '' );
 	$spec        = WP_Agent_Workflow_Registry::find( $workflow_id );
 	if ( null === $spec ) {
-		return array( 'spec' => null, 'inputs' => null );
+		return array(
+			'spec'   => null,
+			'inputs' => null,
+		);
 	}
 	return array(
 		'spec'   => $spec->to_array(),
@@ -265,6 +268,34 @@ function agents_run_workflow_permission( array $input ): bool {
 	return (bool) apply_filters(
 		'agents_run_workflow_permission',
 		current_user_can( 'manage_options' ),
+		$input
+	);
+}
+
+/**
+ * Permission gate for `agents/validate-workflow`. Validation has no side
+ * effects and exposes no information beyond what the caller already
+ * supplied, so the default is more permissive than `agents/run-workflow`:
+ * any logged-in user can lint a spec they're authoring. Anonymous callers
+ * are still rejected unless the filter widens the gate.
+ *
+ * @since 0.103.0
+ *
+ * @param array $input
+ * @return bool
+ */
+function agents_validate_workflow_permission( array $input ): bool {
+	/**
+	 * Filter the permission decision for `agents/validate-workflow`.
+	 *
+	 * @since 0.103.0
+	 *
+	 * @param bool  $allowed Default: any logged-in user.
+	 * @param array $input
+	 */
+	return (bool) apply_filters(
+		'agents_validate_workflow_permission',
+		is_user_logged_in(),
 		$input
 	);
 }

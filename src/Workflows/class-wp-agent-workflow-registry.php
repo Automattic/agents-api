@@ -60,17 +60,22 @@ final class WP_Agent_Workflow_Registry {
 	}
 
 	/**
-	 * Remove a registered workflow. Returns true on success, false if the
-	 * id was not registered.
+	 * Remove a registered workflow. Returns true on success or a
+	 * `WP_Error` with code `not_registered` when the id was never added —
+	 * mirrors the `Store::delete()` return shape so consumers don't have
+	 * to special-case the in-memory registry.
 	 *
 	 * @since 0.103.0
 	 *
 	 * @param string $workflow_id
-	 * @return bool
+	 * @return true|WP_Error
 	 */
-	public static function unregister( string $workflow_id ): bool {
+	public static function unregister( string $workflow_id ) {
 		if ( ! isset( self::$workflows[ $workflow_id ] ) ) {
-			return false;
+			return new WP_Error(
+				'not_registered',
+				sprintf( 'no workflow registered with id `%s`', $workflow_id )
+			);
 		}
 		unset( self::$workflows[ $workflow_id ] );
 		return true;
@@ -96,34 +101,5 @@ final class WP_Agent_Workflow_Registry {
 	 */
 	public static function reset(): void {
 		self::$workflows = array();
-	}
-}
-
-if ( ! function_exists( 'wp_register_workflow' ) ) {
-	/**
-	 * Convenience wrapper: register a code-defined workflow from a raw spec
-	 * array. Returns the validated Spec or a WP_Error on validation failure.
-	 *
-	 * @since 0.103.0
-	 *
-	 * @param array $spec
-	 * @return WP_Agent_Workflow_Spec|WP_Error
-	 */
-	function wp_register_workflow( array $spec ) {
-		return WP_Agent_Workflow_Registry::register( $spec );
-	}
-}
-
-if ( ! function_exists( 'wp_get_workflow' ) ) {
-	/**
-	 * Convenience wrapper: look up a registered workflow by id.
-	 *
-	 * @since 0.103.0
-	 *
-	 * @param string $workflow_id
-	 * @return WP_Agent_Workflow_Spec|null
-	 */
-	function wp_get_workflow( string $workflow_id ): ?WP_Agent_Workflow_Spec {
-		return WP_Agent_Workflow_Registry::find( $workflow_id );
 	}
 }

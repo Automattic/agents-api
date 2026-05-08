@@ -114,7 +114,12 @@ final class WP_Agent_Workflow_Bindings {
 	 * @return mixed|null
 	 */
 	public static function resolve_path( string $expression, array $context ) {
-		$segments = array_values( array_filter( explode( '.', $expression ), 'strlen' ) );
+		$segments = array_values(
+			array_filter(
+				explode( '.', $expression ),
+				static fn ( string $segment ): bool => '' !== $segment
+			)
+		);
 		if ( count( $segments ) < 2 ) {
 			return null;
 		}

@@ -100,6 +100,10 @@ class WP_Agent_Workflow_Runner {
 		$run_id     = (string) ( $options['run_id'] ?? self::generate_run_id() );
 		$metadata   = (array) ( $options['metadata'] ?? array() );
 
+		// Build the initial RUNNING result and persist via recorder->start()
+		// before doing anything else. Even if input validation fails on the
+		// next line we want a `start → update(failed)` lifecycle so recorders
+		// never see `start()` called with an already-terminal status.
 		$result = new WP_Agent_Workflow_Run_Result(
 			$run_id,
 			$spec->get_id(),
@@ -113,32 +117,48 @@ class WP_Agent_Workflow_Runner {
 			$metadata
 		);
 
-		// Validate inputs against the spec's input declarations.
-		$input_error = self::validate_inputs( $spec, $inputs );
-		if ( null !== $input_error ) {
-			return $this->record_and_return(
-				$result->with(
-					array(
-						'status'   => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
-						'error'    => $input_error,
-						'ended_at' => time(),
-					)
-				),
-				/*is_start*/ true
-			);
-		}
-
-		// Persist the start. Recorder may rewrite the run id (CPT post id, …).
 		if ( $this->recorder ) {
 			$persisted = $this->recorder->start( $result );
+			if ( is_wp_error( $persisted ) ) {
+				// Recorder unavailable on entry — return a failed result without
+				// running steps. The caller still gets the in-memory record so
+				// observability hooks fire; the step pipeline does not run.
+				return $result->with(
+					array(
+						'status'   => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
+						'error'    => array(
+							'code'    => 'recorder_start_failed',
+							'message' => $persisted->get_error_message(),
+						),
+						'ended_at' => time(),
+					)
+				);
+			}
 			if ( is_string( $persisted ) && '' !== $persisted ) {
 				$result = $result->with( array( 'run_id' => $persisted ) );
 			}
 		}
 
+		// Validate inputs against the spec's input declarations.
+		$input_error = self::validate_inputs( $spec, $inputs );
+		if ( null !== $input_error ) {
+			$terminal = $result->with(
+				array(
+					'status'   => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
+					'error'    => $input_error,
+					'ended_at' => time(),
+				)
+			);
+			if ( $this->recorder ) {
+				$this->recorder->update( $terminal );
+			}
+			return $terminal;
+		}
+
 		$context = array(
 			'inputs' => $inputs,
-			'steps'  => array(), // step_id => [ 'output' => ... ]
+			// Step outputs accumulate here as the run progresses, keyed by step id.
+			'steps'  => array(),
 		);
 
 		$step_records      = array();
@@ -147,11 +167,11 @@ class WP_Agent_Workflow_Runner {
 		$failure_error     = array();
 
 		foreach ( $spec->get_steps() as $step ) {
-			$step_id   = (string) $step['id'];
-			$type      = (string) $step['type'];
-			$start_ts  = time();
-			$resolved  = WP_Agent_Workflow_Bindings::expand( $step, $context );
-			$record    = array(
+			$step_id  = (string) $step['id'];
+			$type     = (string) $step['type'];
+			$start_ts = time();
+			$resolved = WP_Agent_Workflow_Bindings::expand( $step, $context );
+			$record   = array(
 				'id'         => $step_id,
 				'type'       => $type,
 				'status'     => WP_Agent_Workflow_Run_Result::STATUS_RUNNING,
@@ -219,10 +239,13 @@ class WP_Agent_Workflow_Runner {
 			}
 		}
 
-		// Final aggregated output: the last step's output, plus a `steps`
-		// map with each step's output keyed by id. Callers that want a
-		// specific step's output can pluck it; callers that want
-		// "everything the workflow produced" get the convenient last-output.
+		// Final aggregated output: every step's output keyed by id, plus a
+		// convenience `last` shortcut that points at the last step's output
+		// **only when that last step succeeded**. With `continue_on_error`
+		// the last step in the list may be a failed one, in which case
+		// `last` is intentionally absent — callers should reach for
+		// `$result->get_output()['steps'][<id>]` when partial-failure
+		// semantics matter.
 		$final_output = array(
 			'steps' => array(),
 		);
@@ -243,7 +266,10 @@ class WP_Agent_Workflow_Runner {
 			)
 		);
 
-		return $this->record_and_return( $result, /*is_start*/ false );
+		if ( $this->recorder ) {
+			$this->recorder->update( $result );
+		}
+		return $result;
 	}
 
 	/**
@@ -339,23 +365,6 @@ class WP_Agent_Workflow_Runner {
 			return $result;
 		}
 		return is_array( $result ) ? $result : array( 'reply' => (string) $result );
-	}
-
-	/**
-	 * Persist a final result and return it. Called for both early-exit
-	 * (input validation) and normal completion paths.
-	 *
-	 * @since 0.103.0
-	 */
-	private function record_and_return( WP_Agent_Workflow_Run_Result $result, bool $is_start ): WP_Agent_Workflow_Run_Result {
-		if ( $this->recorder ) {
-			if ( $is_start ) {
-				$this->recorder->start( $result );
-			} else {
-				$this->recorder->update( $result );
-			}
-		}
-		return $result;
 	}
 
 	/**

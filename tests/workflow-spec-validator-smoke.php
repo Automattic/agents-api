@@ -138,6 +138,72 @@ $errors = WP_Agent_Workflow_Spec_Validator::validate(
 $paths = array_column( $errors, 'path' );
 smoke_assert( true, in_array( 'steps.0.message', $paths, true ), 'agent step missing message flagged', $failures, $passes );
 
+// Trigger-types filter widens the known list (mirror of the step-types test).
+add_filter(
+	'wp_agent_workflow_known_trigger_types',
+	static fn( $types ) => array_merge( (array) $types, array( 'webhook' ) )
+);
+$errors = WP_Agent_Workflow_Spec_Validator::validate(
+	array(
+		'id'       => 'demo/x',
+		'steps'    => $min['steps'],
+		'triggers' => array( array( 'type' => 'webhook', 'route' => '/foo' ) ),
+	)
+);
+smoke_assert( array(), $errors, 'filter-extended trigger type accepted', $failures, $passes );
+
+// Forward / unknown step-id binding references.
+$errors = WP_Agent_Workflow_Spec_Validator::validate(
+	array(
+		'id'    => 'demo/forward-ref',
+		'steps' => array(
+			array(
+				'id'      => 'first',
+				'type'    => 'ability',
+				'ability' => 'core/op',
+				'args'    => array( 'x' => '${steps.later.output.value}' ),
+			),
+			array( 'id' => 'later', 'type' => 'ability', 'ability' => 'core/op2' ),
+		),
+	)
+);
+$codes = array_column( $errors, 'code' );
+smoke_assert( true, in_array( 'unknown_step_reference', $codes, true ), 'forward step-id reference flagged', $failures, $passes );
+
+$errors = WP_Agent_Workflow_Spec_Validator::validate(
+	array(
+		'id'    => 'demo/typo',
+		'steps' => array(
+			array( 'id' => 'first', 'type' => 'ability', 'ability' => 'core/op' ),
+			array(
+				'id'      => 'second',
+				'type'    => 'ability',
+				'ability' => 'core/op2',
+				'args'    => array( 'x' => '${steps.frist.output.value}' ),
+			),
+		),
+	)
+);
+$codes = array_column( $errors, 'code' );
+smoke_assert( true, in_array( 'unknown_step_reference', $codes, true ), 'typo in step id reference flagged', $failures, $passes );
+
+// Valid backward reference does NOT trigger the binding-ref check.
+$errors = WP_Agent_Workflow_Spec_Validator::validate(
+	array(
+		'id'    => 'demo/valid-ref',
+		'steps' => array(
+			array( 'id' => 'first', 'type' => 'ability', 'ability' => 'core/op' ),
+			array(
+				'id'      => 'second',
+				'type'    => 'ability',
+				'ability' => 'core/op2',
+				'args'    => array( 'x' => '${steps.first.output.value}' ),
+			),
+		),
+	)
+);
+smoke_assert( array(), $errors, 'backward step-id reference passes', $failures, $passes );
+
 // wp_action trigger missing hook.
 $errors = WP_Agent_Workflow_Spec_Validator::validate(
 	array(

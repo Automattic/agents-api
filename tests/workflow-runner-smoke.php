@@ -220,5 +220,53 @@ if ( ! ( $martian instanceof WP_Error ) ) {
 	smoke_assert( 'no_step_handler', $result5->get_error()['code'], 'runner reports no_step_handler', $failures, $passes );
 }
 
+// ─── Recorder->start() returning WP_Error fails fast ──────────────────
+
+class Failing_Start_Recorder implements WP_Agent_Workflow_Run_Recorder {
+	public int $start_calls  = 0;
+	public int $update_calls = 0;
+	public function start( WP_Agent_Workflow_Run_Result $result ) {
+		++$this->start_calls;
+		return new WP_Error( 'storage_offline', 'recorder is unavailable' );
+	}
+	public function update( WP_Agent_Workflow_Run_Result $result ) {
+		++$this->update_calls;
+		return true;
+	}
+	public function find( string $run_id ): ?WP_Agent_Workflow_Run_Result { return null; }
+	public function recent( array $args = array() ): array { return array(); }
+}
+
+$recorder3 = new Failing_Start_Recorder();
+$result6   = ( new WP_Agent_Workflow_Runner( $recorder3 ) )->run( $spec, array( 'text' => 'hi' ) );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $result6->get_status(), 'recorder start failure => failed run', $failures, $passes );
+smoke_assert( 'recorder_start_failed', $result6->get_error()['code'], 'recorder start failure has expected code', $failures, $passes );
+smoke_assert( 0, count( $result6->get_steps() ), 'no steps run when recorder start fails', $failures, $passes );
+smoke_assert( 0, $recorder3->update_calls, 'no update fired when start failed', $failures, $passes );
+
+// ─── Input-validation failure goes through start → update lifecycle ───
+
+class Lifecycle_Tracker_Recorder implements WP_Agent_Workflow_Run_Recorder {
+	public array $events = array();
+	public function start( WP_Agent_Workflow_Run_Result $result ) {
+		$this->events[] = array( 'op' => 'start', 'status' => $result->get_status() );
+		return $result->get_run_id();
+	}
+	public function update( WP_Agent_Workflow_Run_Result $result ) {
+		$this->events[] = array( 'op' => 'update', 'status' => $result->get_status() );
+		return true;
+	}
+	public function find( string $run_id ): ?WP_Agent_Workflow_Run_Result { return null; }
+	public function recent( array $args = array() ): array { return array(); }
+}
+
+$tracker = new Lifecycle_Tracker_Recorder();
+$result7 = ( new WP_Agent_Workflow_Runner( $tracker ) )->run( $spec /* missing required text */ );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $result7->get_status(), 'missing input still fails', $failures, $passes );
+smoke_assert( 'start', $tracker->events[0]['op'] ?? '', 'recorder sees start first', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_RUNNING, $tracker->events[0]['status'] ?? '', 'start is called with RUNNING', $failures, $passes );
+smoke_assert( 'update', $tracker->events[1]['op'] ?? '', 'recorder sees update second', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $tracker->events[1]['status'] ?? '', 'update flips status to FAILED', $failures, $passes );
+
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
