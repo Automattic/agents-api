@@ -105,6 +105,10 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Tool_Policy_Filter
 agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Tool_Access_Policy' ), 'WP_Agent_Tool_Access_Policy contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Action_Policy_Resolver' ), 'WP_Agent_Action_Policy_Resolver contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Action_Policy_Provider' ), 'WP_Agent_Action_Policy_Provider contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_External_Message' ), 'WP_Agent_External_Message value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Store' ), 'WP_Agent_Channel_Session_Store contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Option_Channel_Session_Store' ), 'WP_Agent_Option_Channel_Session_Store implementation is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Map' ), 'WP_Agent_Channel_Session_Map facade is available', $failures, $passes );
 foreach ( $namespace_map as $legacy_class => $target_class ) {
 	agents_api_smoke_assert_equals( true, class_exists( $target_class ) || interface_exists( $target_class ), $target_class . ' contract is available', $failures, $passes );
 	agents_api_smoke_assert_equals( false, class_exists( $legacy_class, false ) || interface_exists( $legacy_class, false ), $legacy_class . ' compatibility alias is not loaded', $failures, $passes );

@@ -226,6 +226,10 @@ function agents_chat_input_schema(): array {
 						'type'        => 'string',
 						'description' => 'Specific client identifier within the source (e.g. "wacli", "telegram_<bot>", "data-machine").',
 					),
+					'connector_id'             => array(
+						'type'        => 'string',
+						'description' => 'Stable connector or channel instance id used for settings, attribution, and external conversation session mapping.',
+					),
 					'external_provider'        => array(
 						'type'        => array( 'string', 'null' ),
 						'description' => 'External network identifier (e.g. "whatsapp", "slack", "email"). Null if not applicable.',

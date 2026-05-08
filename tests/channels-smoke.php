@@ -48,6 +48,11 @@ function update_option( string $key, $value, $autoload = null ): bool {
 	return true;
 }
 
+function delete_option( string $key ): bool {
+	unset( $GLOBALS['__channel_smoke_options'][ $key ] );
+	return true;
+}
+
 function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool {
 	$GLOBALS['__channel_smoke_scheduled'][] = array(
 		'timestamp' => $timestamp,
@@ -93,8 +98,12 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 	echo '    actual:   ' . var_export( $actual, true ) . "\n";
 }
 
-require_once __DIR__ . '/../src/Channels/class-wp-agent-channel.php';
 require_once __DIR__ . '/../src/Channels/register-agents-chat-ability.php';
+require_once __DIR__ . '/../src/Channels/class-wp-agent-external-message.php';
+require_once __DIR__ . '/../src/Channels/class-wp-agent-channel-session-store.php';
+require_once __DIR__ . '/../src/Channels/class-wp-agent-option-channel-session-store.php';
+require_once __DIR__ . '/../src/Channels/class-wp-agent-channel-session-map.php';
+require_once __DIR__ . '/../src/Channels/class-wp-agent-channel.php';
 
 // ─── Fakes ──────────────────────────────────────────────────────────
 
@@ -163,6 +172,7 @@ $expected_first_call = array(
 		'attachments'    => array(),
 		'client_context' => array(
 			'source'                   => 'channel',
+			'connector_id'             => 'test-channel',
 			'client_name'              => 'test-channel',
 			'external_provider'        => 'test-channel',
 			'external_conversation_id' => 'chat-A',
@@ -172,6 +182,51 @@ $expected_first_call = array(
 	),
 );
 smoke_assert( $expected_first_call, $happy_ability->calls, 'happy_path_canonical_chat_payload', $failures, $passes );
+
+$external_message = $ch->build_external_message( 'hi there', array( 'text' => 'hi there' ) );
+smoke_assert( true, $external_message instanceof \AgentsAPI\AI\Channels\WP_Agent_External_Message, 'external_message_value_object_created', $failures, $passes );
+smoke_assert(
+	array(
+		'text'                     => 'hi there',
+		'connector_id'             => 'test-channel',
+		'external_provider'        => 'test-channel',
+		'external_conversation_id' => 'chat-A',
+		'external_message_id'      => null,
+		'sender_id'                => null,
+		'from_self'                => false,
+		'room_kind'                => null,
+		'attachments'              => array(),
+		'raw'                      => array( 'text' => 'hi there' ),
+	),
+	$external_message->to_array(),
+	'external_message_array_shape',
+	$failures,
+	$passes
+);
+
+\AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Map::set( 'test-channel', 'manual-chat', 'sess-manual', 'test-agent' );
+smoke_assert(
+	'sess-manual',
+	\AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Map::get( 'test-channel', 'manual-chat', 'test-agent' ),
+	'session_map_static_get_set',
+	$failures,
+	$passes
+);
+smoke_assert(
+	null,
+	\AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Map::get( 'test-channel', 'manual-chat', 'other-agent' ),
+	'session_map_scopes_by_agent',
+	$failures,
+	$passes
+);
+\AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Map::delete( 'test-channel', 'manual-chat', 'test-agent' );
+smoke_assert(
+	null,
+	\AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Map::get( 'test-channel', 'manual-chat', 'test-agent' ),
+	'session_map_static_delete',
+	$failures,
+	$passes
+);
 
 // 1b. Override hooks for attachments / external_message_id / room_kind / source.
 class Rich_Channel extends Test_Channel {
@@ -207,6 +262,19 @@ smoke_assert(
 smoke_assert( 'wamid.123', $rich_ability->calls[0]['client_context']['external_message_id'] ?? null, 'rich_payload_external_message_id', $failures, $passes );
 smoke_assert( 'group', $rich_ability->calls[0]['client_context']['room_kind'] ?? null, 'rich_payload_room_kind', $failures, $passes );
 smoke_assert( 'bridge', $rich_ability->calls[0]['client_context']['source'] ?? null, 'rich_payload_source_overridden', $failures, $passes );
+smoke_assert( 'test-channel', $rich_ability->calls[0]['client_context']['connector_id'] ?? null, 'rich_payload_connector_id', $failures, $passes );
+
+// 1c. Channels with legacy/custom session keys keep that override path.
+class Custom_Key_Channel extends Test_Channel {
+	protected function session_storage_key(): string {
+		return 'legacy_custom_session_key_' . $this->external_id;
+	}
+}
+$custom_key_ability = new Fake_Ability( array( 'reply' => 'legacy key', 'session_id' => 'sess-legacy' ) );
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $custom_key_ability;
+$custom_key = new Custom_Key_Channel( 'chat-legacy' );
+$custom_key->handle( array( 'text' => 'use custom key' ) );
+smoke_assert( 'sess-legacy', get_option( 'legacy_custom_session_key_chat-legacy' ), 'custom_session_key_override_is_preserved', $failures, $passes );
 
 // 2. Session continuity: second turn passes the stored session_id.
 $happy_ability2 = new Fake_Ability(
