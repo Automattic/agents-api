@@ -93,7 +93,7 @@ agents_api_smoke_assert_equals( true, $message_count >= 4, 'transcript contains 
 echo "\n[2] Loop runs without mediation when no tool_executor is provided (backwards compatible):\n";
 $executor->executed = array();
 
-$legacy_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+$caller_managed_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	static function ( array $messages, array $context ): array {
 		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'turn ' . $context['turn'] );
@@ -112,8 +112,8 @@ $legacy_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	)
 );
 
-agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'tool executor was not called in legacy path', $failures, $passes );
-agents_api_smoke_assert_equals( 3, count( $legacy_result['messages'] ), 'legacy loop returns correct transcript length', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'tool executor was not called in caller-managed path', $failures, $passes );
+agents_api_smoke_assert_equals( 3, count( $caller_managed_result['messages'] ), 'caller-managed loop returns correct transcript length', $failures, $passes );
 
 echo "\n[3] Multi-turn mediation continues when tool calls are present:\n";
 $executor->executed = array();
@@ -225,13 +225,13 @@ agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'mediation exec
 agents_api_smoke_assert_equals( 2, $default_turn_count, 'mediation loop ran two turns with no explicit should_continue', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $default_result['tool_execution_results'] ), 'mediation default returned the tool result', $failures, $passes );
 
-echo "\n[6] Legacy path (no mediation) preserves break-after-1 default:\n";
-$legacy_default_count = 0;
+echo "\n[6] Caller-managed path (no mediation) preserves break-after-1 default:\n";
+$caller_managed_default_count = 0;
 
-$legacy_default_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+$caller_managed_default_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'go' ) ),
-	static function ( array $messages, array $context ) use ( &$legacy_default_count ): array {
-		++$legacy_default_count;
+	static function ( array $messages, array $context ) use ( &$caller_managed_default_count ): array {
+		++$caller_managed_default_count;
 
 		$messages[] = array(
 			'role'    => 'assistant',
@@ -250,7 +250,7 @@ $legacy_default_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	)
 );
 
-agents_api_smoke_assert_equals( 1, $legacy_default_count, 'legacy path still breaks after one turn without should_continue', $failures, $passes );
-agents_api_smoke_assert_equals( 2, count( $legacy_default_result['messages'] ), 'legacy transcript has user + one assistant message', $failures, $passes );
+agents_api_smoke_assert_equals( 1, $caller_managed_default_count, 'caller-managed path still breaks after one turn without should_continue', $failures, $passes );
+agents_api_smoke_assert_equals( 2, count( $caller_managed_default_result['messages'] ), 'caller-managed transcript has user + one assistant message', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API conversation loop tool execution', $failures, $passes );

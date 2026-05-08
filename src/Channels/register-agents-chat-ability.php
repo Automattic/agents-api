@@ -43,8 +43,7 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * The slug under which this ability is registered. Stable. Consumers and
- * channels should target this string rather than a runtime-specific slug
- * like `openclawp/chat`.
+	 * channels should target this string rather than a runtime-specific slug.
  *
  * @since 0.103.0
  */
@@ -60,7 +59,7 @@ add_action(
 			'agents-api',
 			array(
 				'label'       => 'Agents API',
-				'description' => 'Cross-cutting abilities provided by the Agents API substrate (channel dispatch, canonical chat contract, future runtime resolvers).',
+				'description' => 'Cross-cutting abilities provided by the Agents API substrate (channel dispatch and canonical chat contract).',
 			)
 		);
 	}
@@ -224,7 +223,7 @@ function agents_chat_input_schema(): array {
 					),
 					'client_name'              => array(
 						'type'        => 'string',
-						'description' => 'Specific client identifier within the source (e.g. "wacli", "telegram_<bot>", "data-machine").',
+						'description' => 'Specific client identifier within the source (e.g. "cli-relay" or "messaging-bot").',
 					),
 					'connector_id'             => array(
 						'type'        => 'string',

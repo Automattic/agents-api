@@ -43,7 +43,7 @@ class WP_Agent_Conversation_Loop {
 	 * - `budgets` (WP_Agent_Iteration_Budget[]): Named iteration budgets for bounded execution.
 	 * - `context` (array): Caller-owned context passed to adapters.
 	 * - `should_continue` (callable|null): Caller-owned continuation policy.
-	 *   Defaults to `null` in the legacy path (which causes the loop to break
+	 *   Defaults to `null` in the caller-managed path (which causes the loop to break
 	 *   after one turn unless the caller supplies a callback). When tool
 	 *   mediation is enabled (`tool_executor` + `tool_declarations` provided),
 	 *   defaults to a `__return_true` callable so the loop continues until
@@ -157,7 +157,7 @@ class WP_Agent_Conversation_Loop {
 				}
 
 				// When mediation is enabled, the turn runner returns tool_calls
-				// and the loop handles execution. Otherwise, the legacy path applies.
+				// and the loop handles execution. Otherwise, the caller-managed path applies.
 				if ( $mediation_enabled && isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ) {
 					$mediation_result = self::mediate_tool_calls(
 						$result,
@@ -176,7 +176,7 @@ class WP_Agent_Conversation_Loop {
 					$conversation_complete = $mediation_result['conversation_complete'];
 					$exceeded_budget       = $mediation_result['exceeded_budget'];
 				} else {
-					// Legacy path: turn runner handles everything internally.
+					// Caller-managed path: turn runner handles everything internally.
 					$result       = WP_Agent_Conversation_Result::normalize( $result );
 					$messages     = $result['messages'];
 					$tool_results = array_merge( $tool_results, $result['tool_execution_results'] );
@@ -203,7 +203,7 @@ class WP_Agent_Conversation_Loop {
 					}
 				}
 
-				// Stop conditions: budget exceeded, completion policy, or legacy should_continue.
+				// Stop conditions: budget exceeded, completion policy, or caller should_continue.
 				if ( null !== $exceeded_budget ) {
 					break;
 				}
@@ -519,7 +519,7 @@ class WP_Agent_Conversation_Loop {
 	 *
 	 * When tool mediation is enabled, defaults to a continue-always callable so
 	 * `max_turns`, `completion_policy`, budgets, and natural completion (empty
-	 * `tool_calls`) become the only stop conditions. In the legacy path (no
+	 * `tool_calls`) become the only stop conditions. In the caller-managed path (no
 	 * mediation), preserves the historical break-after-1 behavior unless the
 	 * caller supplies their own continuation policy.
 	 *
@@ -539,7 +539,7 @@ class WP_Agent_Conversation_Loop {
 				return $caller_supplied;
 			}
 			// Caller passed a non-callable value (e.g. null) — preserve the
-			// legacy break-after-1 behavior they explicitly opted into.
+			// break-after-1 behavior they explicitly opted into.
 			return null;
 		}
 

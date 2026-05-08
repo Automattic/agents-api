@@ -113,7 +113,7 @@ $result = agents_chat_dispatch( array(
 	'message'        => 'ping',
 	'session_id'     => null,
 	'attachments'    => array(),
-	'client_context' => array( 'source' => 'channel', 'client_name' => 'wacli' ),
+	'client_context' => array( 'source' => 'channel', 'client_name' => 'cli-relay' ),
 ) );
 
 smoke_assert( 'demo', $captured['agent'] ?? null, 'handler_received_agent', $failures, $passes );

@@ -41,7 +41,7 @@ class WP_Agent_Tool_Parameters {
 	 * Validate required parameters declared by a tool definition.
 	 *
 	 * Supports both the compact Agents API shape (`required` as a list of names)
-	 * and legacy per-property `required => true` flags.
+	 * and per-property `required => true` flags.
 	 *
 	 * @param array $tool_parameters Runtime tool-call parameters.
 	 * @param array $tool_definition Normalized tool declaration.

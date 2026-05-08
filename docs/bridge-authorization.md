@@ -133,8 +133,8 @@ Route auth should be a separate layer that validates the bridge credential and m
 ## Non-Goals
 
 - No platform-specific clients.
-- No Data Machine token table names.
-- No Roadie/Beeper/Matrix-specific copy.
+- No runtime-specific token table names.
+- No product- or network-specific onboarding copy.
 - No required onboarding UI.
 - No duplicate connector registry.
 - No bridge route implementation until auth policy is settled.

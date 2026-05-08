@@ -147,7 +147,7 @@ $result2 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 1, count( $policy_log ), 'policy was called once', $failures, $passes );
 agents_api_smoke_assert_equals( 0, $continue_called, 'should_continue was not called when policy stopped the loop', $failures, $passes );
 
-echo "\n[3] Completion policy works in legacy path (turn runner handles tool execution):\n";
+echo "\n[3] Completion policy works in caller-managed path (turn runner handles tool execution):\n";
 $policy_log = array();
 
 // Build a policy that completes on any tool.
@@ -157,11 +157,11 @@ $always_complete_policy = new class() implements AgentsAPI\AI\WP_Agent_Conversat
 	}
 };
 
-$legacy_turns = 0;
+$caller_managed_turns = 0;
 $result3      = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
-	static function ( array $messages, array $context ) use ( &$legacy_turns ): array {
-		++$legacy_turns;
+	static function ( array $messages, array $context ) use ( &$caller_managed_turns ): array {
+		++$caller_managed_turns;
 		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'calling tool' );
 
 		return array(
@@ -187,6 +187,6 @@ $result3      = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	)
 );
 
-agents_api_smoke_assert_equals( 1, $legacy_turns, 'legacy loop stopped after one turn via completion policy', $failures, $passes );
+agents_api_smoke_assert_equals( 1, $caller_managed_turns, 'caller-managed loop stopped after one turn via completion policy', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API conversation loop completion policy', $failures, $passes );

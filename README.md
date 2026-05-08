@@ -672,7 +672,7 @@ Boundary selection preserves tool-call/tool-result integrity by default. If summ
 
 It does not assemble prompts, select a provider/model, implement concrete tools, choose durable storage, expose admin UI, or define product workflow semantics. Consumers provide adapters for those concerns and pass them into the loop.
 
-### Minimal usage (legacy, fully backwards compatible)
+### Minimal caller-managed usage
 
 ```php
 $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
@@ -736,7 +736,7 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 			$logger->log( $event, $payload );
 		},
 
-		// Legacy escape hatch — both can coexist, typed policy takes precedence
+		// Caller-owned continuation policy; typed completion policy takes precedence.
 		'should_continue' => static function ( array $result, array $context ): bool {
 			return ! empty( $result['tool_execution_results'] );
 		},

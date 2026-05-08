@@ -300,8 +300,8 @@ abstract class WP_Agent_Channel {
 	 *       }
 	 *     }
 	 *
-	 * Runtimes that don't read the richer fields (e.g. `openclawp/chat`)
-	 * ignore them; runtimes that do get the full transport context without
+	 * Runtimes that don't read the richer fields ignore them; runtimes that do
+	 * get the full transport context without
 	 * having to know about WP_Agent_Channel.
 	 *
 	 * @param string $message_text The user-message string from extract_message().
