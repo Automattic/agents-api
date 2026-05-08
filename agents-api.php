@@ -2,6 +2,7 @@
 /**
  * Plugin Name: Agents API
  * Description: WordPress-shaped agent runtime substrate.
+ * Version: 0.1.0
  * Requires at least: 7.0
  * Requires PHP: 8.1
  * Author: Automattic
