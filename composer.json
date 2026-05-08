@@ -46,6 +46,10 @@
       "php tests/conversation-loop-budgets-smoke.php",
       "php tests/context-authority-smoke.php",
       "php tests/guidelines-substrate-smoke.php",
+      "php tests/workflow-bindings-smoke.php",
+      "php tests/workflow-spec-validator-smoke.php",
+      "php tests/workflow-runner-smoke.php",
+      "php tests/agents-workflow-ability-smoke.php",
       "php tests/no-product-imports-smoke.php"
     ]
   }
