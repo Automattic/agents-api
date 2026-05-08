@@ -133,7 +133,7 @@ final class WP_Agent_Workflow_Bindings {
 
 		if ( 'steps' === $root ) {
 			$step_id = array_shift( $segments );
-			if ( null === $step_id || '' === $step_id ) {
+			if ( null === $step_id ) {
 				return null;
 			}
 			$step = $context['steps'][ $step_id ] ?? null;

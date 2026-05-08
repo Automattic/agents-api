@@ -134,7 +134,7 @@ class WP_Agent_Workflow_Runner {
 					)
 				);
 			}
-			if ( is_string( $persisted ) && '' !== $persisted ) {
+			if ( '' !== $persisted ) {
 				$result = $result->with( array( 'run_id' => $persisted ) );
 			}
 		}
@@ -212,7 +212,7 @@ class WP_Agent_Workflow_Runner {
 					'message' => $step_output->get_error_message(),
 					'data'    => $step_output->get_error_data(),
 				);
-				$step_records[] = $record;
+				$step_records[]     = $record;
 
 				$failed        = true;
 				$failure_error = $record['error'];
@@ -355,7 +355,7 @@ class WP_Agent_Workflow_Runner {
 				'agents/chat ability is not registered.'
 			);
 		}
-		$input = array(
+		$input  = array(
 			'agent'      => (string) ( $step['agent'] ?? '' ),
 			'message'    => (string) ( $step['message'] ?? '' ),
 			'session_id' => $step['session_id'] ?? null,
