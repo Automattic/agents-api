@@ -170,16 +170,6 @@ array(
 )
 ```
 
-or a legacy adapter response alias:
-
-```php
-array(
-	'session_id' => 'session-id',
-	'response'   => 'assistant text',
-	'completed'  => true,
-)
-```
-
 or assistant messages:
 
 ```php

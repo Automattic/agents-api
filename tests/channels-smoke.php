@@ -305,17 +305,6 @@ smoke_assert(
 	$passes
 );
 
-// 3b. Legacy adapters can return `response` as an alias for canonical `reply`.
-$response_alias_ability = new Fake_Ability(
-	array( 'response' => 'legacy response alias', 'session_id' => 'sess-response-alias' )
-);
-$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $response_alias_ability;
-
-$response_alias_channel = new Test_Channel( 'chat-response-alias' );
-$response_alias_channel->handle( array( 'text' => 'alias please' ) );
-
-smoke_assert( array( 'legacy response alias' ), $response_alias_channel->sent, 'response_alias_is_delivered', $failures, $passes );
-
 // 4. Empty message short-circuits with WP_Error, no agent call.
 $null_ability = new Fake_Ability( array( 'reply' => 'should not be called' ) );
 $GLOBALS['__channel_smoke_abilities']['agents/chat'] = $null_ability;
