@@ -18,7 +18,7 @@
  * This base class is intentionally agnostic about the agent runtime. The
  * default `run_agent()` calls the chat ability registered under the slug
  * returned by the `wp_agent_channel_chat_ability` filter (default
- * `openclawp/chat`); override `run_agent()` to plug in a different runtime.
+ * `agents/chat`); override `run_agent()` to plug in a different runtime.
  *
  * Mirrors a similar pattern used internally at WordPress.com to drive
  * Telegram, Slack, and other agent surfaces. The host-specific orchestration
@@ -295,7 +295,7 @@ abstract class WP_Agent_Channel {
 	 *       session_id: string|null,
 	 *       attachments: array,
 	 *       client_context: {
-	 *         source, client_name, external_provider,
+	 *         source, connector_id, client_name, external_provider,
 	 *         external_conversation_id, external_message_id, room_kind
 	 *       }
 	 *     }
@@ -356,19 +356,38 @@ abstract class WP_Agent_Channel {
 	 * @return array
 	 */
 	public function build_chat_payload( string $message_text, array $data ): array {
+		$external_message              = $this->build_external_message( $message_text, $data );
+		$client_context                = $external_message->client_context( $this->client_context_source() );
+		$client_context['client_name'] = $this->get_client_name();
+
 		return array(
 			'agent'          => $this->agent_slug,
-			'message'        => $message_text,
+			'message'        => $external_message->text,
 			'session_id'     => '' === (string) $this->session_id ? null : $this->session_id,
-			'attachments'    => $this->extract_attachments( $data ),
-			'client_context' => array(
-				'source'                   => $this->client_context_source(),
-				'client_name'              => $this->get_client_name(),
-				'external_provider'        => $this->get_external_id_provider(),
-				'external_conversation_id' => $this->get_external_id(),
-				'external_message_id'      => $this->extract_external_message_id( $data ),
-				'room_kind'                => $this->get_room_kind( $data ),
-			),
+			'attachments'    => $external_message->attachments,
+			'client_context' => $client_context,
+		);
+	}
+
+	/**
+	 * Build the normalized external message value for this inbound payload.
+	 *
+	 * @param string $message_text
+	 * @param array  $data
+	 * @return WP_Agent_External_Message
+	 */
+	public function build_external_message( string $message_text, array $data ): WP_Agent_External_Message {
+		return new WP_Agent_External_Message(
+			$message_text,
+			$this->get_connector_id(),
+			$this->get_external_id_provider(),
+			$this->get_external_id(),
+			$this->extract_external_message_id( $data ),
+			null,
+			false,
+			$this->get_room_kind( $data ),
+			$this->extract_attachments( $data ),
+			$data
 		);
 	}
 
@@ -386,6 +405,17 @@ abstract class WP_Agent_Channel {
 	protected function extract_attachments( array $data ): array {
 		unset( $data );
 		return array();
+	}
+
+	/**
+	 * Connector or channel instance id used for client context and session maps.
+	 * Defaults to `get_client_name()`; override when a channel needs a stable
+	 * connector id that differs from the human-readable client label.
+	 *
+	 * @return string
+	 */
+	protected function get_connector_id(): string {
+		return $this->get_client_name();
 	}
 
 	/**
@@ -498,19 +528,18 @@ abstract class WP_Agent_Channel {
 		return array();
 	}
 
-	// ─── Session persistence (option-based default) ────────────────────
+	// ─── Session persistence (shared map-backed default) ────────────────
 
 	/**
-	 * Storage key for the external_id ↔ session_id mapping. Subclasses can
-	 * override to change scope (per-user, per-blog, custom table). Default
-	 * is a single site option keyed by hashed `provider:external_id`.
+	 * Storage key for the external_id ↔ session_id mapping. Kept as an
+	 * override point for subclasses that predate the shared session map.
 	 *
 	 * @return string
 	 */
 	protected function session_storage_key(): string {
 		$external_id = $this->get_external_id() ?? '';
 		return 'wp_agent_channel_session_' . md5(
-			$this->get_external_id_provider() . ':' . $external_id
+			implode( ':', array( $this->get_connector_id(), $external_id, $this->agent_slug ) )
 		);
 	}
 
@@ -520,9 +549,15 @@ abstract class WP_Agent_Channel {
 	 * @return string|null
 	 */
 	protected function lookup_session_id(): ?string {
-		if ( null === $this->get_external_id() ) {
+		$external_id = $this->get_external_id();
+		if ( null === $external_id ) {
 			return null;
 		}
+
+		if ( ! $this->uses_custom_session_storage_key() ) {
+			return WP_Agent_Channel_Session_Map::get( $this->get_connector_id(), $external_id, $this->agent_slug );
+		}
+
 		$value = get_option( $this->session_storage_key(), '' );
 		return '' === $value ? null : (string) $value;
 	}
@@ -533,9 +568,21 @@ abstract class WP_Agent_Channel {
 	 * @param string $session_id
 	 */
 	protected function store_session_id( string $session_id ): void {
-		if ( null === $this->get_external_id() ) {
+		$external_id = $this->get_external_id();
+		if ( null === $external_id ) {
 			return;
 		}
+
+		if ( ! $this->uses_custom_session_storage_key() ) {
+			WP_Agent_Channel_Session_Map::set( $this->get_connector_id(), $external_id, $session_id, $this->agent_slug );
+			return;
+		}
+
 		update_option( $this->session_storage_key(), $session_id, false );
+	}
+
+	private function uses_custom_session_storage_key(): bool {
+		$method = new \ReflectionMethod( $this, 'session_storage_key' );
+		return self::class !== $method->getDeclaringClass()->getName();
 	}
 }

@@ -133,6 +133,10 @@ wp_register_agent(
 - `WP_Agent_Default_Consent_Policy`
 - `AgentsAPI\AI\Consent\WP_Agent_Consent_Operation`
 - `AgentsAPI\AI\Consent\WP_Agent_Consent_Decision`
+- `AgentsAPI\AI\Channels\WP_Agent_External_Message`
+- `AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Store`
+- `AgentsAPI\AI\Channels\WP_Agent_Option_Channel_Session_Store`
+- `AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Map`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Call`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Source_Registry`
