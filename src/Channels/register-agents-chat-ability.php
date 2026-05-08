@@ -122,9 +122,9 @@ function agents_chat_dispatch( array $input ) {
  * widen the gate per-request via the `agents_chat_permission` filter.
  *
  * @param array $input Canonical input.
- * @return bool|\WP_Error
+ * @return bool
  */
-function agents_chat_permission( array $input ) {
+function agents_chat_permission( array $input ): bool {
 	/**
 	 * Filter the permission decision for the canonical chat ability.
 	 *
