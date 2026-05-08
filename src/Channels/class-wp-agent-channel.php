@@ -28,6 +28,7 @@
  * the concrete channel.
  *
  * @package AgentsAPI
+ * @since   0.103.0
  */
 
 namespace AgentsAPI\AI\Channels;

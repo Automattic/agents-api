@@ -53,6 +53,16 @@ function add_action( string $hook, callable $cb, int $priority = 10, int $accept
 	add_filter( $hook, $cb, $priority, $accepted_args );
 }
 
+function do_action( string $hook, ...$args ): void {
+	$callbacks = $GLOBALS['__smoke_filters'][ $hook ] ?? array();
+	ksort( $callbacks );
+	foreach ( $callbacks as $priority_callbacks ) {
+		foreach ( $priority_callbacks as $cb ) {
+			call_user_func_array( $cb, $args );
+		}
+	}
+}
+
 function smoke_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {
 	if ( $expected === $actual ) {
 		++$passes;
@@ -79,10 +89,17 @@ use const AgentsAPI\AI\Channels\AGENTS_CHAT_ABILITY;
 // 1. Slug constant.
 smoke_assert( 'agents/chat', AGENTS_CHAT_ABILITY, 'slug_is_agents_chat', $failures, $passes );
 
-// 2. No handler registered → WP_Error agents_chat_no_handler.
+// 2. No handler registered → WP_Error agents_chat_no_handler + observability fires.
+$dispatch_failures = array();
+add_filter( 'agents_chat_dispatch_failed', static function ( $reason, $input ) use ( &$dispatch_failures ) {
+	$dispatch_failures[] = array( 'reason' => $reason, 'agent' => $input['agent'] ?? null );
+}, 10, 2 );
+
 $result = agents_chat_dispatch( array( 'agent' => 'foo', 'message' => 'hi' ) );
 smoke_assert( true, $result instanceof WP_Error, 'no_handler_returns_wp_error', $failures, $passes );
 smoke_assert( 'agents_chat_no_handler', $result->get_error_code(), 'no_handler_error_code', $failures, $passes );
+smoke_assert( 'no_handler', $dispatch_failures[0]['reason'] ?? 'missing', 'no_handler_fires_dispatch_failed', $failures, $passes );
+smoke_assert( 'foo', $dispatch_failures[0]['agent'] ?? 'missing', 'no_handler_observability_includes_input', $failures, $passes );
 
 // 3. Registered handler is called with the canonical input and its result is returned.
 $captured = array();
@@ -104,19 +121,29 @@ smoke_assert( 'ping', $captured['message'] ?? null, 'handler_received_message', 
 smoke_assert( 'channel', $captured['client_context']['source'] ?? null, 'handler_received_client_context', $failures, $passes );
 smoke_assert( 'hello back', $result['reply'] ?? null, 'handler_result_returned', $failures, $passes );
 
-// 4. Handler returning non-array → WP_Error agents_chat_invalid_result.
+// 4. Handler returning non-array → WP_Error agents_chat_invalid_result + observability fires.
 $GLOBALS['__smoke_filters'] = array();
+$dispatch_failures2 = array();
+add_filter( 'agents_chat_dispatch_failed', static function ( $reason ) use ( &$dispatch_failures2 ) {
+	$dispatch_failures2[] = $reason;
+}, 10, 2 );
 register_chat_handler( static fn( array $i ) => 'not an array' );
 $bad = agents_chat_dispatch( array( 'agent' => 'x', 'message' => 'y' ) );
 smoke_assert( true, $bad instanceof WP_Error, 'invalid_result_returns_wp_error', $failures, $passes );
 smoke_assert( 'agents_chat_invalid_result', $bad->get_error_code(), 'invalid_result_error_code', $failures, $passes );
+smoke_assert( 'invalid_result', $dispatch_failures2[0] ?? 'missing', 'invalid_result_fires_dispatch_failed', $failures, $passes );
 
-// 5. Handler returning WP_Error → propagated.
+// 5. Handler returning WP_Error → propagated + observability fires with the error code.
 $GLOBALS['__smoke_filters'] = array();
+$dispatch_failures3 = array();
+add_filter( 'agents_chat_dispatch_failed', static function ( $reason ) use ( &$dispatch_failures3 ) {
+	$dispatch_failures3[] = $reason;
+}, 10, 2 );
 register_chat_handler( static fn( array $i ) => new WP_Error( 'agent_blew_up', 'kaboom' ) );
 $err = agents_chat_dispatch( array( 'agent' => 'x', 'message' => 'y' ) );
 smoke_assert( true, $err instanceof WP_Error, 'handler_wp_error_propagated', $failures, $passes );
 smoke_assert( 'agent_blew_up', $err->get_error_code(), 'handler_wp_error_code_preserved', $failures, $passes );
+smoke_assert( 'agent_blew_up', $dispatch_failures3[0] ?? 'missing', 'handler_wp_error_fires_dispatch_failed_with_code', $failures, $passes );
 
 // 6. First-handler-wins: second register call doesn't override.
 $GLOBALS['__smoke_filters'] = array();

@@ -28,7 +28,13 @@
  * The handler receives the canonical input map and must return either an
  * array matching the canonical output shape or a `WP_Error`.
  *
+ * Observability hooks fired by the dispatcher:
+ *   `agents_chat_dispatch_failed` — fires once per failed dispatch with
+ *     `( string $reason, array $input )`. Reasons: `no_handler`,
+ *     `invalid_result`, or any `WP_Error::get_error_code()` from a handler.
+ *
  * @package AgentsAPI
+ * @since   0.103.0
  */
 
 namespace AgentsAPI\AI\Channels;
@@ -39,6 +45,8 @@ defined( 'ABSPATH' ) || exit;
  * The slug under which this ability is registered. Stable. Consumers and
  * channels should target this string rather than a runtime-specific slug
  * like `openclawp/chat`.
+ *
+ * @since 0.103.0
  */
 const AGENTS_CHAT_ABILITY = 'agents/chat';
 
@@ -90,7 +98,9 @@ add_action(
 /**
  * Dispatch a chat request to the registered runtime.
  *
- * @param array $input Canonical chat-ability input.
+ * @since  0.103.0
+ *
+ * @param  array $input Canonical chat-ability input.
  * @return array|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_chat_dispatch( array $input ) {
@@ -110,6 +120,17 @@ function agents_chat_dispatch( array $input ) {
 	$handler = apply_filters( 'wp_agent_chat_handler', null, $input );
 
 	if ( ! is_callable( $handler ) ) {
+		/**
+		 * Fires when agents/chat dispatched but no handler was registered.
+		 * Use for sysadmin-side observability — alerting, Site Health, logs.
+		 *
+		 * @since 0.103.0
+		 *
+		 * @param string $reason Dispatch failure reason. Always `'no_handler'`.
+		 * @param array  $input  The canonical input that was rejected.
+		 */
+		do_action( 'agents_chat_dispatch_failed', 'no_handler', $input );
+
 		return new \WP_Error(
 			'agents_chat_no_handler',
 			'No agents/chat handler is registered. Install a consumer plugin that registers a runtime, or add a callable to the wp_agent_chat_handler filter.'
@@ -119,10 +140,16 @@ function agents_chat_dispatch( array $input ) {
 	$result = call_user_func( $handler, $input );
 
 	if ( is_wp_error( $result ) ) {
+		/** This action is documented above. */
+		do_action( 'agents_chat_dispatch_failed', $result->get_error_code(), $input );
+
 		return $result;
 	}
 
 	if ( ! is_array( $result ) ) {
+		/** This action is documented above. */
+		do_action( 'agents_chat_dispatch_failed', 'invalid_result', $input );
+
 		return new \WP_Error(
 			'agents_chat_invalid_result',
 			'agents/chat handler returned an unexpected result type. Handlers must return an array matching the canonical output shape or a WP_Error.'
@@ -136,6 +163,8 @@ function agents_chat_dispatch( array $input ) {
  * Permission gate for `agents/chat`. Defaults to `manage_options`; consumers
  * with their own auth model (HMAC-signed webhook, OAuth bearer, etc.) can
  * widen the gate per-request via the `agents_chat_permission` filter.
+ *
+ * @since 0.103.0
  *
  * @param array $input Canonical input.
  * @return bool
@@ -156,6 +185,8 @@ function agents_chat_permission( array $input ): bool {
 
 /**
  * Canonical input JSON schema (per agents-api#100).
+ *
+ * @since  0.103.0
  *
  * @return array
  */
@@ -209,8 +240,8 @@ function agents_chat_input_schema(): array {
 					),
 					'room_kind'                => array(
 						'type'        => array( 'string', 'null' ),
-						'enum'        => array( 'dm', 'group', 'channel', null ),
-						'description' => 'Conversation kind: direct message, multi-participant group, broadcast channel.',
+						'enum'        => array( 'dm', 'group', 'channel' ),
+						'description' => 'Conversation kind: direct message, multi-participant group, broadcast channel. Null when the source has no notion of room kind.',
 					),
 				),
 			),
@@ -220,6 +251,8 @@ function agents_chat_input_schema(): array {
 
 /**
  * Canonical output JSON schema (per agents-api#100).
+ *
+ * @since  0.103.0
  *
  * @return array
  */
@@ -264,6 +297,8 @@ function agents_chat_output_schema(): array {
  *
  * Equivalent to `add_filter( 'wp_agent_chat_handler', ... )` but reads more
  * intentionally at the call site.
+ *
+ * @since 0.103.0
  *
  * @param callable $handler  Receives the canonical input array, returns the
  *                           canonical output array or WP_Error.
