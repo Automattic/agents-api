@@ -140,7 +140,7 @@ is enough for many webhook secrets, bot tokens, and access tokens. It is not yet
 enough to model OAuth2, PKCE, scoped per-agent bridge credentials, callback URL
 registration, or per-client send/pending/ack scopes. Those richer bridge auth
 states should remain in Agents API services unless or until Connectors grows a
-native representation.
+native representation. The detailed boundary is defined in [Bridge Authorization And Onboarding](bridge-authorization.md).
 
 ## Shared Primitives
 
