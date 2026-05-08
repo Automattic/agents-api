@@ -90,32 +90,6 @@ final class WP_Agent_External_Message {
 	}
 
 	/**
-	 * Build a message object from a channel instance and webhook payload.
-	 *
-	 * @param WP_Agent_Channel $channel      Channel instance.
-	 * @param string           $message_text User message text.
-	 * @param array            $data         Channel payload.
-	 * @return self
-	 */
-	public static function from_channel( WP_Agent_Channel $channel, string $message_text, array $data ): self {
-		$payload = $channel->build_chat_payload( $message_text, $data );
-		$context = is_array( $payload['client_context'] ?? null ) ? $payload['client_context'] : array();
-
-		return new self(
-			$message_text,
-			(string) ( $context['connector_id'] ?? $context['client_name'] ?? $channel->get_client_name() ),
-			(string) ( $context['external_provider'] ?? $channel->get_external_id_provider() ),
-			isset( $context['external_conversation_id'] ) ? (string) $context['external_conversation_id'] : $channel->get_external_id(),
-			isset( $context['external_message_id'] ) ? (string) $context['external_message_id'] : null,
-			null,
-			false,
-			isset( $context['room_kind'] ) ? (string) $context['room_kind'] : null,
-			isset( $payload['attachments'] ) && is_array( $payload['attachments'] ) ? $payload['attachments'] : array(),
-			$data
-		);
-	}
-
-	/**
 	 * Return the canonical array shape.
 	 *
 	 * @return array<string,mixed>
