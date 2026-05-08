@@ -83,7 +83,7 @@ final class WP_Agent_Effective_Agent_Resolver {
 		}
 
 		throw new \InvalidArgumentException(
-			'invalid_effective_agent_resolution: owner_user_id is ambiguous; provide an explicit agent_slug or execution principal. Candidates: ' . implode( ', ', $candidates )
+			'invalid_effective_agent_resolution: owner_user_id is ambiguous; provide an explicit agent_slug or execution principal. Candidates: ' . implode( ', ', array_map( 'esc_html', $candidates ) )
 		);
 	}
 
@@ -161,16 +161,12 @@ final class WP_Agent_Effective_Agent_Resolver {
 
 		$matches = array();
 		foreach ( $registry->get_all_registered() as $agent ) {
-			if ( ! $agent instanceof \WP_Agent ) {
-				continue;
-			}
-
 			$owner_resolver = $agent->get_owner_resolver();
 			if ( ! is_callable( $owner_resolver ) ) {
 				continue;
 			}
 
-			if ( $owner_user_id === (int) call_user_func( $owner_resolver ) ) {
+			if ( (int) call_user_func( $owner_resolver ) === $owner_user_id ) {
 				$matches[] = $agent->get_slug();
 			}
 		}

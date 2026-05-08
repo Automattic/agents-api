@@ -109,6 +109,10 @@ agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Ag
 agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Store' ), 'WP_Agent_Channel_Session_Store contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Option_Channel_Session_Store' ), 'WP_Agent_Option_Channel_Session_Store implementation is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Map' ), 'WP_Agent_Channel_Session_Map facade is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Webhook_Signature' ), 'WP_Agent_Webhook_Signature helper is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\AI\Channels\WP_Agent_Message_Idempotency_Store' ), 'WP_Agent_Message_Idempotency_Store contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Transient_Message_Idempotency_Store' ), 'WP_Agent_Transient_Message_Idempotency_Store implementation is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Message_Idempotency' ), 'WP_Agent_Message_Idempotency facade is available', $failures, $passes );
 foreach ( $namespace_map as $legacy_class => $target_class ) {
 	agents_api_smoke_assert_equals( true, class_exists( $target_class ) || interface_exists( $target_class ), $target_class . ' contract is available', $failures, $passes );
 	agents_api_smoke_assert_equals( false, class_exists( $legacy_class, false ) || interface_exists( $legacy_class, false ), $legacy_class . ' compatibility alias is not loaded', $failures, $passes );
