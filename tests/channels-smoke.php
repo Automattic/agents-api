@@ -77,6 +77,10 @@ function apply_filters( string $hook, $value, ...$args ) {
 	return $value;
 }
 
+function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
+	add_filter( $hook, $cb, $priority, $accepted_args );
+}
+
 function smoke_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {
 	if ( $expected === $actual ) {
 		++$passes;
@@ -90,6 +94,7 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 }
 
 require_once __DIR__ . '/../src/Channels/class-wp-agent-channel.php';
+require_once __DIR__ . '/../src/Channels/register-agents-chat-ability.php';
 
 // ─── Fakes ──────────────────────────────────────────────────────────
 
@@ -142,7 +147,7 @@ class Test_Channel extends \AgentsAPI\AI\Channels\WP_Agent_Channel {
 $happy_ability = new Fake_Ability(
 	array( 'reply' => 'Hello from the agent', 'session_id' => 'sess-123', 'completed' => true )
 );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $happy_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $happy_ability;
 
 $ch = new Test_Channel( 'chat-A' );
 $ch->handle( array( 'text' => 'hi there' ) );
@@ -150,36 +155,76 @@ $ch->handle( array( 'text' => 'hi there' ) );
 smoke_assert( array( 'Hello from the agent' ), $ch->sent, 'happy_path_send_response', $failures, $passes );
 smoke_assert( array(), $ch->errors, 'happy_path_no_error', $failures, $passes );
 smoke_assert( array( 'start', 'end', 'complete' ), $ch->lifecycle, 'happy_path_lifecycle_order', $failures, $passes );
+$expected_first_call = array(
+	array(
+		'agent'          => 'test-agent',
+		'message'        => 'hi there',
+		'session_id'     => null,
+		'attachments'    => array(),
+		'client_context' => array(
+			'source'                   => 'channel',
+			'client_name'              => 'test-channel',
+			'external_provider'        => 'test-channel',
+			'external_conversation_id' => 'chat-A',
+			'external_message_id'      => null,
+			'room_kind'                => null,
+		),
+	),
+);
+smoke_assert( $expected_first_call, $happy_ability->calls, 'happy_path_canonical_chat_payload', $failures, $passes );
+
+// 1b. Override hooks for attachments / external_message_id / room_kind / source.
+class Rich_Channel extends Test_Channel {
+	protected function extract_attachments( array $data ): array {
+		return array_map( static fn( $a ) => array( 'url' => $a ), (array) ( $data['attachments'] ?? array() ) );
+	}
+	protected function extract_external_message_id( array $data ): ?string {
+		return isset( $data['msg_id'] ) ? (string) $data['msg_id'] : null;
+	}
+	protected function get_room_kind( array $data ): ?string {
+		return $data['room_kind'] ?? null;
+	}
+	protected function client_context_source(): string {
+		return 'bridge';
+	}
+}
+$rich_ability = new Fake_Ability( array( 'reply' => 'rich response' ) );
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $rich_ability;
+$rich = new Rich_Channel( 'chat-rich' );
+$rich->handle( array(
+	'text'        => 'check this out',
+	'msg_id'      => 'wamid.123',
+	'room_kind'   => 'group',
+	'attachments' => array( 'https://example.com/img.jpg' ),
+) );
 smoke_assert(
-	array( array( 'agent' => 'test-agent', 'message' => 'hi there', 'session_id' => null ) ),
-	$happy_ability->calls,
-	'happy_path_ability_input_first_turn',
+	array( array( 'url' => 'https://example.com/img.jpg' ) ),
+	$rich_ability->calls[0]['attachments'] ?? null,
+	'rich_payload_attachments_extracted',
 	$failures,
 	$passes
 );
+smoke_assert( 'wamid.123', $rich_ability->calls[0]['client_context']['external_message_id'] ?? null, 'rich_payload_external_message_id', $failures, $passes );
+smoke_assert( 'group', $rich_ability->calls[0]['client_context']['room_kind'] ?? null, 'rich_payload_room_kind', $failures, $passes );
+smoke_assert( 'bridge', $rich_ability->calls[0]['client_context']['source'] ?? null, 'rich_payload_source_overridden', $failures, $passes );
 
 // 2. Session continuity: second turn passes the stored session_id.
 $happy_ability2 = new Fake_Ability(
 	array( 'reply' => 'second reply', 'session_id' => 'sess-123', 'completed' => true )
 );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $happy_ability2;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $happy_ability2;
 
 $ch2 = new Test_Channel( 'chat-A' );
 $ch2->handle( array( 'text' => 'follow-up' ) );
 
-smoke_assert(
-	array( array( 'agent' => 'test-agent', 'message' => 'follow-up', 'session_id' => 'sess-123' ) ),
-	$happy_ability2->calls,
-	'second_turn_passes_stored_session_id',
-	$failures,
-	$passes
-);
+smoke_assert( 'sess-123', $happy_ability2->calls[0]['session_id'] ?? 'missing', 'second_turn_passes_stored_session_id', $failures, $passes );
+smoke_assert( 'follow-up', $happy_ability2->calls[0]['message'] ?? 'missing', 'second_turn_message_passed', $failures, $passes );
 
 // 3. Different external_id gets its own session.
 $other_ability = new Fake_Ability(
 	array( 'reply' => 'reply for B', 'session_id' => 'sess-B-456', 'completed' => true )
 );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $other_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $other_ability;
 
 $ch3 = new Test_Channel( 'chat-B' );
 $ch3->handle( array( 'text' => 'hi' ) );
@@ -194,7 +239,7 @@ smoke_assert(
 
 // 4. Empty message short-circuits with WP_Error, no agent call.
 $null_ability = new Fake_Ability( array( 'reply' => 'should not be called' ) );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $null_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $null_ability;
 
 $ch4    = new Test_Channel( 'chat-empty' );
 $result = $ch4->handle( array( 'text' => '   ' ) );
@@ -205,7 +250,7 @@ smoke_assert( array(), $null_ability->calls, 'empty_message_skips_agent', $failu
 
 // 5. Ability returns WP_Error → send_error fires.
 $error_ability = new Fake_Ability( new WP_Error( 'agent_blew_up', 'something exploded' ) );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $error_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $error_ability;
 
 $ch5 = new Test_Channel( 'chat-err' );
 $ch5->handle( array( 'text' => 'try this' ) );
@@ -217,7 +262,8 @@ smoke_assert( array(), $ch5->sent, 'agent_error_no_response', $failures, $passes
 $GLOBALS['__channel_smoke_abilities']['my-plugin/custom-chat'] = new Fake_Ability(
 	array( 'reply' => 'from custom ability' )
 );
-add_filter( 'wp_agent_channel_chat_ability', static fn( $slug ) => 'my-plugin/custom-chat' );
+$override_filter = static fn( $slug ) => 'my-plugin/custom-chat';
+add_filter( 'wp_agent_channel_chat_ability', $override_filter );
 
 $ch6 = new Test_Channel( 'chat-custom' );
 $ch6->handle( array( 'text' => 'route me elsewhere' ) );
@@ -240,7 +286,7 @@ class Silent_Skip_Channel extends Test_Channel {
 	}
 }
 $silent_ability = new Fake_Ability( array( 'reply' => 'should not be called' ) );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $silent_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $silent_ability;
 
 $ch_silent = new Silent_Skip_Channel( 'chat-silent' );
 $result    = $ch_silent->handle( array( 'text' => 'echo of own reply', 'from_me' => true ) );
