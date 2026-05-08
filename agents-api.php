@@ -118,6 +118,10 @@ require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-external-message.php
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel-session-store.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-option-channel-session-store.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel-session-map.php';
+require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-webhook-signature.php';
+require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-message-idempotency-store.php';
+require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-transient-message-idempotency-store.php';
+require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-message-idempotency.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-ability.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-bindings.php';

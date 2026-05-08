@@ -138,6 +138,10 @@ wp_register_agent(
 - `AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Store`
 - `AgentsAPI\AI\Channels\WP_Agent_Option_Channel_Session_Store`
 - `AgentsAPI\AI\Channels\WP_Agent_Channel_Session_Map`
+- `AgentsAPI\AI\Channels\WP_Agent_Webhook_Signature`
+- `AgentsAPI\AI\Channels\WP_Agent_Message_Idempotency_Store`
+- `AgentsAPI\AI\Channels\WP_Agent_Transient_Message_Idempotency_Store`
+- `AgentsAPI\AI\Channels\WP_Agent_Message_Idempotency`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Call`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Source_Registry`
