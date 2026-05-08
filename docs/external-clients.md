@@ -144,8 +144,8 @@ native representation. The detailed boundary is defined in [Bridge Authorization
 
 ## Shared Primitives
 
-The following primitives are candidates for Agents API because they are shared
-by direct channels and remote bridges.
+The following primitives are part of Agents API because they are shared by
+direct channels and remote bridges.
 
 ### Chat Ability Contract
 
@@ -180,8 +180,7 @@ array(
 )
 ```
 
-The bridge-ready extension should preserve those fields and add optional
-metadata:
+The bridge-ready input preserves those fields and adds optional metadata:
 
 ```php
 array(
@@ -224,8 +223,8 @@ array(
 )
 ```
 
-Agents API should define this normalized shape as a reusable value contract.
-Channel plugins should still own vendor-specific parsing.
+Agents API defines this normalized shape with `WP_Agent_External_Message`.
+Channel plugins still own vendor-specific parsing.
 
 ### Session Mapping
 
@@ -236,9 +235,9 @@ connector_id + external_conversation_id + agent
 -> session_id
 ```
 
-`WP_Agent_Channel` has an option-backed default. A follow-up service or
-interface should make the mapping reusable across channel subclasses and remote
-bridge services while preserving override points for custom stores.
+`WP_Agent_Channel_Session_Map` provides this mapping with an option-backed
+default and a replaceable store contract for channel subclasses and remote
+bridge services.
 
 ### Webhook Safety
 
@@ -250,8 +249,9 @@ Most webhook channels need the same small safety helpers:
 - TTL-backed inbound duplicate suppression keyed by external message ID
 - explicit silent-skip results for self messages and non-chat events
 
-Agents API should provide these helpers so every channel does not copy slightly
-different security-sensitive code.
+Agents API provides these helpers with `WP_Agent_Webhook_Signature` and
+`WP_Agent_Message_Idempotency` so every channel does not copy slightly different
+security-sensitive code.
 
 ### Remote Bridge Delivery
 
@@ -265,11 +265,11 @@ assistant response generated
 -> allow polling as recovery path
 ```
 
-This implies generic services or REST endpoints for:
+Agents API provides generic PHP services for:
 
 ```text
 register bridge callback
-send inbound message
+queue outbound bridge messages
 list pending outbound messages
 ack delivered messages
 ```
@@ -292,18 +292,6 @@ Agents API should not own product or platform details:
 - product-specific approval UX
 
 Those belong in channel plugins, bridge clients, or runtime adapters.
-
-## Implementation Sequence
-
-The next slices should be small and reviewable:
-
-1. Document and extend the `WP_Agent_Channel` chat ability contract for bridge
-   metadata.
-2. Add normalized external message and session mapping primitives.
-3. Add webhook signature and inbound idempotency helpers.
-4. Design the remote bridge register/send/pending/ack services.
-5. Design bridge authorization around Connectors-backed service identity and
-   Agents API-owned scoped credentials.
 
 Related tracking issues:
 
