@@ -282,7 +282,7 @@ abstract class WP_Agent_Channel {
 	 *
 	 * Default implementation calls the chat ability registered under the slug
 	 * returned by the `wp_agent_channel_chat_ability` filter (default
-	 * `openclawp/chat`). Override to plug in a different runtime — a
+	 * `agents/chat`). Override to plug in a different runtime — a
 	 * direct `wp_ai_client_prompt()` call, an external HTTP service, or a
 	 * host-specific agent factory.
 	 *
@@ -494,8 +494,9 @@ abstract class WP_Agent_Channel {
 	}
 
 	/**
-	 * Pull assistant text out of the agent result. Default supports two
-	 * shapes: `{ reply: string }` (openclawp/chat single-turn) and
+	 * Pull assistant text out of the agent result. Default supports three
+	 * shapes: `{ reply: string }` (canonical single-turn),
+	 * `{ response: string }` (legacy adapter alias), and
 	 * `{ messages: [ { role, content } ] }` (multi-message). Override for
 	 * exotic result shapes.
 	 *
@@ -505,6 +506,10 @@ abstract class WP_Agent_Channel {
 	protected function extract_replies( array $result ): array {
 		if ( ! empty( $result['reply'] ) ) {
 			return array( (string) $result['reply'] );
+		}
+
+		if ( ! empty( $result['response'] ) ) {
+			return array( (string) $result['response'] );
 		}
 
 		if ( ! empty( $result['messages'] ) && is_array( $result['messages'] ) ) {
