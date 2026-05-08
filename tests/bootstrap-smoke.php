@@ -118,9 +118,9 @@ agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Ag
 agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge_Store' ), 'WP_Agent_Bridge_Store contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Option_Bridge_Store' ), 'WP_Agent_Option_Bridge_Store implementation is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge' ), 'WP_Agent_Bridge facade is available', $failures, $passes );
-foreach ( $namespace_map as $legacy_class => $target_class ) {
+foreach ( $namespace_map as $source_class => $target_class ) {
 	agents_api_smoke_assert_equals( true, class_exists( $target_class ) || interface_exists( $target_class ), $target_class . ' contract is available', $failures, $passes );
-	agents_api_smoke_assert_equals( false, class_exists( $legacy_class, false ) || interface_exists( $legacy_class, false ), $legacy_class . ' compatibility alias is not loaded', $failures, $passes );
+	agents_api_smoke_assert_equals( false, class_exists( $source_class, false ) || interface_exists( $source_class, false ), $source_class . ' compatibility alias is not loaded', $failures, $passes );
 }
 foreach ( $context_contracts as $context_contract ) {
 	agents_api_smoke_assert_equals( true, class_exists( $context_contract ) || interface_exists( $context_contract ), $context_contract . ' contract is available', $failures, $passes );
@@ -191,7 +191,7 @@ sort( $actual_source_directories );
 agents_api_smoke_assert_equals( $expected_source_directories, $actual_source_directories, 'module source directories are agent-native', $failures, $passes );
 agents_api_smoke_assert_equals( false, is_dir( AGENTS_API_PATH . 'inc/Core' ), 'copied inc/Core tree is absent', $failures, $passes );
 agents_api_smoke_assert_equals( false, is_dir( AGENTS_API_PATH . 'inc/AI' ), 'copied inc/AI tree is absent', $failures, $passes );
-agents_api_smoke_assert_equals( false, is_dir( AGENTS_API_PATH . 'inc' ), 'legacy inc source root is absent', $failures, $passes );
+agents_api_smoke_assert_equals( false, is_dir( AGENTS_API_PATH . 'inc' ), 'old inc source root is absent', $failures, $passes );
 
 echo "\n[4] Module owns the generic guideline substrate polyfill:\n";
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Guidelines_Substrate' ), 'guideline substrate class is available', $failures, $passes );

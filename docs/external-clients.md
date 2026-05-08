@@ -1,19 +1,19 @@
 # External Clients, Channels, And Bridges
 
-Agents API should provide the generic substrate that lets external conversation
+Agents API provides the generic substrate that lets external conversation
 surfaces talk to WordPress agents without every consumer rebuilding the same
 transport, session, and delivery primitives.
 
 This document describes the boundary. It is intentionally architectural: it
-connects the merged `WP_Agent_Channel` base class to the follow-up bridge and
-Connectors work without committing to a full REST implementation in this slice.
+connects `WP_Agent_Channel`, bridge primitives, session mapping, webhook safety,
+and Connectors metadata without committing to a full REST implementation in this
+slice.
 
 ## Why This Belongs In Agents API
 
 External clients are a common agent runtime requirement. Users should be able to
 talk to WordPress agents from surfaces such as Telegram, Slack, Discord,
-WhatsApp, SMS, email, Matrix, Beeper, CLI relays, browser extensions, and mobile
-apps.
+WhatsApp, SMS, email, Matrix, CLI relays, browser extensions, and mobile apps.
 
 Those integrations repeat the same infrastructure:
 
@@ -28,7 +28,7 @@ external event
 -> suppress duplicates and recover from delivery failures
 ```
 
-Agents API should own the shape and shared infrastructure. Product plugins and
+Agents API owns the shape and shared infrastructure. Product plugins and
 channel plugins should own platform details, product policy, and UI.
 
 ## Two Integration Shapes
@@ -77,7 +77,7 @@ generic bridge protocol. This is useful when the chat surface is not implemented
 as a WordPress plugin process.
 
 ```text
-Beeper / Matrix / external daemon / mobile client
+external daemon / mobile client / message relay
 -> Agents API bridge endpoint
 -> chat ability
 -> queue assistant response
@@ -85,16 +85,15 @@ Beeper / Matrix / external daemon / mobile client
 -> client ack
 ```
 
-The Data Machine chat bridge currently implements this pattern for Data Machine.
-The generic parts should move toward Agents API so other runtimes do not need to
-copy bridge registration, queue-first delivery, pending polling, and ack logic.
+Agents API owns the generic bridge registration, queue-first delivery, pending
+polling, and ack logic so runtimes do not copy product-specific bridge code.
 
 ## Connectors API Boundary
 
-WordPress Connectors API should be the default registry and settings layer for
+WordPress Connectors API is the default registry and settings layer for
 external services when available.
 
-Connectors should own service metadata:
+Connectors own service metadata:
 
 - connector ID
 - display name and description
@@ -105,7 +104,7 @@ Connectors should own service metadata:
 - plugin install/activate metadata
 - connected status metadata where the auth method fits
 
-Agents API should own agent semantics:
+Agents API owns agent semantics:
 
 - chat ability contract
 - channel and bridge message context
@@ -130,7 +129,7 @@ telegram
 slack
 discord
 whatsapp-cloud
-wacli
+local-relay
 matrix
 beeper
 ```
@@ -274,21 +273,21 @@ list pending outbound messages
 ack delivered messages
 ```
 
-The bridge protocol should call the canonical chat ability contract rather than
+The bridge protocol calls the canonical chat ability contract rather than
 any runtime-specific ability shape.
 
 ## What Stays Out Of Agents API
 
-Agents API should not own product or platform details:
+Agents API does not own product or platform details:
 
 - Slack-specific event envelope parsing
 - Discord-specific interaction handling
 - Telegram-specific bot setup
 - WhatsApp Graph API settings pages
-- wacli process management or QR pairing UI
-- Data Machine token table names
-- Data Machine mode prompts or bridge guidance copy
-- Roadie/Beeper onboarding copy
+- local bridge process management or pairing UI
+- runtime-specific token table names
+- runtime-specific mode prompts or bridge guidance copy
+- product-specific onboarding copy
 - product-specific approval UX
 
 Those belong in channel plugins, bridge clients, or runtime adapters.

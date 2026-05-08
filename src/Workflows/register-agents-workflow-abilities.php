@@ -35,7 +35,7 @@ add_action(
 			'agents-api',
 			array(
 				'label'       => 'Agents API',
-				'description' => 'Cross-cutting abilities provided by the Agents API substrate (channel dispatch, canonical chat contract, workflow dispatch, future runtime resolvers).',
+				'description' => 'Cross-cutting abilities provided by the Agents API substrate (channel dispatch, canonical chat contract, and workflow dispatch).',
 			)
 		);
 	}

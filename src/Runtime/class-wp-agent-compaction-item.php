@@ -82,7 +82,7 @@ class WP_Agent_Compaction_Item {
 	/**
 	 * Project a message envelope into the generic compaction item contract.
 	 *
-	 * @param array    $message Message envelope or legacy message.
+	 * @param array    $message Message envelope or plain role/content message.
 	 * @param int|null $index   Optional item position used for generated IDs.
 	 * @return array<string, mixed> Normalized compaction item.
 	 */
@@ -110,7 +110,7 @@ class WP_Agent_Compaction_Item {
 	/**
 	 * Project message envelopes into ordered compaction items.
 	 *
-	 * @param array $messages Message envelopes or legacy messages.
+	 * @param array $messages Message envelopes or plain role/content messages.
 	 * @return array<int, array<string, mixed>>
 	 */
 	public static function from_messages( array $messages ): array {

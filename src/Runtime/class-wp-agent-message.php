@@ -118,7 +118,7 @@ class WP_Agent_Message {
 	}
 
 	/**
-	 * Normalize a legacy message or typed envelope to the canonical envelope.
+	 * Normalize a plain role/content message or typed envelope to the canonical envelope.
 	 *
 	 * @param array $message Message array.
 	 * @return array<string, mixed> Normalized envelope.
@@ -127,7 +127,7 @@ class WP_Agent_Message {
 	public static function normalize( array $message ): array {
 		$envelope = self::isEnvelope( $message )
 			? self::normalizeEnvelope( $message )
-			: self::fromLegacyMessage( $message );
+			: self::fromPlainMessage( $message );
 
 		if ( false === self::jsonEncode( $envelope ) ) {
 			throw new \InvalidArgumentException( 'invalid_ai_message_envelope: envelope must be JSON serializable' );
@@ -156,7 +156,7 @@ class WP_Agent_Message {
 	/**
 	 * Project an envelope to a provider request message shape.
 	 *
-	 * @param array $message Typed envelope or legacy message.
+	 * @param array $message Typed envelope or plain role/content message.
 	 * @return array<string, mixed> Provider-facing message.
 	 */
 	public static function to_provider_message( array $message ): array {
@@ -187,7 +187,7 @@ class WP_Agent_Message {
 	/**
 	 * Project envelopes to a provider request message shape.
 	 *
-	 * @param array $messages Typed envelopes or legacy messages.
+	 * @param array $messages Typed envelopes or plain role/content messages.
 	 * @return array<int, array<string, mixed>> Provider-facing messages.
 	 */
 	public static function to_provider_messages( array $messages ): array {
@@ -204,7 +204,7 @@ class WP_Agent_Message {
 	/**
 	 * Extract the canonical type from a message.
 	 *
-	 * @param array $message Typed envelope or legacy message.
+	 * @param array $message Typed envelope or plain role/content message.
 	 * @return string Message type.
 	 */
 	public static function type( array $message ): string {
@@ -252,12 +252,12 @@ class WP_Agent_Message {
 	}
 
 	/**
-	 * Normalize the legacy role/content/metadata message shape.
+	 * Normalize the plain role/content/metadata message shape.
 	 *
-	 * @param array $message Legacy message.
+	 * @param array $message Plain role/content message.
 	 * @return array<string, mixed> Canonical envelope.
 	 */
-	private static function fromLegacyMessage( array $message ): array {
+	private static function fromPlainMessage( array $message ): array {
 		$metadata = is_array( $message['metadata'] ?? null ) ? $message['metadata'] : array();
 		$type     = self::inferType( $message, $metadata );
 
@@ -265,7 +265,7 @@ class WP_Agent_Message {
 			$message['role'] ?? self::roleForType( $type ),
 			$message['content'] ?? '',
 			$type,
-			self::payloadFromLegacyMetadata( $type, $metadata ),
+			self::payloadFromPlainMetadata( $type, $metadata ),
 			$metadata,
 			$message
 		);
@@ -311,10 +311,10 @@ class WP_Agent_Message {
 	}
 
 	/**
-	 * Infer the typed envelope event from legacy message fields.
+	 * Infer the typed envelope event from plain message fields.
 	 *
-	 * @param array $message  Legacy message.
-	 * @param array $metadata Legacy metadata.
+	 * @param array $message  Plain role/content message.
+	 * @param array $metadata Plain message metadata.
 	 * @return string Envelope type.
 	 */
 	private static function inferType( array $message, array $metadata ): string {
@@ -346,13 +346,13 @@ class WP_Agent_Message {
 	}
 
 	/**
-	 * Pull common legacy metadata fields into type-specific envelope payload.
+	 * Pull common plain-message metadata fields into type-specific envelope payload.
 	 *
 	 * @param string $type     Envelope type.
-	 * @param array  $metadata Legacy metadata.
+	 * @param array  $metadata Plain message metadata.
 	 * @return array<string, mixed> Type-specific payload.
 	 */
-	private static function payloadFromLegacyMetadata( string $type, array $metadata ): array {
+	private static function payloadFromPlainMetadata( string $type, array $metadata ): array {
 		$payload = array();
 
 		if ( self::TYPE_TOOL_CALL === $type ) {

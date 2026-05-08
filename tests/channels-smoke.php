@@ -264,17 +264,17 @@ smoke_assert( 'group', $rich_ability->calls[0]['client_context']['room_kind'] ??
 smoke_assert( 'bridge', $rich_ability->calls[0]['client_context']['source'] ?? null, 'rich_payload_source_overridden', $failures, $passes );
 smoke_assert( 'test-channel', $rich_ability->calls[0]['client_context']['connector_id'] ?? null, 'rich_payload_connector_id', $failures, $passes );
 
-// 1c. Channels with legacy/custom session keys keep that override path.
+// 1c. Channels with custom session keys keep that override path.
 class Custom_Key_Channel extends Test_Channel {
 	protected function session_storage_key(): string {
-		return 'legacy_custom_session_key_' . $this->external_id;
+		return 'custom_session_key_' . $this->external_id;
 	}
 }
-$custom_key_ability = new Fake_Ability( array( 'reply' => 'legacy key', 'session_id' => 'sess-legacy' ) );
+$custom_key_ability = new Fake_Ability( array( 'reply' => 'custom key', 'session_id' => 'sess-custom' ) );
 $GLOBALS['__channel_smoke_abilities']['agents/chat'] = $custom_key_ability;
-$custom_key = new Custom_Key_Channel( 'chat-legacy' );
+$custom_key = new Custom_Key_Channel( 'chat-custom' );
 $custom_key->handle( array( 'text' => 'use custom key' ) );
-smoke_assert( 'sess-legacy', get_option( 'legacy_custom_session_key_chat-legacy' ), 'custom_session_key_override_is_preserved', $failures, $passes );
+smoke_assert( 'sess-custom', get_option( 'custom_session_key_chat-custom' ), 'custom_session_key_override_is_preserved', $failures, $passes );
 
 // 2. Session continuity: second turn passes the stored session_id.
 $happy_ability2 = new Fake_Ability(
