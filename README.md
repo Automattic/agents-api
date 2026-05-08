@@ -252,6 +252,16 @@ Agents API defines the contracts only. Concrete stores decide how metadata is ph
 
 For the proposed optional reference implementations, see [Default Stores Companion Proposal](docs/default-stores-companion.md). The proposal keeps concrete persistence policy outside this canonical substrate while documenting the package boundary, test expectations, and extraction order for issue #78.
 
+## External Clients
+
+Agents API owns the generic substrate for external conversation clients: direct
+channel plugins, remote bridge clients, normalized external message context, and
+session continuity. Product plugins and channel plugins still own platform APIs,
+settings screens, and product policy.
+
+See [External Clients, Channels, And Bridges](docs/external-clients.md) for the
+architecture boundary and follow-up slices.
+
 ## Tool Visibility And Action Policy
 
 Agents API owns generic policy contracts for deciding which tools are visible to an agent and how a called tool is allowed to execute. Consumers still own concrete tool sources, concrete execution adapters, approval storage, UI, workflows, and any product-specific mandatory tools.
