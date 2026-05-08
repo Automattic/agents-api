@@ -77,6 +77,10 @@ function apply_filters( string $hook, $value, ...$args ) {
 	return $value;
 }
 
+function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
+	add_filter( $hook, $cb, $priority, $accepted_args );
+}
+
 function smoke_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {
 	if ( $expected === $actual ) {
 		++$passes;
@@ -90,6 +94,7 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 }
 
 require_once __DIR__ . '/../src/Channels/class-wp-agent-channel.php';
+require_once __DIR__ . '/../src/Channels/register-agents-chat-ability.php';
 
 // ─── Fakes ──────────────────────────────────────────────────────────
 
@@ -142,7 +147,7 @@ class Test_Channel extends \AgentsAPI\AI\Channels\WP_Agent_Channel {
 $happy_ability = new Fake_Ability(
 	array( 'reply' => 'Hello from the agent', 'session_id' => 'sess-123', 'completed' => true )
 );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $happy_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $happy_ability;
 
 $ch = new Test_Channel( 'chat-A' );
 $ch->handle( array( 'text' => 'hi there' ) );
@@ -184,7 +189,7 @@ class Rich_Channel extends Test_Channel {
 	}
 }
 $rich_ability = new Fake_Ability( array( 'reply' => 'rich response' ) );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $rich_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $rich_ability;
 $rich = new Rich_Channel( 'chat-rich' );
 $rich->handle( array(
 	'text'        => 'check this out',
@@ -207,7 +212,7 @@ smoke_assert( 'bridge', $rich_ability->calls[0]['client_context']['source'] ?? n
 $happy_ability2 = new Fake_Ability(
 	array( 'reply' => 'second reply', 'session_id' => 'sess-123', 'completed' => true )
 );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $happy_ability2;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $happy_ability2;
 
 $ch2 = new Test_Channel( 'chat-A' );
 $ch2->handle( array( 'text' => 'follow-up' ) );
@@ -219,7 +224,7 @@ smoke_assert( 'follow-up', $happy_ability2->calls[0]['message'] ?? 'missing', 's
 $other_ability = new Fake_Ability(
 	array( 'reply' => 'reply for B', 'session_id' => 'sess-B-456', 'completed' => true )
 );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $other_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $other_ability;
 
 $ch3 = new Test_Channel( 'chat-B' );
 $ch3->handle( array( 'text' => 'hi' ) );
@@ -234,7 +239,7 @@ smoke_assert(
 
 // 4. Empty message short-circuits with WP_Error, no agent call.
 $null_ability = new Fake_Ability( array( 'reply' => 'should not be called' ) );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $null_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $null_ability;
 
 $ch4    = new Test_Channel( 'chat-empty' );
 $result = $ch4->handle( array( 'text' => '   ' ) );
@@ -245,7 +250,7 @@ smoke_assert( array(), $null_ability->calls, 'empty_message_skips_agent', $failu
 
 // 5. Ability returns WP_Error → send_error fires.
 $error_ability = new Fake_Ability( new WP_Error( 'agent_blew_up', 'something exploded' ) );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $error_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $error_ability;
 
 $ch5 = new Test_Channel( 'chat-err' );
 $ch5->handle( array( 'text' => 'try this' ) );
@@ -257,7 +262,8 @@ smoke_assert( array(), $ch5->sent, 'agent_error_no_response', $failures, $passes
 $GLOBALS['__channel_smoke_abilities']['my-plugin/custom-chat'] = new Fake_Ability(
 	array( 'reply' => 'from custom ability' )
 );
-add_filter( 'wp_agent_channel_chat_ability', static fn( $slug ) => 'my-plugin/custom-chat' );
+$override_filter = static fn( $slug ) => 'my-plugin/custom-chat';
+add_filter( 'wp_agent_channel_chat_ability', $override_filter );
 
 $ch6 = new Test_Channel( 'chat-custom' );
 $ch6->handle( array( 'text' => 'route me elsewhere' ) );
@@ -280,7 +286,7 @@ class Silent_Skip_Channel extends Test_Channel {
 	}
 }
 $silent_ability = new Fake_Ability( array( 'reply' => 'should not be called' ) );
-$GLOBALS['__channel_smoke_abilities']['openclawp/chat'] = $silent_ability;
+$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $silent_ability;
 
 $ch_silent = new Silent_Skip_Channel( 'chat-silent' );
 $result    = $ch_silent->handle( array( 'text' => 'echo of own reply', 'from_me' => true ) );

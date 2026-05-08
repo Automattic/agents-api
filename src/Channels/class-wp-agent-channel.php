@@ -300,8 +300,8 @@ abstract class WP_Agent_Channel {
 	 *     }
 	 *
 	 * Runtimes that don't read the richer fields (e.g. `openclawp/chat`)
-	 * ignore them; runtimes that do (e.g. Data Machine's chat bridge) get
-	 * the full transport context without having to know about WP_Agent_Channel.
+	 * ignore them; runtimes that do get the full transport context without
+	 * having to know about WP_Agent_Channel.
 	 *
 	 * @param string $message_text The user-message string from extract_message().
 	 * @param array  $data         The original webhook payload, in case the runner
@@ -316,13 +316,17 @@ abstract class WP_Agent_Channel {
 		/**
 		 * Filter the chat ability slug used by channels by default.
 		 *
-		 * @param string $slug       Ability slug. Default 'openclawp/chat'.
+		 * Default is `agents/chat` (the canonical dispatcher registered by
+		 * agents-api itself). Override per-channel only when you need to
+		 * pin a specific runtime ability.
+		 *
+		 * @param string $slug       Ability slug. Default 'agents/chat'.
 		 * @param string $agent_slug The agent slug being targeted.
 		 * @param string $channel    Concrete channel class name.
 		 */
 		$slug = (string) apply_filters(
 			'wp_agent_channel_chat_ability',
-			'openclawp/chat',
+			AGENTS_CHAT_ABILITY,
 			$this->agent_slug,
 			static::class
 		);
