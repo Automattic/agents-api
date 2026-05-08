@@ -113,6 +113,11 @@ agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Ag
 agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\AI\Channels\WP_Agent_Message_Idempotency_Store' ), 'WP_Agent_Message_Idempotency_Store contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Transient_Message_Idempotency_Store' ), 'WP_Agent_Transient_Message_Idempotency_Store implementation is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Message_Idempotency' ), 'WP_Agent_Message_Idempotency facade is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge_Client' ), 'WP_Agent_Bridge_Client value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge_Queue_Item' ), 'WP_Agent_Bridge_Queue_Item value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge_Store' ), 'WP_Agent_Bridge_Store contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Option_Bridge_Store' ), 'WP_Agent_Option_Bridge_Store implementation is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge' ), 'WP_Agent_Bridge facade is available', $failures, $passes );
 foreach ( $namespace_map as $legacy_class => $target_class ) {
 	agents_api_smoke_assert_equals( true, class_exists( $target_class ) || interface_exists( $target_class ), $target_class . ' contract is available', $failures, $passes );
 	agents_api_smoke_assert_equals( false, class_exists( $legacy_class, false ) || interface_exists( $legacy_class, false ), $legacy_class . ' compatibility alias is not loaded', $failures, $passes );
