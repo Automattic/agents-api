@@ -17,6 +17,7 @@
       "php tests/message-envelope-smoke.php",
       "php tests/registry-smoke.php",
       "php tests/execution-principal-smoke.php",
+      "php tests/effective-agent-resolver-smoke.php",
       "php tests/caller-context-smoke.php",
       "php tests/authorization-smoke.php",
       "php tests/action-policy-values-smoke.php",
