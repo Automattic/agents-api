@@ -92,6 +92,7 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Context_Section_Re
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Context_Injection_Policy' ), 'WP_Agent_Context_Injection_Policy vocabulary is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Composable_Context' ), 'WP_Agent_Composable_Context value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_PLUGIN_FILE' ), 'plugin file constant is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, str_contains( file_get_contents( AGENTS_API_PLUGIN_FILE ), 'Requires at least: 6.9' ), 'plugin header supports WordPress 6.9 consumers', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\WP_Agent_Markdown_Section_Compaction_Adapter' ), 'AgentsAPI\\AI\\WP_Agent_Markdown_Section_Compaction_Adapter contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\WP_Agent_Conversation_Loop' ), 'WP_Agent_Conversation_Loop facade is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Store' ), 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Store contract is available', $failures, $passes );
