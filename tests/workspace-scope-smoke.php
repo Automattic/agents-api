@@ -86,6 +86,9 @@ $workspace_class = AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope::class;
 
 agents_api_smoke_assert_equals( 'workspace', $create_params[0]->getName(), 'create_session first parameter is workspace', $failures, $passes );
 agents_api_smoke_assert_equals( $workspace_class, $create_params[0]->getType()->getName(), 'create_session workspace parameter is typed', $failures, $passes );
+agents_api_smoke_assert_equals( 'agent_slug', $create_params[2]->getName(), 'create_session accepts registered agent slug', $failures, $passes );
+agents_api_smoke_assert_equals( 'string', $create_params[2]->getType()->getName(), 'create_session agent slug is string typed', $failures, $passes );
+agents_api_smoke_assert_equals( '', $create_params[2]->getDefaultValue(), 'create_session agent slug defaults to agent-less session', $failures, $passes );
 agents_api_smoke_assert_equals( 'provider_response_id', $update_params[5]->getName(), 'update_session accepts provider response ID', $failures, $passes );
 agents_api_smoke_assert_equals( true, $update_params[5]->allowsNull(), 'provider response ID can be null when no provider state exists', $failures, $passes );
 agents_api_smoke_assert_equals( 'workspace', $pending_params[0]->getName(), 'get_recent_pending_session first parameter is workspace', $failures, $passes );

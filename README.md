@@ -382,6 +382,8 @@ $scope = new AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Scope(
 
 Transcript sessions are also workspace-stamped. `WP_Agent_Conversation_Store::create_session()` and `::get_recent_pending_session()` both receive an `WP_Agent_Workspace_Scope`, and `WP_Agent_Conversation_Request` can carry a workspace so runtime persisters can stamp the session they materialize.
 
+Transcript sessions use registered agent slugs for runtime agent identity. `WP_Agent_Conversation_Store::create_session()` accepts `string $agent_slug = ''`, matching `wp_register_agent()` / `wp_get_agent()`. Concrete stores that materialize agents as posts can keep post IDs internally, but generic session arrays expose `agent_slug` rather than requiring a WordPress post ID.
+
 Transcript stores preserve provider continuity metadata as part of the complete session state. `WP_Agent_Conversation_Store::update_session()` accepts an optional opaque `provider_response_id`, and `::get_session()` returns the same key alongside `provider` and `model`. Consumers using provider-side state, such as the OpenAI Responses API `previous_response_id` flow, can pass the provider's response ID through this field without encoding per-consumer metadata keys. A `null` value means no provider-side response ID is associated with the current transcript state.
 
 ## Retrieved Context Authority
