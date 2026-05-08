@@ -285,14 +285,30 @@ abstract class WP_Agent_Channel {
 	 * direct `wp_ai_client_prompt()` call, an external HTTP service, or a
 	 * host-specific agent factory.
 	 *
+	 * The dispatched payload follows the canonical chat-ability contract
+	 * tracked in https://github.com/Automattic/agents-api/issues/100 :
+	 *
+	 *     {
+	 *       agent: string,
+	 *       message: string,
+	 *       session_id: string|null,
+	 *       attachments: array,
+	 *       client_context: {
+	 *         source, client_name, external_provider,
+	 *         external_conversation_id, external_message_id, room_kind
+	 *       }
+	 *     }
+	 *
+	 * Runtimes that don't read the richer fields (e.g. `openclawp/chat`)
+	 * ignore them; runtimes that do (e.g. Data Machine's chat bridge) get
+	 * the full transport context without having to know about WP_Agent_Channel.
+	 *
 	 * @param string $message_text The user-message string from extract_message().
 	 * @param array  $data         The original webhook payload, in case the runner
 	 *                             needs metadata beyond the text (sender, timestamp).
-	 * @return array|WP_Error      `{ session_id, reply, completed? }` or WP_Error.
+	 * @return array|WP_Error      `{ session_id, reply, completed?, … }` or WP_Error.
 	 */
 	protected function run_agent( string $message_text, array $data ): array|WP_Error {
-		unset( $data );
-
 		if ( ! function_exists( 'wp_get_ability' ) ) {
 			return new WP_Error( 'abilities_api_missing', 'Abilities API is not loaded.' );
 		}
@@ -319,13 +335,90 @@ abstract class WP_Agent_Channel {
 			);
 		}
 
-		return $ability->execute(
-			array(
-				'agent'      => $this->agent_slug,
-				'message'    => $message_text,
-				'session_id' => '' === (string) $this->session_id ? null : $this->session_id,
-			)
+		return $ability->execute( $this->build_chat_payload( $message_text, $data ) );
+	}
+
+	/**
+	 * Build the canonical chat-ability input payload. Public so subclasses,
+	 * tests, and external callers can introspect or extend it.
+	 *
+	 * Override `extract_attachments()`, `extract_external_message_id()`,
+	 * `get_room_kind()`, and `client_context_source()` to fill in the
+	 * transport-specific bits without rewriting this method.
+	 *
+	 * @param string $message_text
+	 * @param array  $data
+	 * @return array
+	 */
+	public function build_chat_payload( string $message_text, array $data ): array {
+		return array(
+			'agent'          => $this->agent_slug,
+			'message'        => $message_text,
+			'session_id'     => '' === (string) $this->session_id ? null : $this->session_id,
+			'attachments'    => $this->extract_attachments( $data ),
+			'client_context' => array(
+				'source'                   => $this->client_context_source(),
+				'client_name'              => $this->get_client_name(),
+				'external_provider'        => $this->get_external_id_provider(),
+				'external_conversation_id' => $this->get_external_id(),
+				'external_message_id'      => $this->extract_external_message_id( $data ),
+				'room_kind'                => $this->get_room_kind( $data ),
+			),
 		);
+	}
+
+	// ─── Pluggable: client_context fields (overridable, default sensible) ─
+
+	/**
+	 * Channel attachments lifted from the inbound payload, ready for the
+	 * agent runtime. Default is an empty array. Override to pluck images,
+	 * voice notes, files, link previews, etc., from the channel-specific
+	 * payload shape.
+	 *
+	 * @param array $data
+	 * @return array
+	 */
+	protected function extract_attachments( array $data ): array {
+		unset( $data );
+		return array();
+	}
+
+	/**
+	 * Stable transport-side message id, used by the runtime for reply
+	 * threading, dedup, and audit. Default null. Override to expose the
+	 * inbound `msg_id` from your payload.
+	 *
+	 * @param array $data
+	 * @return string|null
+	 */
+	protected function extract_external_message_id( array $data ): ?string {
+		unset( $data );
+		return null;
+	}
+
+	/**
+	 * Conversation kind: `dm`, `group`, `channel`, or null when unknown.
+	 * Override per transport — WhatsApp can derive from the JID suffix,
+	 * Slack from the channel type, Telegram from the chat type.
+	 *
+	 * @param array $data
+	 * @return string|null
+	 */
+	protected function get_room_kind( array $data ): ?string {
+		unset( $data );
+		return null;
+	}
+
+	/**
+	 * `client_context.source` value. Defaults to `'channel'` for direct
+	 * webhook-style transports. Bridge consumers (e.g. an MCP bridge or a
+	 * remote-driven A2A flow) override to `'bridge'` so the runtime can
+	 * tell apart inbound traffic styles.
+	 *
+	 * @return string
+	 */
+	protected function client_context_source(): string {
+		return 'channel';
 	}
 
 	// ─── Result delivery ───────────────────────────────────────────────
