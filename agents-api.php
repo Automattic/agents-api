@@ -122,6 +122,11 @@ require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-webhook-signature.ph
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-message-idempotency-store.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-transient-message-idempotency-store.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-message-idempotency.php';
+require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge-client.php';
+require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge-queue-item.php';
+require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge-store.php';
+require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-option-bridge-store.php';
+require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-ability.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-bindings.php';

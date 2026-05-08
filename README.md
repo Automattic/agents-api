@@ -142,6 +142,11 @@ wp_register_agent(
 - `AgentsAPI\AI\Channels\WP_Agent_Message_Idempotency_Store`
 - `AgentsAPI\AI\Channels\WP_Agent_Transient_Message_Idempotency_Store`
 - `AgentsAPI\AI\Channels\WP_Agent_Message_Idempotency`
+- `AgentsAPI\AI\Channels\WP_Agent_Bridge_Client`
+- `AgentsAPI\AI\Channels\WP_Agent_Bridge_Queue_Item`
+- `AgentsAPI\AI\Channels\WP_Agent_Bridge_Store`
+- `AgentsAPI\AI\Channels\WP_Agent_Option_Bridge_Store`
+- `AgentsAPI\AI\Channels\WP_Agent_Bridge`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Call`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Source_Registry`
