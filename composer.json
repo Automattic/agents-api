@@ -11,6 +11,9 @@
   "require": {
     "php": ">=8.1"
   },
+  "suggest": {
+    "woocommerce/action-scheduler": "Required to actually run cron-triggered workflows. The substrate detects Action Scheduler at runtime and no-ops cleanly when absent; install this package (or any plugin that ships it, like WooCommerce) to enable scheduled workflow runs."
+  },
   "scripts": {
     "test": [
       "php tests/bootstrap-smoke.php",

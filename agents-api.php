@@ -140,6 +140,7 @@ require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-registry.p
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-action-scheduler-bridge.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflows.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-agents-workflow-abilities.php';
+require_once AGENTS_API_PATH . 'src/Workflows/register-action-scheduler-listener.php';
 
 add_action( 'init', array( 'WP_Agents_Registry', 'init' ), 10 );
 add_action( 'init', array( 'WP_Guidelines_Substrate', 'register' ), 9 );
