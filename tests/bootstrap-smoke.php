@@ -174,6 +174,7 @@ $expected_source_directories = array(
 	'Memory',
 	'Packages',
 	'Registry',
+	'Routines',
 	'Runtime',
 	'Tools',
 	'Transcripts',

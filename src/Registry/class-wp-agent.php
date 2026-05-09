@@ -85,6 +85,24 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		protected array $meta = array();
 
 		/**
+		 * Slugs of subagents this agent coordinates.
+		 *
+		 * When non-empty, the agent acts as a coordinator: each subagent is
+		 * exposed to its main loop as a `delegate-to-<slug>` tool. Consumers
+		 * are responsible for mapping these slugs to other registered
+		 * agents and surfacing them through the tool/ability layer — the
+		 * substrate just persists the declaration.
+		 *
+		 * Mirrors the Anthropic CLI `agents` field on `coordination`-role
+		 * agents: a parent agent declares the subagents it can dispatch to.
+		 *
+		 * @since 0.105.0
+		 *
+		 * @var string[]
+		 */
+		protected array $subagents = array();
+
+		/**
 		 * Constructor.
 		 *
 		 * @param string $slug Unique agent slug.
@@ -166,6 +184,19 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 				}
 
 				$properties['meta'] = $args['meta'];
+			}
+
+			if ( isset( $args['subagents'] ) ) {
+				if ( ! is_array( $args['subagents'] ) ) {
+					throw new InvalidArgumentException( 'Agent subagents property must be an array of slugs.' );
+				}
+
+				$properties['subagents'] = array_values(
+					array_filter(
+						array_map( static fn( $slug ): string => sanitize_title( (string) $slug ), $args['subagents'] ),
+						static fn( string $slug ): bool => '' !== $slug
+					)
+				);
 			}
 
 			foreach ( $args as $property_name => $property_value ) {
@@ -279,6 +310,26 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		}
 
 		/**
+		 * Subagent slugs this agent coordinates.
+		 *
+		 * @since 0.105.0
+		 *
+		 * @return string[]
+		 */
+		public function get_subagents(): array {
+			return $this->subagents;
+		}
+
+		/**
+		 * Whether this agent declares any subagents (i.e. is a coordinator).
+		 *
+		 * @since 0.105.0
+		 */
+		public function is_coordinator(): bool {
+			return ! empty( $this->subagents );
+		}
+
+		/**
 		 * Return registration arguments for the registry.
 		 *
 		 * @return array
@@ -294,6 +345,7 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 				'supports_conversation_compaction' => $this->supports_conversation_compaction,
 				'conversation_compaction_policy'   => $this->conversation_compaction_policy,
 				'meta'                             => $this->meta,
+				'subagents'                        => $this->subagents,
 			);
 		}
 
