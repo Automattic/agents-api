@@ -32,7 +32,15 @@ final class WP_Agent_Option_Bridge_Store implements WP_Agent_Bridge_Store {
 	}
 
 	public function enqueue( WP_Agent_Bridge_Queue_Item $item ): WP_Agent_Bridge_Queue_Item {
-		$queue                    = $this->read_queue();
+		$queue = $this->read_queue();
+
+		if ( isset( $queue[ $item->queue_id ] ) && is_array( $queue[ $item->queue_id ] ) ) {
+			$existing = WP_Agent_Bridge_Queue_Item::from_array( $queue[ $item->queue_id ] );
+			if ( $existing->client_id !== $item->client_id ) {
+				throw new \InvalidArgumentException( 'Cannot overwrite a queue item owned by another client.' );
+			}
+		}
+
 		$queue[ $item->queue_id ] = $item->to_array();
 		update_option( self::QUEUE_OPTION, $queue, false );
 		return $item;
