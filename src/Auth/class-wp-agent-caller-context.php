@@ -65,6 +65,10 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 				throw self::invalid( 'chain_depth', 'top-of-chain context cannot include remote caller identity' );
 			}
 
+			if ( $this->chain_depth > 0 && self::SELF_HOST === $this->caller_host ) {
+				throw self::invalid( 'caller_host', 'chained context (chain_depth > 0) must specify a remote caller host, not "self"' );
+			}
+
 			if ( false === self::json_encode( $this->metadata ) ) {
 				throw self::invalid( 'metadata', 'must be JSON serializable' );
 			}
@@ -141,6 +145,10 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 
 			if ( '' === $raw['caller_host'] ) {
 				throw self::invalid( 'caller_host', 'must be present when chain_depth is greater than zero' );
+			}
+
+			if ( self::SELF_HOST === $raw['caller_host'] ) {
+				throw self::invalid( 'caller_host', 'chained context (chain_depth > 0) must specify a remote caller host, not "self"' );
 			}
 
 			if ( '' === $raw['chain_root_request_id'] ) {
