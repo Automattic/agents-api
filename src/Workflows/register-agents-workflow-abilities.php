@@ -28,9 +28,10 @@ const AGENTS_DESCRIBE_WORKFLOW_ABILITY = 'agents/describe-workflow';
 add_action(
 	'wp_abilities_api_categories_init',
 	static function (): void {
-		if ( ! function_exists( 'wp_register_ability_category' ) ) {
+		if ( wp_has_ability_category( 'agents-api' ) ) {
 			return;
 		}
+
 		wp_register_ability_category(
 			'agents-api',
 			array(
@@ -44,101 +45,103 @@ add_action(
 add_action(
 	'wp_abilities_api_init',
 	static function (): void {
-		if ( ! function_exists( 'wp_register_ability' ) ) {
-			return;
-		}
-
-		wp_register_ability(
-			AGENTS_RUN_WORKFLOW_ABILITY,
-			array(
-				'label'               => 'Run Workflow',
-				'description'         => 'Canonical entry point for running a registered workflow. Dispatches to whichever runtime is registered via the wp_agent_workflow_handler filter.',
-				'category'            => 'agents-api',
-				'input_schema'        => agents_run_workflow_input_schema(),
-				'output_schema'       => agents_run_workflow_output_schema(),
-				'execute_callback'    => __NAMESPACE__ . '\\agents_run_workflow_dispatch',
-				'permission_callback' => __NAMESPACE__ . '\\agents_run_workflow_permission',
-				'meta'                => array(
-					'show_in_rest' => true,
-					'annotations'  => array(
-						'destructive' => true,
-						'idempotent'  => false,
-					),
-				),
-			)
-		);
-
-		wp_register_ability(
-			AGENTS_VALIDATE_WORKFLOW_ABILITY,
-			array(
-				'label'               => 'Validate Workflow Spec',
-				'description'         => 'Structural validation of a workflow spec. Returns a list of structured errors (or an empty list when valid). Does not touch any runtime or storage.',
-				'category'            => 'agents-api',
-				'input_schema'        => array(
-					'type'       => 'object',
-					'required'   => array( 'spec' ),
-					'properties' => array(
-						'spec' => array(
-							'type'        => 'object',
-							'description' => 'Raw workflow spec to validate.',
+		if ( ! wp_has_ability( AGENTS_RUN_WORKFLOW_ABILITY ) ) {
+			wp_register_ability(
+				AGENTS_RUN_WORKFLOW_ABILITY,
+				array(
+					'label'               => 'Run Workflow',
+					'description'         => 'Canonical entry point for running a registered workflow. Dispatches to whichever runtime is registered via the wp_agent_workflow_handler filter.',
+					'category'            => 'agents-api',
+					'input_schema'        => agents_run_workflow_input_schema(),
+					'output_schema'       => agents_run_workflow_output_schema(),
+					'execute_callback'    => __NAMESPACE__ . '\\agents_run_workflow_dispatch',
+					'permission_callback' => __NAMESPACE__ . '\\agents_run_workflow_permission',
+					'meta'                => array(
+						'show_in_rest' => true,
+						'annotations'  => array(
+							'destructive' => true,
+							'idempotent'  => false,
 						),
 					),
-				),
-				'output_schema'       => array(
-					'type'       => 'object',
-					'required'   => array( 'valid', 'errors' ),
-					'properties' => array(
-						'valid'  => array( 'type' => 'boolean' ),
-						'errors' => array(
-							'type'  => 'array',
-							'items' => array(
-								'type'       => 'object',
-								'properties' => array(
-									'path'    => array( 'type' => 'string' ),
-									'code'    => array( 'type' => 'string' ),
-									'message' => array( 'type' => 'string' ),
+				)
+			);
+		}
+
+		if ( ! wp_has_ability( AGENTS_VALIDATE_WORKFLOW_ABILITY ) ) {
+			wp_register_ability(
+				AGENTS_VALIDATE_WORKFLOW_ABILITY,
+				array(
+					'label'               => 'Validate Workflow Spec',
+					'description'         => 'Structural validation of a workflow spec. Returns a list of structured errors (or an empty list when valid). Does not touch any runtime or storage.',
+					'category'            => 'agents-api',
+					'input_schema'        => array(
+						'type'       => 'object',
+						'required'   => array( 'spec' ),
+						'properties' => array(
+							'spec' => array(
+								'type'        => 'object',
+								'description' => 'Raw workflow spec to validate.',
+							),
+						),
+					),
+					'output_schema'       => array(
+						'type'       => 'object',
+						'required'   => array( 'valid', 'errors' ),
+						'properties' => array(
+							'valid'  => array( 'type' => 'boolean' ),
+							'errors' => array(
+								'type'  => 'array',
+								'items' => array(
+									'type'       => 'object',
+									'properties' => array(
+										'path'    => array( 'type' => 'string' ),
+										'code'    => array( 'type' => 'string' ),
+										'message' => array( 'type' => 'string' ),
+									),
 								),
 							),
 						),
 					),
-				),
-				'execute_callback'    => __NAMESPACE__ . '\\agents_validate_workflow',
-				'permission_callback' => __NAMESPACE__ . '\\agents_validate_workflow_permission',
-				'meta'                => array(
-					'show_in_rest' => true,
-					'annotations'  => array( 'idempotent' => true ),
-				),
-			)
-		);
+					'execute_callback'    => __NAMESPACE__ . '\\agents_validate_workflow',
+					'permission_callback' => __NAMESPACE__ . '\\agents_validate_workflow_permission',
+					'meta'                => array(
+						'show_in_rest' => true,
+						'annotations'  => array( 'idempotent' => true ),
+					),
+				)
+			);
+		}
 
-		wp_register_ability(
-			AGENTS_DESCRIBE_WORKFLOW_ABILITY,
-			array(
-				'label'               => 'Describe Workflow',
-				'description'         => 'Return a registered workflow spec along with its input declarations. Useful for callers that want to enumerate or render workflows without executing them.',
-				'category'            => 'agents-api',
-				'input_schema'        => array(
-					'type'       => 'object',
-					'required'   => array( 'workflow_id' ),
-					'properties' => array(
-						'workflow_id' => array( 'type' => 'string' ),
+		if ( ! wp_has_ability( AGENTS_DESCRIBE_WORKFLOW_ABILITY ) ) {
+			wp_register_ability(
+				AGENTS_DESCRIBE_WORKFLOW_ABILITY,
+				array(
+					'label'               => 'Describe Workflow',
+					'description'         => 'Return a registered workflow spec along with its input declarations. Useful for callers that want to enumerate or render workflows without executing them.',
+					'category'            => 'agents-api',
+					'input_schema'        => array(
+						'type'       => 'object',
+						'required'   => array( 'workflow_id' ),
+						'properties' => array(
+							'workflow_id' => array( 'type' => 'string' ),
+						),
 					),
-				),
-				'output_schema'       => array(
-					'type'       => 'object',
-					'properties' => array(
-						'spec'   => array( 'type' => array( 'object', 'null' ) ),
-						'inputs' => array( 'type' => array( 'object', 'null' ) ),
+					'output_schema'       => array(
+						'type'       => 'object',
+						'properties' => array(
+							'spec'   => array( 'type' => array( 'object', 'null' ) ),
+							'inputs' => array( 'type' => array( 'object', 'null' ) ),
+						),
 					),
-				),
-				'execute_callback'    => __NAMESPACE__ . '\\agents_describe_workflow',
-				'permission_callback' => __NAMESPACE__ . '\\agents_run_workflow_permission',
-				'meta'                => array(
-					'show_in_rest' => true,
-					'annotations'  => array( 'idempotent' => true ),
-				),
-			)
-		);
+					'execute_callback'    => __NAMESPACE__ . '\\agents_describe_workflow',
+					'permission_callback' => __NAMESPACE__ . '\\agents_run_workflow_permission',
+					'meta'                => array(
+						'show_in_rest' => true,
+						'annotations'  => array( 'idempotent' => true ),
+					),
+				)
+			);
+		}
 	}
 );
 
