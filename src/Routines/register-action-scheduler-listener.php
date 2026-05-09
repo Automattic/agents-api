@@ -58,7 +58,10 @@ function dispatch_scheduled_routine_run( $args ): void {
 		do_action(
 			'agents_run_routine_dispatch_failed',
 			'routine_not_registered',
-			array( 'routine_id' => $routine_id, 'source' => 'action_scheduler' )
+			array(
+				'routine_id' => $routine_id,
+				'source'     => 'action_scheduler',
+			)
 		);
 		return;
 	}

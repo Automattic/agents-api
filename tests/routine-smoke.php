@@ -52,6 +52,9 @@ if ( ! function_exists( 'sanitize_title' ) ) {
 		return trim( $str, '-' );
 	}
 }
+if ( ! function_exists( 'esc_html' ) ) {
+	function esc_html( $s ) { return $s; }
+}
 
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {

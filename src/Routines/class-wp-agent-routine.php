@@ -36,23 +36,20 @@ final class WP_Agent_Routine {
 	private string $label;
 	private string $agent_slug;
 	private string $trigger_type;
-	private int    $interval_s    = 0;
-	private string $expression    = '';
-	private string $prompt        = '';
-	private string $session_id    = '';
-	private array  $meta          = array();
+	private int $interval_s = 0;
+	private string $expression = '';
+	private string $prompt = '';
+	private string $session_id = '';
+	private array $meta = array();
 
 	/**
-	 * @param string $id   Unique routine slug.
-	 * @param array{
-	 *   label?: string,
-	 *   agent: string,
-	 *   interval?: int,
-	 *   expression?: string,
-	 *   prompt?: string,
-	 *   session_id?: string,
-	 *   meta?: array<string, mixed>,
-	 * } $args
+	 * @param string                $id   Unique routine slug.
+	 * @param array<string, mixed>  $args Recognised keys: `label` (string),
+	 *                                    `agent` (string, required),
+	 *                                    `interval` (int seconds) OR
+	 *                                    `expression` (cron string),
+	 *                                    `prompt` (string), `session_id`
+	 *                                    (string), `meta` (array).
 	 */
 	public function __construct( string $id, array $args ) {
 		$id = sanitize_title( $id );
@@ -65,7 +62,7 @@ final class WP_Agent_Routine {
 
 		$agent = isset( $args['agent'] ) ? (string) $args['agent'] : '';
 		if ( '' === $agent ) {
-			throw new \InvalidArgumentException( sprintf( 'Routine "%s" must specify an agent slug.', $id ) );
+			throw new \InvalidArgumentException( esc_html( sprintf( 'Routine "%s" must specify an agent slug.', $id ) ) );
 		}
 		$this->agent_slug = $agent;
 
@@ -73,10 +70,10 @@ final class WP_Agent_Routine {
 		$has_expression = isset( $args['expression'] ) && '' !== trim( (string) $args['expression'] );
 
 		if ( $has_interval && $has_expression ) {
-			throw new \InvalidArgumentException( sprintf( 'Routine "%s" must specify either `interval` or `expression`, not both.', $id ) );
+			throw new \InvalidArgumentException( esc_html( sprintf( 'Routine "%s" must specify either `interval` or `expression`, not both.', $id ) ) );
 		}
 		if ( ! $has_interval && ! $has_expression ) {
-			throw new \InvalidArgumentException( sprintf( 'Routine "%s" must specify a trigger via `interval` (seconds) or `expression` (cron string).', $id ) );
+			throw new \InvalidArgumentException( esc_html( sprintf( 'Routine "%s" must specify a trigger via `interval` (seconds) or `expression` (cron string).', $id ) ) );
 		}
 
 		if ( $has_interval ) {
