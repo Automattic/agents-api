@@ -52,14 +52,15 @@ const AGENTS_CHAT_ABILITY = 'agents/chat';
 add_action(
 	'wp_abilities_api_categories_init',
 	static function (): void {
-		if ( ! function_exists( 'wp_register_ability_category' ) ) {
+		if ( wp_has_ability_category( 'agents-api' ) ) {
 			return;
 		}
+
 		wp_register_ability_category(
 			'agents-api',
 			array(
 				'label'       => 'Agents API',
-				'description' => 'Cross-cutting abilities provided by the Agents API substrate (channel dispatch and canonical chat contract).',
+				'description' => 'Cross-cutting abilities provided by the Agents API substrate (channel dispatch, canonical chat contract, and workflow dispatch).',
 			)
 		);
 	}
@@ -68,7 +69,7 @@ add_action(
 add_action(
 	'wp_abilities_api_init',
 	static function (): void {
-		if ( ! function_exists( 'wp_register_ability' ) ) {
+		if ( wp_has_ability( AGENTS_CHAT_ABILITY ) ) {
 			return;
 		}
 
