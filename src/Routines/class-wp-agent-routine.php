@@ -36,11 +36,11 @@ final class WP_Agent_Routine {
 	private string $label;
 	private string $agent_slug;
 	private string $trigger_type;
-	private int $interval_s = 0;
+	private int $interval_s    = 0;
 	private string $expression = '';
-	private string $prompt = '';
+	private string $prompt     = '';
 	private string $session_id = '';
-	private array $meta = array();
+	private array $meta        = array();
 
 	/**
 	 * @param string                $id   Unique routine slug.
