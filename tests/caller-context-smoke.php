@@ -67,4 +67,25 @@ try {
 	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'chain_depth' ), 'chain depth limit is enforced', $failures, $passes );
 }
 
+try {
+	WP_Agent_Caller_Context::from_headers(
+		array(
+			WP_Agent_Caller_Context::HEADER_CALLER_AGENT => 'source-agent',
+			WP_Agent_Caller_Context::HEADER_CALLER_HOST  => 'self',
+			WP_Agent_Caller_Context::HEADER_CHAIN_DEPTH  => '1',
+			WP_Agent_Caller_Context::HEADER_CHAIN_ROOT   => 'root-request-123',
+		)
+	);
+	agents_api_smoke_assert_equals( true, false, 'chained context with self host is rejected via from_headers', $failures, $passes );
+} catch ( InvalidArgumentException $e ) {
+	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'caller_host' ), 'chained context with self host is rejected via from_headers', $failures, $passes );
+}
+
+try {
+	new WP_Agent_Caller_Context( 'source-agent', 0, WP_Agent_Caller_Context::SELF_HOST, 1, 'root-request-123' );
+	agents_api_smoke_assert_equals( true, false, 'chained context with self host is rejected via constructor', $failures, $passes );
+} catch ( InvalidArgumentException $e ) {
+	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'caller_host' ), 'chained context with self host is rejected via constructor', $failures, $passes );
+}
+
 agents_api_smoke_finish( 'Agents API caller context', $failures, $passes );
