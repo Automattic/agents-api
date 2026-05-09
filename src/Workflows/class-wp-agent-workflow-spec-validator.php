@@ -40,6 +40,8 @@ final class WP_Agent_Workflow_Spec_Validator {
 	/** @since 0.103.0 */
 	public const KNOWN_TRIGGER_TYPES = array( 'on_demand', 'wp_action', 'cron' );
 
+	private const MAX_NESTING_DEPTH = 50;
+
 	/**
 	 * Validate a raw workflow spec.
 	 *
@@ -257,26 +259,37 @@ final class WP_Agent_Workflow_Spec_Validator {
 	 * Walk a step array and pull out every `${steps.<id>.output.*}` token's
 	 * id segment. Used by {@see validate_step_binding_references()}.
 	 *
+	 * Uses an iterative approach with an explicit stack to avoid stack
+	 * exhaustion from deeply nested untrusted input.
+	 *
 	 * @param mixed $value
 	 * @return array<int,string>
 	 */
 	private static function extract_step_binding_ids( $value ): array {
-		$ids = array();
+		$ids   = array();
+		$stack = array( array( $value, 0 ) );
 
-		if ( is_array( $value ) ) {
-			foreach ( $value as $inner ) {
-				$ids = array_merge( $ids, self::extract_step_binding_ids( $inner ) );
+		while ( $stack ) {
+			list( $current, $depth ) = array_pop( $stack );
+
+			if ( is_array( $current ) ) {
+				if ( $depth >= self::MAX_NESTING_DEPTH ) {
+					continue;
+				}
+				foreach ( $current as $inner ) {
+					$stack[] = array( $inner, $depth + 1 );
+				}
+				continue;
 			}
-			return $ids;
-		}
 
-		if ( ! is_string( $value ) ) {
-			return $ids;
-		}
+			if ( ! is_string( $current ) ) {
+				continue;
+			}
 
-		if ( preg_match_all( '/\$\{\s*steps\.([a-zA-Z0-9_\-]+)\./', $value, $matches ) ) {
-			foreach ( $matches[1] as $found ) {
-				$ids[] = (string) $found;
+			if ( preg_match_all( '/\$\{\s*steps\.([a-zA-Z0-9_\-]+)\./', $current, $matches ) ) {
+				foreach ( $matches[1] as $found ) {
+					$ids[] = (string) $found;
+				}
 			}
 		}
 
