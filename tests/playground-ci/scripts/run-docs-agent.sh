@@ -12,6 +12,8 @@ DM_PATH="${DM_PATH:-/Users/chubes/Developer/data-machine}"
 DMC_PATH="${DMC_PATH:-/Users/chubes/Developer/data-machine-code}"
 OPENAI_PROVIDER_PATH="${OPENAI_PROVIDER_PATH:-/Users/chubes/Studio/intelligence-chubes4/wp-content/plugins/ai-provider-for-openai}"
 STUDIO_SITE_PATH="${STUDIO_SITE_PATH:-/Users/chubes/Studio/intelligence-chubes4}"
+DOCS_AGENT_PATH="${DOCS_AGENT_PATH:-$REPO_ROOT/.ci/docs-agent}"
+DOCS_LINK_REPAIRER="$DOCS_AGENT_PATH/scripts/repair-docs-links.php"
 DOCS_AGENT_OPENAI_MODEL="${DOCS_AGENT_OPENAI_MODEL:-gpt-5.5}"
 DOCS_AGENT_TARGET_REPO="${DOCS_AGENT_TARGET_REPO:-Automattic/agents-api}"
 DOCS_AGENT_REF="${DOCS_AGENT_REF:-main}"
@@ -278,11 +280,16 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
 fi
 
 if [ "$job_status" = "completed" ] && [ "$success_status" = "pr_opened" ] && [[ "$DOCS_AGENT_FLOW_SLUG" == *-bootstrap-flow ]]; then
+    if [ ! -f "$DOCS_LINK_REPAIRER" ]; then
+        echo "ERROR: Docs link repairer missing at $DOCS_LINK_REPAIRER" >&2
+        exit 1
+    fi
     if [ ! -f "$DOCS_LINK_VALIDATOR" ]; then
         echo "ERROR: Docs link validator missing at $DOCS_LINK_VALIDATOR" >&2
         exit 1
     fi
 
+    php "$DOCS_LINK_REPAIRER" "$AGENTS_API_PATH" "$DOCS_AGENT_BRANCH" --commit
     git -C "$AGENTS_API_PATH" fetch origin "$DOCS_AGENT_BRANCH"
     php "$DOCS_LINK_VALIDATOR" "$AGENTS_API_PATH" FETCH_HEAD
 fi

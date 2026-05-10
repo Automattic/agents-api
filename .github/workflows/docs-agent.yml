@@ -133,6 +133,7 @@ jobs:
           DM_PATH: ${{ github.workspace }}/.ci/data-machine
           DMC_PATH: ${{ github.workspace }}/.ci/data-machine-code
           OPENAI_PROVIDER_PATH: ${{ github.workspace }}/.ci/ai-provider-for-openai
+          DOCS_AGENT_PATH: ${{ github.workspace }}/.ci/docs-agent
           DOCS_AGENT_OPENAI_MODEL: ${{ inputs.openai_model }}
           DOCS_AGENT_REF: ${{ inputs.docs_agent_ref }}
           DOCS_AGENT_FLOW: ${{ inputs.docs_agent_flow }}
