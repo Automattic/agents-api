@@ -14,7 +14,29 @@ STUDIO_SITE_PATH="${STUDIO_SITE_PATH:-/Users/chubes/Studio/intelligence-chubes4}
 DOCS_AGENT_OPENAI_MODEL="${DOCS_AGENT_OPENAI_MODEL:-gpt-5.5}"
 DOCS_AGENT_TARGET_REPO="${DOCS_AGENT_TARGET_REPO:-Automattic/agents-api}"
 DOCS_AGENT_REF="${DOCS_AGENT_REF:-main}"
-DOCS_AGENT_PROMPT="${DOCS_AGENT_PROMPT:-Inspect Agents API docs and open a documentation PR only if needed.}"
+DOCS_AGENT_WORKFLOW="${DOCS_AGENT_WORKFLOW:-technical}"
+DOCS_AGENT_PROMPT="${DOCS_AGENT_PROMPT:-Generate or update technical developer documentation for Agents API from source code. Open a documentation PR only if needed.}"
+
+case "$DOCS_AGENT_WORKFLOW" in
+    technical)
+        DOCS_AGENT_PIPELINE_SLUG="technical-docs-pipeline"
+        DOCS_AGENT_FLOW_SLUG="technical-docs-flow"
+        DOCS_AGENT_WORKLOAD_ID="technical-docs-generation"
+        DOCS_AGENT_WORKLOAD_LABEL="Run Docs Agent technical documentation"
+        DOCS_AGENT_AUDIENCE="technical developer-facing"
+        ;;
+    user)
+        DOCS_AGENT_PIPELINE_SLUG="user-docs-pipeline"
+        DOCS_AGENT_FLOW_SLUG="user-docs-flow"
+        DOCS_AGENT_WORKLOAD_ID="user-docs-generation"
+        DOCS_AGENT_WORKLOAD_LABEL="Run Docs Agent user documentation"
+        DOCS_AGENT_AUDIENCE="non-technical user-facing"
+        ;;
+    *)
+        echo "ERROR: DOCS_AGENT_WORKFLOW must be technical or user" >&2
+        exit 1
+        ;;
+esac
 
 if [ ! -f "$EXTENSION_PATH/scripts/bench/bench-runner.sh" ]; then
     echo "ERROR: Homeboy WordPress extension not found at $EXTENSION_PATH" >&2
@@ -86,8 +108,9 @@ Target ref: ${TARGET_REF}
 Head SHA: ${HEAD_SHA}
 Workflow run: ${RUN_URL}
 Writable documentation paths: README.md, docs/**
+Selected docs workflow: ${DOCS_AGENT_WORKFLOW} (${DOCS_AGENT_AUDIENCE})
 
-Inspect repository docs and changed context. If no documentation update is needed, finish cleanly without opening a pull request. If an update is needed, write only allowed documentation paths and open one pull request.
+Generate documentation from source code for the selected audience. If no documentation update is needed, finish cleanly without opening a pull request. If an update is needed, write only allowed documentation paths and open one pull request.
 EOF
 )
 
@@ -102,20 +125,24 @@ jq -n \
     --arg model "$DOCS_AGENT_OPENAI_MODEL" \
     --arg targetRepo "$DOCS_AGENT_TARGET_REPO" \
     --arg docsAgentRef "$DOCS_AGENT_REF" \
+    --arg pipelineSlug "$DOCS_AGENT_PIPELINE_SLUG" \
+    --arg flowSlug "$DOCS_AGENT_FLOW_SLUG" \
+    --arg workloadId "$DOCS_AGENT_WORKLOAD_ID" \
+    --arg workloadLabel "$DOCS_AGENT_WORKLOAD_LABEL" \
     --arg prompt "$PROMPT" \
     '{
         component_id: "agents-api-docs-agent-ci-driver",
         component_path: $componentPath,
-        workload_id: "docs-agent-maintenance",
-        workload_label: "Run Docs Agent",
+        workload_id: $workloadId,
+        workload_label: $workloadLabel,
         validation_dependencies: [$agentsApi, $dm, $dmc, $openaiProvider],
         playground_wordpress_version: "7.0",
         bundle_repo: "https://github.com/Automattic/docs-agent.git",
         bundle_ref: $docsAgentRef,
         bundle_path_in_repo: "bundles/docs-agent",
         agent_slug: "docs-agent",
-        pipeline_slug: "docs-agent-pipeline",
-        flow_slug: "docs-maintenance-flow",
+        pipeline_slug: $pipelineSlug,
+        flow_slug: $flowSlug,
         provider: "openai",
         model: $model,
         provider_register_function: "WordPress\\OpenAiAiProvider\\register_provider",
@@ -174,6 +201,7 @@ echo "============================================"
 echo "Target repo:  $DOCS_AGENT_TARGET_REPO"
 echo "OpenAI model: $DOCS_AGENT_OPENAI_MODEL"
 echo "Docs ref:     $DOCS_AGENT_REF"
+echo "Workflow:     $DOCS_AGENT_WORKFLOW"
 echo "Prompt:       $DOCS_AGENT_PROMPT"
 echo ""
 
@@ -190,7 +218,7 @@ fi
 
 cat "$RESULTS_TMPFILE"
 
-scenario='.scenarios[] | select(.id == "docs-agent-maintenance")'
+scenario='.scenarios[] | select(.id == "'"$DOCS_AGENT_WORKLOAD_ID"'")'
 job_status=$(jq -r "$scenario | .metadata.job_status // \"unknown\"" "$RESULTS_TMPFILE")
 success_status=$(jq -r "$scenario | .metadata.success_status // \"unknown\"" "$RESULTS_TMPFILE")
 docs_agent_pr_url=$(jq -r "$scenario | .metadata.engine_data.docs_agent.pr.url // \"\"" "$RESULTS_TMPFILE")

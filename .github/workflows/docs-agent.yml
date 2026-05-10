@@ -6,7 +6,7 @@ on:
       prompt:
         description: Instruction for Docs Agent.
         required: true
-        default: Inspect Agents API docs and open a documentation PR only if needed.
+        default: Generate or update technical developer documentation for Agents API from source code. Open a documentation PR only if needed.
       openai_model:
         description: OpenAI model to use for the imported agent flow.
         required: true
@@ -123,6 +123,7 @@ jobs:
           OPENAI_PROVIDER_PATH: ${{ github.workspace }}/.ci/ai-provider-for-openai
           DOCS_AGENT_OPENAI_MODEL: ${{ inputs.openai_model }}
           DOCS_AGENT_REF: ${{ inputs.docs_agent_ref }}
+          DOCS_AGENT_WORKFLOW: technical
           DOCS_AGENT_TARGET_REPO: Automattic/agents-api
           DOCS_AGENT_PROMPT: ${{ inputs.prompt }}
         run: tests/playground-ci/scripts/run-docs-agent.sh
