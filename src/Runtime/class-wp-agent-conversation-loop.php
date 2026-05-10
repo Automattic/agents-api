@@ -89,7 +89,19 @@ class WP_Agent_Conversation_Loop {
 		$tool_results          = array();
 		$conversation_complete = false;
 		$exceeded_budget       = null;
-		$last_request_metadata = array();
+
+		// Universal observability accumulators. Turn runners may report
+		// `usage` (token counts) and `request_metadata` (last provider request
+		// descriptor) in their per-turn return value; the loop accumulates
+		// these and exposes them in the final result so consumers don't have
+		// to track them out-of-band via mutable state.
+		$turns_run        = 0;
+		$total_usage      = array(
+			'prompt_tokens'     => 0,
+			'completion_tokens' => 0,
+			'total_tokens'      => 0,
+		);
+		$request_metadata = array();
 
 		if ( null !== $transcript_lock && '' !== $lock_session_id ) {
 			$lock_token = $transcript_lock->acquire_session_lock( $lock_session_id, $lock_ttl );
@@ -109,6 +121,7 @@ class WP_Agent_Conversation_Loop {
 
 		try {
 			for ( $turn = 1; $turn <= $max_turns; ++$turn ) {
+				$turns_run            = $turn;
 				$turn_context         = $context;
 				$turn_context['turn'] = $turn;
 
@@ -155,6 +168,18 @@ class WP_Agent_Conversation_Loop {
 					) );
 
 					throw $error;
+				}
+
+				// Accumulate optional observability fields from the turn runner.
+				// `usage` is a per-turn token-count array that gets summed into
+				// `$total_usage`. `request_metadata` is the most recent provider
+				// request descriptor and overwrites on each turn — consumers
+				// typically only care about the last one.
+				if ( isset( $result['usage'] ) && is_array( $result['usage'] ) ) {
+					$total_usage = self::accumulate_usage( $total_usage, $result['usage'] );
+				}
+				if ( isset( $result['request_metadata'] ) && is_array( $result['request_metadata'] ) ) {
+					$request_metadata = $result['request_metadata'];
 				}
 
 				// When mediation is enabled, the turn runner returns tool_calls
@@ -237,11 +262,11 @@ class WP_Agent_Conversation_Loop {
 				'messages'               => $messages,
 				'tool_execution_results' => $tool_results,
 				'events'                 => $events,
+				'turn_count'             => $turns_run,
+				'final_content'          => self::extract_final_content( $messages ),
+				'usage'                  => $total_usage,
+				'request_metadata'       => $request_metadata,
 			);
-
-			if ( ! empty( $last_request_metadata ) ) {
-				$final_result_data['request_metadata'] = $last_request_metadata;
-			}
 
 			if ( null !== $exceeded_budget ) {
 				$final_result_data['status'] = 'budget_exceeded';
@@ -253,7 +278,7 @@ class WP_Agent_Conversation_Loop {
 			self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
 
 			self::emit_event( $on_event, 'completed', array(
-				'turn'          => $turn,
+				'turn'          => $turns_run,
 				'message_count' => count( $messages ),
 				'tool_results'  => count( $tool_results ),
 			) );
@@ -750,6 +775,61 @@ class WP_Agent_Conversation_Loop {
 			'messages' => $compaction['messages'],
 			'events'   => self::normalize_events( $compaction['events'] ),
 		);
+	}
+
+	/**
+	 * Accumulate per-turn usage into the running total.
+	 *
+	 * Sums the canonical `prompt_tokens`/`completion_tokens`/`total_tokens`
+	 * fields and preserves any provider-specific keys from the latest turn
+	 * (e.g. `cache_creation_input_tokens`, `reasoning_tokens`) so consumers
+	 * can read provider extensions without the loop having to know about
+	 * each one. Numeric fields are summed; non-numeric fields are taken
+	 * from the latest turn.
+	 *
+	 * @param array<string, mixed> $running Current accumulated usage.
+	 * @param array<string, mixed> $turn    Per-turn usage.
+	 * @return array<string, mixed> Accumulated usage.
+	 */
+	private static function accumulate_usage( array $running, array $turn ): array {
+		foreach ( $turn as $key => $value ) {
+			if ( is_int( $value ) || is_float( $value ) ) {
+				$running[ $key ] = (float) ( $running[ $key ] ?? 0 ) + (float) $value;
+				if ( is_int( $value ) && (float) (int) $running[ $key ] === (float) $running[ $key ] ) {
+					$running[ $key ] = (int) $running[ $key ];
+				}
+				continue;
+			}
+			$running[ $key ] = $value;
+		}
+		return $running;
+	}
+
+	/**
+	 * Extract the text of the last assistant message from a transcript.
+	 *
+	 * Returns an empty string when no assistant message exists or the
+	 * latest assistant message has no text content (e.g. tool-call-only
+	 * turns at the tail).
+	 *
+	 * @param array $messages Normalized transcript messages.
+	 * @return string Final assistant text content.
+	 */
+	private static function extract_final_content( array $messages ): string {
+		for ( $i = count( $messages ) - 1; $i >= 0; --$i ) {
+			$message = $messages[ $i ];
+			if ( ! is_array( $message ) ) {
+				continue;
+			}
+			if ( ( $message['role'] ?? '' ) !== 'assistant' ) {
+				continue;
+			}
+			$content = $message['content'] ?? '';
+			if ( is_string( $content ) && '' !== $content ) {
+				return $content;
+			}
+		}
+		return '';
 	}
 
 	/**
