@@ -54,6 +54,13 @@ case "$DOCS_AGENT_WORKFLOW" in
         ;;
 esac
 
+DOCS_AGENT_SUCCESS_REQUIRES_PR="false"
+DOCS_AGENT_COMPLETION_INSTRUCTION="If no documentation update is needed, finish cleanly without opening a pull request. If an update is needed, write only allowed documentation paths and open one pull request."
+if [[ "$DOCS_AGENT_FLOW_SLUG" == *-bootstrap-flow ]]; then
+    DOCS_AGENT_SUCCESS_REQUIRES_PR="true"
+    DOCS_AGENT_COMPLETION_INSTRUCTION="This is a bootstrap run. Write a coverage map and initial documentation to allowed documentation paths, then open one pull request. A no_changes outcome is invalid for this consumer bootstrap proof."
+fi
+
 if [ ! -f "$EXTENSION_PATH/scripts/bench/bench-runner.sh" ]; then
     echo "ERROR: Homeboy WordPress extension not found at $EXTENSION_PATH" >&2
     exit 1
@@ -126,7 +133,7 @@ Workflow run: ${RUN_URL}
 Writable documentation paths: README.md, docs/**
 Selected docs workflow: ${DOCS_AGENT_WORKFLOW} (${DOCS_AGENT_AUDIENCE})
 
-Generate documentation from source code for the selected audience. If no documentation update is needed, finish cleanly without opening a pull request. If an update is needed, write only allowed documentation paths and open one pull request.
+Generate documentation from source code for the selected audience. ${DOCS_AGENT_COMPLETION_INSTRUCTION}
 EOF
 )
 
@@ -145,6 +152,7 @@ jq -n \
     --arg flowSlug "$DOCS_AGENT_FLOW_SLUG" \
     --arg workloadId "$DOCS_AGENT_WORKLOAD_ID" \
     --arg workloadLabel "$DOCS_AGENT_WORKLOAD_LABEL" \
+    --argjson successRequiresPr "$DOCS_AGENT_SUCCESS_REQUIRES_PR" \
     --arg prompt "$PROMPT" \
     '{
         component_id: "agents-api-docs-agent-ci-driver",
@@ -169,7 +177,7 @@ jq -n \
         github_profile_id: "docs-agent-ci",
         target_repo: $targetRepo,
         allowed_repos: [$targetRepo],
-        success_requires_pr: false,
+        success_requires_pr: $successRequiresPr,
         max_turns: 12,
         prompt: $prompt,
         step_budget: 16,
