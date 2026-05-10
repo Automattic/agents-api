@@ -15,19 +15,35 @@ DOCS_AGENT_OPENAI_MODEL="${DOCS_AGENT_OPENAI_MODEL:-gpt-5.5}"
 DOCS_AGENT_TARGET_REPO="${DOCS_AGENT_TARGET_REPO:-Automattic/agents-api}"
 DOCS_AGENT_REF="${DOCS_AGENT_REF:-main}"
 DOCS_AGENT_WORKFLOW="${DOCS_AGENT_WORKFLOW:-technical}"
+DOCS_AGENT_FLOW="${DOCS_AGENT_FLOW:-}"
 DOCS_AGENT_PROMPT="${DOCS_AGENT_PROMPT:-Generate or update technical developer documentation for Agents API from source code. Open a documentation PR only if needed.}"
+
+if [ -n "$DOCS_AGENT_FLOW" ]; then
+    case "$DOCS_AGENT_FLOW" in
+        technical-docs-bootstrap-flow|technical-docs-maintenance-flow|technical-docs-flow)
+            DOCS_AGENT_WORKFLOW="technical"
+            ;;
+        user-docs-bootstrap-flow|user-docs-maintenance-flow|user-docs-flow)
+            DOCS_AGENT_WORKFLOW="user"
+            ;;
+        *)
+            echo "ERROR: DOCS_AGENT_FLOW must be a supported docs-agent flow slug" >&2
+            exit 1
+            ;;
+    esac
+fi
 
 case "$DOCS_AGENT_WORKFLOW" in
     technical)
         DOCS_AGENT_PIPELINE_SLUG="technical-docs-pipeline"
-        DOCS_AGENT_FLOW_SLUG="technical-docs-flow"
+        DOCS_AGENT_FLOW_SLUG="${DOCS_AGENT_FLOW:-technical-docs-flow}"
         DOCS_AGENT_WORKLOAD_ID="technical-docs-generation"
         DOCS_AGENT_WORKLOAD_LABEL="Run Docs Agent technical documentation"
         DOCS_AGENT_AUDIENCE="technical developer-facing"
         ;;
     user)
         DOCS_AGENT_PIPELINE_SLUG="user-docs-pipeline"
-        DOCS_AGENT_FLOW_SLUG="user-docs-flow"
+        DOCS_AGENT_FLOW_SLUG="${DOCS_AGENT_FLOW:-user-docs-flow}"
         DOCS_AGENT_WORKLOAD_ID="user-docs-generation"
         DOCS_AGENT_WORKLOAD_LABEL="Run Docs Agent user documentation"
         DOCS_AGENT_AUDIENCE="non-technical user-facing"

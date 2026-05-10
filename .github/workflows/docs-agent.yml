@@ -11,6 +11,18 @@ on:
         description: OpenAI model to use for the imported agent flow.
         required: true
         default: gpt-5.5
+      docs_agent_flow:
+        description: Docs Agent flow slug to run.
+        type: choice
+        required: true
+        options:
+          - technical-docs-bootstrap-flow
+          - technical-docs-maintenance-flow
+          - technical-docs-flow
+          - user-docs-bootstrap-flow
+          - user-docs-maintenance-flow
+          - user-docs-flow
+        default: technical-docs-maintenance-flow
       docs_agent_ref:
         description: Docs Agent ref.
         required: true
@@ -123,7 +135,7 @@ jobs:
           OPENAI_PROVIDER_PATH: ${{ github.workspace }}/.ci/ai-provider-for-openai
           DOCS_AGENT_OPENAI_MODEL: ${{ inputs.openai_model }}
           DOCS_AGENT_REF: ${{ inputs.docs_agent_ref }}
-          DOCS_AGENT_WORKFLOW: technical
+          DOCS_AGENT_FLOW: ${{ inputs.docs_agent_flow }}
           DOCS_AGENT_TARGET_REPO: Automattic/agents-api
           DOCS_AGENT_PROMPT: ${{ inputs.prompt }}
         run: tests/playground-ci/scripts/run-docs-agent.sh
