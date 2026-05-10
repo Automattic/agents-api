@@ -97,6 +97,23 @@ class WP_Agent_Conversation_Result {
 			throw self::invalid( 'budget', 'must be a string when present' );
 		}
 
+		// Validate optional observability fields surfaced by the loop.
+		if ( array_key_exists( 'turn_count', $result ) && ! is_int( $result['turn_count'] ) ) {
+			throw self::invalid( 'turn_count', 'must be an integer when present' );
+		}
+
+		if ( array_key_exists( 'final_content', $result ) && ! is_string( $result['final_content'] ) ) {
+			throw self::invalid( 'final_content', 'must be a string when present' );
+		}
+
+		if ( array_key_exists( 'usage', $result ) && ! is_array( $result['usage'] ) ) {
+			throw self::invalid( 'usage', 'must be an array when present' );
+		}
+
+		if ( array_key_exists( 'request_metadata', $result ) && ! is_array( $result['request_metadata'] ) ) {
+			throw self::invalid( 'request_metadata', 'must be an array when present' );
+		}
+
 		return $result;
 	}
 
