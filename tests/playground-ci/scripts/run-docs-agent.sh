@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 COMPONENT_PATH="$REPO_ROOT/tests/playground-ci/component"
+DOCS_LINK_VALIDATOR="$SCRIPT_DIR/validate-docs-links.php"
 
 EXTENSION_PATH="${HOMEBOY_EXTENSION_PATH:-/Users/chubes/Developer/homeboy-extensions/wordpress}"
 AGENTS_API_PATH="${AGENTS_API_PATH:-$REPO_ROOT}"
@@ -274,6 +275,16 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
         echo "success_status=$success_status"
         echo "docs_agent_pr_url=$docs_agent_pr_url"
     } >> "$GITHUB_OUTPUT"
+fi
+
+if [ "$job_status" = "completed" ] && [ "$success_status" = "pr_opened" ] && [[ "$DOCS_AGENT_FLOW_SLUG" == *-bootstrap-flow ]]; then
+    if [ ! -f "$DOCS_LINK_VALIDATOR" ]; then
+        echo "ERROR: Docs link validator missing at $DOCS_LINK_VALIDATOR" >&2
+        exit 1
+    fi
+
+    git -C "$AGENTS_API_PATH" fetch origin "$DOCS_AGENT_BRANCH"
+    php "$DOCS_LINK_VALIDATOR" "$AGENTS_API_PATH" FETCH_HEAD
 fi
 
 if [ "$job_status" = "completed" ] && { [ "$success_status" = "pr_opened" ] || [ "$success_status" = "no_changes" ]; }; then
