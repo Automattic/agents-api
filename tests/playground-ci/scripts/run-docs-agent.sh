@@ -61,7 +61,7 @@ DOCS_AGENT_COMPLETION_INSTRUCTION="If no documentation update is needed, finish 
 if [[ "$DOCS_AGENT_FLOW_SLUG" == *-bootstrap-flow ]]; then
     DOCS_AGENT_SUCCESS_REQUIRES_PR="true"
     DOCS_AGENT_BRANCH="${DOCS_AGENT_BRANCH:-docs-agent/${DOCS_AGENT_WORKFLOW}-bootstrap-docs}"
-    DOCS_AGENT_COMPLETION_INSTRUCTION="This is a bootstrap run. Scaffold a complete, clean, hierarchical documentation surface under the allowed documentation paths. Cover the repository source as the source of truth, organize pages by architecture and logical module boundaries, and write every needed digestible topic page before opening one pull request. A no_changes outcome is invalid for this consumer bootstrap proof."
+    DOCS_AGENT_COMPLETION_INSTRUCTION="This is a bootstrap run. Complete the proof by opening one pull request with a complete, clean, hierarchical documentation surface under the allowed documentation paths. Cover the repository source as the source of truth, organize pages by architecture and logical module boundaries, write every needed digestible topic page, and reconcile the committed docs against the source inventory before opening the pull request."
 fi
 DOCS_AGENT_BRANCH="${DOCS_AGENT_BRANCH:-docs-agent/${DOCS_AGENT_WORKFLOW}-docs}"
 
