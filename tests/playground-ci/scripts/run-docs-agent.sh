@@ -58,7 +58,7 @@ DOCS_AGENT_SUCCESS_REQUIRES_PR="false"
 DOCS_AGENT_COMPLETION_INSTRUCTION="If no documentation update is needed, finish cleanly without opening a pull request. If an update is needed, write only allowed documentation paths and open one pull request."
 if [[ "$DOCS_AGENT_FLOW_SLUG" == *-bootstrap-flow ]]; then
     DOCS_AGENT_SUCCESS_REQUIRES_PR="true"
-    DOCS_AGENT_COMPLETION_INSTRUCTION="This is a bootstrap run. Write a coverage map and initial documentation to allowed documentation paths, then open one pull request. A no_changes outcome is invalid for this consumer bootstrap proof."
+    DOCS_AGENT_COMPLETION_INSTRUCTION="This is a bootstrap run. Write the coverage map, docs index, and topic pages to allowed documentation paths. Complete the run by opening one pull request for those documentation commits. A no_changes outcome is invalid for this consumer bootstrap proof."
 fi
 
 if [ ! -f "$EXTENSION_PATH/scripts/bench/bench-runner.sh" ]; then
@@ -178,9 +178,9 @@ jq -n \
         target_repo: $targetRepo,
         allowed_repos: [$targetRepo],
         success_requires_pr: $successRequiresPr,
-        max_turns: 12,
+        max_turns: 20,
         prompt: $prompt,
-        step_budget: 16,
+        step_budget: 24,
         time_budget_ms: 600000,
         transcript_dir: "/wordpress/wp-content/plugins/agents-api-docs-agent-ci-driver/artifacts/docs-agent",
         required_abilities: [
