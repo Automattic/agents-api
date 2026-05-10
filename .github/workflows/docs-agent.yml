@@ -1,0 +1,128 @@
+name: Docs Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Instruction for Docs Agent.
+        required: true
+        default: Inspect Agents API docs and open a documentation PR only if needed.
+      openai_model:
+        description: OpenAI model to use for the imported agent flow.
+        required: true
+        default: gpt-5.5
+      docs_agent_ref:
+        description: Docs Agent ref.
+        required: true
+        default: main
+      data_machine_ref:
+        description: Data Machine ref.
+        required: true
+        default: main
+      data_machine_code_ref:
+        description: Data Machine Code ref.
+        required: true
+        default: main
+      homeboy_extensions_ref:
+        description: Homeboy Extensions ref.
+        required: true
+        default: main
+      homeboy_ref:
+        description: Homeboy core ref.
+        required: true
+        default: main
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  docs-agent:
+    name: Run Docs Agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Agents API
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout Docs Agent
+        uses: actions/checkout@v4
+        with:
+          repository: Extra-Chill/docs-agent
+          ref: ${{ inputs.docs_agent_ref }}
+          path: .ci/docs-agent
+
+      - name: Checkout Homeboy Extensions
+        uses: actions/checkout@v4
+        with:
+          repository: Extra-Chill/homeboy-extensions
+          ref: ${{ inputs.homeboy_extensions_ref }}
+          path: .ci/homeboy-extensions
+
+      - name: Checkout Homeboy
+        uses: actions/checkout@v4
+        with:
+          repository: Extra-Chill/homeboy
+          ref: ${{ inputs.homeboy_ref }}
+          path: .ci/homeboy
+
+      - name: Checkout Data Machine
+        uses: actions/checkout@v4
+        with:
+          repository: Extra-Chill/data-machine
+          ref: ${{ inputs.data_machine_ref }}
+          path: .ci/data-machine
+
+      - name: Checkout Data Machine Code
+        uses: actions/checkout@v4
+        with:
+          repository: Extra-Chill/data-machine-code
+          ref: ${{ inputs.data_machine_code_ref }}
+          path: .ci/data-machine-code
+
+      - name: Checkout OpenAI provider
+        uses: actions/checkout@v4
+        with:
+          repository: WordPress/ai-provider-for-openai
+          path: .ci/ai-provider-for-openai
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Homeboy WordPress extension dependencies
+        working-directory: .ci/homeboy-extensions/wordpress
+        run: |
+          composer install --no-interaction --no-progress --prefer-dist
+          npm install
+
+      - name: Install plugin PHP dependencies
+        run: |
+          composer install --working-dir=.ci/data-machine --no-interaction --no-progress --prefer-dist
+          composer install --working-dir=.ci/data-machine-code --no-interaction --no-progress --prefer-dist
+
+      - name: Validate Docs Agent bundle
+        working-directory: .ci/docs-agent
+        run: php tests/validate-docs-agent-bundle.php
+
+      - name: Run Docs Agent
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          HOMEBOY_EXTENSION_PATH: ${{ github.workspace }}/.ci/homeboy-extensions/wordpress
+          HOMEBOY_RUNTIME_BENCH_HELPER_SH: ${{ github.workspace }}/.ci/homeboy/src/core/extension/runtime/bench-helper.sh
+          HOMEBOY_RUNTIME_BENCH_HELPER_PHP: ${{ github.workspace }}/.ci/homeboy/src/core/extension/runtime/bench-helper.php
+          AGENTS_API_PATH: ${{ github.workspace }}
+          DM_PATH: ${{ github.workspace }}/.ci/data-machine
+          DMC_PATH: ${{ github.workspace }}/.ci/data-machine-code
+          OPENAI_PROVIDER_PATH: ${{ github.workspace }}/.ci/ai-provider-for-openai
+          DOCS_AGENT_OPENAI_MODEL: ${{ inputs.openai_model }}
+          DOCS_AGENT_REF: ${{ inputs.docs_agent_ref }}
+          DOCS_AGENT_TARGET_REPO: Automattic/agents-api
+          DOCS_AGENT_PROMPT: ${{ inputs.prompt }}
+        run: tests/playground-ci/scripts/run-docs-agent.sh
