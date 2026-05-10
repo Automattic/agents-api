@@ -110,7 +110,7 @@ jq -n \
         workload_label: "Run Docs Agent",
         validation_dependencies: [$agentsApi, $dm, $dmc, $openaiProvider],
         playground_wordpress_version: "7.0",
-        bundle_repo: "https://github.com/Extra-Chill/docs-agent.git",
+        bundle_repo: "https://github.com/Automattic/docs-agent.git",
         bundle_ref: $docsAgentRef,
         bundle_path_in_repo: "bundles/docs-agent",
         agent_slug: "docs-agent",

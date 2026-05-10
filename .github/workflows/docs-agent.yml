@@ -52,7 +52,7 @@ jobs:
       - name: Checkout Docs Agent
         uses: actions/checkout@v4
         with:
-          repository: Extra-Chill/docs-agent
+          repository: Automattic/docs-agent
           ref: ${{ inputs.docs_agent_ref }}
           path: .ci/docs-agent
 
