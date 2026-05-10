@@ -184,6 +184,7 @@ jq -n \
         engine_key: "docs_agent",
         tool_results_key: "github_tool_results",
         success_requires_pr: $successRequiresPr,
+        required_written_paths: ($successRequiresPr | if . then ["docs/index.md", "docs/coverage-map.md"] else [] end),
         fallback_pull_request: {
             repo: $targetRepo,
             title: "Bootstrap developer documentation surface",
