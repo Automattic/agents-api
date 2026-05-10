@@ -181,6 +181,8 @@ jq -n \
         github_profile_id: "docs-agent-ci",
         target_repo: $targetRepo,
         allowed_repos: [$targetRepo],
+        engine_key: "docs_agent",
+        tool_results_key: "github_tool_results",
         success_requires_pr: $successRequiresPr,
         fallback_pull_request: {
             repo: $targetRepo,
