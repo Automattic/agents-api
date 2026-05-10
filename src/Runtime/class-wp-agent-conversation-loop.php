@@ -89,6 +89,7 @@ class WP_Agent_Conversation_Loop {
 		$tool_results          = array();
 		$conversation_complete = false;
 		$exceeded_budget       = null;
+		$last_request_metadata = array();
 
 		if ( null !== $transcript_lock && '' !== $lock_session_id ) {
 			$lock_token = $transcript_lock->acquire_session_lock( $lock_session_id, $lock_ttl );
@@ -181,6 +182,9 @@ class WP_Agent_Conversation_Loop {
 					$messages     = $result['messages'];
 					$tool_results = array_merge( $tool_results, $result['tool_execution_results'] );
 					$events       = array_merge( $events, self::normalize_events( $result['events'] ?? array() ) );
+					if ( isset( $result['request_metadata'] ) && is_array( $result['request_metadata'] ) ) {
+						$last_request_metadata = $result['request_metadata'];
+					}
 
 					// Apply completion policy to tool results from the turn runner
 					// when the loop owns policy but the turn runner handled execution.
@@ -234,6 +238,10 @@ class WP_Agent_Conversation_Loop {
 				'tool_execution_results' => $tool_results,
 				'events'                 => $events,
 			);
+
+			if ( ! empty( $last_request_metadata ) ) {
+				$final_result_data['request_metadata'] = $last_request_metadata;
+			}
 
 			if ( null !== $exceeded_budget ) {
 				$final_result_data['status'] = 'budget_exceeded';

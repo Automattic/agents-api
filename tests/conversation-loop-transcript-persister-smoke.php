@@ -31,10 +31,11 @@ $persister     = new class( $persister_log ) implements AgentsAPI\AI\WP_Agent_Tr
 
 	public function persist( array $messages, AgentsAPI\AI\WP_Agent_Conversation_Request $request, array $result ): string {
 		$this->log[] = array(
-			'message_count' => count( $messages ),
-			'request_turns' => $request->maxTurns(),
-			'workspace'     => $request->workspace() ? $request->workspace()->to_array() : null,
-			'result_keys'   => array_keys( $result ),
+			'message_count'    => count( $messages ),
+			'request_turns'    => $request->maxTurns(),
+			'workspace'        => $request->workspace() ? $request->workspace()->to_array() : null,
+			'result_keys'      => array_keys( $result ),
+			'request_metadata' => $result['request_metadata'] ?? null,
 		);
 
 		return 'transcript-' . count( $this->log );
@@ -53,6 +54,11 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 			'messages'               => $messages,
 			'tool_execution_results' => array(),
 			'events'                 => array(),
+			'request_metadata'       => array(
+				'memory_files' => array(
+					array( 'filename' => 'SITE.md' ),
+				),
+			),
 		);
 	},
 	array(
@@ -64,6 +70,8 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 1, count( $persister_log ), 'persister was called once on success', $failures, $passes );
 agents_api_smoke_assert_equals( 2, $persister_log[0]['message_count'], 'persister received final messages', $failures, $passes );
 agents_api_smoke_assert_equals( 1, $persister_log[0]['request_turns'], 'persister received request with correct max_turns', $failures, $passes );
+agents_api_smoke_assert_equals( 'SITE.md', $result['request_metadata']['memory_files'][0]['filename'] ?? '', 'loop result preserves caller request metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'SITE.md', $persister_log[0]['request_metadata']['memory_files'][0]['filename'] ?? '', 'persister receives caller request metadata', $failures, $passes );
 
 echo "\n[2] Persister fires on the failure path (turn runner throws):\n";
 $persister_log = array();
