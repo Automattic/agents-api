@@ -19,9 +19,6 @@ on:
           - technical-docs-bootstrap-flow
           - technical-docs-maintenance-flow
           - technical-docs-flow
-          - user-docs-bootstrap-flow
-          - user-docs-maintenance-flow
-          - user-docs-flow
         default: technical-docs-maintenance-flow
       docs_agent_ref:
         description: Docs Agent ref.
@@ -62,14 +59,9 @@ jobs:
           set -euo pipefail
           case "$DOCS_AGENT_FLOW" in
             technical-docs-bootstrap-flow|technical-docs-maintenance-flow|technical-docs-flow)
-              docs_workflow="technical"
+              docs_workflow="developer"
               pipeline_slug="technical-docs-pipeline"
-              audience="technical developer-facing"
-              ;;
-            user-docs-bootstrap-flow|user-docs-maintenance-flow|user-docs-flow)
-              docs_workflow="user"
-              pipeline_slug="user-docs-pipeline"
-              audience="non-technical user-facing"
+              audience="developer-facing API and substrate documentation"
               ;;
             *)
               echo "Unsupported docs_agent_flow: $DOCS_AGENT_FLOW" >&2
@@ -78,14 +70,14 @@ jobs:
           esac
 
           success_requires_pr="false"
-          docs_branch="docs-agent/${docs_workflow}-docs"
-          fallback_pr_title="Update ${docs_workflow} documentation"
-          completion_instruction="If no documentation update is needed, finish cleanly without opening a pull request. If an update is needed, write only allowed documentation paths and open one pull request."
+          docs_branch="docs-agent/developer-docs"
+          fallback_pr_title="Update Agents API developer documentation"
+          completion_instruction="Agents API has one documentation audience: developer-facing API and substrate documentation. Preserve the existing docs/ topic structure, maintain docs/README.md as the navigation index, and place focused topic pages directly in the existing docs/ tree. If no documentation update is needed, finish cleanly without opening a pull request. If an update is needed, write only allowed documentation paths and open one pull request."
           if [[ "$DOCS_AGENT_FLOW" == *-bootstrap-flow ]]; then
             success_requires_pr="true"
-            docs_branch="docs-agent/${docs_workflow}-bootstrap-docs"
-            fallback_pr_title="Bootstrap ${docs_workflow} documentation surface"
-            completion_instruction="This is a bootstrap run. Scaffold a complete, clean, hierarchical documentation surface under the allowed documentation paths. Cover the repository source as the source of truth, organize pages by architecture and logical module boundaries, and write every needed digestible topic page before opening one pull request. A no_changes outcome is invalid for this consumer bootstrap proof."
+            docs_branch="docs-agent/developer-bootstrap-docs"
+            fallback_pr_title="Bootstrap Agents API developer documentation"
+            completion_instruction="This is a bootstrap run. Scaffold a complete, clean, hierarchical developer documentation surface under docs/. Cover the repository source as the source of truth, organize pages by architecture and logical module boundaries, keep docs/README.md as the navigation index, and place focused topic pages directly in the existing docs/ tree. Write every needed digestible topic page before opening one pull request. A no_changes outcome is invalid for this consumer bootstrap proof."
           fi
 
           {
@@ -167,6 +159,7 @@ jobs:
         Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         Writable documentation paths: README.md, docs/**
         Selected docs workflow: ${{ needs.prepare.outputs.docs_workflow }} (${{ needs.prepare.outputs.audience }})
+        Docs structure: maintain one developer documentation surface under docs/. Use docs/README.md as the navigation index. Keep focused topic pages at stable docs/ paths such as docs/architecture.md, docs/runtime-and-tools.md, docs/auth-consent-context-memory.md, docs/channels-workflows-operations.md, and specialized protocol/bridge pages.
 
         Generate documentation from source code for the selected audience. ${{ needs.prepare.outputs.completion_instruction }}
     secrets: inherit

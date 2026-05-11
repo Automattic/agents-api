@@ -57,7 +57,7 @@ The package requires PHP `>=8.1` and declares WordPress plugin metadata requirin
 
 ## Future coverage
 
-This bootstrap covers the major source modules and public contracts under `docs/technical`. Future passes should add deeper reference pages for:
+This documentation covers the major source modules and public contracts in the `docs/` topic tree. Future passes should add deeper reference pages for:
 
 - `Approvals/` pending action lifecycle and handler permissions, because this pass only references it from the architecture inventory.
 - `Guidelines/` substrate internals, because this pass covers the memory/context boundary but not post type/taxonomy registration details.

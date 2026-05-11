@@ -16,6 +16,8 @@ Consumers    -> product UX, concrete tools, workflows, prompt policy, storage/ma
 
 Agents API sits between tool/action discovery and product-specific automation. It owns the reusable agent runtime contracts; product plugins own the user-facing product experience.
 
+Developer documentation lives in [`docs/README.md`](docs/README.md).
+
 ## What Agents API Owns
 
 - Agent registration and lookup.
