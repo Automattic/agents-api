@@ -266,11 +266,13 @@ class WP_Agent_Conversation_Loop {
 				'final_content'          => self::extract_final_content( $messages ),
 				'usage'                  => $total_usage,
 				'request_metadata'       => $request_metadata,
+				'completed'              => true,
 			);
 
 			if ( null !== $exceeded_budget ) {
-				$final_result_data['status'] = 'budget_exceeded';
-				$final_result_data['budget'] = $exceeded_budget;
+				$final_result_data['status']    = 'budget_exceeded';
+				$final_result_data['budget']    = $exceeded_budget;
+				$final_result_data['completed'] = false;
 			}
 
 			$final_result = WP_Agent_Conversation_Result::normalize( $final_result_data );
