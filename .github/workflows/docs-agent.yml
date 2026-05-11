@@ -35,14 +35,6 @@ on:
         description: Data Machine Code ref.
         required: true
         default: main
-      homeboy_extensions_ref:
-        description: Homeboy Extensions ref.
-        required: true
-        default: main
-      homeboy_ref:
-        description: Homeboy core ref.
-        required: true
-        default: main
 
 permissions:
   contents: write
@@ -50,11 +42,142 @@ permissions:
   issues: write
 
 jobs:
+  prepare:
+    name: Prepare Docs Agent config
+    runs-on: ubuntu-latest
+    outputs:
+      docs_workflow: ${{ steps.config.outputs.docs_workflow }}
+      pipeline_slug: ${{ steps.config.outputs.pipeline_slug }}
+      docs_branch: ${{ steps.config.outputs.docs_branch }}
+      audience: ${{ steps.config.outputs.audience }}
+      success_requires_pr: ${{ steps.config.outputs.success_requires_pr }}
+      completion_instruction: ${{ steps.config.outputs.completion_instruction }}
+      fallback_pr_title: ${{ steps.config.outputs.fallback_pr_title }}
+    steps:
+      - name: Resolve flow settings
+        id: config
+        env:
+          DOCS_AGENT_FLOW: ${{ inputs.docs_agent_flow }}
+        run: |
+          set -euo pipefail
+          case "$DOCS_AGENT_FLOW" in
+            technical-docs-bootstrap-flow|technical-docs-maintenance-flow|technical-docs-flow)
+              docs_workflow="technical"
+              pipeline_slug="technical-docs-pipeline"
+              audience="technical developer-facing"
+              ;;
+            user-docs-bootstrap-flow|user-docs-maintenance-flow|user-docs-flow)
+              docs_workflow="user"
+              pipeline_slug="user-docs-pipeline"
+              audience="non-technical user-facing"
+              ;;
+            *)
+              echo "Unsupported docs_agent_flow: $DOCS_AGENT_FLOW" >&2
+              exit 1
+              ;;
+          esac
+
+          success_requires_pr="false"
+          docs_branch="docs-agent/${docs_workflow}-docs"
+          fallback_pr_title="Update ${docs_workflow} documentation"
+          completion_instruction="If no documentation update is needed, finish cleanly without opening a pull request. If an update is needed, write only allowed documentation paths and open one pull request."
+          if [[ "$DOCS_AGENT_FLOW" == *-bootstrap-flow ]]; then
+            success_requires_pr="true"
+            docs_branch="docs-agent/${docs_workflow}-bootstrap-docs"
+            fallback_pr_title="Bootstrap ${docs_workflow} documentation surface"
+            completion_instruction="This is a bootstrap run. Scaffold a complete, clean, hierarchical documentation surface under the allowed documentation paths. Cover the repository source as the source of truth, organize pages by architecture and logical module boundaries, and write every needed digestible topic page before opening one pull request. A no_changes outcome is invalid for this consumer bootstrap proof."
+          fi
+
+          {
+            printf 'docs_workflow=%s\n' "$docs_workflow"
+            printf 'pipeline_slug=%s\n' "$pipeline_slug"
+            printf 'docs_branch=%s\n' "$docs_branch"
+            printf 'audience=%s\n' "$audience"
+            printf 'success_requires_pr=%s\n' "$success_requires_pr"
+            printf 'fallback_pr_title=%s\n' "$fallback_pr_title"
+            printf 'completion_instruction<<EOF\n%s\nEOF\n' "$completion_instruction"
+          } >> "$GITHUB_OUTPUT"
+
   docs-agent:
     name: Run Docs Agent
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    needs: prepare
+    uses: Extra-Chill/homeboy-extensions/.github/workflows/datamachine-agent-ci.yml@feat/agent-ci-runner-extensions
+    with:
+      bundle_path: bundles/docs-agent
+      bundle_repo: https://github.com/Automattic/docs-agent.git
+      bundle_ref: ${{ inputs.docs_agent_ref }}
+      bundle_path_in_repo: bundles/docs-agent
+      agent_slug: docs-agent
+      pipeline_slug: ${{ needs.prepare.outputs.pipeline_slug }}
+      flow_slug: ${{ inputs.docs_agent_flow }}
+      target_repo: Automattic/agents-api
+      model: ${{ inputs.openai_model }}
+      validation_dependencies: Extra-Chill/data-machine@${{ inputs.data_machine_ref }},Extra-Chill/data-machine-code@${{ inputs.data_machine_code_ref }},WordPress/ai-provider-for-openai@trunk
+      success_requires_pr: ${{ needs.prepare.outputs.success_requires_pr == 'true' }}
+      max_turns: 20
+      step_budget: 24
+      time_budget_ms: 600000
+      engine_key: docs_agent
+      tool_results_key: github_tool_results
+      extra_required_abilities: '["datamachine/create-or-update-github-file"]'
+      allowed_repos: '["Automattic/agents-api"]'
+      tool_recorders: |
+        [
+          {
+            "tool": "create_or_update_github_file",
+            "forced_parameters": {
+              "allowed_file_paths": ["README.md", "docs/**"],
+              "branch": "${{ needs.prepare.outputs.docs_branch }}"
+            },
+            "record": {
+              "engine_key": "docs_agent",
+              "tool_results_key": "github_tool_results"
+            }
+          },
+          {
+            "tool": "create_github_pull_request",
+            "record": {
+              "engine_key": "docs_agent",
+              "tool_results_key": "github_tool_results",
+              "event": {
+                "key": "pr",
+                "type": "pull_request",
+                "only_if_success": true
+              }
+            }
+          }
+        ]
+      fallback_pull_request: |
+        {
+          "repo": "Automattic/agents-api",
+          "title": "${{ needs.prepare.outputs.fallback_pr_title }}",
+          "head": "${{ needs.prepare.outputs.docs_branch }}",
+          "base": "main",
+          "body": "## Summary\n- Generate or update Agents API documentation from repository source.\n- Keep documentation under README.md and docs/**.\n- Generated by the Docs Agent workflow.\n\n## AI assistance\n- **AI assistance:** Yes\n- **Tool(s):** OpenCode (GPT-5.5) via Docs Agent\n- **Used for:** Generated documentation draft from repository source for human review."
+        }
+      engine_data_outputs: '{"docs_agent_pr_url":"metadata.engine_data.docs_agent.pr.url","success_status":"metadata.success_status"}'
+      transcript_artifact_name: docs-agent-transcript-${{ github.run_id }}
+      prompt: |
+        ${{ inputs.prompt }}
 
+        Target repository: Automattic/agents-api
+        Event name: ${{ github.event_name }}
+        Target ref: ${{ github.ref_name }}
+        Head SHA: ${{ github.sha }}
+        Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        Writable documentation paths: README.md, docs/**
+        Selected docs workflow: ${{ needs.prepare.outputs.docs_workflow }} (${{ needs.prepare.outputs.audience }})
+
+        Generate documentation from source code for the selected audience. ${{ needs.prepare.outputs.completion_instruction }}
+    secrets: inherit
+
+  validate-bootstrap-docs:
+    name: Validate bootstrap docs links
+    needs:
+      - prepare
+      - docs-agent
+    if: ${{ needs.prepare.outputs.success_requires_pr == 'true' && fromJSON(needs.docs-agent.outputs.engine_data_json).success_status == 'pr_opened' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Agents API
         uses: actions/checkout@v4
@@ -68,75 +191,11 @@ jobs:
           ref: ${{ inputs.docs_agent_ref }}
           path: .ci/docs-agent
 
-      - name: Checkout Homeboy Extensions
-        uses: actions/checkout@v4
-        with:
-          repository: Extra-Chill/homeboy-extensions
-          ref: ${{ inputs.homeboy_extensions_ref }}
-          path: .ci/homeboy-extensions
-
-      - name: Checkout Homeboy
-        uses: actions/checkout@v4
-        with:
-          repository: Extra-Chill/homeboy
-          ref: ${{ inputs.homeboy_ref }}
-          path: .ci/homeboy
-
-      - name: Checkout Data Machine
-        uses: actions/checkout@v4
-        with:
-          repository: Extra-Chill/data-machine
-          ref: ${{ inputs.data_machine_ref }}
-          path: .ci/data-machine
-
-      - name: Checkout Data Machine Code
-        uses: actions/checkout@v4
-        with:
-          repository: Extra-Chill/data-machine-code
-          ref: ${{ inputs.data_machine_code_ref }}
-          path: .ci/data-machine-code
-
-      - name: Checkout OpenAI provider
-        uses: actions/checkout@v4
-        with:
-          repository: WordPress/ai-provider-for-openai
-          path: .ci/ai-provider-for-openai
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Install Homeboy WordPress extension dependencies
-        working-directory: .ci/homeboy-extensions/wordpress
-        run: |
-          composer install --no-interaction --no-progress --prefer-dist
-          npm install
-
-      - name: Install plugin PHP dependencies
-        run: |
-          composer install --working-dir=.ci/data-machine --no-interaction --no-progress --prefer-dist
-          composer install --working-dir=.ci/data-machine-code --no-interaction --no-progress --prefer-dist
-
-      - name: Validate Docs Agent bundle
-        working-directory: .ci/docs-agent
-        run: php tests/validate-docs-agent-bundle.php
-
-      - name: Run Docs Agent
+      - name: Repair and validate generated Markdown links
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          HOMEBOY_EXTENSION_PATH: ${{ github.workspace }}/.ci/homeboy-extensions/wordpress
-          HOMEBOY_RUNTIME_BENCH_HELPER_SH: ${{ github.workspace }}/.ci/homeboy/src/core/extension/runtime/bench-helper.sh
-          HOMEBOY_RUNTIME_BENCH_HELPER_PHP: ${{ github.workspace }}/.ci/homeboy/src/core/extension/runtime/bench-helper.php
-          AGENTS_API_PATH: ${{ github.workspace }}
-          DM_PATH: ${{ github.workspace }}/.ci/data-machine
-          DMC_PATH: ${{ github.workspace }}/.ci/data-machine-code
-          OPENAI_PROVIDER_PATH: ${{ github.workspace }}/.ci/ai-provider-for-openai
-          DOCS_AGENT_PATH: ${{ github.workspace }}/.ci/docs-agent
-          DOCS_AGENT_OPENAI_MODEL: ${{ inputs.openai_model }}
-          DOCS_AGENT_REF: ${{ inputs.docs_agent_ref }}
-          DOCS_AGENT_FLOW: ${{ inputs.docs_agent_flow }}
-          DOCS_AGENT_TARGET_REPO: Automattic/agents-api
-          DOCS_AGENT_PROMPT: ${{ inputs.prompt }}
-        run: tests/playground-ci/scripts/run-docs-agent.sh
+          DOCS_AGENT_BRANCH: ${{ needs.prepare.outputs.docs_branch }}
+        run: |
+          set -euo pipefail
+          php .ci/docs-agent/scripts/repair-docs-links.php "$GITHUB_WORKSPACE" "$DOCS_AGENT_BRANCH" --commit
+          git fetch origin "$DOCS_AGENT_BRANCH"
+          php tests/playground-ci/scripts/validate-docs-links.php "$GITHUB_WORKSPACE" FETCH_HEAD
