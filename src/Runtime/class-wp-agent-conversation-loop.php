@@ -270,8 +270,8 @@ class WP_Agent_Conversation_Loop {
 			);
 
 			if ( null !== $exceeded_budget ) {
-				$final_result_data['status'] = 'budget_exceeded';
-				$final_result_data['budget'] = $exceeded_budget;
+				$final_result_data['status']    = 'budget_exceeded';
+				$final_result_data['budget']    = $exceeded_budget;
 				$final_result_data['completed'] = false;
 			}
 
