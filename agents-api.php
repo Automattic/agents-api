@@ -37,12 +37,14 @@ require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adopter.php'
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-capability-ceiling.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-access-grant.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-access-store.php';
+require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-access.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-token.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-token-store.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-caller-context.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-authorization-policy.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-token-authenticator.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-wordpress-authorization-policy.php';
+require_once AGENTS_API_PATH . 'src/Auth/register-agent-access-abilities.php';
 require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-context-injection-policy.php';
 require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-memory-layer.php';
 require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-memory-registry.php';
