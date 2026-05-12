@@ -9,7 +9,7 @@ namespace AgentsAPI\AI\Auth;
 
 defined( 'ABSPATH' ) || exit;
 
-const AGENTS_CAN_ACCESS_AGENT_ABILITY      = 'agents/can-access-agent';
+const AGENTS_CAN_ACCESS_AGENT_ABILITY       = 'agents/can-access-agent';
 const AGENTS_LIST_ACCESSIBLE_AGENTS_ABILITY = 'agents/list-accessible-agents';
 
 add_action(
