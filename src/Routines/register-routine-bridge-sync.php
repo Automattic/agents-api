@@ -34,3 +34,30 @@ add_action(
 	10,
 	1
 );
+
+add_action(
+	'wp_agent_routine_paused',
+	static function ( WP_Agent_Routine $routine ): void {
+		WP_Agent_Routine_Action_Scheduler_Bridge::pause( $routine->get_id() );
+	},
+	10,
+	1
+);
+
+add_action(
+	'wp_agent_routine_resumed',
+	static function ( WP_Agent_Routine $routine ): void {
+		WP_Agent_Routine_Action_Scheduler_Bridge::resume( $routine );
+	},
+	10,
+	1
+);
+
+add_action(
+	'wp_agent_routine_run_now_requested',
+	static function ( WP_Agent_Routine $routine ): void {
+		WP_Agent_Routine_Action_Scheduler_Bridge::run_now( $routine );
+	},
+	10,
+	1
+);

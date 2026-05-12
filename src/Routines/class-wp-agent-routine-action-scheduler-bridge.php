@@ -97,4 +97,49 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 			self::GROUP
 		);
 	}
+
+	/**
+	 * Cancel the recurring/cron schedule without removing the routine from
+	 * the registry. Mirrors {@see unregister()}; the only behavioural
+	 * difference is the upstream caller's intent (the routine stays in
+	 * memory and can be {@see resume()}d).
+	 *
+	 * @since 0.106.0
+	 */
+	public static function pause( string $routine_id ): void {
+		self::unregister( $routine_id );
+	}
+
+	/**
+	 * Re-establish the recurring/cron schedule for a previously-paused
+	 * routine. Idempotent — calling on a routine whose schedule is still
+	 * active simply re-registers (the underlying register call unschedules
+	 * first).
+	 *
+	 * @since 0.106.0
+	 */
+	public static function resume( WP_Agent_Routine $routine ): bool {
+		return self::register( $routine );
+	}
+
+	/**
+	 * Enqueue a single-shot action for the routine, in addition to its
+	 * recurring schedule. The listener already resolves the routine by
+	 * `routine_id`, so the same wake handler fires for both kinds of
+	 * dispatch.
+	 *
+	 * @since 0.106.0
+	 */
+	public static function run_now( WP_Agent_Routine $routine ): bool {
+		if ( ! self::is_available() || ! function_exists( 'as_enqueue_async_action' ) ) {
+			return false;
+		}
+
+		as_enqueue_async_action(
+			self::SCHEDULED_HOOK,
+			array( 'routine_id' => $routine->get_id() ),
+			self::GROUP
+		);
+		return true;
+	}
 }

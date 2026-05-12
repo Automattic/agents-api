@@ -64,10 +64,13 @@ if ( ! class_exists( 'WP_Error' ) ) {
 		public function get_error_data() { return $this->data; }
 	}
 }
+$GLOBALS['smoke_dispatched'] = array();
 if ( ! function_exists( 'do_action' ) ) {
 	function do_action( string $hook, ...$args ): void {
-		// no-op for substrate-only smoke; the registry doesn't depend on
-		// listener side effects.
+		// Capturing shim — append every fired hook + its first arg (routines
+		// always pass the WP_Agent_Routine object as the only payload). The
+		// registry's lifecycle verbs assert on this from section 6 onwards.
+		$GLOBALS['smoke_dispatched'][] = array( 'hook' => $hook, 'arg' => $args[0] ?? null );
 	}
 }
 
@@ -165,6 +168,53 @@ smoke_assert( true, is_object( $missing ) && method_exists( $missing, 'get_error
 // 5. Registry rejects invalid args via WP_Error.
 $bad = WP_Agent_Routine_Registry::register( 'x', array( 'interval' => 1 ) );
 smoke_assert( true, is_object( $bad ) && method_exists( $bad, 'get_error_code' ) && 'invalid_routine' === $bad->get_error_code(), 'registry returns WP_Error on validation failure', $failures, $passes );
+
+// 6. Lifecycle verbs: pause / resume / run_now.
+WP_Agent_Routine_Registry::reset();
+$GLOBALS['smoke_dispatched'] = array();
+
+WP_Agent_Routine_Registry::register( 'lunar-monitor', array( 'agent' => 'commander', 'interval' => 60 ) );
+
+// Filter helper for the captured dispatch log.
+$last_fired = static function ( string $hook ): ?array {
+	foreach ( array_reverse( $GLOBALS['smoke_dispatched'] ) as $entry ) {
+		if ( $entry['hook'] === $hook ) {
+			return $entry;
+		}
+	}
+	return null;
+};
+
+// Pause returns true + fires wp_agent_routine_paused with the routine.
+$paused_result = WP_Agent_Routine_Registry::pause( 'lunar-monitor' );
+smoke_assert( true, $paused_result, 'pause returns true on existing routine', $failures, $passes );
+$paused_event = $last_fired( 'wp_agent_routine_paused' );
+smoke_assert( true, null !== $paused_event && $paused_event['arg'] instanceof WP_Agent_Routine && 'lunar-monitor' === $paused_event['arg']->get_id(), 'pause fires wp_agent_routine_paused with the routine', $failures, $passes );
+smoke_assert( true, null !== WP_Agent_Routine_Registry::find( 'lunar-monitor' ), 'pause keeps the routine in the registry', $failures, $passes );
+
+// Resume returns true + fires wp_agent_routine_resumed.
+$resumed_result = WP_Agent_Routine_Registry::resume( 'lunar-monitor' );
+smoke_assert( true, $resumed_result, 'resume returns true on existing routine', $failures, $passes );
+$resumed_event = $last_fired( 'wp_agent_routine_resumed' );
+smoke_assert( true, null !== $resumed_event && $resumed_event['arg'] instanceof WP_Agent_Routine, 'resume fires wp_agent_routine_resumed with the routine', $failures, $passes );
+
+// run_now returns true + fires wp_agent_routine_run_now_requested.
+$run_now_result = WP_Agent_Routine_Registry::run_now( 'lunar-monitor' );
+smoke_assert( true, $run_now_result, 'run_now returns true on existing routine', $failures, $passes );
+$run_now_event = $last_fired( 'wp_agent_routine_run_now_requested' );
+smoke_assert( true, null !== $run_now_event && $run_now_event['arg'] instanceof WP_Agent_Routine, 'run_now fires wp_agent_routine_run_now_requested with the routine', $failures, $passes );
+
+// All three verbs return WP_Error('not_registered') for unknown ids.
+foreach ( array( 'pause', 'resume', 'run_now' ) as $verb ) {
+	$result = WP_Agent_Routine_Registry::$verb( 'never-registered' );
+	smoke_assert(
+		true,
+		is_object( $result ) && method_exists( $result, 'get_error_code' ) && 'not_registered' === $result->get_error_code(),
+		"{$verb} returns WP_Error('not_registered') for unknown id",
+		$failures,
+		$passes
+	);
+}
 
 if ( count( $failures ) > 0 ) {
 	echo 'FAIL ' . count( $failures ) . " failures\n";
