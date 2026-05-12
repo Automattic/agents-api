@@ -180,7 +180,7 @@ function wp_set_object_terms( int $post_id, $terms, string $taxonomy ): void {
 }
 
 function is_wp_error( $value ): bool {
-	return false;
+	return class_exists( 'WP_Error' ) && $value instanceof WP_Error;
 }
 
 function agents_api_smoke_assert_equals( $expected, $actual, string $name, array &$failures, int &$passes ): void {
