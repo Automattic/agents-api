@@ -81,6 +81,111 @@ final class WP_Agent_Routine_Registry {
 		return true;
 	}
 
+	/**
+	 * Pause a registered routine's schedule without unregistering the routine
+	 * itself. The value object stays in the registry; the cron schedule is
+	 * cancelled. Use {@see resume()} to re-establish it later.
+	 *
+	 * State (paused-vs-active) is intentionally NOT stored on the value
+	 * object or the registry — both are stateless across requests. Consumers
+	 * that want a "this routine is paused" UI persist that fact themselves
+	 * (typically a `wp_options` flag) and re-fire `pause()` on each plugin
+	 * boot. The substrate just provides the verb and the event.
+	 *
+	 * @since 0.106.0
+	 *
+	 * @return true|WP_Error
+	 */
+	public static function pause( string $routine_id ) {
+		if ( ! isset( self::$routines[ $routine_id ] ) ) {
+			return new WP_Error(
+				'not_registered',
+				sprintf( 'no routine registered with id `%s`', $routine_id )
+			);
+		}
+		$routine = self::$routines[ $routine_id ];
+
+		/**
+		 * Fires when a caller requests pausing a routine. The Action Scheduler
+		 * bridge listens to cancel the schedule (without unregistering).
+		 *
+		 * @since 0.106.0
+		 *
+		 * @param WP_Agent_Routine $routine
+		 */
+		do_action( 'wp_agent_routine_paused', $routine );
+
+		return true;
+	}
+
+	/**
+	 * Resume a previously-paused routine by re-establishing its schedule.
+	 *
+	 * Idempotent: resuming a routine whose schedule is still active just
+	 * re-fires `wp_agent_routine_resumed`. The AS bridge's register call is
+	 * already idempotent (unschedules first), so the net effect is safe.
+	 *
+	 * @since 0.106.0
+	 *
+	 * @return true|WP_Error
+	 */
+	public static function resume( string $routine_id ) {
+		if ( ! isset( self::$routines[ $routine_id ] ) ) {
+			return new WP_Error(
+				'not_registered',
+				sprintf( 'no routine registered with id `%s`', $routine_id )
+			);
+		}
+		$routine = self::$routines[ $routine_id ];
+
+		/**
+		 * Fires when a caller requests resuming a paused routine. The AS
+		 * bridge listens to re-register the recurring/cron schedule.
+		 *
+		 * @since 0.106.0
+		 *
+		 * @param WP_Agent_Routine $routine
+		 */
+		do_action( 'wp_agent_routine_resumed', $routine );
+
+		return true;
+	}
+
+	/**
+	 * Trigger an immediate one-shot wake of the routine, in addition to its
+	 * recurring schedule. The next scheduled wake is unaffected.
+	 *
+	 * Useful for "Run now" buttons in admin UIs and for testing — the routine
+	 * fires through the same listener as any scheduled wake, so the agent's
+	 * conversation session, prompt, and tool surface are identical.
+	 *
+	 * @since 0.106.0
+	 *
+	 * @return true|WP_Error
+	 */
+	public static function run_now( string $routine_id ) {
+		if ( ! isset( self::$routines[ $routine_id ] ) ) {
+			return new WP_Error(
+				'not_registered',
+				sprintf( 'no routine registered with id `%s`', $routine_id )
+			);
+		}
+		$routine = self::$routines[ $routine_id ];
+
+		/**
+		 * Fires when a caller requests an immediate one-shot wake of a
+		 * routine. The AS bridge listens to enqueue a single-action job for
+		 * the same scheduled-hook the recurring schedule uses.
+		 *
+		 * @since 0.106.0
+		 *
+		 * @param WP_Agent_Routine $routine
+		 */
+		do_action( 'wp_agent_routine_run_now_requested', $routine );
+
+		return true;
+	}
+
 	public static function find( string $routine_id ): ?WP_Agent_Routine {
 		return self::$routines[ $routine_id ] ?? null;
 	}
