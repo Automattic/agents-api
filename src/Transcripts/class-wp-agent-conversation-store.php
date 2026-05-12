@@ -37,6 +37,22 @@ interface WP_Agent_Conversation_Store {
 	public function create_session( WP_Agent_Workspace_Scope $workspace, int $user_id, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ): string;
 
 	/**
+	 * List transcript sessions for one workspace/user pair.
+	 *
+	 * Implementations should return newest sessions first by default and honor the
+	 * `include_messages` arg. List callers pass `include_messages => false` by
+	 * default so concrete stores can avoid loading full transcript payloads.
+	 * Common filter/pagination keys are `limit`, `offset`, `agent_slug`, and
+	 * `context`.
+	 *
+	 * @param WP_Agent_Workspace_Scope $workspace Workspace owning the sessions.
+	 * @param int                      $user_id   WordPress user ID owning the sessions.
+	 * @param array                    $args      Optional host-supported filters/pagination.
+	 * @return array<int,array<string,mixed>> Session rows.
+	 */
+	public function list_sessions( WP_Agent_Workspace_Scope $workspace, int $user_id, array $args = array() ): array;
+
+	/**
 	 * Retrieve a transcript session by ID.
 	 *
 	 * Returns the session as an associative array with keys:
