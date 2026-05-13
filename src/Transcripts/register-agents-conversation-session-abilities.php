@@ -15,11 +15,11 @@ use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 
 defined( 'ABSPATH' ) || exit;
 
-const AGENTS_LIST_CONVERSATION_SESSIONS_ABILITY         = 'agents/list-conversation-sessions';
-const AGENTS_GET_CONVERSATION_SESSION_ABILITY           = 'agents/get-conversation-session';
-const AGENTS_CREATE_CONVERSATION_SESSION_ABILITY        = 'agents/create-conversation-session';
-const AGENTS_UPDATE_CONVERSATION_SESSION_TITLE_ABILITY  = 'agents/update-conversation-session-title';
-const AGENTS_DELETE_CONVERSATION_SESSION_ABILITY        = 'agents/delete-conversation-session';
+const AGENTS_LIST_CONVERSATION_SESSIONS_ABILITY        = 'agents/list-conversation-sessions';
+const AGENTS_GET_CONVERSATION_SESSION_ABILITY          = 'agents/get-conversation-session';
+const AGENTS_CREATE_CONVERSATION_SESSION_ABILITY       = 'agents/create-conversation-session';
+const AGENTS_UPDATE_CONVERSATION_SESSION_TITLE_ABILITY = 'agents/update-conversation-session-title';
+const AGENTS_DELETE_CONVERSATION_SESSION_ABILITY       = 'agents/delete-conversation-session';
 
 add_action(
 	'wp_abilities_api_categories_init',
@@ -42,7 +42,7 @@ add_action(
 	'wp_abilities_api_init',
 	static function (): void {
 		$abilities = array(
-			AGENTS_LIST_CONVERSATION_SESSIONS_ABILITY        => array(
+			AGENTS_LIST_CONVERSATION_SESSIONS_ABILITY  => array(
 				'label'            => 'List Conversation Sessions',
 				'description'      => 'List conversation sessions for the current principal in a workspace.',
 				'input_schema'     => agents_conversation_sessions_list_input_schema(),
@@ -50,7 +50,7 @@ add_action(
 				'execute_callback' => __NAMESPACE__ . '\\agents_list_conversation_sessions',
 				'annotations'      => array( 'idempotent' => true ),
 			),
-			AGENTS_GET_CONVERSATION_SESSION_ABILITY          => array(
+			AGENTS_GET_CONVERSATION_SESSION_ABILITY    => array(
 				'label'            => 'Get Conversation Session',
 				'description'      => 'Read one conversation session owned by the current principal.',
 				'input_schema'     => agents_conversation_session_id_input_schema(),
@@ -58,7 +58,7 @@ add_action(
 				'execute_callback' => __NAMESPACE__ . '\\agents_get_conversation_session',
 				'annotations'      => array( 'idempotent' => true ),
 			),
-			AGENTS_CREATE_CONVERSATION_SESSION_ABILITY       => array(
+			AGENTS_CREATE_CONVERSATION_SESSION_ABILITY => array(
 				'label'            => 'Create Conversation Session',
 				'description'      => 'Create an empty conversation session for the current principal in a workspace.',
 				'input_schema'     => agents_conversation_sessions_create_input_schema(),
@@ -80,7 +80,7 @@ add_action(
 					'idempotent'  => false,
 				),
 			),
-			AGENTS_DELETE_CONVERSATION_SESSION_ABILITY       => array(
+			AGENTS_DELETE_CONVERSATION_SESSION_ABILITY => array(
 				'label'            => 'Delete Conversation Session',
 				'description'      => 'Delete a conversation session owned by the current principal.',
 				'input_schema'     => agents_conversation_session_id_input_schema(),
@@ -405,9 +405,9 @@ function agents_conversation_session_id_input_schema(): array {
 }
 
 function agents_conversation_sessions_update_title_input_schema(): array {
-	$schema                         = agents_conversation_session_id_input_schema();
-	$schema['required'][]           = 'title';
-	$schema['properties']['title']   = array( 'type' => 'string' );
+	$schema                        = agents_conversation_session_id_input_schema();
+	$schema['required'][]          = 'title';
+	$schema['properties']['title'] = array( 'type' => 'string' );
 	return $schema;
 }
 
