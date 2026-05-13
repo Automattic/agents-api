@@ -106,6 +106,26 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 	}
 
 	/**
+	 * Re-sync the AS schedule for a durable workflow spec.
+	 *
+	 * Unconditionally unschedules every existing AS action keyed on this
+	 * workflow id, then registers the cron triggers declared on the new
+	 * spec. Distinct from {@see register()} because it tears down stale
+	 * schedules even when the new spec has no cron triggers — the case
+	 * an update that switches from `cron` to `on_demand` would otherwise
+	 * leak. This is the method durable-store lifecycle subscribers want.
+	 *
+	 * @since 0.108.0
+	 *
+	 * @return int Number of schedules registered (zero if the new spec
+	 *             has no cron triggers; the unschedule step still ran).
+	 */
+	public static function sync( WP_Agent_Workflow_Spec $spec ): int {
+		self::unregister( $spec->get_id() );
+		return self::register( $spec );
+	}
+
+	/**
 	 * Cancel every scheduled action this bridge owns for the given
 	 * workflow id. Useful on workflow deletion or version bump.
 	 *

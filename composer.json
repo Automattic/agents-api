@@ -61,6 +61,7 @@
       "php tests/workflow-bindings-smoke.php",
       "php tests/workflow-spec-validator-smoke.php",
       "php tests/workflow-runner-smoke.php",
+      "php tests/workflow-lifecycle-smoke.php",
       "php tests/agents-workflow-ability-smoke.php",
       "php tests/routine-smoke.php",
       "php tests/subagents-smoke.php",

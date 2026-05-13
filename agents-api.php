@@ -143,6 +143,7 @@ require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-spec-valid
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-spec.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-run-result.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-store.php';
+require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-lifecycle.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-run-recorder.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-runner.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-registry.php';
