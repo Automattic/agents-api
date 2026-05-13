@@ -186,7 +186,7 @@ function agents_get_pending_action( array $input ) {
  * @return array<string,mixed>|\WP_Error
  */
 function agents_resolve_pending_action( array $input ) {
-	$action_id = trim( (string) ( $input['action_id'] ?? '' ) );
+	$action_id   = trim( (string) ( $input['action_id'] ?? '' ) );
 	$resolver_id = trim( (string) ( $input['resolver'] ?? '' ) );
 	if ( '' === $action_id ) {
 		return new \WP_Error( 'agents_pending_action_missing_action_id', 'action_id is required.' );
