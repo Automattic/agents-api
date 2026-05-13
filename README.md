@@ -1,10 +1,16 @@
 # Agents API
 
-Agents API is a WordPress-shaped backend substrate for durable agent runtime behavior.
+**The shared foundation for building AI agents in WordPress.**
 
-Agents API is maintained by Automattic as a standalone WordPress substrate package.
+If you're building a plugin that needs an AI agent — one that can hold a conversation, call tools, run workflows, remember things between sessions, or talk to users through Slack, Telegram, or email — you shouldn't have to reinvent the plumbing every time. Agents API gives you that plumbing.
 
-It provides generic contracts and value objects that product plugins can build on without copying agent runtime primitives into every product. It is not an admin application or a provider-specific AI client. It ships **workflow plumbing** (spec value object, validator, runner skeleton, in-memory registry, three abilities, optional Action Scheduler bridge) but does **not** ship a concrete workflow runtime, durable run history, scheduling stack, editor UI, or product-specific step types — those are consumer concerns.
+It's a small, focused WordPress package maintained by Automattic. Think of it as the layer that sits *underneath* your product: it owns the boring-but-important parts (agent identity, runtime contracts, tool mediation, sessions, transcripts, memory, workflow scaffolding), so your plugin can focus on what makes it special.
+
+**What you get out of the box:** a way to register agents, a messaging channel base class that plugs into any transport, value objects for the agent lifecycle, contracts for tools and memory and consent, and lightweight workflow plumbing (spec, validator, runner skeleton, three abilities, an optional Action Scheduler bridge).
+
+**What you don't get — and shouldn't expect:** a concrete workflow runtime, durable run history, an editor UI, admin screens, or any provider-specific AI client. Those belong to your product. Agents API is the substrate, not the application.
+
+New here? Start with the [developer documentation](docs/README.md).
 
 ## Layer Boundary
 
@@ -15,8 +21,6 @@ Consumers    -> product UX, concrete tools, workflows, prompt policy, storage/ma
 ```
 
 Agents API sits between tool/action discovery and product-specific automation. It owns the reusable agent runtime contracts; product plugins own the user-facing product experience.
-
-Developer documentation lives in [`docs/README.md`](docs/README.md).
 
 ## What Agents API Owns
 
