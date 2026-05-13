@@ -31,6 +31,7 @@
       "php tests/tool-runtime-smoke.php",
       "php tests/pending-action-store-contract-smoke.php",
       "php tests/approval-resolver-contract-smoke.php",
+      "php tests/pending-action-abilities-smoke.php",
       "php tests/identity-smoke.php",
       "php tests/memory-metadata-contract-smoke.php",
       "php tests/approval-action-value-shape-smoke.php",

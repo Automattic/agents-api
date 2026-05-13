@@ -66,6 +66,7 @@ require_once AGENTS_API_PATH . 'src/Approvals/class-wp-agent-pending-action.php'
 require_once AGENTS_API_PATH . 'src/Approvals/class-wp-agent-approval-decision.php';
 require_once AGENTS_API_PATH . 'src/Approvals/class-wp-agent-pending-action-handler.php';
 require_once AGENTS_API_PATH . 'src/Approvals/class-wp-agent-pending-action-resolver.php';
+require_once AGENTS_API_PATH . 'src/Approvals/register-pending-action-abilities.php';
 require_once AGENTS_API_PATH . 'src/Consent/class-wp-agent-consent-operation.php';
 require_once AGENTS_API_PATH . 'src/Consent/class-wp-agent-consent-decision.php';
 require_once AGENTS_API_PATH . 'src/Consent/class-wp-agent-consent-policy.php';
