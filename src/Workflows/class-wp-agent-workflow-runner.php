@@ -491,7 +491,7 @@ class WP_Agent_Workflow_Runner {
 					$last_output = is_array( $nested_output ) ? $nested_output : array( 'value' => $nested_output );
 				}
 
-				$step_outputs[ $nested_id ]             = $last_output;
+				$step_outputs[ $nested_id ]               = $last_output;
 				$iteration_context['steps'][ $nested_id ] = array( 'output' => $last_output );
 			}
 

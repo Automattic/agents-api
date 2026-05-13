@@ -137,15 +137,15 @@ function agents_dispatch_message_input_schema(): array {
 		'type'       => 'object',
 		'required'   => array( 'channel', 'recipient', 'message' ),
 		'properties' => array(
-			'channel'        => array(
+			'channel'         => array(
 				'type'        => 'string',
 				'description' => 'Outbound channel identifier, e.g. whatsapp, wacli, slack, sms, or a product-defined channel id.',
 			),
-			'recipient'      => array(
+			'recipient'       => array(
 				'type'        => 'string',
 				'description' => 'Transport-specific destination id, e.g. phone number, WhatsApp JID, channel id, or email address.',
 			),
-			'message'        => array(
+			'message'         => array(
 				'type'        => 'string',
 				'description' => 'Text body to send.',
 			),
@@ -153,17 +153,17 @@ function agents_dispatch_message_input_schema(): array {
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Optional transport conversation/thread id.',
 			),
-			'attachments'    => array(
+			'attachments'     => array(
 				'type'        => 'array',
 				'default'     => array(),
 				'items'       => array( 'type' => 'object' ),
 				'description' => 'Optional transport-defined attachments.',
 			),
-			'client_context' => array(
+			'client_context'  => array(
 				'type'        => 'object',
 				'description' => 'Optional caller/runtime context.',
 			),
-			'metadata'       => array(
+			'metadata'        => array(
 				'type'        => 'object',
 				'description' => 'Opaque caller metadata for transport runtimes and audit logs.',
 			),
