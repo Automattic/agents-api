@@ -135,6 +135,7 @@ require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-option-bridge-store.
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-ability.php';
+require_once AGENTS_API_PATH . 'src/Channels/register-frontend-chat-rest-route.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-bindings.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-spec.php';

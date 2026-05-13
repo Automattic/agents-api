@@ -52,6 +52,7 @@
       "php tests/iteration-budget-smoke.php",
       "php tests/conversation-loop-budgets-smoke.php",
       "php tests/channels-smoke.php",
+      "php tests/frontend-chat-rest-smoke.php",
       "php tests/webhook-safety-smoke.php",
       "php tests/remote-bridge-smoke.php",
       "php tests/context-authority-smoke.php",
