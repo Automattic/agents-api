@@ -45,14 +45,18 @@ $registry->registerSource(
 	static function () {
 		return array(
 			'local/summarize' => array(
-				'description' => 'Summarize text.',
-				'parameters'  => array(
+				'description'              => 'Summarize text.',
+				'parameters'               => array(
 					'type'       => 'object',
 					'required'   => array( 'text' ),
 					'properties' => array(
 						'text' => array( 'type' => 'string' ),
 					),
 				),
+				// Opt this tool into pulling `text` from the runtime context. Without
+				// this declaration, a `text` key in context never satisfies the
+				// required parameter — keeps required-arg sourcing auditable.
+				'client_context_bindings'  => array( 'text' ),
 			),
 		);
 	}
@@ -85,8 +89,37 @@ $parameters = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
 	),
 	$tools['local/summarize']
 );
-agents_api_smoke_assert_equals( 'hello', $parameters['text'], 'runtime parameters override context defaults', $failures, $passes );
-agents_api_smoke_assert_equals( 'req-123', $parameters['request_id'], 'parameter builder preserves runtime context', $failures, $passes );
+agents_api_smoke_assert_equals( 'hello', $parameters['text'], 'runtime parameters override declared context bindings', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'request_id', $parameters ), 'undeclared context keys do not leak into parameters', $failures, $passes );
+
+$rename_definition = array(
+	'parameters'              => array(
+		'type'       => 'object',
+		'required'   => array( 'user_phone' ),
+		'properties' => array( 'user_phone' => array( 'type' => 'string' ) ),
+	),
+	'client_context_bindings' => array( 'user_phone' => 'sender_id' ),
+);
+$renamed = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array(),
+	array( 'sender_id' => 'whatsapp:+1', 'request_id' => 'req-123' ),
+	$rename_definition
+);
+agents_api_smoke_assert_equals( 'whatsapp:+1', $renamed['user_phone'] ?? null, 'binding can rename context_key → parameter_name', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'sender_id', $renamed ), 'rename binding does not also expose the source key', $failures, $passes );
+
+$undeclared = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array(),
+	array( 'text' => 'context text' ),
+	array(
+		'parameters' => array(
+			'type'     => 'object',
+			'required' => array( 'text' ),
+		),
+		// No client_context_bindings declared — context must NOT auto-satisfy.
+	)
+);
+agents_api_smoke_assert_equals( array(), $undeclared, 'no bindings ⇒ no context auto-population', $failures, $passes );
 
 $tool_call = AgentsAPI\AI\Tools\WP_Agent_Tool_Call::normalize(
 	array(
@@ -101,12 +134,15 @@ $adapter = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
 	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
 		unset( $tool_definition );
 
+		// `text` is auditable runtime input (declared parameter); `request_id` and
+		// `agent_id` are ambient context that the adapter is free to consult
+		// without the tool declaration having to bind them as parameters.
 		return array(
 			'success' => true,
 			'result'  => array(
 				'summary'    => strtoupper( (string) $tool_call['parameters']['text'] ),
-				'request_id' => $tool_call['parameters']['request_id'],
-				'agent_id'   => $context['agent_id'],
+				'request_id' => $context['request_id'] ?? null,
+				'agent_id'   => $context['agent_id'] ?? null,
 			),
 		);
 	}
@@ -116,6 +152,38 @@ $executor = new AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core();
 $missing  = $executor->executeTool( 'local/summarize', array(), $tools, $adapter, array( 'request_id' => 'req-123' ) );
 agents_api_smoke_assert_equals( false, $missing['success'], 'execution returns normalized error for missing parameters', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'text' ), $missing['metadata']['missing_parameters'], 'execution error includes missing parameter metadata', $failures, $passes );
+
+$from_context = $executor->executeTool(
+	'local/summarize',
+	array(),
+	$tools,
+	$adapter,
+	array(
+		'agent_id'   => 'writer',
+		'request_id' => 'req-123',
+		'text'       => 'context text',
+	)
+);
+agents_api_smoke_assert_equals( true, $from_context['success'], 'declared context binding satisfies required parameter', $failures, $passes );
+agents_api_smoke_assert_equals( 'CONTEXT TEXT', $from_context['result']['summary'], 'bound context value reaches adapter through parameters', $failures, $passes );
+
+// Sanity: an undeclared context key (request_id) must not silently satisfy a
+// required parameter even when its name matches.
+$tools_with_request_required                                                = $tools;
+$tools_with_request_required['local/summarize']['parameters']['required']   = array( 'text', 'request_id' );
+$tools_with_request_required['local/summarize']['parameters']['properties'] = array(
+	'text'       => array( 'type' => 'string' ),
+	'request_id' => array( 'type' => 'string' ),
+);
+$undeclared_required = $executor->executeTool(
+	'local/summarize',
+	array( 'text' => 'hello' ),
+	$tools_with_request_required,
+	$adapter,
+	array( 'request_id' => 'req-undeclared' )
+);
+agents_api_smoke_assert_equals( false, $undeclared_required['success'], 'undeclared context key cannot satisfy a required parameter', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'request_id' ), $undeclared_required['metadata']['missing_parameters'], 'missing-parameter error names the undeclared slot', $failures, $passes );
 
 $result = $executor->executeTool(
 	'local/summarize',

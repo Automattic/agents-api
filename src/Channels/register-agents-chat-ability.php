@@ -242,6 +242,10 @@ function agents_chat_input_schema(): array {
 						'type'        => array( 'string', 'null' ),
 						'description' => 'Stable transport-side message id, used for reply threading / dedup / audit.',
 					),
+					'sender_id'                => array(
+						'type'        => array( 'string', 'null' ),
+						'description' => 'Opaque external sender id. In group rooms this identifies the human sender inside the conversation.',
+					),
 					'room_kind'                => array(
 						'type'        => array( 'string', 'null' ),
 						'enum'        => array( 'dm', 'group', 'channel' ),

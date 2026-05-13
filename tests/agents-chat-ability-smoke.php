@@ -167,6 +167,7 @@ $in = agents_chat_input_schema();
 smoke_assert( array( 'agent', 'message' ), $in['required'] ?? array(), 'input_schema_required_fields', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context'] ), 'input_schema_has_client_context', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['attachments'] ), 'input_schema_has_attachments', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['client_context']['properties']['sender_id'] ), 'client_context_schema_has_sender_id', $failures, $passes );
 
 $out_schema = agents_chat_output_schema();
 smoke_assert( array( 'session_id', 'reply' ), $out_schema['required'] ?? array(), 'output_schema_required_fields', $failures, $passes );

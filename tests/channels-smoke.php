@@ -177,6 +177,7 @@ $expected_first_call = array(
 			'external_provider'        => 'test-channel',
 			'external_conversation_id' => 'chat-A',
 			'external_message_id'      => null,
+			'sender_id'                => null,
 			'room_kind'                => null,
 		),
 	),

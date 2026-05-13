@@ -123,6 +123,7 @@ final class WP_Agent_External_Message {
 			'external_provider'        => $this->external_provider,
 			'external_conversation_id' => $this->external_conversation_id,
 			'external_message_id'      => $this->external_message_id,
+			'sender_id'                => $this->sender_id,
 			'room_kind'                => $this->room_kind,
 		);
 	}

@@ -35,7 +35,7 @@ defined( 'ABSPATH' ) || exit;
 final class WP_Agent_Workflow_Spec_Validator {
 
 	/** @since 0.103.0 */
-	public const KNOWN_STEP_TYPES = array( 'ability', 'agent' );
+	public const KNOWN_STEP_TYPES = array( 'ability', 'agent', 'foreach' );
 
 	/** @since 0.103.0 */
 	public const KNOWN_TRIGGER_TYPES = array( 'on_demand', 'wp_action', 'cron' );
@@ -204,6 +204,29 @@ final class WP_Agent_Workflow_Spec_Validator {
 					);
 				}
 			}
+
+			if ( 'foreach' === $step['type'] ) {
+				if ( ! array_key_exists( 'items', $step ) ) {
+					$errors[] = array(
+						'path'    => "{$path}.items",
+						'code'    => 'missing_required',
+						'message' => 'foreach step is missing required `items` field',
+					);
+				}
+				if ( empty( $step['steps'] ) || ! is_array( $step['steps'] ) || array_values( $step['steps'] ) !== $step['steps'] ) {
+					$errors[] = array(
+						'path'    => "{$path}.steps",
+						'code'    => 'missing_required',
+						'message' => 'foreach step must declare a non-empty `steps` list',
+					);
+				} else {
+					foreach ( self::validate_steps( $step['steps'] ) as $inner_error ) {
+						$inner_path          = (string) preg_replace( '/^steps\./', '', $inner_error['path'] );
+						$inner_error['path'] = "{$path}.steps." . $inner_path;
+						$errors[]            = $inner_error;
+					}
+				}
+			}
 		}
 
 		return $errors;
@@ -228,7 +251,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 			}
 
 			$step_id = isset( $step['id'] ) ? (string) $step['id'] : '';
-			$tokens  = self::extract_step_binding_ids( $step );
+			$tokens  = self::extract_top_level_step_binding_ids( $step );
 
 			foreach ( $tokens as $referenced_id ) {
 				if ( ! isset( $seen[ $referenced_id ] ) ) {
@@ -251,6 +274,24 @@ final class WP_Agent_Workflow_Spec_Validator {
 		}
 
 		return $errors;
+	}
+
+	/**
+	 * Pull step references from a top-level step without validating nested
+	 * foreach step bodies against the outer step order.
+	 *
+	 * @param array $step
+	 * @return array<int,string>
+	 */
+	private static function extract_top_level_step_binding_ids( array $step ): array {
+		$ids = array();
+		foreach ( $step as $key => $value ) {
+			if ( 'steps' === $key && 'foreach' === ( $step['type'] ?? '' ) ) {
+				continue;
+			}
+			$ids = array_merge( $ids, self::extract_step_binding_ids( $value ) );
+		}
+		return $ids;
 	}
 
 	/**

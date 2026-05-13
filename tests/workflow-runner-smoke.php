@@ -119,6 +119,14 @@ $GLOBALS['__abilities']['demo/wrap'] = new Stub_Ability(
 		return array( 'wrapped' => '<<' . (string) ( $input['inner'] ?? '' ) . '>>' );
 	}
 );
+$GLOBALS['__abilities']['demo/score-item'] = new Stub_Ability(
+	static function ( array $input ): array {
+		return array(
+			'id'     => (int) ( $input['id'] ?? 0 ),
+			'points' => (int) ( $input['points'] ?? 0 ),
+		);
+	}
+);
 
 $spec = WP_Agent_Workflow_Spec::from_array(
 	array(
@@ -267,6 +275,51 @@ smoke_assert( 'start', $tracker->events[0]['op'] ?? '', 'recorder sees start fir
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_RUNNING, $tracker->events[0]['status'] ?? '', 'start is called with RUNNING', $failures, $passes );
 smoke_assert( 'update', $tracker->events[1]['op'] ?? '', 'recorder sees update second', $failures, $passes );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $tracker->events[1]['status'] ?? '', 'update flips status to FAILED', $failures, $passes );
+
+// ─── foreach step iterates over bound arrays with scoped vars ────────
+
+$foreach_spec = WP_Agent_Workflow_Spec::from_array(
+	array(
+		'id'    => 'demo/foreach',
+		'inputs' => array(
+			'items' => array( 'type' => 'array', 'required' => true ),
+		),
+		'steps' => array(
+			array(
+				'id'    => 'score_each',
+				'type'  => 'foreach',
+				'items' => '${inputs.items}',
+				'as'    => 'prediction',
+				'steps' => array(
+					array(
+						'id'      => 'score',
+						'type'    => 'ability',
+						'ability' => 'demo/score-item',
+						'args'    => array(
+							'id'     => '${vars.prediction.id}',
+							'points' => '${vars.prediction.points}',
+						),
+					),
+				),
+			),
+		),
+	)
+);
+
+$result8 = ( new WP_Agent_Workflow_Runner( null ) )->run(
+	$foreach_spec,
+	array(
+		'items' => array(
+			array( 'id' => 10, 'points' => 5 ),
+			array( 'id' => 11, 'points' => 1 ),
+		),
+	)
+);
+
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $result8->get_status(), 'foreach run succeeds', $failures, $passes );
+smoke_assert( 2, $result8->get_output()['last']['count'] ?? 0, 'foreach reports iteration count', $failures, $passes );
+smoke_assert( 10, $result8->get_output()['last']['iterations'][0]['last']['id'] ?? 0, 'foreach first iteration receives scoped item', $failures, $passes );
+smoke_assert( 1, $result8->get_output()['last']['iterations'][1]['last']['points'] ?? 0, 'foreach second iteration receives scoped item', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
