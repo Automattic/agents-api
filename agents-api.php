@@ -136,6 +136,7 @@ require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-ability.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-frontend-chat-rest-route.php';
+require_once AGENTS_API_PATH . 'src/Channels/register-agents-dispatch-message-ability.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-bindings.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-spec.php';
@@ -147,6 +148,7 @@ require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-registry.p
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-action-scheduler-bridge.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflows.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-agents-workflow-abilities.php';
+require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-bridge-sync.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-action-scheduler-listener.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine-registry.php';

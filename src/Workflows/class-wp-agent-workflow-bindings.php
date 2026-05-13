@@ -4,10 +4,12 @@
  *
  * A workflow step's `args` (or `message`, or any other field a runner asks
  * the resolver to expand) may contain `${...}` references that pull values
- * from the workflow's static inputs or from previous steps' outputs:
+ * from the workflow's static inputs, previous steps' outputs, or scoped
+ * runtime variables:
  *
  *     ${inputs.<dot.path>}            // workflow input
  *     ${steps.<step_id>.output.<dot.path>}  // earlier step output
+ *     ${vars.<name>.<dot.path>}       // loop/runtime variable
  *
  * Resolution is deliberately conservative: the helper substitutes whole
  * template expressions atomically (so binding a non-string value into a
@@ -16,10 +18,10 @@
  * literal `${...}` string. Callers that need stricter behavior can check
  * for `null` after expansion.
  *
- * The token vocabulary is intentionally minimal — `inputs.*` and
- * `steps.<id>.output.*`. Anything else (env vars, user-context, secrets)
- * needs to be introduced via a dedicated runtime hook so the contract
- * stays auditable.
+ * The token vocabulary is intentionally minimal — `inputs.*`,
+ * `steps.<id>.output.*`, and `vars.*`. Anything else (env vars,
+ * user-context, secrets) needs to be introduced via a dedicated runtime hook
+ * so the contract stays auditable.
  *
  * @package AgentsAPI
  * @since   0.103.0
@@ -146,6 +148,11 @@ final class WP_Agent_Workflow_Bindings {
 				return null;
 			}
 			return self::walk( $step['output'] ?? null, $segments );
+		}
+
+		if ( 'vars' === $root ) {
+			$source = $context['vars'] ?? array();
+			return self::walk( $source, $segments );
 		}
 
 		return null;

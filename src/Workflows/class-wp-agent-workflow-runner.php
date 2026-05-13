@@ -61,6 +61,7 @@ class WP_Agent_Workflow_Runner {
 		$defaults = array(
 			'ability' => array( __CLASS__, 'default_ability_handler' ),
 			'agent'   => array( __CLASS__, 'default_agent_handler' ),
+			'foreach' => array( __CLASS__, 'default_foreach_handler' ),
 		);
 
 		/**
@@ -159,6 +160,7 @@ class WP_Agent_Workflow_Runner {
 			'inputs' => $inputs,
 			// Step outputs accumulate here as the run progresses, keyed by step id.
 			'steps'  => array(),
+			'vars'   => array(),
 		);
 
 		$step_records      = array();
@@ -170,7 +172,9 @@ class WP_Agent_Workflow_Runner {
 			$step_id  = (string) $step['id'];
 			$type     = (string) $step['type'];
 			$start_ts = time();
-			$resolved = WP_Agent_Workflow_Bindings::expand( $step, $context );
+			$resolved = 'foreach' === $type
+				? self::expand_foreach_outer_step( $step, $context )
+				: WP_Agent_Workflow_Bindings::expand( $step, $context );
 			$record   = array(
 				'id'         => $step_id,
 				'type'       => $type,
@@ -273,6 +277,26 @@ class WP_Agent_Workflow_Runner {
 	}
 
 	/**
+	 * Expand a foreach step's outer fields while preserving its nested step
+	 * templates for each iteration's scoped variables.
+	 *
+	 * @since 0.107.0
+	 *
+	 * @param array $step
+	 * @param array $context
+	 * @return array
+	 */
+	private static function expand_foreach_outer_step( array $step, array $context ): array {
+		$nested = $step['steps'] ?? array();
+		unset( $step['steps'] );
+
+		$expanded          = WP_Agent_Workflow_Bindings::expand( $step, $context );
+		$expanded['steps'] = $nested;
+
+		return $expanded;
+	}
+
+	/**
 	 * Validate inputs against the spec's declared input schemas.
 	 *
 	 * @since 0.103.0
@@ -365,6 +389,124 @@ class WP_Agent_Workflow_Runner {
 			return $result;
 		}
 		return is_array( $result ) ? $result : array( 'reply' => (string) $result );
+	}
+
+	/**
+	 * Default `foreach` step handler. Iterates over a resolved array and runs
+	 * an inline list of workflow steps with `${vars.<as>.*}` available.
+	 *
+	 * @since 0.107.0
+	 *
+	 * @param array $step    Resolved outer foreach step.
+	 * @param array $context Resolution context.
+	 * @return array|WP_Error
+	 */
+	public static function default_foreach_handler( array $step, array $context ) {
+		$items = $step['items'] ?? array();
+		if ( ! is_array( $items ) ) {
+			return new \WP_Error(
+				'workflow_foreach_items_invalid',
+				'foreach step `items` must resolve to an array.'
+			);
+		}
+
+		$steps = $step['steps'] ?? array();
+		if ( empty( $steps ) || ! is_array( $steps ) ) {
+			return new \WP_Error(
+				'workflow_foreach_steps_invalid',
+				'foreach step must include a non-empty nested `steps` list.'
+			);
+		}
+
+		$as                = isset( $step['as'] ) && '' !== (string) $step['as'] ? (string) $step['as'] : 'item';
+		$index_as          = isset( $step['index_as'] ) && '' !== (string) $step['index_as'] ? (string) $step['index_as'] : 'index';
+		$continue_on_error = ! empty( $step['continue_on_error'] );
+		$handlers          = (array) apply_filters(
+			'wp_agent_workflow_step_handlers',
+			array(
+				'ability' => array( __CLASS__, 'default_ability_handler' ),
+				'agent'   => array( __CLASS__, 'default_agent_handler' ),
+				'foreach' => array( __CLASS__, 'default_foreach_handler' ),
+			)
+		);
+		$iterations        = array();
+
+		foreach ( array_values( $items ) as $index => $item ) {
+			$iteration_context         = $context;
+			$iteration_context['vars'] = array_merge(
+				(array) ( $context['vars'] ?? array() ),
+				array(
+					$as       => $item,
+					$index_as => $index,
+				)
+			);
+			$step_outputs              = array();
+			$last_output               = null;
+
+			foreach ( $steps as $nested_step ) {
+				if ( ! is_array( $nested_step ) ) {
+					return new \WP_Error(
+						'workflow_foreach_step_invalid',
+						sprintf( 'foreach nested step at index %d must be an array.', $index )
+					);
+				}
+
+				$nested_id = (string) ( $nested_step['id'] ?? '' );
+				$type      = (string) ( $nested_step['type'] ?? '' );
+				$handler   = $handlers[ $type ] ?? null;
+				if ( '' === $nested_id || ! is_callable( $handler ) ) {
+					$error = new \WP_Error(
+						'workflow_foreach_step_unhandled',
+						sprintf( 'foreach nested step `%s` cannot be handled.', '' !== $nested_id ? $nested_id : (string) $index )
+					);
+					if ( ! $continue_on_error ) {
+						return $error;
+					}
+					$step_outputs[ $nested_id ] = array(
+						'error' => array(
+							'code'    => $error->get_error_code(),
+							'message' => $error->get_error_message(),
+						),
+					);
+					continue;
+				}
+
+				$resolved      = 'foreach' === $type
+					? self::expand_foreach_outer_step( $nested_step, $iteration_context )
+					: WP_Agent_Workflow_Bindings::expand( $nested_step, $iteration_context );
+				$nested_output = call_user_func( $handler, $resolved, $iteration_context );
+
+				if ( is_wp_error( $nested_output ) ) {
+					if ( ! $continue_on_error ) {
+						return $nested_output;
+					}
+					$last_output = array(
+						'error' => array(
+							'code'    => $nested_output->get_error_code(),
+							'message' => $nested_output->get_error_message(),
+							'data'    => $nested_output->get_error_data(),
+						),
+					);
+				} else {
+					$last_output = is_array( $nested_output ) ? $nested_output : array( 'value' => $nested_output );
+				}
+
+				$step_outputs[ $nested_id ]             = $last_output;
+				$iteration_context['steps'][ $nested_id ] = array( 'output' => $last_output );
+			}
+
+			$iterations[] = array(
+				'index' => $index,
+				'item'  => $item,
+				'steps' => $step_outputs,
+				'last'  => $last_output,
+			);
+		}
+
+		return array(
+			'count'      => count( $iterations ),
+			'iterations' => $iterations,
+		);
 	}
 
 	/**
