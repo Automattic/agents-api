@@ -69,7 +69,7 @@ function agents_frontend_chat_rest_permission( \WP_REST_Request $request ) {
 		return $input;
 	}
 
-	$agent = isset( $input['agent'] ) ? (string) $input['agent'] : '';
+	$agent   = isset( $input['agent'] ) ? (string) $input['agent'] : '';
 	$allowed = '' !== $agent && agents_chat_permission( $input );
 
 	if ( ! $allowed && '' !== $agent ) {
@@ -173,7 +173,7 @@ function agents_frontend_chat_rest_input( \WP_REST_Request $request ) {
  * @return array<string,mixed>
  */
 function agents_frontend_chat_rest_scope( \WP_REST_Request $request ): array {
-	$scope = \AgentsAPI\AI\Auth\agents_access_request_scope(
+	$scope                     = \AgentsAPI\AI\Auth\agents_access_request_scope(
 		array(
 			'workspace_id' => $request->get_param( 'workspace_id' ),
 			'client_id'    => $request->get_param( 'client_id' ),
