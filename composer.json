@@ -24,6 +24,7 @@
       "php tests/caller-context-smoke.php",
       "php tests/authorization-smoke.php",
       "php tests/agents-access-ability-smoke.php",
+      "php tests/agents-conversation-session-abilities-smoke.php",
       "php tests/action-policy-values-smoke.php",
       "php tests/consent-policy-smoke.php",
       "php tests/tool-policy-contracts-smoke.php",
