@@ -34,7 +34,8 @@ class WP_Agent_Tool_Execution_Core {
 			);
 		}
 
-		$validation = WP_Agent_Tool_Parameters::validateRequiredParameters( $tool_parameters, $tool_definition );
+		$parameters = WP_Agent_Tool_Parameters::buildParameters( $tool_parameters, $context, $tool_definition );
+		$validation = WP_Agent_Tool_Parameters::validateRequiredParameters( $parameters, $tool_definition );
 		if ( ! $validation['valid'] ) {
 			return array_merge(
 				array( 'ready' => false ),
@@ -51,7 +52,7 @@ class WP_Agent_Tool_Execution_Core {
 			'tool_call'  => WP_Agent_Tool_Call::normalize(
 				array(
 					'tool_name'  => $tool_name,
-					'parameters' => WP_Agent_Tool_Parameters::buildParameters( $tool_parameters, $context, $tool_definition ),
+					'parameters' => $parameters,
 					'metadata'   => array(
 						'source' => $tool_definition['source'] ?? WP_Agent_Tool_Declaration::sourceFromName( $tool_name ),
 					),

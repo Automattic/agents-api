@@ -383,7 +383,7 @@ abstract class WP_Agent_Channel {
 			$this->get_external_id_provider(),
 			$this->get_external_id(),
 			$this->extract_external_message_id( $data ),
-			null,
+			$this->extract_sender_id( $data ),
 			false,
 			$this->get_room_kind( $data ),
 			$this->extract_attachments( $data ),
@@ -427,6 +427,18 @@ abstract class WP_Agent_Channel {
 	 * @return string|null
 	 */
 	protected function extract_external_message_id( array $data ): ?string {
+		unset( $data );
+		return null;
+	}
+
+	/**
+	 * Opaque external sender id. In DMs this may equal the conversation id;
+	 * in group chats it identifies the human sender inside the room.
+	 *
+	 * @param array $data
+	 * @return string|null
+	 */
+	protected function extract_sender_id( array $data ): ?string {
 		unset( $data );
 		return null;
 	}

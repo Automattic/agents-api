@@ -117,6 +117,20 @@ $missing  = $executor->executeTool( 'local/summarize', array(), $tools, $adapter
 agents_api_smoke_assert_equals( false, $missing['success'], 'execution returns normalized error for missing parameters', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'text' ), $missing['metadata']['missing_parameters'], 'execution error includes missing parameter metadata', $failures, $passes );
 
+$from_context = $executor->executeTool(
+	'local/summarize',
+	array(),
+	$tools,
+	$adapter,
+	array(
+		'agent_id'   => 'writer',
+		'request_id' => 'req-123',
+		'text'       => 'context text',
+	)
+);
+agents_api_smoke_assert_equals( true, $from_context['success'], 'context can satisfy required tool parameters', $failures, $passes );
+agents_api_smoke_assert_equals( 'CONTEXT TEXT', $from_context['result']['summary'], 'context-supplied required parameter reaches adapter', $failures, $passes );
+
 $result = $executor->executeTool(
 	'local/summarize',
 	array( 'text' => 'hello' ),
