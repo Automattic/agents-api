@@ -13,8 +13,8 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 	 */
 	final class WP_Agent_Access {
 
-		private const CURRENT_USER_EFFECTIVE_AGENT_ID = '__wordpress_user__';
-		private const PUBLIC_AUDIENCE_ID             = 'audience:public';
+		private const CURRENT_USER_EFFECTIVE_AGENT_ID  = '__wordpress_user__';
+		private const PUBLIC_AUDIENCE_ID              = 'audience:public';
 
 		/**
 		 * Resolve the host-provided access store.
@@ -35,7 +35,7 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 		 *
 		 * @param array<string,mixed> $context Host-owned request context.
 		 */
-		public static function get_current_principal( array $context = array() ): ?AgentsAPI\AI\WP_Agent_Execution_Principal {
+		public static function get_current_principal( array $context = array() ): AgentsAPI\AI\WP_Agent_Execution_Principal {
 			if ( isset( $context['principal'] ) && $context['principal'] instanceof AgentsAPI\AI\WP_Agent_Execution_Principal ) {
 				return $context['principal'];
 			}
