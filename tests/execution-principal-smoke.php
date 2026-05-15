@@ -129,6 +129,34 @@ $with_metadata = $from_array->with_request_metadata( array( 'request_id' => 'req
 agents_api_smoke_assert_equals( array( 'request_id' => 'req-next' ), $with_metadata->request_metadata, 'metadata replacement returns updated copy', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'ip_hash' => 'abc123' ), $from_array->request_metadata, 'metadata replacement leaves original immutable', $failures, $passes );
 
+$audience_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
+	'audience:docs-readers',
+	'audience-gateway',
+	AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+	array( 'route' => '/agents/v1/chat' ),
+	'site:42',
+	'browser',
+	array( 'example' => 'docs-readers' )
+);
+agents_api_smoke_assert_equals( 0, $audience_principal->acting_user_id, 'audience principal has no WordPress user', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_AUDIENCE, $audience_principal->auth_source, 'audience principal records audience auth source', $failures, $passes );
+agents_api_smoke_assert_equals( 'audience:docs-readers', $audience_principal->audience_id, 'audience principal records audience id', $failures, $passes );
+agents_api_smoke_assert_equals( true, $audience_principal->has_audience(), 'audience principal reports audience presence', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'example' => 'docs-readers' ), $audience_principal->to_array()['audience_claims'], 'audience principal exports claims', $failures, $passes );
+
+$audience_from_array = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
+	array(
+		'acting_user_id'     => 0,
+		'effective_agent_id' => 'audience-gateway',
+		'auth_source'        => AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_AUDIENCE,
+		'request_context'    => AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+		'audience_id'        => 'audience:docs-readers',
+		'audience_claims'    => array( 'tier' => 'viewer' ),
+	)
+);
+agents_api_smoke_assert_equals( 'audience:docs-readers', $audience_from_array->audience_id, 'from_array restores audience id', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'tier' => 'viewer' ), $audience_from_array->audience_claims, 'from_array restores audience claims', $failures, $passes );
+
 try {
 	new AgentsAPI\AI\WP_Agent_Execution_Principal( -1, 'agent', AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER, AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );
 	agents_api_smoke_assert_equals( true, false, 'negative user id is rejected', $failures, $passes );

@@ -14,6 +14,7 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 	final class WP_Agent_Access {
 
 		private const CURRENT_USER_EFFECTIVE_AGENT_ID = '__wordpress_user__';
+		private const PUBLIC_AUDIENCE_ID             = 'audience:public';
 
 		/**
 		 * Resolve the host-provided access store.
@@ -46,7 +47,14 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 
 			$user_id = self::get_current_user_id();
 			if ( $user_id <= 0 ) {
-				return null;
+				return AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
+					self::PUBLIC_AUDIENCE_ID,
+					self::PUBLIC_AUDIENCE_ID,
+					isset( $context['request_context'] ) ? (string) $context['request_context'] : AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+					isset( $context['request_metadata'] ) && is_array( $context['request_metadata'] ) ? $context['request_metadata'] : array(),
+					array_key_exists( 'workspace_id', $context ) && null !== $context['workspace_id'] ? (string) $context['workspace_id'] : null,
+					array_key_exists( 'client_id', $context ) && null !== $context['client_id'] ? (string) $context['client_id'] : null
+				);
 			}
 
 			return AgentsAPI\AI\WP_Agent_Execution_Principal::user_session(
@@ -121,11 +129,13 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 
 			$agent_ids = array();
 			$store     = self::get_store( $context );
-			if ( $store instanceof WP_Agent_Access_Store ) {
+			if ( $store instanceof WP_Agent_Principal_Access_Store ) {
+				$agent_ids = $store->get_agent_ids_for_principal( $principal, $minimum_role, $principal->workspace_id );
+			} elseif ( $store instanceof WP_Agent_Access_Store && $principal->acting_user_id > 0 ) {
 				$agent_ids = $store->get_agent_ids_for_user( $principal->acting_user_id, $minimum_role, $principal->workspace_id );
 			}
 
-			if ( self::CURRENT_USER_EFFECTIVE_AGENT_ID !== $principal->effective_agent_id ) {
+			if ( null === $principal->audience_id && self::CURRENT_USER_EFFECTIVE_AGENT_ID !== $principal->effective_agent_id ) {
 				$agent_ids[] = $principal->effective_agent_id;
 			}
 

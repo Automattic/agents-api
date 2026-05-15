@@ -111,7 +111,7 @@ function agents_list_accessible_agents( array $input ): array {
  * @param array<string,mixed> $input Ability input.
  */
 function agents_access_permission( array $input ): bool {
-	$allowed = function_exists( 'is_user_logged_in' ) ? is_user_logged_in() : \WP_Agent_Access::get_current_principal( agents_access_request_scope( $input ) ) instanceof \AgentsAPI\AI\WP_Agent_Execution_Principal;
+	$allowed = \WP_Agent_Access::get_current_principal( agents_access_request_scope( $input ) ) instanceof \AgentsAPI\AI\WP_Agent_Execution_Principal;
 
 	return (bool) apply_filters( 'agents_access_permission', $allowed, $input );
 }
