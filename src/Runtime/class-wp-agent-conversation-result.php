@@ -56,8 +56,16 @@ class WP_Agent_Conversation_Result {
 			$result['tool_execution_results'] = array();
 		}
 
+		if ( ! array_key_exists( 'tool_audit_events', $result ) ) {
+			$result['tool_audit_events'] = array();
+		}
+
 		if ( ! is_array( $result['tool_execution_results'] ) ) {
 			throw self::invalid( 'tool_execution_results', 'must be an array' );
+		}
+
+		if ( ! is_array( $result['tool_audit_events'] ) ) {
+			throw self::invalid( 'tool_audit_events', 'must be an array' );
 		}
 
 		foreach ( $result['tool_execution_results'] as $index => $tool_result ) {
@@ -85,6 +93,36 @@ class WP_Agent_Conversation_Result {
 
 			if ( ! array_key_exists( 'turn_count', $tool_result ) || ! is_int( $tool_result['turn_count'] ) ) {
 				throw self::invalid( $path . '.turn_count', 'must be an integer' );
+			}
+		}
+
+		foreach ( $result['tool_audit_events'] as $index => $audit_event ) {
+			$path = 'tool_audit_events[' . $index . ']';
+
+			if ( ! is_array( $audit_event ) ) {
+				throw self::invalid( $path, 'must be an array' );
+			}
+
+			foreach ( array( 'type', 'tool_name', 'parameters_sha256', 'result_sha256' ) as $field ) {
+				if ( ! array_key_exists( $field, $audit_event ) || ! is_string( $audit_event[ $field ] ) || '' === $audit_event[ $field ] ) {
+					throw self::invalid( $path . '.' . $field, 'must be a non-empty string' );
+				}
+			}
+
+			if ( ! array_key_exists( 'schema_version', $audit_event ) || ! is_int( $audit_event['schema_version'] ) ) {
+				throw self::invalid( $path . '.schema_version', 'must be an integer' );
+			}
+
+			if ( ! array_key_exists( 'turn_count', $audit_event ) || ! is_int( $audit_event['turn_count'] ) ) {
+				throw self::invalid( $path . '.turn_count', 'must be an integer' );
+			}
+
+			if ( ! array_key_exists( 'success', $audit_event ) || ! is_bool( $audit_event['success'] ) ) {
+				throw self::invalid( $path . '.success', 'must be a boolean' );
+			}
+
+			if ( array_key_exists( 'error_type', $audit_event ) && ! is_string( $audit_event['error_type'] ) ) {
+				throw self::invalid( $path . '.error_type', 'must be a string when present' );
 			}
 		}
 

@@ -34,6 +34,7 @@ Representative message roles include user, assistant, tool-call, and tool-result
 array(
 	'messages'               => $messages,
 	'tool_execution_results' => $tool_results,
+	'tool_audit_events'      => $tool_audit_events,
 	'events'                 => $events,
 	'turn_count'             => $turns_run,
 	'final_content'          => $last_assistant_text,
@@ -160,6 +161,41 @@ Failure modes are normalized rather than thrown to the loop:
 - missing required parameters returns an error with `missing_parameters` metadata;
 - executor exceptions are caught and returned as tool errors;
 - executor arrays without `success` are wrapped as successful results.
+
+## Tool Audit Events
+
+When the conversation loop mediates tool calls, the result includes
+`tool_audit_events` alongside the backwards-compatible `tool_execution_results`.
+The audit events are the safe replay surface for generic observers: they include
+stable hashes and normalized status, but do not include raw tool parameters.
+
+Representative event shape:
+
+```php
+array(
+	'schema_version'      => 1,
+	'type'                => 'tool_call',
+	'turn_count'          => 1,
+	'tool_name'           => 'client/search_docs',
+	'tool_source'         => 'client',
+	'parameters_sha256'   => 'sha256:...',
+	'parameters_redacted' => true,
+	'success'             => true,
+	'result_status'       => 'success',
+	'result_sha256'       => 'sha256:...',
+)
+```
+
+Failed calls include `error_type` when the loop can classify the failure. The
+core classifications are `tool_not_found`, `missing_required_parameters`, and
+`executor_exception`.
+
+Sensitive parameter keys such as `token`, `secret`, `password`, `authorization`,
+`cookie`, `credential`, `nonce`, and `api_key` are redacted before hashing. Hosts
+can customize deterministic redaction with the
+`agents_api_tool_audit_parameters` filter. The legacy `tool_execution_results`
+field still contains raw parameters for existing callers and should be treated as
+caller-owned runtime data, not as the generic replay artifact surface.
 
 ## Visibility and action policy
 
