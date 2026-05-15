@@ -152,7 +152,10 @@ function agents_list_conversation_sessions( array $input ) {
 		$args['context'] = (string) $input['context'];
 	}
 
-	$sessions = $context['store']->list_sessions( $workspace, $context['principal']->acting_user_id, $args );
+	$sessions = agents_conversation_sessions_list_for_owner( $context['store'], $workspace, $context['owner'], $args );
+	if ( is_wp_error( $sessions ) ) {
+		return $sessions;
+	}
 
 	return array(
 		'sessions' => array_map( __NAMESPACE__ . '\\agents_conversation_session_summary', $sessions ),
@@ -189,7 +192,10 @@ function agents_create_conversation_session( array $input ) {
 	$metadata   = isset( $input['metadata'] ) && is_array( $input['metadata'] ) ? $input['metadata'] : array();
 	$agent_slug = isset( $input['agent'] ) ? (string) $input['agent'] : $context['principal']->effective_agent_id;
 	$mode       = isset( $input['context'] ) ? (string) $input['context'] : WP_Agent_Execution_Principal::REQUEST_CONTEXT_CHAT;
-	$session_id = $context['store']->create_session( $workspace, $context['principal']->acting_user_id, $agent_slug, $metadata, $mode );
+	$session_id = agents_conversation_sessions_create_for_owner( $context['store'], $workspace, $context['owner'], $agent_slug, $metadata, $mode );
+	if ( is_wp_error( $session_id ) ) {
+		return $session_id;
+	}
 
 	if ( '' === $session_id ) {
 		return new \WP_Error( 'agents_conversation_session_create_failed', 'The conversation session store did not create a session.' );
@@ -249,11 +255,16 @@ function agents_conversation_sessions_permission( array $input ): bool {
 	return (bool) apply_filters( 'agents_conversation_sessions_permission', $allowed, $input );
 }
 
-/** @return array{store:WP_Agent_Conversation_Store,principal:WP_Agent_Execution_Principal}|\WP_Error */
+/** @return array{store:WP_Agent_Conversation_Store,principal:WP_Agent_Execution_Principal,owner:array{type:string,key:string}}|\WP_Error */
 function agents_conversation_sessions_context( array $input ) {
 	$principal = agents_conversation_sessions_principal( $input );
 	if ( ! $principal instanceof WP_Agent_Execution_Principal ) {
 		return new \WP_Error( 'agents_conversation_session_unauthenticated', 'A conversation session principal could not be resolved.' );
+	}
+
+	$owner = $principal->conversation_owner();
+	if ( null === $owner ) {
+		return new \WP_Error( 'agents_conversation_session_owner_required', 'The current principal does not provide a conversation session owner key.' );
 	}
 
 	$store = WP_Agent_Conversation_Sessions::get_store( array( 'principal' => $principal ) + $input );
@@ -261,10 +272,47 @@ function agents_conversation_sessions_context( array $input ) {
 		return new \WP_Error( 'agents_conversation_session_no_store', 'No WP_Agent_Conversation_Store is registered. Provide one with the wp_agent_conversation_store filter.' );
 	}
 
+	if ( ! $store instanceof WP_Agent_Principal_Conversation_Store && WP_Agent_Execution_Principal::OWNER_TYPE_USER !== $owner['type'] ) {
+		return new \WP_Error( 'agents_conversation_session_principal_store_required', 'The registered conversation session store does not support non-user principal owners.' );
+	}
+
 	return array(
 		'store'     => $store,
 		'principal' => $principal,
+		'owner'     => $owner,
 	);
+}
+
+/**
+ * @param array{type:string,key:string} $owner Canonical principal owner.
+ * @return string|\WP_Error
+ */
+function agents_conversation_sessions_create_for_owner( WP_Agent_Conversation_Store $store, WP_Agent_Workspace_Scope $workspace, array $owner, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ) {
+	if ( $store instanceof WP_Agent_Principal_Conversation_Store ) {
+		return $store->create_session_for_owner( $workspace, $owner, $agent_slug, $metadata, $context );
+	}
+
+	if ( WP_Agent_Execution_Principal::OWNER_TYPE_USER !== $owner['type'] ) {
+		return new \WP_Error( 'agents_conversation_session_principal_store_required', 'The registered conversation session store does not support non-user principal owners.' );
+	}
+
+	return $store->create_session( $workspace, (int) $owner['key'], $agent_slug, $metadata, $context );
+}
+
+/**
+ * @param array{type:string,key:string} $owner Canonical principal owner.
+ * @return array<int,array<string,mixed>>|\WP_Error
+ */
+function agents_conversation_sessions_list_for_owner( WP_Agent_Conversation_Store $store, WP_Agent_Workspace_Scope $workspace, array $owner, array $args = array() ) {
+	if ( $store instanceof WP_Agent_Principal_Conversation_Store ) {
+		return $store->list_sessions_for_owner( $workspace, $owner, $args );
+	}
+
+	if ( WP_Agent_Execution_Principal::OWNER_TYPE_USER !== $owner['type'] ) {
+		return new \WP_Error( 'agents_conversation_session_principal_store_required', 'The registered conversation session store does not support non-user principal owners.' );
+	}
+
+	return $store->list_sessions( $workspace, (int) $owner['key'], $args );
 }
 
 function agents_conversation_sessions_principal( array $input ): ?WP_Agent_Execution_Principal {
@@ -335,12 +383,25 @@ function agents_conversation_sessions_owned_session( string $session_id, array $
 		return new \WP_Error( 'agents_conversation_session_not_found', 'Conversation session not found.' );
 	}
 
-	$principal = $context['principal'];
-	if ( (int) ( $session['user_id'] ?? 0 ) !== $principal->acting_user_id && ! agents_conversation_sessions_can_manage_any() ) {
+	if ( ! agents_conversation_sessions_session_matches_owner( $session, $context['owner'] ) && ! agents_conversation_sessions_can_manage_any() ) {
 		return new \WP_Error( 'agents_conversation_session_forbidden', 'The current principal cannot access this conversation session.' );
 	}
 
 	return $session;
+}
+
+/**
+ * @param array{type:string,key:string} $owner Canonical principal owner.
+ */
+function agents_conversation_sessions_session_matches_owner( array $session, array $owner ): bool {
+	$session_owner_type = $session['owner_type'] ?? $session['principal_owner_type'] ?? null;
+	$session_owner_key  = $session['owner_key'] ?? $session['principal_owner_key'] ?? null;
+
+	if ( null !== $session_owner_type || null !== $session_owner_key ) {
+		return (string) $session_owner_type === $owner['type'] && (string) $session_owner_key === $owner['key'];
+	}
+
+	return WP_Agent_Execution_Principal::OWNER_TYPE_USER === $owner['type'] && (int) ( $session['user_id'] ?? 0 ) === (int) $owner['key'];
 }
 
 function agents_conversation_sessions_can_manage_any(): bool {
