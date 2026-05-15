@@ -87,6 +87,7 @@ class WP_Agent_Conversation_Loop {
 		$messages              = WP_Agent_Message::normalize_many( $messages );
 		$events                = array();
 		$tool_results          = array();
+		$tool_audit_events     = array();
 		$conversation_complete = false;
 		$exceeded_budget       = null;
 
@@ -198,6 +199,7 @@ class WP_Agent_Conversation_Loop {
 
 					$messages              = $mediation_result['messages'];
 					$tool_results          = array_merge( $tool_results, $mediation_result['tool_execution_results'] );
+					$tool_audit_events     = array_merge( $tool_audit_events, $mediation_result['tool_audit_events'] );
 					$events                = array_merge( $events, $mediation_result['events'] );
 					$conversation_complete = $mediation_result['conversation_complete'];
 					$exceeded_budget       = $mediation_result['exceeded_budget'];
@@ -206,6 +208,9 @@ class WP_Agent_Conversation_Loop {
 					$result       = WP_Agent_Conversation_Result::normalize( $result );
 					$messages     = $result['messages'];
 					$tool_results = array_merge( $tool_results, $result['tool_execution_results'] );
+					if ( isset( $result['tool_audit_events'] ) && is_array( $result['tool_audit_events'] ) ) {
+						$tool_audit_events = array_merge( $tool_audit_events, $result['tool_audit_events'] );
+					}
 					$events       = array_merge( $events, self::normalize_events( $result['events'] ?? array() ) );
 					if ( isset( $result['request_metadata'] ) && is_array( $result['request_metadata'] ) ) {
 						$last_request_metadata = $result['request_metadata'];
@@ -261,6 +266,7 @@ class WP_Agent_Conversation_Loop {
 			$final_result_data = array(
 				'messages'               => $messages,
 				'tool_execution_results' => $tool_results,
+				'tool_audit_events'      => $tool_audit_events,
 				'events'                 => $events,
 				'turn_count'             => $turns_run,
 				'final_content'          => self::extract_final_content( $messages ),
@@ -311,7 +317,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param int                                               $turn            Current turn number.
 	 * @param callable|null                                     $on_event        Event sink.
 	 * @param array<string, WP_Agent_Iteration_Budget>                    $budgets         Named iteration budgets.
-	 * @return array{messages: array, tool_execution_results: array, events: array, conversation_complete: bool, exceeded_budget: string|null}
+	 * @return array{messages: array, tool_execution_results: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null}
 	 */
 	private static function mediate_tool_calls(
 		array $result,
@@ -329,6 +335,7 @@ class WP_Agent_Conversation_Loop {
 			: array();
 		$tool_calls             = $result['tool_calls'];
 		$tool_execution_results = array();
+		$tool_audit_events      = array();
 		$events                 = array();
 		$complete               = false;
 		$exceeded_budget        = null;
@@ -383,6 +390,15 @@ class WP_Agent_Conversation_Loop {
 				'result'     => $exec_result,
 				'parameters' => is_array( $parameters ) ? $parameters : array(),
 				'turn_count' => $turn,
+			);
+
+			$tool_audit_events[] = self::tool_audit_event(
+				$tool_name,
+				is_array( $parameters ) ? $parameters : array(),
+				$exec_result,
+				is_array( $tool_def ) ? $tool_def : null,
+				$turn_context,
+				$turn
 			);
 
 			// Add tool-result message to transcript.
@@ -441,6 +457,7 @@ class WP_Agent_Conversation_Loop {
 		return array(
 			'messages'               => $messages,
 			'tool_execution_results' => $tool_execution_results,
+			'tool_audit_events'      => $tool_audit_events,
 			'events'                 => $events,
 			'conversation_complete'  => $complete,
 			'exceeded_budget'        => $exceeded_budget,
@@ -536,6 +553,174 @@ class WP_Agent_Conversation_Loop {
 				unset( $error );
 			}
 		}
+	}
+
+	/**
+	 * Build a stable, safe audit entry for a mediated tool call.
+	 *
+	 * The legacy `tool_execution_results` field intentionally keeps raw
+	 * parameters for existing callers. Audit events avoid raw parameter storage by
+	 * default so transcripts can be used for replay attestation without leaking
+	 * secrets into generic observers.
+	 *
+	 * @param string     $tool_name       Tool identifier.
+	 * @param array      $parameters      Runtime tool-call parameters.
+	 * @param array      $result          Normalized tool execution result.
+	 * @param array|null $tool_definition Tool declaration, when available.
+	 * @param array      $context         Turn context.
+	 * @param int        $turn            Turn number.
+	 * @return array<string, mixed> Audit event.
+	 */
+	private static function tool_audit_event( string $tool_name, array $parameters, array $result, ?array $tool_definition, array $context, int $turn ): array {
+		$safe_parameters = self::redact_tool_audit_parameters( $parameters, $tool_name, $tool_definition, $context );
+		$metadata        = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
+		$error_type      = isset( $metadata['error_type'] ) && is_string( $metadata['error_type'] ) ? $metadata['error_type'] : '';
+
+		$audit_event = array(
+			'schema_version'    => 1,
+			'type'              => 'tool_call',
+			'turn_count'        => $turn,
+			'tool_name'         => $tool_name,
+			'tool_source'       => is_array( $tool_definition ) && is_string( $tool_definition['source'] ?? null ) ? $tool_definition['source'] : '',
+			'parameters_sha256' => self::stable_sha256( $safe_parameters ),
+			'parameters_redacted' => true,
+			'success'           => (bool) ( $result['success'] ?? false ),
+			'result_status'     => ! empty( $result['success'] ) ? 'success' : 'error',
+			'result_sha256'     => self::stable_sha256( self::audit_result_summary( $result ) ),
+		);
+
+		if ( '' !== $error_type ) {
+			$audit_event['error_type'] = $error_type;
+		}
+
+		return array_filter(
+			$audit_event,
+			static fn( $value ): bool => '' !== $value
+		);
+	}
+
+	/**
+	 * Redact tool parameters before hashing them for audit events.
+	 *
+	 * @param array      $parameters      Raw tool-call parameters.
+	 * @param string     $tool_name       Tool identifier.
+	 * @param array|null $tool_definition Tool declaration, when available.
+	 * @param array      $context         Turn context.
+	 * @return array Redacted parameters.
+	 */
+	private static function redact_tool_audit_parameters( array $parameters, string $tool_name, ?array $tool_definition, array $context ): array {
+		$redacted = self::redact_sensitive_values( $parameters );
+
+		if ( function_exists( 'apply_filters' ) ) {
+			try {
+				/**
+				 * Filters parameters before Agents API hashes them into tool audit events.
+				 *
+				 * Callers can remove or normalize product-specific sensitive fields while
+				 * keeping deterministic replay hashes. Returning a non-array falls back to
+				 * the default redacted parameters.
+				 *
+				 * @param array      $redacted        Default redacted parameters.
+				 * @param array      $parameters      Raw tool-call parameters.
+				 * @param string     $tool_name       Tool identifier.
+				 * @param array|null $tool_definition Tool declaration, when available.
+				 * @param array      $context         Turn context.
+				 */
+				$filtered = apply_filters( 'agents_api_tool_audit_parameters', $redacted, $parameters, $tool_name, $tool_definition, $context );
+				if ( is_array( $filtered ) ) {
+					$redacted = $filtered;
+				}
+			} catch ( \Throwable $error ) {
+				// Audit redaction filters must not change loop results.
+				unset( $error );
+			}
+		}
+
+		return $redacted;
+	}
+
+	/**
+	 * Redact obviously sensitive scalar fields in nested parameter arrays.
+	 *
+	 * @param mixed $value Value to redact.
+	 * @param string $key Current key.
+	 * @return mixed Redacted value.
+	 */
+	private static function redact_sensitive_values( $value, string $key = '' ) {
+		if ( is_array( $value ) ) {
+			$redacted = array();
+			foreach ( $value as $item_key => $item_value ) {
+				$redacted[ $item_key ] = self::redact_sensitive_values( $item_value, is_string( $item_key ) ? $item_key : '' );
+			}
+			return $redacted;
+		}
+
+		if ( '' !== $key && preg_match( '/(api[_-]?key|authorization|cookie|credential|nonce|password|secret|token)/i', $key ) ) {
+			return '[redacted]';
+		}
+
+		return $value;
+	}
+
+	/**
+	 * Keep the audit result hash focused on normalized status, not raw payloads.
+	 *
+	 * @param array $result Normalized tool result.
+	 * @return array<string, mixed> Hashable result summary.
+	 */
+	private static function audit_result_summary( array $result ): array {
+		$metadata = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
+
+		$summary = array(
+			'success'   => (bool) ( $result['success'] ?? false ),
+			'tool_name' => is_string( $result['tool_name'] ?? null ) ? $result['tool_name'] : '',
+			'metadata'  => $metadata,
+		);
+
+		if ( empty( $result['success'] ) ) {
+			$summary['error_sha256'] = self::stable_sha256( is_string( $result['error'] ?? null ) ? $result['error'] : 'Tool execution failed.' );
+		}
+
+		return $summary;
+	}
+
+	/**
+	 * Hash data after recursively sorting array keys for deterministic output.
+	 *
+	 * @param mixed $data Data to hash.
+	 * @return string sha256-prefixed hash.
+	 */
+	private static function stable_sha256( $data ): string {
+		$normalized = self::sort_for_hash( $data );
+		$encoded    = self::json_encode_safe( $normalized );
+		if ( false === $encoded ) {
+			$encoded = '';
+		}
+
+		return 'sha256:' . hash( 'sha256', (string) $encoded );
+	}
+
+	/**
+	 * Recursively sort associative arrays before hashing.
+	 *
+	 * @param mixed $value Value to normalize.
+	 * @return mixed Normalized value.
+	 */
+	private static function sort_for_hash( $value ) {
+		if ( ! is_array( $value ) ) {
+			return $value;
+		}
+
+		$normalized = array();
+		foreach ( $value as $key => $item ) {
+			$normalized[ $key ] = self::sort_for_hash( $item );
+		}
+
+		if ( array() !== $normalized && array_keys( $normalized ) !== range( 0, count( $normalized ) - 1 ) ) {
+			ksort( $normalized );
+		}
+
+		return $normalized;
 	}
 
 	/**

@@ -30,7 +30,7 @@ class WP_Agent_Tool_Execution_Core {
 		if ( ! is_array( $tool_definition ) ) {
 			return array_merge(
 				array( 'ready' => false ),
-				WP_Agent_Tool_Result::error( $tool_name, "Tool '{$tool_name}' not found" )
+				WP_Agent_Tool_Result::error( $tool_name, "Tool '{$tool_name}' not found", array( 'error_type' => 'tool_not_found' ) )
 			);
 		}
 
@@ -42,7 +42,10 @@ class WP_Agent_Tool_Execution_Core {
 				WP_Agent_Tool_Result::error(
 					$tool_name,
 					sprintf( 'Tool "%s" requires the following parameters: %s.', $tool_name, implode( ', ', $validation['missing'] ) ),
-					array( 'missing_parameters' => $validation['missing'] )
+					array(
+						'error_type'         => 'missing_required_parameters',
+						'missing_parameters' => $validation['missing'],
+					)
 				)
 			);
 		}
@@ -76,7 +79,7 @@ class WP_Agent_Tool_Execution_Core {
 		try {
 			$result = $executor->executeWP_Agent_Tool_Call( $tool_call, $tool_definition, $context );
 		} catch ( \Throwable $throwable ) {
-			return WP_Agent_Tool_Result::error( $tool_call['tool_name'], $throwable->getMessage() );
+			return WP_Agent_Tool_Result::error( $tool_call['tool_name'], $throwable->getMessage(), array( 'error_type' => 'executor_exception' ) );
 		}
 
 		if ( ! array_key_exists( 'success', $result ) ) {

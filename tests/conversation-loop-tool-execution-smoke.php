@@ -85,6 +85,12 @@ agents_api_smoke_assert_equals( 'client/summarize', $executor->executed[0]['tool
 agents_api_smoke_assert_equals( 1, count( $result['tool_execution_results'] ), 'result contains one tool execution result', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/summarize', $result['tool_execution_results'][0]['tool_name'], 'tool execution result has correct tool name', $failures, $passes );
 agents_api_smoke_assert_equals( 'HELLO WORLD', $result['tool_execution_results'][0]['result']['result']['summary'], 'tool execution result carries executor payload', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $result['tool_audit_events'] ), 'result contains one tool audit event', $failures, $passes );
+agents_api_smoke_assert_equals( 'tool_call', $result['tool_audit_events'][0]['type'], 'tool audit event has stable type', $failures, $passes );
+agents_api_smoke_assert_equals( 'client/summarize', $result['tool_audit_events'][0]['tool_name'], 'tool audit event has correct tool name', $failures, $passes );
+agents_api_smoke_assert_equals( true, $result['tool_audit_events'][0]['success'], 'tool audit event records success', $failures, $passes );
+agents_api_smoke_assert_equals( true, str_starts_with( $result['tool_audit_events'][0]['parameters_sha256'], 'sha256:' ), 'tool audit event hashes parameters', $failures, $passes );
+agents_api_smoke_assert_equals( true, ! array_key_exists( 'parameters', $result['tool_audit_events'][0] ), 'tool audit event omits raw parameters', $failures, $passes );
 
 // Messages should contain: user, assistant text, tool_call, tool_result.
 $message_count = count( $result['messages'] );
@@ -183,6 +189,7 @@ $validation_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'executor was not called for invalid tool call', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $validation_result['tool_execution_results'] ), 'validation error is recorded as tool result', $failures, $passes );
 agents_api_smoke_assert_equals( false, $validation_result['tool_execution_results'][0]['result']['success'], 'validation error marks result as failed', $failures, $passes );
+agents_api_smoke_assert_equals( 'missing_required_parameters', $validation_result['tool_audit_events'][0]['error_type'], 'validation audit event records missing parameter error type', $failures, $passes );
 
 echo "\n[5] Multi-turn mediation runs without an explicit should_continue option:\n";
 $executor->executed   = array();
@@ -252,5 +259,61 @@ $caller_managed_default_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 
 agents_api_smoke_assert_equals( 1, $caller_managed_default_count, 'caller-managed path still breaks after one turn without should_continue', $failures, $passes );
 agents_api_smoke_assert_equals( 2, count( $caller_managed_default_result['messages'] ), 'caller-managed transcript has user + one assistant message', $failures, $passes );
+
+echo "\n[7] Missing tools and executor exceptions produce safe audit events:\n";
+$executor->executed = array();
+
+$missing_tool_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'test' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'name'       => 'client/missing',
+					'parameters' => array( 'token' => 'secret-value' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 1,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+	)
+);
+
+agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'executor was not called for missing tool', $failures, $passes );
+agents_api_smoke_assert_equals( 'tool_not_found', $missing_tool_result['tool_audit_events'][0]['error_type'], 'missing tool audit event records error type', $failures, $passes );
+agents_api_smoke_assert_equals( true, ! str_contains( wp_json_encode( $missing_tool_result['tool_audit_events'][0] ), 'secret-value' ), 'missing tool audit event does not expose raw secret parameter', $failures, $passes );
+
+$throwing_executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
+	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
+		throw new RuntimeException( 'executor exploded' );
+	}
+};
+
+$exception_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'test' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'hello' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 1,
+		'tool_executor'     => $throwing_executor,
+		'tool_declarations' => $tools,
+	)
+);
+
+agents_api_smoke_assert_equals( 'executor_exception', $exception_result['tool_audit_events'][0]['error_type'], 'executor exception audit event records error type', $failures, $passes );
+agents_api_smoke_assert_equals( false, $exception_result['tool_audit_events'][0]['success'], 'executor exception audit event records failure', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API conversation loop tool execution', $failures, $passes );
