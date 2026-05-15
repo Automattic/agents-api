@@ -211,7 +211,7 @@ class WP_Agent_Conversation_Loop {
 					if ( isset( $result['tool_audit_events'] ) && is_array( $result['tool_audit_events'] ) ) {
 						$tool_audit_events = array_merge( $tool_audit_events, $result['tool_audit_events'] );
 					}
-					$events       = array_merge( $events, self::normalize_events( $result['events'] ?? array() ) );
+					$events = array_merge( $events, self::normalize_events( $result['events'] ?? array() ) );
 					if ( isset( $result['request_metadata'] ) && is_array( $result['request_metadata'] ) ) {
 						$last_request_metadata = $result['request_metadata'];
 					}
@@ -577,16 +577,16 @@ class WP_Agent_Conversation_Loop {
 		$error_type      = isset( $metadata['error_type'] ) && is_string( $metadata['error_type'] ) ? $metadata['error_type'] : '';
 
 		$audit_event = array(
-			'schema_version'    => 1,
-			'type'              => 'tool_call',
-			'turn_count'        => $turn,
-			'tool_name'         => $tool_name,
-			'tool_source'       => is_array( $tool_definition ) && is_string( $tool_definition['source'] ?? null ) ? $tool_definition['source'] : '',
-			'parameters_sha256' => self::stable_sha256( $safe_parameters ),
+			'schema_version'      => 1,
+			'type'                => 'tool_call',
+			'turn_count'          => $turn,
+			'tool_name'           => $tool_name,
+			'tool_source'         => is_array( $tool_definition ) && is_string( $tool_definition['source'] ?? null ) ? $tool_definition['source'] : '',
+			'parameters_sha256'   => self::stable_sha256( $safe_parameters ),
 			'parameters_redacted' => true,
-			'success'           => (bool) ( $result['success'] ?? false ),
-			'result_status'     => ! empty( $result['success'] ) ? 'success' : 'error',
-			'result_sha256'     => self::stable_sha256( self::audit_result_summary( $result ) ),
+			'success'             => (bool) ( $result['success'] ?? false ),
+			'result_status'       => ! empty( $result['success'] ) ? 'success' : 'error',
+			'result_sha256'       => self::stable_sha256( self::audit_result_summary( $result ) ),
 		);
 
 		if ( '' !== $error_type ) {
@@ -626,10 +626,7 @@ class WP_Agent_Conversation_Loop {
 				 * @param array|null $tool_definition Tool declaration, when available.
 				 * @param array      $context         Turn context.
 				 */
-				$filtered = apply_filters( 'agents_api_tool_audit_parameters', $redacted, $parameters, $tool_name, $tool_definition, $context );
-				if ( is_array( $filtered ) ) {
-					$redacted = $filtered;
-				}
+				$redacted = apply_filters( 'agents_api_tool_audit_parameters', $redacted, $parameters, $tool_name, $tool_definition, $context );
 			} catch ( \Throwable $error ) {
 				// Audit redaction filters must not change loop results.
 				unset( $error );
