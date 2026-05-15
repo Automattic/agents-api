@@ -13,7 +13,7 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 	 */
 	final class WP_Agent_Access {
 
-		private const CURRENT_USER_EFFECTIVE_AGENT_ID  = '__wordpress_user__';
+		private const CURRENT_USER_EFFECTIVE_AGENT_ID = '__wordpress_user__';
 		private const PUBLIC_AUDIENCE_ID              = 'audience:public';
 
 		/**
@@ -35,7 +35,7 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 		 *
 		 * @param array<string,mixed> $context Host-owned request context.
 		 */
-		public static function get_current_principal( array $context = array() ): AgentsAPI\AI\WP_Agent_Execution_Principal {
+		public static function get_current_principal( array $context = array() ): ?AgentsAPI\AI\WP_Agent_Execution_Principal {
 			if ( isset( $context['principal'] ) && $context['principal'] instanceof AgentsAPI\AI\WP_Agent_Execution_Principal ) {
 				return $context['principal'];
 			}
@@ -47,6 +47,10 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 
 			$user_id = self::get_current_user_id();
 			if ( $user_id <= 0 ) {
+				if ( array_key_exists( 'allow_anonymous_audience', $context ) && false === (bool) $context['allow_anonymous_audience'] ) {
+					return null;
+				}
+
 				return AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
 					self::PUBLIC_AUDIENCE_ID,
 					self::PUBLIC_AUDIENCE_ID,
