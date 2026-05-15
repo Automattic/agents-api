@@ -22,6 +22,7 @@ final class WP_Agent_Execution_Principal {
 	public const AUTH_SOURCE_USER                 = 'user';
 	public const AUTH_SOURCE_APPLICATION_PASSWORD = 'application_password';
 	public const AUTH_SOURCE_AGENT_TOKEN          = 'agent_token';
+	public const AUTH_SOURCE_AUDIENCE             = 'audience';
 	public const AUTH_SOURCE_SYSTEM               = 'system';
 
 	public const REQUEST_CONTEXT_REST = 'rest';
@@ -40,6 +41,8 @@ final class WP_Agent_Execution_Principal {
 	 * @param string|null $client_id         Optional client/login identifier.
 	 * @param \WP_Agent_Capability_Ceiling|null $capability_ceiling Optional capability ceiling for this execution.
 	 * @param \WP_Agent_Caller_Context|null     $caller_context     Optional cross-site caller context claims.
+	 * @param string|null                       $audience_id        Optional non-user audience/principal identifier.
+	 * @param array<string,mixed>               $audience_claims    Optional host-owned audience claims.
 	 */
 	public function __construct(
 		public readonly int $acting_user_id,
@@ -52,6 +55,8 @@ final class WP_Agent_Execution_Principal {
 		public readonly ?string $client_id = null,
 		public readonly ?\WP_Agent_Capability_Ceiling $capability_ceiling = null,
 		public readonly ?\WP_Agent_Caller_Context $caller_context = null,
+		public readonly ?string $audience_id = null,
+		public readonly array $audience_claims = array(),
 	) {
 		if ( $this->acting_user_id < 0 ) {
 			throw self::invalid( 'acting_user_id', 'must be zero or a positive integer' );
@@ -73,8 +78,16 @@ final class WP_Agent_Execution_Principal {
 			throw self::invalid( 'token_id', 'must be null or a positive integer' );
 		}
 
+		if ( null !== $this->audience_id && '' === trim( $this->audience_id ) ) {
+			throw self::invalid( 'audience_id', 'must be null or a non-empty string' );
+		}
+
 		if ( false === self::jsonEncode( $this->request_metadata ) ) {
 			throw self::invalid( 'request_metadata', 'must be JSON serializable' );
+		}
+
+		if ( false === self::jsonEncode( $this->audience_claims ) ) {
+			throw self::invalid( 'audience_claims', 'must be JSON serializable' );
 		}
 	}
 
@@ -134,6 +147,22 @@ final class WP_Agent_Execution_Principal {
 	}
 
 	/**
+	 * Build a principal for a non-user audience resolved by the host.
+	 *
+	 * @param string $audience_id        Host-owned audience identifier.
+	 * @param string $effective_agent_id Registered agent ID/slug effective for the run.
+	 * @param string $request_context    Request context.
+	 * @param array  $request_metadata   Request metadata.
+	 * @param string|null $workspace_id  Optional host workspace/scope identifier.
+	 * @param string|null $client_id     Optional client/login identifier.
+	 * @param array  $audience_claims    Host-owned audience claims.
+	 * @return self
+	 */
+	public static function audience( string $audience_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, array $audience_claims = array() ): self {
+		return new self( 0, $effective_agent_id, self::AUTH_SOURCE_AUDIENCE, $request_context, null, $request_metadata, $workspace_id, $client_id, null, null, $audience_id, $audience_claims );
+	}
+
+	/**
 	 * Build a principal from a request/context array.
 	 *
 	 * @param array $principal Raw principal fields.
@@ -168,7 +197,9 @@ final class WP_Agent_Execution_Principal {
 			array_key_exists( 'workspace_id', $principal ) && null !== $principal['workspace_id'] ? (string) $principal['workspace_id'] : null,
 			array_key_exists( 'client_id', $principal ) && null !== $principal['client_id'] ? (string) $principal['client_id'] : null,
 			$capability_ceiling,
-			$caller_context
+			$caller_context,
+			array_key_exists( 'audience_id', $principal ) && null !== $principal['audience_id'] ? (string) $principal['audience_id'] : null,
+			isset( $principal['audience_claims'] ) && is_array( $principal['audience_claims'] ) ? $principal['audience_claims'] : array()
 		);
 	}
 
@@ -189,7 +220,16 @@ final class WP_Agent_Execution_Principal {
 			'client_id'          => $this->client_id,
 			'capability_ceiling' => $this->capability_ceiling instanceof \WP_Agent_Capability_Ceiling ? $this->capability_ceiling->to_array() : null,
 			'caller_context'     => $this->caller_context instanceof \WP_Agent_Caller_Context ? $this->caller_context->to_array() : null,
+			'audience_id'        => $this->audience_id,
+			'audience_claims'    => $this->audience_claims,
 		);
+	}
+
+	/**
+	 * Whether this principal represents a host-resolved non-user audience.
+	 */
+	public function has_audience(): bool {
+		return null !== $this->audience_id;
 	}
 
 	/**
@@ -209,7 +249,9 @@ final class WP_Agent_Execution_Principal {
 			$this->workspace_id,
 			$this->client_id,
 			$this->capability_ceiling,
-			$this->caller_context
+			$this->caller_context,
+			$this->audience_id,
+			$this->audience_claims
 		);
 	}
 

@@ -38,6 +38,7 @@ require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adopter.php'
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-capability-ceiling.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-access-grant.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-access-store.php';
+require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-principal-access-store.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-access.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-token.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-token-store.php';

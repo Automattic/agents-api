@@ -9,7 +9,7 @@ defined( 'ABSPATH' ) || exit;
 
 if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 	/**
-	 * Role-based access grant between a WordPress user and an agent.
+	 * Role-based access grant between a WordPress user/audience and an agent.
 	 */
 	final class WP_Agent_Access_Grant {
 
@@ -26,6 +26,7 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 		 * @param int|null        $granted_by_user_id  Optional WordPress user ID that created the grant.
 		 * @param string|null     $granted_at          Optional UTC datetime string.
 		 * @param array<string,mixed> $metadata         Host-owned metadata.
+		 * @param string|null     $audience_id         Optional non-user audience receiving access.
 		 */
 		public function __construct(
 			public readonly string $agent_id,
@@ -36,13 +37,22 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 			public readonly ?int $granted_by_user_id = null,
 			public readonly ?string $granted_at = null,
 			public readonly array $metadata = array(),
+			public readonly ?string $audience_id = null,
 		) {
 			if ( '' === trim( $this->agent_id ) ) {
 				throw self::invalid( 'agent_id', 'must be a non-empty string' );
 			}
 
-			if ( $this->user_id <= 0 ) {
-				throw self::invalid( 'user_id', 'must be a positive integer' );
+			if ( $this->user_id < 0 ) {
+				throw self::invalid( 'user_id', 'must be zero or a positive integer' );
+			}
+
+			if ( 0 === $this->user_id && null === $this->audience_id ) {
+				throw self::invalid( 'user_id', 'must be positive unless audience_id is present' );
+			}
+
+			if ( null !== $this->audience_id && '' === trim( $this->audience_id ) ) {
+				throw self::invalid( 'audience_id', 'must be null or a non-empty string' );
 			}
 
 			if ( null !== $this->grant_id && $this->grant_id <= 0 ) {
@@ -94,7 +104,8 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 				isset( $grant['grant_id'] ) ? (int) $grant['grant_id'] : null,
 				isset( $grant['granted_by_user_id'] ) ? (int) $grant['granted_by_user_id'] : null,
 				array_key_exists( 'granted_at', $grant ) && null !== $grant['granted_at'] ? (string) $grant['granted_at'] : null,
-				isset( $grant['metadata'] ) && is_array( $grant['metadata'] ) ? $grant['metadata'] : array()
+				isset( $grant['metadata'] ) && is_array( $grant['metadata'] ) ? $grant['metadata'] : array(),
+				array_key_exists( 'audience_id', $grant ) && null !== $grant['audience_id'] ? (string) $grant['audience_id'] : null
 			);
 		}
 
@@ -124,6 +135,7 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 				'granted_by_user_id' => $this->granted_by_user_id,
 				'granted_at'         => $this->granted_at,
 				'metadata'           => $this->metadata,
+				'audience_id'        => $this->audience_id,
 			);
 		}
 

@@ -74,7 +74,14 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 				return false;
 			}
 
-			$grant = $access_store->get_access( $agent_id, $principal->acting_user_id, $principal->workspace_id );
+			if ( $access_store instanceof WP_Agent_Principal_Access_Store ) {
+				$grant = $access_store->get_access_for_principal( $agent_id, $principal, $principal->workspace_id );
+			} elseif ( $principal->acting_user_id > 0 ) {
+				$grant = $access_store->get_access( $agent_id, $principal->acting_user_id, $principal->workspace_id );
+			} else {
+				$grant = null;
+			}
+
 			return $grant instanceof WP_Agent_Access_Grant && $grant->role_meets( $minimum_role );
 		}
 
