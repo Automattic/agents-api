@@ -47,10 +47,6 @@ class WP_Agent_Tool_Pair_Validator {
 		$pending = array();
 
 		foreach ( array_values( $messages ) as $index => $message ) {
-			if ( ! is_array( $message ) ) {
-				continue;
-			}
-
 			$envelope = WP_Agent_Message::normalize( $message );
 			$type     = $envelope['type'];
 
@@ -158,11 +154,11 @@ class WP_Agent_Tool_Pair_Validator {
 		$event = self::event(
 			self::EVENT_PRUNED,
 			array(
-				'total_messages'   => count( $source ),
-				'orphan_count'     => count( $orphans ),
-				'retained_count'   => count( $retained ),
-				'removed_indices'  => array_map( 'intval', array_keys( $drop_indices ) ),
-				'orphans'          => $orphans,
+				'total_messages'  => count( $source ),
+				'orphan_count'    => count( $orphans ),
+				'retained_count'  => count( $retained ),
+				'removed_indices' => array_map( 'intval', array_keys( $drop_indices ) ),
+				'orphans'         => $orphans,
 			)
 		);
 
