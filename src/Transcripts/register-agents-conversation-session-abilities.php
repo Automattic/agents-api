@@ -252,6 +252,11 @@ function agents_delete_conversation_session( array $input ) {
 
 function agents_conversation_sessions_permission( array $input ): bool {
 	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'read' ) : false;
+	if ( ! $allowed ) {
+		$principal = agents_conversation_sessions_principal( $input );
+		$allowed   = $principal instanceof WP_Agent_Execution_Principal && null !== $principal->conversation_owner();
+	}
+
 	return (bool) apply_filters( 'agents_conversation_sessions_permission', $allowed, $input );
 }
 
