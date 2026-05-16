@@ -52,6 +52,7 @@ agents_api_smoke_assert_equals( 456, $principal_array['token_id'], 'principal ex
 agents_api_smoke_assert_equals( 'site:42', $principal_array['workspace_id'], 'principal exports workspace id', $failures, $passes );
 agents_api_smoke_assert_equals( 'kimaki', $principal_array['client_id'], 'principal exports client id', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'edit_posts' ), $principal_array['capability_ceiling']['allowed_capabilities'], 'principal exports capability ceiling', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_TOKEN, 'key' => '456' ), $principal->conversation_owner(), 'agent token derives token conversation owner', $failures, $passes );
 
 $from_array = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
 	array(
@@ -96,6 +97,7 @@ agents_api_smoke_assert_equals( 99, $user_session->acting_user_id, 'user_session
 agents_api_smoke_assert_equals( 'editor-agent', $user_session->effective_agent_id, 'user_session records effective agent id', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER, $user_session->auth_source, 'user_session records user auth source', $failures, $passes );
 agents_api_smoke_assert_equals( null, $user_session->token_id, 'user_session omits token id', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_USER, 'key' => '99' ), $user_session->conversation_owner(), 'user_session derives user conversation owner', $failures, $passes );
 
 add_filter(
 	'agents_api_execution_principal',
@@ -143,6 +145,20 @@ agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_
 agents_api_smoke_assert_equals( 'audience:docs-readers', $audience_principal->audience_id, 'audience principal records audience id', $failures, $passes );
 agents_api_smoke_assert_equals( true, $audience_principal->has_audience(), 'audience principal reports audience presence', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'example' => 'docs-readers' ), $audience_principal->to_array()['audience_claims'], 'audience principal exports claims', $failures, $passes );
+agents_api_smoke_assert_equals( null, $audience_principal->conversation_owner(), 'audience access alone is not a conversation owner', $failures, $passes );
+
+$audience_owner_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
+	'audience:docs-readers',
+	'audience-gateway',
+	AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+	array( 'route' => '/agents/v1/chat' ),
+	'site:42',
+	'browser',
+	array( 'example' => 'docs-readers' ),
+	'browser-session:opaque-123'
+);
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_AUDIENCE, 'key' => 'browser-session:opaque-123' ), $audience_owner_principal->conversation_owner(), 'audience principal can carry opaque conversation owner key', $failures, $passes );
+agents_api_smoke_assert_equals( 'browser-session:opaque-123', $audience_owner_principal->to_array()['owner_key'], 'principal exports owner key', $failures, $passes );
 
 $audience_from_array = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
 	array(
@@ -152,10 +168,13 @@ $audience_from_array = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
 		'request_context'    => AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
 		'audience_id'        => 'audience:docs-readers',
 		'audience_claims'    => array( 'tier' => 'viewer' ),
+		'owner_type'         => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_AUDIENCE,
+		'owner_key'          => 'browser-session:opaque-456',
 	)
 );
 agents_api_smoke_assert_equals( 'audience:docs-readers', $audience_from_array->audience_id, 'from_array restores audience id', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'tier' => 'viewer' ), $audience_from_array->audience_claims, 'from_array restores audience claims', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_AUDIENCE, 'key' => 'browser-session:opaque-456' ), $audience_from_array->conversation_owner(), 'from_array restores explicit conversation owner', $failures, $passes );
 
 try {
 	new AgentsAPI\AI\WP_Agent_Execution_Principal( -1, 'agent', AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER, AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );

@@ -25,6 +25,11 @@ final class WP_Agent_Execution_Principal {
 	public const AUTH_SOURCE_AUDIENCE             = 'audience';
 	public const AUTH_SOURCE_SYSTEM               = 'system';
 
+	public const OWNER_TYPE_USER     = 'user';
+	public const OWNER_TYPE_AUDIENCE = 'audience';
+	public const OWNER_TYPE_TOKEN    = 'token';
+	public const OWNER_TYPE_SYSTEM   = 'system';
+
 	public const REQUEST_CONTEXT_REST = 'rest';
 	public const REQUEST_CONTEXT_CLI  = 'cli';
 	public const REQUEST_CONTEXT_CRON = 'cron';
@@ -43,6 +48,8 @@ final class WP_Agent_Execution_Principal {
 	 * @param \WP_Agent_Caller_Context|null     $caller_context     Optional cross-site caller context claims.
 	 * @param string|null                       $audience_id        Optional non-user audience/principal identifier.
 	 * @param array<string,mixed>               $audience_claims    Optional host-owned audience claims.
+	 * @param string|null                       $owner_type         Optional canonical transcript owner type.
+	 * @param string|null                       $owner_key          Optional opaque transcript owner key scoped to the owner type.
 	 */
 	public function __construct(
 		public readonly int $acting_user_id,
@@ -57,6 +64,8 @@ final class WP_Agent_Execution_Principal {
 		public readonly ?\WP_Agent_Caller_Context $caller_context = null,
 		public readonly ?string $audience_id = null,
 		public readonly array $audience_claims = array(),
+		public readonly ?string $owner_type = null,
+		public readonly ?string $owner_key = null,
 	) {
 		if ( $this->acting_user_id < 0 ) {
 			throw self::invalid( 'acting_user_id', 'must be zero or a positive integer' );
@@ -88,6 +97,18 @@ final class WP_Agent_Execution_Principal {
 
 		if ( false === self::jsonEncode( $this->audience_claims ) ) {
 			throw self::invalid( 'audience_claims', 'must be JSON serializable' );
+		}
+
+		if ( ( null === $this->owner_type ) !== ( null === $this->owner_key ) ) {
+			throw self::invalid( 'owner', 'type and key must both be present or both be null' );
+		}
+
+		if ( null !== $this->owner_type && '' === trim( $this->owner_type ) ) {
+			throw self::invalid( 'owner_type', 'must be null or a non-empty string' );
+		}
+
+		if ( null !== $this->owner_key && '' === trim( $this->owner_key ) ) {
+			throw self::invalid( 'owner_key', 'must be null or a non-empty string' );
 		}
 	}
 
@@ -158,8 +179,8 @@ final class WP_Agent_Execution_Principal {
 	 * @param array  $audience_claims    Host-owned audience claims.
 	 * @return self
 	 */
-	public static function audience( string $audience_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, array $audience_claims = array() ): self {
-		return new self( 0, $effective_agent_id, self::AUTH_SOURCE_AUDIENCE, $request_context, null, $request_metadata, $workspace_id, $client_id, null, null, $audience_id, $audience_claims );
+	public static function audience( string $audience_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, array $audience_claims = array(), ?string $owner_key = null ): self {
+		return new self( 0, $effective_agent_id, self::AUTH_SOURCE_AUDIENCE, $request_context, null, $request_metadata, $workspace_id, $client_id, null, null, $audience_id, $audience_claims, null !== $owner_key ? self::OWNER_TYPE_AUDIENCE : null, $owner_key );
 	}
 
 	/**
@@ -199,7 +220,9 @@ final class WP_Agent_Execution_Principal {
 			$capability_ceiling,
 			$caller_context,
 			array_key_exists( 'audience_id', $principal ) && null !== $principal['audience_id'] ? (string) $principal['audience_id'] : null,
-			isset( $principal['audience_claims'] ) && is_array( $principal['audience_claims'] ) ? $principal['audience_claims'] : array()
+			isset( $principal['audience_claims'] ) && is_array( $principal['audience_claims'] ) ? $principal['audience_claims'] : array(),
+			array_key_exists( 'owner_type', $principal ) && null !== $principal['owner_type'] ? (string) $principal['owner_type'] : null,
+			array_key_exists( 'owner_key', $principal ) && null !== $principal['owner_key'] ? (string) $principal['owner_key'] : null
 		);
 	}
 
@@ -222,7 +245,44 @@ final class WP_Agent_Execution_Principal {
 			'caller_context'     => $this->caller_context instanceof \WP_Agent_Caller_Context ? $this->caller_context->to_array() : null,
 			'audience_id'        => $this->audience_id,
 			'audience_claims'    => $this->audience_claims,
+			'owner_type'         => $this->owner_type,
+			'owner_key'          => $this->owner_key,
 		);
+	}
+
+	/**
+	 * Return the canonical transcript owner for this principal.
+	 *
+	 * Runtime authorization and transcript ownership are intentionally separate.
+	 * User principals can safely derive ownership from the WordPress user ID. Non-user
+	 * principals must provide an opaque owner key resolved by the host, such as a
+	 * browser-session key; audience access alone is not a transcript owner.
+	 *
+	 * @return array{type:string,key:string}|null Principal owner, or null when this principal is not transcript-ownable.
+	 */
+	public function conversation_owner(): ?array {
+		if ( null !== $this->owner_type && null !== $this->owner_key ) {
+			return array(
+				'type' => $this->owner_type,
+				'key'  => $this->owner_key,
+			);
+		}
+
+		if ( $this->acting_user_id > 0 && self::AUTH_SOURCE_AGENT_TOKEN !== $this->auth_source ) {
+			return array(
+				'type' => self::OWNER_TYPE_USER,
+				'key'  => (string) $this->acting_user_id,
+			);
+		}
+
+		if ( self::AUTH_SOURCE_AGENT_TOKEN === $this->auth_source && null !== $this->token_id ) {
+			return array(
+				'type' => self::OWNER_TYPE_TOKEN,
+				'key'  => (string) $this->token_id,
+			);
+		}
+
+		return null;
 	}
 
 	/**
@@ -251,7 +311,9 @@ final class WP_Agent_Execution_Principal {
 			$this->capability_ceiling,
 			$this->caller_context,
 			$this->audience_id,
-			$this->audience_claims
+			$this->audience_claims,
+			$this->owner_type,
+			$this->owner_key
 		);
 	}
 

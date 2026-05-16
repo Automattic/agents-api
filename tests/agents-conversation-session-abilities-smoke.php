@@ -102,10 +102,12 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 require_once __DIR__ . '/../src/Workspace/class-wp-agent-workspace-scope.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-execution-principal.php';
 require_once __DIR__ . '/../src/Transcripts/class-wp-agent-conversation-store.php';
+require_once __DIR__ . '/../src/Transcripts/class-wp-agent-principal-conversation-store.php';
 require_once __DIR__ . '/../src/Transcripts/class-wp-agent-conversation-sessions.php';
 require_once __DIR__ . '/../src/Transcripts/register-agents-conversation-session-abilities.php';
 
 use AgentsAPI\AI\WP_Agent_Execution_Principal;
+use AgentsAPI\Core\Database\Chat\WP_Agent_Principal_Conversation_Store;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store;
 use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 use function AgentsAPI\Core\Database\Chat\agents_create_conversation_session;
@@ -221,9 +223,82 @@ $forbidden       = agents_get_conversation_session( array( 'principal' => $other
 smoke_assert( true, $forbidden instanceof WP_Error, 'get blocks sessions owned by another user', $failures, $passes );
 smoke_assert( 'agents_conversation_session_forbidden', $forbidden instanceof WP_Error ? $forbidden->get_error_code() : '', 'forbidden error code', $failures, $passes );
 
+$audience_without_owner = WP_Agent_Execution_Principal::audience( 'audience:public', 'demo-agent' );
+$owner_required         = agents_list_conversation_sessions( array( 'principal' => $audience_without_owner ) );
+smoke_assert( 'agents_conversation_session_owner_required', $owner_required instanceof WP_Error ? $owner_required->get_error_code() : '', 'audience access alone cannot list sessions', $failures, $passes );
+
+$audience_with_owner = WP_Agent_Execution_Principal::audience( 'audience:public', 'demo-agent', WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, array(), null, null, array(), 'browser:one' );
+$store_required      = agents_list_conversation_sessions( array( 'principal' => $audience_with_owner ) );
+smoke_assert( 'agents_conversation_session_principal_store_required', $store_required instanceof WP_Error ? $store_required->get_error_code() : '', 'legacy store only accepts user owners', $failures, $passes );
+
 $deleted = agents_delete_conversation_session( array( 'principal' => $principal, 'session_id' => 's-1' ) );
 smoke_assert( true, $deleted['deleted'] ?? false, 'delete delegates to store', $failures, $passes );
 smoke_assert( null, $store->get_session( 's-1' ), 'delete removes session', $failures, $passes );
+
+$principal_store = new class() implements WP_Agent_Principal_Conversation_Store {
+	/** @var array<string,array<string,mixed>> */
+	public array $sessions = array();
+
+	public function create_session_for_owner( WP_Agent_Workspace_Scope $workspace, array $owner, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ): string {
+		$session_id = 'p-' . ( count( $this->sessions ) + 1 );
+		$this->sessions[ $session_id ] = array(
+			'session_id'     => $session_id,
+			'workspace_type' => $workspace->workspace_type,
+			'workspace_id'   => $workspace->workspace_id,
+			'owner_type'     => $owner['type'],
+			'owner_key'      => $owner['key'],
+			'user_id'        => 0,
+			'agent_slug'     => $agent_slug,
+			'title'          => '',
+			'messages'       => array(),
+			'metadata'       => $metadata,
+			'context'        => $context,
+		);
+		return $session_id;
+	}
+
+	public function list_sessions_for_owner( WP_Agent_Workspace_Scope $workspace, array $owner, array $args = array() ): array {
+		unset( $args );
+		return array_values(
+			array_filter(
+				$this->sessions,
+				static fn( array $session ): bool => $session['workspace_type'] === $workspace->workspace_type && $session['workspace_id'] === $workspace->workspace_id && $session['owner_type'] === $owner['type'] && $session['owner_key'] === $owner['key']
+			)
+		);
+	}
+
+	public function get_recent_pending_session_for_owner( WP_Agent_Workspace_Scope $workspace, array $owner, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array {
+		unset( $workspace, $owner, $seconds, $context, $token_id );
+		return null;
+	}
+
+	public function create_session( WP_Agent_Workspace_Scope $workspace, int $user_id, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ): string {
+		return $this->create_session_for_owner( $workspace, array( 'type' => WP_Agent_Execution_Principal::OWNER_TYPE_USER, 'key' => (string) $user_id ), $agent_slug, $metadata, $context );
+	}
+
+	public function list_sessions( WP_Agent_Workspace_Scope $workspace, int $user_id, array $args = array() ): array {
+		return $this->list_sessions_for_owner( $workspace, array( 'type' => WP_Agent_Execution_Principal::OWNER_TYPE_USER, 'key' => (string) $user_id ), $args );
+	}
+
+	public function get_session( string $session_id ): ?array { return $this->sessions[ $session_id ] ?? null; }
+	public function update_session( string $session_id, array $messages, array $metadata = array(), string $provider = '', string $model = '', ?string $provider_response_id = null ): bool { unset( $session_id, $messages, $metadata, $provider, $model, $provider_response_id ); return true; }
+	public function delete_session( string $session_id ): bool { unset( $this->sessions[ $session_id ] ); return true; }
+	public function get_recent_pending_session( WP_Agent_Workspace_Scope $workspace, int $user_id, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array { unset( $workspace, $user_id, $seconds, $context, $token_id ); return null; }
+	public function update_title( string $session_id, string $title ): bool { $this->sessions[ $session_id ]['title'] = $title; return true; }
+};
+
+add_filter( 'wp_agent_conversation_store', static fn() => $principal_store, 20 );
+
+$audience_created = agents_create_conversation_session( array( 'principal' => $audience_with_owner, 'workspace' => array( 'workspace_type' => 'site', 'workspace_id' => '42' ) ) );
+smoke_assert( 'p-1', $audience_created['session']['session_id'] ?? null, 'principal store creates audience-owned session', $failures, $passes );
+smoke_assert( 'browser:one', $principal_store->sessions['p-1']['owner_key'] ?? null, 'principal store receives opaque owner key', $failures, $passes );
+
+$audience_listed = agents_list_conversation_sessions( array( 'principal' => $audience_with_owner, 'workspace' => array( 'workspace_type' => 'site', 'workspace_id' => '42' ) ) );
+smoke_assert( 'p-1', $audience_listed['sessions'][0]['session_id'] ?? null, 'principal store lists matching owner only', $failures, $passes );
+
+$other_audience = WP_Agent_Execution_Principal::audience( 'audience:public', 'demo-agent', WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, array(), null, null, array(), 'browser:two' );
+$blocked_owner  = agents_get_conversation_session( array( 'principal' => $other_audience, 'session_id' => 'p-1' ) );
+smoke_assert( 'agents_conversation_session_forbidden', $blocked_owner instanceof WP_Error ? $blocked_owner->get_error_code() : '', 'principal owner key blocks other audience sessions', $failures, $passes );
 
 do_action( 'wp_abilities_api_categories_init' );
 do_action( 'wp_abilities_api_init' );
