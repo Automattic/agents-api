@@ -61,6 +61,7 @@ require_once AGENTS_API_PATH . 'src/Identity/class-wp-agent-materialized-identit
 require_once AGENTS_API_PATH . 'src/Identity/class-wp-agent-identity-store.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-conversation-store.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-principal-conversation-store.php';
+require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-principal-conversation-session-reader.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-conversation-sessions.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-conversation-lock.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-null-conversation-lock.php';

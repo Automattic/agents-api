@@ -103,10 +103,12 @@ require_once __DIR__ . '/../src/Workspace/class-wp-agent-workspace-scope.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-execution-principal.php';
 require_once __DIR__ . '/../src/Transcripts/class-wp-agent-conversation-store.php';
 require_once __DIR__ . '/../src/Transcripts/class-wp-agent-principal-conversation-store.php';
+require_once __DIR__ . '/../src/Transcripts/class-wp-agent-principal-conversation-session-reader.php';
 require_once __DIR__ . '/../src/Transcripts/class-wp-agent-conversation-sessions.php';
 require_once __DIR__ . '/../src/Transcripts/register-agents-conversation-session-abilities.php';
 
 use AgentsAPI\AI\WP_Agent_Execution_Principal;
+use AgentsAPI\Core\Database\Chat\WP_Agent_Principal_Conversation_Session_Reader;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Principal_Conversation_Store;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store;
 use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
@@ -235,7 +237,7 @@ $deleted = agents_delete_conversation_session( array( 'principal' => $principal,
 smoke_assert( true, $deleted['deleted'] ?? false, 'delete delegates to store', $failures, $passes );
 smoke_assert( null, $store->get_session( 's-1' ), 'delete removes session', $failures, $passes );
 
-$principal_store = new class() implements WP_Agent_Principal_Conversation_Store {
+$principal_store = new class() implements WP_Agent_Principal_Conversation_Session_Reader {
 	/** @var array<string,array<string,mixed>> */
 	public array $sessions = array();
 
@@ -267,6 +269,15 @@ $principal_store = new class() implements WP_Agent_Principal_Conversation_Store 
 		);
 	}
 
+	public function get_session_for_owner( WP_Agent_Workspace_Scope $workspace, array $owner, string $session_id ): ?array {
+		$session = $this->sessions[ $session_id ] ?? null;
+		if ( ! is_array( $session ) ) {
+			return null;
+		}
+
+		return $session['workspace_type'] === $workspace->workspace_type && $session['workspace_id'] === $workspace->workspace_id && $session['owner_type'] === $owner['type'] && $session['owner_key'] === $owner['key'] ? $session : null;
+	}
+
 	public function get_recent_pending_session_for_owner( WP_Agent_Workspace_Scope $workspace, array $owner, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array {
 		unset( $workspace, $owner, $seconds, $context, $token_id );
 		return null;
@@ -296,9 +307,12 @@ smoke_assert( 'browser:one', $principal_store->sessions['p-1']['owner_key'] ?? n
 $audience_listed = agents_list_conversation_sessions( array( 'principal' => $audience_with_owner, 'workspace' => array( 'workspace_type' => 'site', 'workspace_id' => '42' ) ) );
 smoke_assert( 'p-1', $audience_listed['sessions'][0]['session_id'] ?? null, 'principal store lists matching owner only', $failures, $passes );
 
+$audience_loaded = agents_get_conversation_session( array( 'principal' => $audience_with_owner, 'session_id' => 'p-1', 'workspace' => array( 'workspace_type' => 'site', 'workspace_id' => '42' ) ) );
+smoke_assert( 'p-1', $audience_loaded['session']['session_id'] ?? null, 'principal store loads matching owner session', $failures, $passes );
+
 $other_audience = WP_Agent_Execution_Principal::audience( 'audience:public', 'demo-agent', WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, array(), null, null, array(), 'browser:two' );
-$blocked_owner  = agents_get_conversation_session( array( 'principal' => $other_audience, 'session_id' => 'p-1' ) );
-smoke_assert( 'agents_conversation_session_forbidden', $blocked_owner instanceof WP_Error ? $blocked_owner->get_error_code() : '', 'principal owner key blocks other audience sessions', $failures, $passes );
+$blocked_owner  = agents_get_conversation_session( array( 'principal' => $other_audience, 'session_id' => 'p-1', 'workspace' => array( 'workspace_type' => 'site', 'workspace_id' => '42' ) ) );
+smoke_assert( 'agents_conversation_session_not_found', $blocked_owner instanceof WP_Error ? $blocked_owner->get_error_code() : '', 'principal owner key blocks other audience sessions', $failures, $passes );
 
 do_action( 'wp_abilities_api_categories_init' );
 do_action( 'wp_abilities_api_init' );

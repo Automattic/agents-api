@@ -260,7 +260,7 @@ function agents_conversation_sessions_permission( array $input ): bool {
 	return (bool) apply_filters( 'agents_conversation_sessions_permission', $allowed, $input );
 }
 
-/** @return array{store:WP_Agent_Conversation_Store,principal:WP_Agent_Execution_Principal,owner:array{type:string,key:string}}|\WP_Error */
+/** @return array{store:WP_Agent_Conversation_Store,principal:WP_Agent_Execution_Principal,owner:array{type:string,key:string},input:array}|\WP_Error */
 function agents_conversation_sessions_context( array $input ) {
 	$principal = agents_conversation_sessions_principal( $input );
 	if ( ! $principal instanceof WP_Agent_Execution_Principal ) {
@@ -285,6 +285,7 @@ function agents_conversation_sessions_context( array $input ) {
 		'store'     => $store,
 		'principal' => $principal,
 		'owner'     => $owner,
+		'input'     => $input,
 	);
 }
 
@@ -381,6 +382,20 @@ function agents_conversation_sessions_default_workspace_id(): string {
 function agents_conversation_sessions_owned_session( string $session_id, array $context ) {
 	if ( '' === trim( $session_id ) ) {
 		return new \WP_Error( 'agents_conversation_session_invalid_id', 'Conversation session ID must be a non-empty string.' );
+	}
+
+	$workspace = agents_conversation_sessions_workspace( is_array( $context['input'] ?? null ) ? $context['input'] : array() );
+	if ( is_wp_error( $workspace ) ) {
+		return $workspace;
+	}
+
+	if ( $context['store'] instanceof WP_Agent_Principal_Conversation_Session_Reader ) {
+		$session = $context['store']->get_session_for_owner( $workspace, $context['owner'], $session_id );
+		if ( ! is_array( $session ) ) {
+			return new \WP_Error( 'agents_conversation_session_not_found', 'Conversation session not found.' );
+		}
+
+		return $session;
 	}
 
 	$session = $context['store']->get_session( $session_id );
