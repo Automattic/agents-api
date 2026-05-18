@@ -111,7 +111,7 @@ $access_store = new class( $grant ) implements WP_Agent_Access_Store, WP_Agent_P
 
 	public function get_access_for_principal( string $agent_id, AgentsAPI\AI\WP_Agent_Execution_Principal $principal, ?string $workspace_id = null ): ?WP_Agent_Access_Grant {
 		if ( null === $principal->audience_id ) {
-			return $this->get_access( $agent_id, $principal->acting_user_id, $workspace_id );
+			return null;
 		}
 
 		return $this->audience_grant->agent_id === $agent_id && $this->audience_grant->audience_id === $principal->audience_id && $this->audience_grant->workspace_id === $workspace_id ? $this->audience_grant : null;
@@ -119,7 +119,7 @@ $access_store = new class( $grant ) implements WP_Agent_Access_Store, WP_Agent_P
 
 	public function get_agent_ids_for_principal( AgentsAPI\AI\WP_Agent_Execution_Principal $principal, ?string $minimum_role = null, ?string $workspace_id = null ): array {
 		if ( null === $principal->audience_id ) {
-			return $this->get_agent_ids_for_user( $principal->acting_user_id, $minimum_role, $workspace_id );
+			return array();
 		}
 
 		if ( $this->audience_grant->audience_id !== $principal->audience_id || $this->audience_grant->workspace_id !== $workspace_id ) {
