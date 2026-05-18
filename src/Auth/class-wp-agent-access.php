@@ -133,10 +133,12 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 
 			$agent_ids = array();
 			$store     = self::get_store( $context );
+			if ( $store instanceof WP_Agent_Access_Store && $principal->acting_user_id > 0 ) {
+				$agent_ids = array_merge( $agent_ids, $store->get_agent_ids_for_user( $principal->acting_user_id, $minimum_role, $principal->workspace_id ) );
+			}
+
 			if ( $store instanceof WP_Agent_Principal_Access_Store ) {
-				$agent_ids = $store->get_agent_ids_for_principal( $principal, $minimum_role, $principal->workspace_id );
-			} elseif ( $store instanceof WP_Agent_Access_Store && $principal->acting_user_id > 0 ) {
-				$agent_ids = $store->get_agent_ids_for_user( $principal->acting_user_id, $minimum_role, $principal->workspace_id );
+				$agent_ids = array_merge( $agent_ids, $store->get_agent_ids_for_principal( $principal, $minimum_role, $principal->workspace_id ) );
 			}
 
 			if ( null === $principal->audience_id && self::CURRENT_USER_EFFECTIVE_AGENT_ID !== $principal->effective_agent_id ) {

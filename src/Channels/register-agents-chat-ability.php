@@ -219,7 +219,7 @@ function agents_chat_input_schema(): array {
 				'properties'  => array(
 					'source'                   => array(
 						'type'        => 'string',
-						'enum'        => array( 'channel', 'bridge', 'rest', 'block' ),
+						'enum'        => array( 'channel', 'bridge', 'rest', 'block', 'peer-agent' ),
 						'description' => 'How the request reached this dispatcher.',
 					),
 					'client_name'              => array(
@@ -250,6 +250,18 @@ function agents_chat_input_schema(): array {
 						'type'        => array( 'string', 'null' ),
 						'enum'        => array( 'dm', 'group', 'channel' ),
 						'description' => 'Conversation kind: direct message, multi-participant group, broadcast channel. Null when the source has no notion of room kind.',
+					),
+					'caller_agent'             => array(
+						'type'        => array( 'string', 'null' ),
+						'description' => 'Agent slug that initiated this turn when source is peer-agent. Null when the source is not another agent.',
+					),
+					'caller_session_id'        => array(
+						'type'        => array( 'string', 'null' ),
+						'description' => 'Originating agent session id when source is peer-agent. Null when unavailable or not applicable.',
+					),
+					'peer_agent_call'          => array(
+						'type'        => 'boolean',
+						'description' => 'Whether this turn is an explicit agent-to-agent delegation call.',
 					),
 				),
 			),

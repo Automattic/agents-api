@@ -168,6 +168,11 @@ smoke_assert( array( 'agent', 'message' ), $in['required'] ?? array(), 'input_sc
 smoke_assert( true, isset( $in['properties']['client_context'] ), 'input_schema_has_client_context', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['attachments'] ), 'input_schema_has_attachments', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context']['properties']['sender_id'] ), 'client_context_schema_has_sender_id', $failures, $passes );
+smoke_assert( true, in_array( 'peer-agent', $in['properties']['client_context']['properties']['source']['enum'] ?? array(), true ), 'client_context_source_allows_peer_agent', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['client_context']['properties']['caller_agent'] ), 'client_context_schema_has_caller_agent', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['client_context']['properties']['caller_session_id'] ), 'client_context_schema_has_caller_session_id', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['client_context']['properties']['peer_agent_call'] ), 'client_context_schema_has_peer_agent_call', $failures, $passes );
+smoke_assert( false, isset( $in['properties']['client_context']['properties']['agent_chat_depth'] ), 'client_context_schema_omits_tool_specific_depth', $failures, $passes );
 
 $out_schema = agents_chat_output_schema();
 smoke_assert( array( 'session_id', 'reply' ), $out_schema['required'] ?? array(), 'output_schema_required_fields', $failures, $passes );
