@@ -123,6 +123,7 @@ require_once AGENTS_API_PATH . 'src/Memory/class-wp-agent-memory-list-entry.php'
 require_once AGENTS_API_PATH . 'src/Memory/class-wp-agent-memory-read-result.php';
 require_once AGENTS_API_PATH . 'src/Memory/class-wp-agent-memory-write-result.php';
 require_once AGENTS_API_PATH . 'src/Memory/class-wp-agent-memory-store.php';
+require_once AGENTS_API_PATH . 'src/Memory/class-wp-agent-memory-stores.php';
 require_once AGENTS_API_PATH . 'src/Guidelines/guidelines.php';
 require_once AGENTS_API_PATH . 'src/Guidelines/class-wp-guidelines-substrate.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-external-message.php';
