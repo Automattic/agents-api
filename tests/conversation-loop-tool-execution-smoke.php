@@ -65,12 +65,13 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 		return array(
 			'messages'   => $messages,
 			'content'    => 'I will summarize that for you.',
-			'tool_calls' => array(
-				array(
-					'name'       => 'client/summarize',
-					'parameters' => array( 'text' => 'hello world' ),
+				'tool_calls' => array(
+					array(
+						'id'         => 'call_123',
+						'name'       => 'client/summarize',
+						'parameters' => array( 'text' => 'hello world' ),
+					),
 				),
-			),
 		);
 	},
 	array(
@@ -80,11 +81,13 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	)
 );
 
-agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'tool executor was called once', $failures, $passes );
-agents_api_smoke_assert_equals( 'client/summarize', $executor->executed[0]['tool_name'], 'tool executor received correct tool name', $failures, $passes );
-agents_api_smoke_assert_equals( 1, count( $result['tool_execution_results'] ), 'result contains one tool execution result', $failures, $passes );
-agents_api_smoke_assert_equals( 'client/summarize', $result['tool_execution_results'][0]['tool_name'], 'tool execution result has correct tool name', $failures, $passes );
-agents_api_smoke_assert_equals( 'HELLO WORLD', $result['tool_execution_results'][0]['result']['result']['summary'], 'tool execution result carries executor payload', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'tool executor was called once', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client/summarize', $executor->executed[0]['tool_name'], 'tool executor received correct tool name', $failures, $passes );
+	agents_api_smoke_assert_equals( 'call_123', $executor->executed[0]['id'] ?? '', 'tool executor received provider tool call id', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, count( $result['tool_execution_results'] ), 'result contains one tool execution result', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client/summarize', $result['tool_execution_results'][0]['tool_name'], 'tool execution result has correct tool name', $failures, $passes );
+	agents_api_smoke_assert_equals( 'call_123', $result['tool_execution_results'][0]['tool_call_id'] ?? '', 'tool execution result preserves provider tool call id', $failures, $passes );
+	agents_api_smoke_assert_equals( 'HELLO WORLD', $result['tool_execution_results'][0]['result']['result']['summary'], 'tool execution result carries executor payload', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $result['tool_audit_events'] ), 'result contains one tool audit event', $failures, $passes );
 agents_api_smoke_assert_equals( 'tool_call', $result['tool_audit_events'][0]['type'], 'tool audit event has stable type', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/summarize', $result['tool_audit_events'][0]['tool_name'], 'tool audit event has correct tool name', $failures, $passes );
