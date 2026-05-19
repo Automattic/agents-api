@@ -322,12 +322,18 @@ function agents_conversation_sessions_list_for_owner( WP_Agent_Conversation_Stor
 }
 
 function agents_conversation_sessions_principal( array $input ): ?WP_Agent_Execution_Principal {
-	if ( isset( $input['principal'] ) && $input['principal'] instanceof WP_Agent_Execution_Principal ) {
-		return $input['principal'];
-	}
+	// Caller-supplied principals are honored only outside REST request context.
+	// REST callers go through the standard resolver chain so identity is
+	// established by the request itself rather than declared in the body.
+	$accepts_caller_principal = ! defined( 'REST_REQUEST' );
 
-	if ( isset( $input['principal'] ) && is_array( $input['principal'] ) ) {
-		return WP_Agent_Execution_Principal::from_array( $input['principal'] );
+	if ( $accepts_caller_principal && isset( $input['principal'] ) ) {
+		if ( $input['principal'] instanceof WP_Agent_Execution_Principal ) {
+			return $input['principal'];
+		}
+		if ( is_array( $input['principal'] ) ) {
+			return WP_Agent_Execution_Principal::from_array( $input['principal'] );
+		}
 	}
 
 	$principal = WP_Agent_Execution_Principal::resolve( array( 'request_context' => WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST ) + $input );
