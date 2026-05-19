@@ -345,18 +345,20 @@ class WP_Agent_Conversation_Loop {
 			$messages[] = WP_Agent_Message::text( 'assistant', $result['content'] );
 		}
 
-		foreach ( $tool_calls as $raw_call ) {
-			$tool_name  = $raw_call['name'] ?? $raw_call['tool_name'] ?? '';
-			$parameters = $raw_call['parameters'] ?? array();
+		foreach ( $tool_calls as $index => $raw_call ) {
+			$tool_name    = $raw_call['name'] ?? $raw_call['tool_name'] ?? '';
+			$parameters   = $raw_call['parameters'] ?? array();
+			$tool_call_id = self::resolve_tool_call_id( is_array( $raw_call ) ? $raw_call : array(), $turn, (int) $index + 1 );
 
 			if ( ! is_string( $tool_name ) || '' === $tool_name ) {
 				continue;
 			}
 
 			self::emit_event( $on_event, 'tool_call', array(
-				'turn'       => $turn,
-				'tool_name'  => $tool_name,
-				'parameters' => $parameters,
+				'turn'         => $turn,
+				'tool_name'    => $tool_name,
+				'tool_call_id' => $tool_call_id,
+				'parameters'   => $parameters,
 			) );
 
 			// Add tool-call message to transcript.
@@ -364,32 +366,37 @@ class WP_Agent_Conversation_Loop {
 				'Calling ' . $tool_name,
 				$tool_name,
 				is_array( $parameters ) ? $parameters : array(),
-				$turn
+				$turn,
+				array( 'tool_call_id' => $tool_call_id )
 			);
 
 			// Execute through WP_Agent_Tool_Execution_Core.
-			$exec_result = $core->executeTool(
+			$tool_context                 = $turn_context;
+			$tool_context['tool_call_id'] = $tool_call_id;
+			$exec_result                  = $core->executeTool(
 				$tool_name,
 				is_array( $parameters ) ? $parameters : array(),
 				$declarations,
 				$executor,
-				$turn_context
+				$tool_context
 			);
 
 			$tool_def = $declarations[ $tool_name ] ?? null;
 
 			self::emit_event( $on_event, 'tool_result', array(
-				'turn'      => $turn,
-				'tool_name' => $tool_name,
-				'success'   => (bool) ( $exec_result['success'] ?? false ),
+				'turn'         => $turn,
+				'tool_name'    => $tool_name,
+				'tool_call_id' => $tool_call_id,
+				'success'      => (bool) ( $exec_result['success'] ?? false ),
 			) );
 
 			// Build the tool_execution_results entry.
 			$tool_execution_results[] = array(
-				'tool_name'  => $tool_name,
-				'result'     => $exec_result,
-				'parameters' => is_array( $parameters ) ? $parameters : array(),
-				'turn_count' => $turn,
+				'tool_name'    => $tool_name,
+				'tool_call_id' => $tool_call_id,
+				'result'       => $exec_result,
+				'parameters'   => is_array( $parameters ) ? $parameters : array(),
+				'turn_count'   => $turn,
 			);
 
 			$tool_audit_events[] = self::tool_audit_event(
@@ -406,10 +413,14 @@ class WP_Agent_Conversation_Loop {
 				? self::json_encode_safe( $exec_result['result'] ?? array() )
 				: ( $exec_result['error'] ?? 'Tool execution failed.' );
 
+			$tool_result_payload                 = $exec_result;
+			$tool_result_payload['tool_call_id'] = $tool_call_id;
+
 			$messages[] = WP_Agent_Message::toolResult(
 				is_string( $result_content ) ? $result_content : '',
 				$tool_name,
-				$exec_result
+				$tool_result_payload,
+				array( 'tool_call_id' => $tool_call_id )
 			);
 
 			// Increment tool-call budgets: total and per-tool-name.
@@ -462,6 +473,23 @@ class WP_Agent_Conversation_Loop {
 			'conversation_complete'  => $complete,
 			'exceeded_budget'        => $exceeded_budget,
 		);
+	}
+
+	/**
+	 * Resolve a stable tool-call identifier for transcript pairing.
+	 *
+	 * @param array $raw_call Raw tool call emitted by a turn runner.
+	 * @param int   $turn Current turn number.
+	 * @param int   $sequence Tool-call sequence in this turn.
+	 * @return string
+	 */
+	private static function resolve_tool_call_id( array $raw_call, int $turn, int $sequence ): string {
+		$id = $raw_call['id'] ?? $raw_call['tool_call_id'] ?? '';
+		if ( is_string( $id ) && '' !== trim( $id ) ) {
+			return trim( $id );
+		}
+
+		return sprintf( 'tool-call-%d-%d', max( 1, $turn ), max( 1, $sequence ) );
 	}
 
 	/**

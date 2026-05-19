@@ -50,17 +50,22 @@ class WP_Agent_Tool_Execution_Core {
 			);
 		}
 
+		$tool_call = array(
+			'tool_name'  => $tool_name,
+			'parameters' => $parameters,
+			'metadata'   => array(
+				'source' => $tool_definition['source'] ?? WP_Agent_Tool_Declaration::sourceFromName( $tool_name ),
+			),
+		);
+
+		$tool_call_id = $context['tool_call_id'] ?? '';
+		if ( is_string( $tool_call_id ) && '' !== trim( $tool_call_id ) ) {
+			$tool_call['id'] = trim( $tool_call_id );
+		}
+
 		return array(
 			'ready'      => true,
-			'tool_call'  => WP_Agent_Tool_Call::normalize(
-				array(
-					'tool_name'  => $tool_name,
-					'parameters' => $parameters,
-					'metadata'   => array(
-						'source' => $tool_definition['source'] ?? WP_Agent_Tool_Declaration::sourceFromName( $tool_name ),
-					),
-				)
-			),
+			'tool_call'  => WP_Agent_Tool_Call::normalize( $tool_call ),
 			'tool_def'   => $tool_definition,
 		);
 	}
