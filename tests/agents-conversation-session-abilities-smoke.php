@@ -314,6 +314,40 @@ $other_audience = WP_Agent_Execution_Principal::audience( 'audience:public', 'de
 $blocked_owner  = agents_get_conversation_session( array( 'principal' => $other_audience, 'session_id' => 'p-1', 'workspace' => array( 'workspace_type' => 'site', 'workspace_id' => '42' ) ) );
 smoke_assert( 'agents_conversation_session_not_found', $blocked_owner instanceof WP_Error ? $blocked_owner->get_error_code() : '', 'principal owner key blocks other audience sessions', $failures, $passes );
 
+// REST callers cannot impersonate other owners via the principal field — the
+// principal is resolved from the request, not from the body.
+defined( 'REST_REQUEST' ) || define( 'REST_REQUEST', true );
+$GLOBALS['__smoke_caps']            = array( 'read' );
+$GLOBALS['__smoke_current_user_id'] = 99;
+
+$forged_principal = array(
+	'effective_agent_id' => 'demo-agent',
+	'auth_source'        => 'user',
+	'request_context'    => 'rest',
+	'owner_type'         => 'audience',
+	'owner_key'          => 'browser:one',
+);
+
+$forged_get = agents_get_conversation_session(
+	array(
+		'principal'  => $forged_principal,
+		'session_id' => 'p-1',
+		'workspace'  => array( 'workspace_type' => 'site', 'workspace_id' => '42' ),
+	)
+);
+smoke_assert( 'agents_conversation_session_not_found', $forged_get instanceof WP_Error ? $forged_get->get_error_code() : '', 'REST principal passthrough is ignored on get', $failures, $passes );
+
+$forged_list = agents_list_conversation_sessions(
+	array(
+		'principal' => $forged_principal,
+		'workspace' => array( 'workspace_type' => 'site', 'workspace_id' => '42' ),
+	)
+);
+smoke_assert( array(), is_array( $forged_list ) ? ( $forged_list['sessions'] ?? null ) : null, 'REST principal passthrough is ignored on list', $failures, $passes );
+
+$GLOBALS['__smoke_caps']            = array();
+$GLOBALS['__smoke_current_user_id'] = 0;
+
 do_action( 'wp_abilities_api_categories_init' );
 do_action( 'wp_abilities_api_init' );
 
