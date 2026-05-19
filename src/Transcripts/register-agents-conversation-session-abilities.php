@@ -325,7 +325,7 @@ function agents_conversation_sessions_principal( array $input ): ?WP_Agent_Execu
 	// Caller-supplied principals are honored only outside REST request context.
 	// REST callers go through the standard resolver chain so identity is
 	// established by the request itself rather than declared in the body.
-	$accepts_caller_principal = ! ( defined( 'REST_REQUEST' ) && constant( 'REST_REQUEST' ) );
+	$accepts_caller_principal = ! defined( 'REST_REQUEST' );
 
 	if ( $accepts_caller_principal && isset( $input['principal'] ) ) {
 		if ( $input['principal'] instanceof WP_Agent_Execution_Principal ) {
