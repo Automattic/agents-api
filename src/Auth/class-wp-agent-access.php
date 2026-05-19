@@ -138,7 +138,9 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 			}
 
 			if ( $store instanceof WP_Agent_Principal_Access_Store ) {
-				$agent_ids = array_merge( $agent_ids, $store->get_agent_ids_for_principal( $principal, $minimum_role, $principal->workspace_id ) );
+				foreach ( self::access_principals_for( $principal, $context ) as $access_principal ) {
+					$agent_ids = array_merge( $agent_ids, $store->get_agent_ids_for_principal( $access_principal, $minimum_role, $principal->workspace_id ) );
+				}
 			}
 
 			if ( null === $principal->audience_id && self::CURRENT_USER_EFFECTIVE_AGENT_ID !== $principal->effective_agent_id ) {
@@ -169,6 +171,51 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 				'description' => $agent->get_description(),
 				'meta'        => $agent->get_meta(),
 			);
+		}
+
+		/**
+		 * Expand a request principal into the principal grants that apply to it.
+		 *
+		 * @param AgentsAPI\AI\WP_Agent_Execution_Principal $principal Request principal.
+		 * @param array<string,mixed>                       $context   Host-owned request context.
+		 * @return AgentsAPI\AI\WP_Agent_Execution_Principal[]
+		 */
+		public static function access_principals_for( AgentsAPI\AI\WP_Agent_Execution_Principal $principal, array $context = array() ): array {
+			$principals = array( $principal );
+			$audiences  = array();
+
+			if ( null !== $principal->audience_id ) {
+				$audiences[] = $principal->audience_id;
+			}
+
+			if ( ! array_key_exists( 'include_public_audience', $context ) || false !== (bool) $context['include_public_audience'] ) {
+				$audiences[] = self::PUBLIC_AUDIENCE_ID;
+			}
+
+			/**
+			 * Filter audience grants that apply to a request principal.
+			 *
+			 * @param string[]                                  $audiences Audience IDs such as audience:public.
+			 * @param AgentsAPI\AI\WP_Agent_Execution_Principal $principal Request principal.
+			 * @param array<string,mixed>                       $context   Host-owned request context.
+			 */
+			/** @var mixed $filtered_audiences */
+			$filtered_audiences = function_exists( 'apply_filters' ) ? apply_filters( 'agents_api_access_audiences_for_principal', $audiences, $principal, $context ) : $audiences;
+			$audiences          = is_array( $filtered_audiences ) ? $filtered_audiences : array();
+
+			foreach ( array_values( array_unique( array_filter( array_map( 'strval', $audiences ) ) ) ) as $audience_id ) {
+				$principals[] = AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
+					$audience_id,
+					$principal->effective_agent_id,
+					$principal->request_context,
+					$principal->request_metadata,
+					$principal->workspace_id,
+					$principal->client_id,
+					$principal->audience_claims
+				);
+			}
+
+			return $principals;
 		}
 
 		/**
