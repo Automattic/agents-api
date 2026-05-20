@@ -96,6 +96,7 @@ agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\WP_Agent_Com
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\WP_Agent_Markdown_Section_Compaction_Adapter' ), 'AgentsAPI\\AI\\WP_Agent_Markdown_Section_Compaction_Adapter contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\WP_Agent_Conversation_Loop' ), 'WP_Agent_Conversation_Loop facade is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Store' ), 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Store contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Observer' ), 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Observer contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Status' ), 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Status vocabulary is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Consent_Policy' ), 'WP_Agent_Consent_Policy contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Default_Consent_Policy' ), 'WP_Agent_Default_Consent_Policy implementation is available', $failures, $passes );

@@ -182,10 +182,13 @@ Approval primitives live in `src/Approvals/`:
 - `WP_Agent_Pending_Action_Status`: pending/accepted/rejected/expired/deleted vocabulary.
 - `WP_Agent_Approval_Decision`: resolver decision value object.
 - `WP_Agent_Pending_Action_Store`: durable queue/audit interface.
+- `WP_Agent_Pending_Action_Observer`: lifecycle observer contract for stores that emit stored/resolved/expired events.
 - `WP_Agent_Pending_Action_Resolver`: accept/reject resolution contract.
 - `WP_Agent_Pending_Action_Handler`: product handler contract for permission checks and applying/rejecting proposals.
 
-Consumers own the database tables, REST routes, admin/chat UI, queues, product-specific apply/reject handlers, and authorization ceilings for transcript and approval materialization.
+Store implementations own observer registration and invocation. Observers should tolerate duplicate lifecycle calls and avoid throwing; stores should defensively catch observer failures so notification, logging, or metrics observers cannot break durable approval state transitions.
+
+Consumers own the database tables, REST routes, admin/chat UI, queues, product-specific apply/reject handlers, event adapters, and authorization ceilings for transcript and approval materialization.
 
 ## Operational failure behavior
 
