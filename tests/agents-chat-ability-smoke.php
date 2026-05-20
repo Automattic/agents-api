@@ -166,6 +166,9 @@ smoke_assert( true, agents_chat_permission( array() ), 'permission_filter_widens
 $in = agents_chat_input_schema();
 smoke_assert( array( 'agent', 'message' ), $in['required'] ?? array(), 'input_schema_required_fields', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context'] ), 'input_schema_has_client_context', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['session_owner'] ), 'input_schema_has_session_owner', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['session_owner']['properties']['type'] ), 'session_owner_schema_has_type', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['session_owner']['properties']['key'] ), 'session_owner_schema_has_key', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['attachments'] ), 'input_schema_has_attachments', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context']['properties']['sender_id'] ), 'client_context_schema_has_sender_id', $failures, $passes );
 smoke_assert( true, in_array( 'peer-agent', $in['properties']['client_context']['properties']['source']['enum'] ?? array(), true ), 'client_context_source_allows_peer_agent', $failures, $passes );

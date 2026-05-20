@@ -267,7 +267,14 @@ function agents_conversation_sessions_context( array $input ) {
 		return new \WP_Error( 'agents_conversation_session_unauthenticated', 'A conversation session principal could not be resolved.' );
 	}
 
-	$owner = $principal->conversation_owner();
+	$owner = agents_conversation_session_owner_from_input( $input, $principal );
+	if ( is_wp_error( $owner ) ) {
+		return $owner;
+	}
+
+	if ( null === $owner ) {
+		$owner = $principal->conversation_owner();
+	}
 	if ( null === $owner ) {
 		return new \WP_Error( 'agents_conversation_session_owner_required', 'The current principal does not provide a conversation session owner key.' );
 	}
@@ -286,6 +293,49 @@ function agents_conversation_sessions_context( array $input ) {
 		'principal' => $principal,
 		'owner'     => $owner,
 		'input'     => $input,
+	);
+}
+
+/**
+ * Resolve an explicit canonical session owner from ability input.
+ *
+ * @param array                        $input     Ability input.
+ * @param WP_Agent_Execution_Principal $principal Authenticated execution principal.
+ * @return array{type:string,key:string}|null|\WP_Error
+ */
+function agents_conversation_session_owner_from_input( array $input, WP_Agent_Execution_Principal $principal ) {
+	$owner = is_array( $input['session_owner'] ?? null ) ? $input['session_owner'] : null;
+	if ( null === $owner ) {
+		$client_context = is_array( $input['client_context'] ?? null ) ? $input['client_context'] : array();
+		$owner          = is_array( $client_context['session_owner'] ?? null ) ? $client_context['session_owner'] : null;
+	}
+
+	if ( null === $owner ) {
+		return null;
+	}
+
+	$type = sanitize_key( (string) ( $owner['type'] ?? $owner['owner_type'] ?? '' ) );
+	$key  = trim( (string) ( $owner['key'] ?? $owner['owner_key'] ?? '' ) );
+	if ( '' === $type || '' === $key ) {
+		return new \WP_Error( 'agents_conversation_session_invalid_owner', 'Conversation session owner type and key are required.' );
+	}
+
+	if ( WP_Agent_Execution_Principal::OWNER_TYPE_AUDIENCE === $type && in_array( $key, array( 'public', 'audience:public' ), true ) ) {
+		return new \WP_Error( 'agents_conversation_session_non_isolating_owner', 'Public audience is not an isolating conversation session owner.' );
+	}
+
+	$principal_owner = $principal->conversation_owner();
+	if ( WP_Agent_Execution_Principal::OWNER_TYPE_USER === $type ) {
+		if ( ! is_array( $principal_owner ) || WP_Agent_Execution_Principal::OWNER_TYPE_USER !== $principal_owner['type'] || preg_replace( '/^user:/', '', $key ) !== (string) $principal_owner['key'] ) {
+			return new \WP_Error( 'agents_conversation_session_user_owner_forbidden', 'User conversation session owners must match the authenticated user principal.' );
+		}
+
+		$key = (string) $principal_owner['key'];
+	}
+
+	return array(
+		'type' => $type,
+		'key'  => $key,
 	);
 }
 
@@ -468,11 +518,24 @@ function agents_conversation_sessions_list_input_schema(): array {
 	return array(
 		'type'       => 'object',
 		'properties' => array(
-			'workspace' => agents_conversation_sessions_workspace_schema(),
-			'limit'     => array( 'type' => 'integer' ),
-			'offset'    => array( 'type' => 'integer' ),
-			'agent'     => array( 'type' => 'string' ),
-			'context'   => array( 'type' => 'string' ),
+			'workspace'     => agents_conversation_sessions_workspace_schema(),
+			'session_owner' => agents_conversation_session_owner_schema(),
+			'limit'         => array( 'type' => 'integer' ),
+			'offset'        => array( 'type' => 'integer' ),
+			'agent'         => array( 'type' => 'string' ),
+			'context'       => array( 'type' => 'string' ),
+		),
+	);
+}
+
+function agents_conversation_session_owner_schema(): array {
+	return array(
+		'type'        => array( 'object', 'null' ),
+		'description' => 'Opaque, isolating owner for persisted conversation sessions. Use for anonymous browser or external-channel chats when no logged-in user owns the transcript. Do not use a shared public audience as a session owner.',
+		'properties'  => array(
+			'type'  => array( 'type' => 'string' ),
+			'key'   => array( 'type' => 'string' ),
+			'label' => array( 'type' => 'string' ),
 		),
 	);
 }
@@ -487,7 +550,10 @@ function agents_conversation_session_id_input_schema(): array {
 	return array(
 		'type'       => 'object',
 		'required'   => array( 'session_id' ),
-		'properties' => array( 'session_id' => array( 'type' => 'string' ) ),
+		'properties' => array(
+			'session_id'    => array( 'type' => 'string' ),
+			'session_owner' => agents_conversation_session_owner_schema(),
+		),
 	);
 }
 
