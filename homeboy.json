@@ -7,7 +7,7 @@
     }
   },
   "id": "agents-api",
-  "remote_path": "wp-content/plugins/agents-api",
+  "remote_path": "../wp-content/plugins/agents-api",
   "version_targets": [
     {
       "file": "agents-api.php",
