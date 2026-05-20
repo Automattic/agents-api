@@ -64,6 +64,12 @@ Products can require Agents API because they build on the substrate. Agents API 
 
 Agents API requires **WordPress 7.0 or higher**. The substrate itself is provider-agnostic and loads on earlier versions, but every realistic consumer needs an AI provider. The only WordPress-native provider story is `wp-ai-client`, which ships in WordPress 7.0 core. Sites running 6.8–6.9 can install Agents API without errors but won't have a working AI provider unless they manually install the deprecated `wp-ai-client` plugin.
 
+## Core-Candidate API Naming
+
+Agents API intentionally exposes WordPress-shaped public APIs such as `wp_register_agent()`, `wp_get_agent()`, `wp_agents_api_init`, and `wp_agent_*` hooks.
+
+These names are not accidental plugin globals. They are the public API surface being evaluated for possible WordPress Core alignment, following existing Core naming conventions for substrate APIs. Plugin Check may report prefix warnings for these symbols; those warnings are expected for this Core-candidate package and should be reviewed in that context.
+
 ## Installation
 
 Agents API supports the same two delivery shapes used by other shared WordPress runtime packages such as Action Scheduler: install it as a normal WordPress plugin, or require it through Composer and load Composer's autoloader from the host project.
