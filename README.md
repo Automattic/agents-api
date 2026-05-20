@@ -164,6 +164,7 @@ wp_register_agent(
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Store`
+- `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Observer`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Resolver`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Handler`
 - `AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier`
