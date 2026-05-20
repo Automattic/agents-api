@@ -207,6 +207,7 @@ function agents_chat_input_schema(): array {
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Existing session ID to continue, or null to start a new session.',
 			),
+			'session_owner'  => agents_chat_session_owner_schema(),
 			'attachments'    => array(
 				'type'        => 'array',
 				'description' => 'Channel-side attachments (images, voice notes, files, link previews). Shape is runtime-defined; runtimes ignore unknown attachment types.',
@@ -264,6 +265,39 @@ function agents_chat_input_schema(): array {
 						'description' => 'Whether this turn is an explicit agent-to-agent delegation call.',
 					),
 				),
+			),
+		),
+	);
+}
+
+/**
+ * Canonical conversation-session owner schema.
+ *
+ * Session owners isolate persisted transcripts. They are intentionally separate
+ * from access principals: `audience:public` can authorize a request, but a
+ * stored transcript needs an owner such as `user:<id>`, `browser:<opaque id>`,
+ * or a channel-specific conversation key.
+ *
+ * @since 0.103.0
+ *
+ * @return array
+ */
+function agents_chat_session_owner_schema(): array {
+	return array(
+		'type'        => array( 'object', 'null' ),
+		'description' => 'Opaque, isolating owner for persisted conversation sessions. Use for anonymous browser or external-channel chats when no logged-in user owns the transcript. Do not use a shared public audience as a session owner.',
+		'properties'  => array(
+			'type'  => array(
+				'type'        => 'string',
+				'description' => 'Owner namespace such as user, browser, channel, token, or system.',
+			),
+			'key'   => array(
+				'type'        => 'string',
+				'description' => 'Opaque owner key within the namespace. Runtimes should hash before storage.',
+			),
+			'label' => array(
+				'type'        => 'string',
+				'description' => 'Optional human-readable owner label for diagnostics.',
 			),
 		),
 	);

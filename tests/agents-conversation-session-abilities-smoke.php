@@ -36,6 +36,10 @@ function get_current_blog_id(): int {
 	return 42;
 }
 
+function sanitize_key( string $key ): string {
+	return strtolower( preg_replace( '/[^a-z0-9_\-]/', '', $key ) ?? '' );
+}
+
 $GLOBALS['__smoke_filters']    = array();
 $GLOBALS['__smoke_abilities']  = array();
 $GLOBALS['__smoke_categories'] = array();
@@ -304,6 +308,31 @@ $audience_created = agents_create_conversation_session( array( 'principal' => $a
 smoke_assert( 'p-1', $audience_created['session']['session_id'] ?? null, 'principal store creates audience-owned session', $failures, $passes );
 smoke_assert( 'browser:one', $principal_store->sessions['p-1']['owner_key'] ?? null, 'principal store receives opaque owner key', $failures, $passes );
 
+$explicit_owner_created = agents_create_conversation_session(
+	array(
+		'principal'     => $audience_without_owner,
+		'session_owner' => array(
+			'type' => 'browser',
+			'key'  => 'browser:explicit',
+		),
+		'workspace'     => array( 'workspace_type' => 'site', 'workspace_id' => '42' ),
+	)
+);
+smoke_assert( 'p-2', $explicit_owner_created['session']['session_id'] ?? null, 'explicit session_owner creates audience transcript session', $failures, $passes );
+smoke_assert( 'browser', $principal_store->sessions['p-2']['owner_type'] ?? null, 'principal store receives explicit owner type', $failures, $passes );
+smoke_assert( 'browser:explicit', $principal_store->sessions['p-2']['owner_key'] ?? null, 'principal store receives explicit owner key', $failures, $passes );
+
+$public_owner_rejected = agents_list_conversation_sessions(
+	array(
+		'principal'     => $audience_without_owner,
+		'session_owner' => array(
+			'type' => 'audience',
+			'key'  => 'public',
+		),
+	)
+);
+smoke_assert( 'agents_conversation_session_non_isolating_owner', $public_owner_rejected instanceof WP_Error ? $public_owner_rejected->get_error_code() : '', 'public audience session_owner is rejected', $failures, $passes );
+
 $audience_listed = agents_list_conversation_sessions( array( 'principal' => $audience_with_owner, 'workspace' => array( 'workspace_type' => 'site', 'workspace_id' => '42' ) ) );
 smoke_assert( 'p-1', $audience_listed['sessions'][0]['session_id'] ?? null, 'principal store lists matching owner only', $failures, $passes );
 
@@ -356,6 +385,8 @@ smoke_assert( true, wp_has_ability( AGENTS_GET_CONVERSATION_SESSION_ABILITY ), '
 smoke_assert( true, wp_has_ability( AGENTS_CREATE_CONVERSATION_SESSION_ABILITY ), 'create ability registers', $failures, $passes );
 smoke_assert( true, wp_has_ability( AGENTS_UPDATE_CONVERSATION_SESSION_TITLE_ABILITY ), 'update-title ability registers', $failures, $passes );
 smoke_assert( true, wp_has_ability( AGENTS_DELETE_CONVERSATION_SESSION_ABILITY ), 'delete ability registers', $failures, $passes );
+smoke_assert( true, isset( $GLOBALS['__smoke_abilities'][ AGENTS_CREATE_CONVERSATION_SESSION_ABILITY ]['input_schema']['properties']['session_owner'] ), 'create schema exposes session_owner', $failures, $passes );
+smoke_assert( true, isset( $GLOBALS['__smoke_abilities'][ AGENTS_LIST_CONVERSATION_SESSIONS_ABILITY ]['input_schema']['properties']['session_owner'] ), 'list schema exposes session_owner', $failures, $passes );
 
 if ( $failures ) {
 	echo "\nFAILED: " . count( $failures ) . " agents conversation session ability assertions failed.\n";
