@@ -20,10 +20,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  * happen. This validator gives consumers a substrate-level helper to detect or
  * scrub such transcripts before dispatch.
  *
- * Pairing rule: a tool_call envelope at index `i` matches the next tool_result
- * envelope at index `j > i` with the same `payload.tool_name`. Matching is FIFO
- * per tool name — the oldest unmatched tool_call wins, mirroring how providers
- * resolve tool-use IDs positionally when multiple calls share a name.
+ * Pairing rule: tool_call_id metadata is authoritative when present. Messages
+ * without IDs fall back to FIFO matching by `payload.tool_name`, preserving
+ * compatibility with transcripts written before tool-call IDs were captured.
  */
 class WP_Agent_Tool_Pair_Validator {
 
@@ -37,7 +36,7 @@ class WP_Agent_Tool_Pair_Validator {
 	 * Inspect a message list and return any orphan tool_call / tool_result envelopes.
 	 *
 	 * Returned reports are sorted by ascending message index. Each entry has the
-	 * shape `{ index, kind, type, tool_name }`.
+	 * shape `{ index, kind, type, tool_name, tool_call_id? }`.
 	 *
 	 * @param array<int, array<string, mixed>> $messages Raw or normalized messages.
 	 * @return array<int, array<string, mixed>> Orphan reports.
@@ -52,8 +51,9 @@ class WP_Agent_Tool_Pair_Validator {
 
 			if ( WP_Agent_Message::TYPE_TOOL_CALL === $type ) {
 				$pending[] = array(
-					'index'     => $index,
-					'tool_name' => self::tool_name( $envelope ),
+					'index'        => $index,
+					'tool_name'    => self::tool_name( $envelope ),
+					'tool_call_id' => self::tool_call_id( $envelope ),
 				);
 				continue;
 			}
@@ -62,16 +62,21 @@ class WP_Agent_Tool_Pair_Validator {
 				continue;
 			}
 
-			$tool_name   = self::tool_name( $envelope );
-			$matched_pos = self::match_pending( $pending, $tool_name );
+			$tool_name    = self::tool_name( $envelope );
+			$tool_call_id = self::tool_call_id( $envelope );
+			$matched_pos  = self::match_pending( $pending, $tool_name, $tool_call_id );
 
 			if ( null === $matched_pos ) {
-				$orphans[] = array(
+				$orphan = array(
 					'index'     => $index,
 					'kind'      => self::KIND_ORPHAN_TOOL_RESULT,
 					'type'      => WP_Agent_Message::TYPE_TOOL_RESULT,
 					'tool_name' => $tool_name,
 				);
+				if ( '' !== $tool_call_id ) {
+					$orphan['tool_call_id'] = $tool_call_id;
+				}
+				$orphans[] = $orphan;
 				continue;
 			}
 
@@ -79,12 +84,16 @@ class WP_Agent_Tool_Pair_Validator {
 		}
 
 		foreach ( $pending as $pending_call ) {
-			$orphans[] = array(
+			$orphan = array(
 				'index'     => $pending_call['index'],
 				'kind'      => self::KIND_ORPHAN_TOOL_CALL,
 				'type'      => WP_Agent_Message::TYPE_TOOL_CALL,
 				'tool_name' => $pending_call['tool_name'],
 			);
+			if ( '' !== $pending_call['tool_call_id'] ) {
+				$orphan['tool_call_id'] = $pending_call['tool_call_id'];
+			}
+			$orphans[] = $orphan;
 		}
 
 		usort(
@@ -170,15 +179,26 @@ class WP_Agent_Tool_Pair_Validator {
 	}
 
 	/**
-	 * Find the FIFO-oldest pending tool_call with the given name.
+	 * Find the pending tool_call matching the given ID or legacy name-only pair.
 	 *
-	 * @param array<int, array<string, mixed>> $pending   Pending list.
-	 * @param string                           $tool_name Tool name to match.
+	 * @param array<int, array<string, mixed>> $pending      Pending list.
+	 * @param string                           $tool_name    Tool name to match.
+	 * @param string                           $tool_call_id Tool-call ID to match.
 	 * @return int|null Index in $pending or null when no match.
 	 */
-	private static function match_pending( array $pending, string $tool_name ): ?int {
+	private static function match_pending( array $pending, string $tool_name, string $tool_call_id ): ?int {
+		if ( '' !== $tool_call_id ) {
+			foreach ( $pending as $position => $candidate ) {
+				if ( ( $candidate['tool_call_id'] ?? '' ) === $tool_call_id ) {
+					return $position;
+				}
+			}
+
+			return null;
+		}
+
 		foreach ( $pending as $position => $candidate ) {
-			if ( ( $candidate['tool_name'] ?? '' ) === $tool_name ) {
+			if ( '' === ( $candidate['tool_call_id'] ?? '' ) && ( $candidate['tool_name'] ?? '' ) === $tool_name ) {
 				return $position;
 			}
 		}
@@ -195,6 +215,17 @@ class WP_Agent_Tool_Pair_Validator {
 	private static function tool_name( array $envelope ): string {
 		$name = $envelope['payload']['tool_name'] ?? '';
 		return is_string( $name ) ? $name : '';
+	}
+
+	/**
+	 * Read a normalized envelope's tool-call ID metadata.
+	 *
+	 * @param array<string, mixed> $envelope Normalized envelope.
+	 * @return string
+	 */
+	private static function tool_call_id( array $envelope ): string {
+		$id = $envelope['metadata']['tool_call_id'] ?? '';
+		return is_string( $id ) ? $id : '';
 	}
 
 	/**

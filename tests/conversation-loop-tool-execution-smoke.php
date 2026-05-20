@@ -98,6 +98,16 @@ agents_api_smoke_assert_equals( true, ! array_key_exists( 'parameters', $result[
 // Messages should contain: user, assistant text, tool_call, tool_result.
 $message_count = count( $result['messages'] );
 agents_api_smoke_assert_equals( true, $message_count >= 4, 'transcript contains user + assistant + tool_call + tool_result messages', $failures, $passes );
+$tool_result_messages = array_values(
+	array_filter(
+		$result['messages'],
+		static function ( array $message ): bool {
+			return ( $message['type'] ?? '' ) === AgentsAPI\AI\WP_Agent_Message::TYPE_TOOL_RESULT;
+		}
+	)
+);
+agents_api_smoke_assert_equals( 'call_123', $tool_result_messages[0]['metadata']['tool_call_id'] ?? '', 'tool result metadata preserves provider tool call id', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'tool_call_id', $tool_result_messages[0]['payload'] ?? array() ), 'tool result payload does not duplicate tool_call_id', $failures, $passes );
 
 echo "\n[2] Loop runs without mediation when no tool_executor is provided (backwards compatible):\n";
 $executor->executed = array();

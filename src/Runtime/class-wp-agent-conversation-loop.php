@@ -413,13 +413,10 @@ class WP_Agent_Conversation_Loop {
 				? self::json_encode_safe( $exec_result['result'] ?? array() )
 				: ( $exec_result['error'] ?? 'Tool execution failed.' );
 
-			$tool_result_payload                 = $exec_result;
-			$tool_result_payload['tool_call_id'] = $tool_call_id;
-
 			$messages[] = WP_Agent_Message::toolResult(
 				is_string( $result_content ) ? $result_content : '',
 				$tool_name,
-				$tool_result_payload,
+				$exec_result,
 				array( 'tool_call_id' => $tool_call_id )
 			);
 
