@@ -31,6 +31,11 @@ $result_search = WP_Agent_Message::toolResult( 'results', 'search', array( 'succ
 $call_fetch   = WP_Agent_Message::toolCall( 'fetching', 'fetch', array( 'url' => 'https://example.com' ), 2 );
 $result_fetch = WP_Agent_Message::toolResult( 'fetched', 'fetch', array( 'success' => true, 'tool_data' => array( 'status' => 200 ) ) );
 
+$call_search_id_1   = WP_Agent_Message::toolCall( 'searching', 'search', array( 'q' => 'foo' ), 1, array( 'tool_call_id' => 'call_search_1' ) );
+$call_search_id_2   = WP_Agent_Message::toolCall( 'searching again', 'search', array( 'q' => 'bar' ), 1, array( 'tool_call_id' => 'call_search_2' ) );
+$result_search_id_1 = WP_Agent_Message::toolResult( 'results', 'search', array( 'success' => true ), array( 'tool_call_id' => 'call_search_1' ) );
+$result_search_id_2 = WP_Agent_Message::toolResult( 'more results', 'search', array( 'success' => true ), array( 'tool_call_id' => 'call_search_2' ) );
+
 echo "\n[1] Empty transcript has no orphans:\n";
 agents_api_smoke_assert_equals( array(), WP_Agent_Tool_Pair_Validator::validate( array() ), 'empty transcript validates clean', $failures, $passes );
 agents_api_smoke_assert_equals( true, WP_Agent_Tool_Pair_Validator::is_paired( array() ), 'empty transcript is paired', $failures, $passes );
@@ -102,5 +107,22 @@ agents_api_smoke_assert_equals( 4, count( $clean_pruned['messages'] ), 'clean pr
 agents_api_smoke_assert_equals( array(), $clean_pruned['removed'], 'clean prune removes nothing', $failures, $passes );
 agents_api_smoke_assert_equals( WP_Agent_Tool_Pair_Validator::EVENT_VALIDATED, $clean_pruned['events'][0]['type'], 'clean prune emits validated event', $failures, $passes );
 agents_api_smoke_assert_equals( 0, $clean_pruned['events'][0]['metadata']['orphan_count'], 'clean prune event reports orphan_count=0', $failures, $passes );
+
+echo "\n[11] Tool-call IDs match same-name calls out of FIFO order:\n";
+$id_paired = array( $call_search_id_1, $call_search_id_2, $result_search_id_2, $result_search_id_1 );
+agents_api_smoke_assert_equals( array(), WP_Agent_Tool_Pair_Validator::validate( $id_paired ), 'id-paired transcript validates clean', $failures, $passes );
+
+echo "\n[12] ID-less pairs still fall back to FIFO by tool name in mixed transcripts:\n";
+$mixed = array( $call_search_id_1, $call_fetch, $result_fetch, $result_search_id_1 );
+agents_api_smoke_assert_equals( array(), WP_Agent_Tool_Pair_Validator::validate( $mixed ), 'mixed id and name transcript validates clean', $failures, $passes );
+
+echo "\n[13] ID mismatch within the same tool name reports both sides as orphans:\n";
+$id_mismatch = array( $call_search_id_1, $result_search_id_2 );
+$orphans     = WP_Agent_Tool_Pair_Validator::validate( $id_mismatch );
+agents_api_smoke_assert_equals( 2, count( $orphans ), 'id mismatch produces two orphan reports', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Tool_Pair_Validator::KIND_ORPHAN_TOOL_CALL, $orphans[0]['kind'], 'mismatched call remains orphan', $failures, $passes );
+agents_api_smoke_assert_equals( 'call_search_1', $orphans[0]['tool_call_id'] ?? '', 'orphan call report includes tool_call_id', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Tool_Pair_Validator::KIND_ORPHAN_TOOL_RESULT, $orphans[1]['kind'], 'mismatched result remains orphan', $failures, $passes );
+agents_api_smoke_assert_equals( 'call_search_2', $orphans[1]['tool_call_id'] ?? '', 'orphan result report includes tool_call_id', $failures, $passes );
 
 agents_api_smoke_finish( 'tool-pair-validator', $failures, $passes );

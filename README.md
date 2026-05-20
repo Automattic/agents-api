@@ -64,6 +64,28 @@ Products can require Agents API because they build on the substrate. Agents API 
 
 Agents API requires **WordPress 7.0 or higher**. The substrate itself is provider-agnostic and loads on earlier versions, but every realistic consumer needs an AI provider. The only WordPress-native provider story is `wp-ai-client`, which ships in WordPress 7.0 core. Sites running 6.8–6.9 can install Agents API without errors but won't have a working AI provider unless they manually install the deprecated `wp-ai-client` plugin.
 
+## Installation
+
+Agents API supports the same two delivery shapes used by other shared WordPress runtime packages such as Action Scheduler: install it as a normal WordPress plugin, or require it through Composer and load Composer's autoloader from the host project.
+
+Both paths load the same `agents-api.php` bootstrap. The bootstrap is idempotent, so loading it through Composer and WordPress in the same request is safe.
+
+### WordPress Plugin
+
+Install and activate the Agents API plugin through the normal WordPress plugin mechanism. This is the recommended path for site owners and plugins that declare Agents API as a plugin dependency.
+
+### Composer
+
+Require the package from a host plugin, mu-plugin, or Composer-managed WordPress project:
+
+```sh
+composer require automattic/agents-api:^0.1
+```
+
+Composer autoloads `agents-api.php` through the package `files` autoload entry. The consuming project must load Composer's generated `vendor/autoload.php` during WordPress bootstrap. After that, the same public API is available as in the plugin activation path.
+
+Pin released tags (`^0.1`, `0.1.x`, or an exact `0.1.0` tag) for reproducible production installs. Track `main` only for active substrate development.
+
 ## Consumer Integration
 
 Product plugins should treat Agents API as an optional or required runtime dependency depending on their feature surface.
