@@ -122,6 +122,10 @@ Core classes:
 | `WP_Agent_Package_Update_Planner` | Pure planner that compares installed, current, and target artifact state. |
 | `WP_Agent_Package_Update_Plan` | Bucketed plan value object. |
 | `WP_Agent_Package_Artifact_Callbacks` | Helper for invoking registered artifact type lifecycle callbacks. |
+| `WP_Agent_Package_Artifact_State_Store` | Storage-neutral contract for installed, current, target, and recorded artifact snapshots. |
+| `WP_Agent_Package_Adoption_Request` | Value object describing install, upgrade, reconcile, uninstall, or dry-run adoption. |
+| `WP_Agent_Package_Adoption_Result` | Value object describing plans, applied/skipped/failed entries, and recorded snapshots. |
+| `WP_Agent_Package_Adoption_Orchestrator` | Storage-neutral coordinator that composes the planner, artifact callbacks, and state store. |
 
 `WP_Agent_Package_Update_Planner::plan()` returns buckets:
 
@@ -135,6 +139,35 @@ Core classes:
 Planner entries include artifact identity, hashes, a reason, a summary, and a redacted before/after diff payload. Secret-like keys such as `token`, `password`, `api_key`, `authorization`, and `credential` are redacted recursively.
 
 `WP_Agent_Package_Adoption_Diff` accepts an optional `WP_Agent_Package_Update_Plan` so adopters can return bucketed artifact plans alongside the existing flat `changes` and `warnings` fields.
+
+## Package adoption orchestration
+
+Plugin authors can ship package definitions with their plugin releases while still preserving user-customized runtime state. The plugin release answers which package definition is available; package adoption answers how that definition reconciles with installed and current artifacts.
+
+The generic adoption flow is:
+
+```text
+plugin package definition
+  -> state store reads installed/current/target artifacts
+  -> update planner creates buckets
+  -> orchestrator applies auto-apply plus approved artifacts
+  -> artifact callbacks materialize product-specific runtime state
+  -> state store records installed snapshots for applied artifacts
+```
+
+`WP_Agent_Package_Adoption_Orchestrator` owns only that neutral sequencing. It does not store rows, expose UI, approve user decisions, fetch remote package sources, or understand product artifacts. Consumers provide a `WP_Agent_Package_Artifact_State_Store`, registered artifact type callbacks, and any approval surface.
+
+`WP_Agent_Package_Adoption_Request` controls the operation and policy knobs:
+
+| Field | Purpose |
+| --- | --- |
+| `operation` | `install`, `upgrade`, `reconcile`, `uninstall`, or `dry-run`. |
+| `dry_run` | Returns a plan without invoking import callbacks or recording snapshots. |
+| `auto_apply` | Allows or blocks the `auto_apply` bucket from materializing. |
+| `approved_artifact_keys` | Explicit artifact keys that may be applied from non-auto buckets. |
+| `context` | Consumer metadata forwarded to state store and artifact callbacks. |
+
+`WP_Agent_Package_Adoption_Result` reports the plan, applied entries, skipped entries, failed entries, and installed snapshots recorded for applied artifacts. This lets plugin updates ship improved bundled agents while customized prompts, flows, memory, or settings remain reviewable instead of being blindly overwritten.
 
 ## Artifact type registry
 

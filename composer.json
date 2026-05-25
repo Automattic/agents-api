@@ -25,6 +25,7 @@
       "php tests/message-envelope-smoke.php",
       "php tests/registry-smoke.php",
       "php tests/package-lifecycle-smoke.php",
+      "php tests/package-adoption-orchestration-smoke.php",
       "php tests/execution-principal-smoke.php",
       "php tests/effective-agent-resolver-smoke.php",
       "php tests/caller-context-smoke.php",

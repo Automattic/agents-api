@@ -39,7 +39,10 @@ require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-update-plann
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-callbacks.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adoption-diff.php';
+require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-state-store.php';
+require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adoption-request.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adoption-result.php';
+require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adoption-orchestrator.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adopter.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-capability-ceiling.php';
 require_once AGENTS_API_PATH . 'src/Auth/class-wp-agent-access-grant.php';
