@@ -108,6 +108,34 @@ Core fields:
 
 Package artifacts can describe diff callbacks through registered artifact types, which supports human-reviewable adoption/update flows without tying package review to live runtime pending-action approval.
 
+## Package lifecycle primitives
+
+Agents API owns storage-neutral primitives for package update planning. They do not create database rows, read package files from disk, approve changes, or apply artifacts. Consumers provide installed/current/target artifact arrays and decide how to store or display the resulting plan.
+
+Core classes:
+
+| Class | Purpose |
+| --- | --- |
+| `WP_Agent_Package_Artifact_Status` | Drift vocabulary: `clean`, `modified`, `missing`, `orphaned`. |
+| `WP_Agent_Package_Artifact_Hasher` | Deterministic SHA-256 hashes for strings and JSON-friendly payloads. Associative key order is normalized; list order remains significant. |
+| `WP_Agent_Package_Installed_Artifact` | Immutable install-time snapshot with package version, artifact identity, hashes, status, timestamps, and optional installed payload. |
+| `WP_Agent_Package_Update_Planner` | Pure planner that compares installed, current, and target artifact state. |
+| `WP_Agent_Package_Update_Plan` | Bucketed plan value object. |
+| `WP_Agent_Package_Artifact_Callbacks` | Helper for invoking registered artifact type lifecycle callbacks. |
+
+`WP_Agent_Package_Update_Planner::plan()` returns buckets:
+
+| Bucket | Meaning |
+| --- | --- |
+| `auto_apply` | New artifacts without local state, or artifacts whose current hash still matches the installed hash. |
+| `needs_approval` | Untracked local artifacts or locally modified artifacts that differ from the target. |
+| `warnings` | Missing local artifacts or installed artifacts absent from the target package. |
+| `no_op` | Current artifact already matches the target. |
+
+Planner entries include artifact identity, hashes, a reason, a summary, and a redacted before/after diff payload. Secret-like keys such as `token`, `password`, `api_key`, `authorization`, and `credential` are redacted recursively.
+
+`WP_Agent_Package_Adoption_Diff` accepts an optional `WP_Agent_Package_Update_Plan` so adopters can return bucketed artifact plans alongside the existing flat `changes` and `warnings` fields.
+
 ## Artifact type registry
 
 `WP_Agent_Package_Artifacts_Registry` manages artifact type metadata. Registration fires through `wp_agent_package_artifacts_init` when the singleton is first resolved after `init`.
