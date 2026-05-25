@@ -38,6 +38,8 @@ require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-update-plan.
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-update-planner.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-callbacks.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package.php';
+require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-capability-report.php';
+require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-capability-checker.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adoption-diff.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-state-store.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-adoption-request.php';

@@ -84,6 +84,8 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Installed_
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Update_Plan' ), 'WP_Agent_Package_Update_Plan value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Update_Planner' ), 'WP_Agent_Package_Update_Planner service is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact_Callbacks' ), 'WP_Agent_Package_Artifact_Callbacks helper is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Capability_Report' ), 'WP_Agent_Package_Capability_Report value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Capability_Checker' ), 'WP_Agent_Package_Capability_Checker service is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Access_Grant' ), 'WP_Agent_Access_Grant value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Access_Store' ), 'WP_Agent_Access_Store contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token' ), 'WP_Agent_Token value object is available', $failures, $passes );
