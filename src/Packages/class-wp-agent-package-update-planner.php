@@ -16,7 +16,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 		/**
 		 * Plans an artifact update without mutating storage.
 		 *
-		 * Artifact arrays accept: artifact_type, artifact_slug, source, payload, hash.
+		 * Artifact arrays accept: artifact_type, artifact_id, source, payload, hash.
 		 * Installed arrays may also use artifact_id/source_path for downstream adapters.
 		 *
 		 * @param array<int,array<string,mixed>|WP_Agent_Package_Installed_Artifact> $installed_artifacts Install-time artifact records.
@@ -76,10 +76,10 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 				$buckets['warnings'][] = array(
 					'artifact_key'  => $key,
 					'artifact_type' => (string) $installed_artifact['artifact_type'],
-					'artifact_slug' => (string) $installed_artifact['artifact_slug'],
+					'artifact_id'   => (string) $installed_artifact['artifact_id'],
 					'source'        => (string) ( $installed_artifact['source'] ?? '' ),
 					'reason'        => 'orphaned_installed_artifact',
-					'summary'       => sprintf( '%s %s is not present in the target package.', $installed_artifact['artifact_type'], $installed_artifact['artifact_slug'] ),
+					'summary'       => sprintf( '%s %s is not present in the target package.', $installed_artifact['artifact_type'], $installed_artifact['artifact_id'] ),
 				);
 			}
 
@@ -98,7 +98,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 					continue;
 				}
 				$row = self::normalize_artifact_row( $row );
-				$key = self::artifact_key( (string) $row['artifact_type'], (string) $row['artifact_slug'] );
+				$key = self::artifact_key( (string) $row['artifact_type'], (string) $row['artifact_id'] );
 				$indexed[ $key ] = $row;
 			}
 
@@ -118,7 +118,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 					continue;
 				}
 				$row = self::normalize_artifact_row( $row );
-				$key = self::artifact_key( (string) $row['artifact_type'], (string) $row['artifact_slug'] );
+				$key = self::artifact_key( (string) $row['artifact_type'], (string) $row['artifact_id'] );
 				$indexed[ $key ] = $row;
 			}
 
@@ -129,7 +129,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 		private static function row_from_package_artifact( WP_Agent_Package_Artifact $artifact ): array {
 			return array(
 				'artifact_type' => $artifact->get_type(),
-				'artifact_slug' => $artifact->get_slug(),
+				'artifact_id'   => $artifact->get_slug(),
 				'source'        => $artifact->get_source(),
 				'hash'          => '' !== $artifact->get_checksum() ? $artifact->get_checksum() : null,
 			);
@@ -140,7 +140,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 				$row,
 				array(
 					'artifact_type' => WP_Agent_Package_Artifact::prepare_type( $row['artifact_type'] ?? '' ),
-					'artifact_slug' => sanitize_title( (string) ( $row['artifact_slug'] ?? ( $row['artifact_id'] ?? '' ) ) ),
+					'artifact_id'   => self::normalize_artifact_id( $row['artifact_id'] ?? ( $row['artifact_slug'] ?? '' ) ),
 					'source'        => (string) ( $row['source'] ?? ( $row['source_path'] ?? '' ) ),
 				)
 			);
@@ -150,13 +150,13 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			return array(
 				'artifact_key'   => $key,
 				'artifact_type'  => (string) $target['artifact_type'],
-				'artifact_slug'  => (string) $target['artifact_slug'],
+				'artifact_id'    => (string) $target['artifact_id'],
 				'source'         => (string) ( $target['source'] ?? '' ),
 				'reason'         => $reason,
 				'installed_hash' => $installed_hash,
 				'current_hash'   => $current_hash,
 				'target_hash'    => $target_hash,
-				'summary'        => sprintf( '%s %s: %s', (string) $target['artifact_type'], (string) $target['artifact_slug'], str_replace( '_', ' ', $reason ) ),
+				'summary'        => sprintf( '%s %s: %s', (string) $target['artifact_type'], (string) $target['artifact_id'], str_replace( '_', ' ', $reason ) ),
 				'diff'           => array(
 					'before' => self::redact( $current['payload'] ?? null ),
 					'after'  => self::redact( $target['payload'] ?? null ),
@@ -166,6 +166,15 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 
 		private static function artifact_key( string $type, string $slug ): string {
 			return $type . ':' . $slug;
+		}
+
+		private static function normalize_artifact_id( $artifact_id ): string {
+			$artifact_id = trim( str_replace( '\\', '/', (string) $artifact_id ) );
+			if ( '' === $artifact_id || str_starts_with( $artifact_id, '/' ) || str_contains( $artifact_id, '..' ) ) {
+				throw new InvalidArgumentException( 'Agent package artifact rows require a package-local artifact_id.' );
+			}
+
+			return $artifact_id;
 		}
 
 		private static function artifact_hash( ?array $artifact ): ?string {

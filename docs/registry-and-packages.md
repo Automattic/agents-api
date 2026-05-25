@@ -118,7 +118,7 @@ Core classes:
 | --- | --- |
 | `WP_Agent_Package_Artifact_Status` | Drift vocabulary: `clean`, `modified`, `missing`, `orphaned`. |
 | `WP_Agent_Package_Artifact_Hasher` | Deterministic SHA-256 hashes for strings and JSON-friendly payloads. Associative key order is normalized; list order remains significant. |
-| `WP_Agent_Package_Installed_Artifact` | Immutable install-time snapshot with package version, artifact identity, hashes, status, timestamps, and optional installed payload. |
+| `WP_Agent_Package_Installed_Artifact` | Immutable install-time snapshot with package version, lossless artifact identity, hashes, status, timestamps, and optional installed payload. |
 | `WP_Agent_Package_Update_Planner` | Pure planner that compares installed, current, and target artifact state. |
 | `WP_Agent_Package_Update_Plan` | Bucketed plan value object. |
 | `WP_Agent_Package_Artifact_Callbacks` | Helper for invoking registered artifact type lifecycle callbacks. |

@@ -77,13 +77,28 @@ agents_api_smoke_assert_equals( WP_Agent_Package_Artifact_Status::MODIFIED, $mod
 agents_api_smoke_assert_equals( WP_Agent_Package_Artifact_Status::MISSING, $missing->get_status(), 'missing current payload is missing', $failures, $passes );
 agents_api_smoke_assert_equals( 'prompts/welcome.md', $snapshot->to_array()['source'], 'installed snapshot preserves package-relative source', $failures, $passes );
 
+$path_id_snapshot = WP_Agent_Package_Installed_Artifact::from_array(
+	array(
+		'package_slug'    => 'demo-package',
+		'package_version' => '1.2.3',
+		'artifact_type'   => 'example/prompt',
+		'artifact_id'     => 'memory/agent/SOUL.md',
+		'source'          => 'memory/agent/SOUL.md',
+		'installed_hash'  => $hash_a,
+		'current_hash'    => $hash_a,
+		'installed_at'    => '2026-05-25T00:00:00Z',
+		'updated_at'      => '2026-05-25T00:00:00Z',
+	)
+);
+agents_api_smoke_assert_equals( 'memory/agent/SOUL.md', $path_id_snapshot->to_array()['artifact_id'], 'installed artifact IDs preserve package-relative paths', $failures, $passes );
+
 echo "\n[3] Update planner buckets artifacts without mutating storage:\n";
 $installed = array(
 	array_merge(
 		$snapshot->to_array(),
 		array(
 			'artifact_type' => 'example/prompt',
-			'artifact_slug' => 'clean-update',
+			'artifact_id'   => 'clean-update',
 			'source'        => 'prompts/clean-update.md',
 			'installed_hash' => WP_Agent_Package_Artifact_Hasher::hash( array( 'body' => 'old' ) ),
 			'current_hash'   => WP_Agent_Package_Artifact_Hasher::hash( array( 'body' => 'old' ) ),
@@ -93,7 +108,7 @@ $installed = array(
 		$snapshot->to_array(),
 		array(
 			'artifact_type' => 'example/prompt',
-			'artifact_slug' => 'local-edit',
+			'artifact_id'   => 'local-edit',
 			'source'        => 'prompts/local-edit.md',
 			'installed_hash' => WP_Agent_Package_Artifact_Hasher::hash( array( 'body' => 'base' ) ),
 			'current_hash'   => WP_Agent_Package_Artifact_Hasher::hash( array( 'body' => 'local' ) ),
@@ -103,7 +118,7 @@ $installed = array(
 		$snapshot->to_array(),
 		array(
 			'artifact_type' => 'example/prompt',
-			'artifact_slug' => 'removed-upstream',
+			'artifact_id'   => 'removed-upstream',
 			'source'        => 'prompts/removed-upstream.md',
 		)
 	),
@@ -111,13 +126,13 @@ $installed = array(
 $current = array(
 	array(
 		'artifact_type' => 'example/prompt',
-		'artifact_slug' => 'clean-update',
+		'artifact_id'   => 'clean-update',
 		'source'        => 'prompts/clean-update.md',
 		'payload'       => array( 'body' => 'old' ),
 	),
 	array(
 		'artifact_type' => 'example/prompt',
-		'artifact_slug' => 'local-edit',
+		'artifact_id'   => 'local-edit',
 		'source'        => 'prompts/local-edit.md',
 		'payload'       => array(
 			'body'  => 'local',
@@ -126,7 +141,7 @@ $current = array(
 	),
 	array(
 		'artifact_type' => 'example/prompt',
-		'artifact_slug' => 'untracked-local',
+		'artifact_id'   => 'untracked-local',
 		'source'        => 'prompts/untracked-local.md',
 		'payload'       => array( 'body' => 'local-only' ),
 	),
@@ -134,25 +149,25 @@ $current = array(
 $target = array(
 	array(
 		'artifact_type' => 'example/prompt',
-		'artifact_slug' => 'clean-update',
+		'artifact_id'   => 'clean-update',
 		'source'        => 'prompts/clean-update.md',
 		'payload'       => array( 'body' => 'new' ),
 	),
 	array(
 		'artifact_type' => 'example/prompt',
-		'artifact_slug' => 'local-edit',
+		'artifact_id'   => 'local-edit',
 		'source'        => 'prompts/local-edit.md',
 		'payload'       => array( 'body' => 'remote' ),
 	),
 	array(
 		'artifact_type' => 'example/prompt',
-		'artifact_slug' => 'untracked-local',
+		'artifact_id'   => 'untracked-local',
 		'source'        => 'prompts/untracked-local.md',
 		'payload'       => array( 'body' => 'remote' ),
 	),
 	array(
 		'artifact_type' => 'example/prompt',
-		'artifact_slug' => 'brand-new',
+		'artifact_id'   => 'brand-new',
 		'source'        => 'prompts/brand-new.md',
 		'payload'       => array( 'body' => 'new' ),
 	),

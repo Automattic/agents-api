@@ -16,7 +16,7 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 		private string $package_slug;
 		private string $package_version;
 		private string $artifact_type;
-		private string $artifact_slug;
+		private string $artifact_id;
 		private string $source;
 		private ?string $installed_hash;
 		private ?string $current_hash;
@@ -34,7 +34,7 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 			$this->package_slug      = $this->prepare_slug( $artifact['package_slug'] ?? '', 'package_slug' );
 			$this->package_version   = $this->prepare_string( $artifact['package_version'] ?? '', 'package_version' );
 			$this->artifact_type     = WP_Agent_Package_Artifact::prepare_type( $artifact['artifact_type'] ?? '' );
-			$this->artifact_slug     = $this->prepare_slug( $artifact['artifact_slug'] ?? ( $artifact['artifact_id'] ?? '' ), 'artifact_slug' );
+			$this->artifact_id       = $this->prepare_id( $artifact['artifact_id'] ?? ( $artifact['artifact_slug'] ?? '' ) );
 			$this->source            = $this->prepare_source( $artifact['source'] ?? ( $artifact['source_path'] ?? '' ) );
 			$this->installed_hash    = $this->prepare_optional_string( $artifact['installed_hash'] ?? null );
 			$this->current_hash      = $this->prepare_optional_string( $artifact['current_hash'] ?? null );
@@ -61,7 +61,7 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 					'package_slug'      => $package->get_slug(),
 					'package_version'   => $package->get_version(),
 					'artifact_type'     => $artifact->get_type(),
-					'artifact_slug'     => $artifact->get_slug(),
+					'artifact_id'       => $artifact->get_slug(),
 					'source'            => $artifact->get_source(),
 					'installed_hash'    => $hash,
 					'current_hash'      => $hash,
@@ -95,7 +95,7 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 					'package_slug'      => $this->package_slug,
 					'package_version'   => $this->package_version,
 					'artifact_type'     => $this->artifact_type,
-					'artifact_slug'     => $this->artifact_slug,
+					'artifact_id'       => $this->artifact_id,
 					'source'            => $this->source,
 					'installed_hash'    => $this->installed_hash,
 					'current_hash'      => null === $current_payload ? null : WP_Agent_Package_Artifact_Hasher::hash( $current_payload ),
@@ -119,7 +119,11 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 		}
 
 		public function get_artifact_slug(): string {
-			return $this->artifact_slug;
+			return $this->artifact_id;
+		}
+
+		public function get_artifact_id(): string {
+			return $this->artifact_id;
 		}
 
 		public function get_source(): string {
@@ -152,7 +156,7 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 				'package_slug'    => $this->package_slug,
 				'package_version' => $this->package_version,
 				'artifact_type'   => $this->artifact_type,
-				'artifact_slug'   => $this->artifact_slug,
+				'artifact_id'     => $this->artifact_id,
 				'source'          => $this->source,
 				'installed_hash'  => $this->installed_hash,
 				'current_hash'    => $this->current_hash,
@@ -177,6 +181,15 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 			return $value;
 		}
 
+		private function prepare_id( $value ): string {
+			$value = trim( str_replace( '\\', '/', (string) $value ) );
+			if ( '' === $value || str_starts_with( $value, '/' ) || str_contains( $value, '..' ) ) {
+				throw new InvalidArgumentException( 'Agent package installed artifact artifact_id must be a non-empty package-local identifier.' );
+			}
+
+			return $value;
+		}
+
 		private function prepare_string( $value, string $field ): string {
 			$value = trim( (string) $value );
 			if ( '' === $value ) {
@@ -195,7 +208,7 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 			$artifact = new WP_Agent_Package_Artifact(
 				array(
 					'type'   => $this->artifact_type,
-					'slug'   => $this->artifact_slug,
+					'slug'   => sanitize_title( $this->artifact_id ),
 					'source' => $source,
 				)
 			);
