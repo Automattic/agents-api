@@ -124,6 +124,7 @@ require_once AGENTS_API_PATH . 'src/Memory/class-wp-agent-memory-read-result.php
 require_once AGENTS_API_PATH . 'src/Memory/class-wp-agent-memory-write-result.php';
 require_once AGENTS_API_PATH . 'src/Memory/class-wp-agent-memory-store.php';
 require_once AGENTS_API_PATH . 'src/Memory/class-wp-agent-memory-stores.php';
+require_once AGENTS_API_PATH . 'src/Abilities/class-wp-agent-ability-lifecycle-bridge.php';
 require_once AGENTS_API_PATH . 'src/Guidelines/guidelines.php';
 require_once AGENTS_API_PATH . 'src/Guidelines/class-wp-guidelines-substrate.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-external-message.php';
@@ -166,3 +167,4 @@ require_once AGENTS_API_PATH . 'src/Routines/register-action-scheduler-listener.
 
 add_action( 'init', array( 'WP_Agents_Registry', 'init' ), 10 );
 add_action( 'init', array( 'WP_Guidelines_Substrate', 'register' ), 9 );
+add_action( 'init', array( 'AgentsAPI\\AI\\Abilities\\WP_Agent_Ability_Lifecycle_Bridge', 'register' ), 5 );

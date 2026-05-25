@@ -36,6 +36,7 @@
       "php tests/identity-smoke.php",
       "php tests/memory-metadata-contract-smoke.php",
       "php tests/memory-store-resolver-smoke.php",
+      "php tests/ability-lifecycle-bridge-smoke.php",
       "php tests/approval-action-value-shape-smoke.php",
       "php tests/workspace-scope-smoke.php",
       "php tests/compaction-item-smoke.php",
