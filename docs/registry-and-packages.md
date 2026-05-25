@@ -123,6 +123,8 @@ Core classes:
 | `WP_Agent_Package_Update_Plan` | Bucketed plan value object. |
 | `WP_Agent_Package_Artifact_Callbacks` | Helper for invoking registered artifact type lifecycle callbacks. |
 | `WP_Agent_Package_Artifact_State_Store` | Storage-neutral contract for installed, current, target, and recorded artifact snapshots. |
+| `WP_Agent_Package_Capability_Report` | Stable compatibility report for package requirements, host capabilities, unknown artifact types, and artifact-level blockers. |
+| `WP_Agent_Package_Capability_Checker` | Pure checker that compares a package declaration with host-supported capabilities. |
 | `WP_Agent_Package_Adoption_Request` | Value object describing install, upgrade, reconcile, uninstall, or dry-run adoption. |
 | `WP_Agent_Package_Adoption_Result` | Value object describing plans, applied/skipped/failed entries, and recorded snapshots. |
 | `WP_Agent_Package_Adoption_Orchestrator` | Storage-neutral coordinator that composes the planner, artifact callbacks, and state store. |
@@ -168,6 +170,26 @@ plugin package definition
 | `context` | Consumer metadata forwarded to state store and artifact callbacks. |
 
 `WP_Agent_Package_Adoption_Result` reports the plan, applied entries, skipped entries, failed entries, and installed snapshots recorded for applied artifacts. This lets plugin updates ship improved bundled agents while customized prompts, flows, memory, or settings remain reviewable instead of being blindly overwritten.
+
+## Package capability compatibility
+
+Portable packages can declare runtime needs without assuming every host can satisfy them. Package-level `capabilities` describe requirements for the whole package. Artifact-level `requires` describe requirements for one artifact. Hosts compare those strings against their supported capabilities before adoption.
+
+Use `WP_Agent_Package_Capability_Checker::check( $package, $host_capabilities )` to produce a `WP_Agent_Package_Capability_Report`. The checker also reports unknown artifact types from the artifact registry, or from an explicit `known_artifact_types` argument for tests and non-WordPress package readers.
+
+Report fields:
+
+| Field | Purpose |
+| --- | --- |
+| `compatible` | Boolean summary for whether all required capabilities and artifact types are supported. |
+| `status` | Stable string: `compatible` or `unsupported`. |
+| `required_capabilities` | Sorted union of package capabilities and artifact `requires` values. |
+| `host_capabilities` | Sorted capabilities supplied by the host. |
+| `unsupported_capabilities` | Required capabilities absent from host support. |
+| `unknown_artifact_types` | Artifact type slugs with no registered/known handler. |
+| `unsupported_artifacts` | Artifact-level details keyed by `artifact_type:artifact_slug`, including missing requirements and unknown type status. |
+
+Capability reports are advisory and storage-neutral. Hosts decide whether unsupported package pieces block adoption, become skipped artifacts, or are staged for user/admin approval. The checker must not create fallback runtime behavior for a host-specific artifact; the host adapter either supports the declared capability/type or reports it clearly.
 
 ## Artifact type registry
 
