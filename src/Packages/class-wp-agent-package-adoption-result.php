@@ -34,17 +34,46 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Result' ) ) {
 		 */
 		private array $messages;
 
+		private ?WP_Agent_Package_Update_Plan $plan;
+
+		/** @var array<int,array<string,mixed>> */
+		private array $applied_artifacts;
+
+		/** @var array<int,array<string,mixed>> */
+		private array $skipped_artifacts;
+
+		/** @var array<int,array<string,mixed>> */
+		private array $failed_artifacts;
+
+		/** @var array<int,WP_Agent_Package_Installed_Artifact> */
+		private array $recorded_artifacts;
+
+		/** @var array<string,mixed> */
+		private array $meta;
+
 		/**
 		 * Constructor.
 		 *
-		 * @param string             $status     Result status.
-		 * @param string             $agent_slug Adopted agent slug.
-		 * @param array<int, string> $messages   Result messages.
+		 * @param string                                     $status Result status.
+		 * @param string                                     $agent_slug Adopted agent slug.
+		 * @param array<int,string>                          $messages Result messages.
+		 * @param WP_Agent_Package_Update_Plan|null          $plan Optional package plan.
+		 * @param array<int,array<string,mixed>>             $applied_artifacts Applied entries.
+		 * @param array<int,array<string,mixed>>             $skipped_artifacts Skipped entries.
+		 * @param array<int,array<string,mixed>>             $failed_artifacts Failed entries.
+		 * @param array<int,WP_Agent_Package_Installed_Artifact> $recorded_artifacts Recorded snapshots.
+		 * @param array<string,mixed>                        $meta Result metadata.
 		 */
-		public function __construct( string $status, string $agent_slug, array $messages = array() ) {
-			$this->status     = $this->prepare_status( $status );
-			$this->agent_slug = sanitize_title( $agent_slug );
-			$this->messages   = $this->prepare_messages( $messages );
+		public function __construct( string $status, string $agent_slug, array $messages = array(), ?WP_Agent_Package_Update_Plan $plan = null, array $applied_artifacts = array(), array $skipped_artifacts = array(), array $failed_artifacts = array(), array $recorded_artifacts = array(), array $meta = array() ) {
+			$this->status             = $this->prepare_status( $status );
+			$this->agent_slug         = sanitize_title( $agent_slug );
+			$this->messages           = $this->prepare_messages( $messages );
+			$this->plan               = $plan;
+			$this->applied_artifacts  = $applied_artifacts;
+			$this->skipped_artifacts  = $skipped_artifacts;
+			$this->failed_artifacts   = $failed_artifacts;
+			$this->recorded_artifacts = $this->prepare_recorded_artifacts( $recorded_artifacts );
+			$this->meta               = $meta;
 
 			if ( '' === $this->agent_slug ) {
 				throw new InvalidArgumentException( 'Agent package adoption result requires an agent slug.' );
@@ -78,17 +107,62 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Result' ) ) {
 			return $this->messages;
 		}
 
+		public function get_plan(): ?WP_Agent_Package_Update_Plan {
+			return $this->plan;
+		}
+
+		/** @return array<int,array<string,mixed>> */
+		public function get_applied_artifacts(): array {
+			return $this->applied_artifacts;
+		}
+
+		/** @return array<int,array<string,mixed>> */
+		public function get_skipped_artifacts(): array {
+			return $this->skipped_artifacts;
+		}
+
+		/** @return array<int,array<string,mixed>> */
+		public function get_failed_artifacts(): array {
+			return $this->failed_artifacts;
+		}
+
+		/** @return array<int,WP_Agent_Package_Installed_Artifact> */
+		public function get_recorded_artifacts(): array {
+			return $this->recorded_artifacts;
+		}
+
+		/** @return array<string,mixed> */
+		public function get_meta(): array {
+			return $this->meta;
+		}
+
 		/**
 		 * Exports the value object.
 		 *
 		 * @return array<string, mixed>
 		 */
 		public function to_array(): array {
-			return array(
+			$data = array(
 				'status'     => $this->status,
 				'agent_slug' => $this->agent_slug,
 				'messages'   => $this->messages,
+				'applied'    => $this->applied_artifacts,
+				'skipped'    => $this->skipped_artifacts,
+				'failed'     => $this->failed_artifacts,
+				'recorded'   => array_map(
+					static function ( WP_Agent_Package_Installed_Artifact $artifact ): array {
+						return $artifact->to_array();
+					},
+					$this->recorded_artifacts
+				),
+				'meta'       => $this->meta,
 			);
+
+			if ( null !== $this->plan ) {
+				$data['plan'] = $this->plan->to_array();
+			}
+
+			return $data;
 		}
 
 		/**
@@ -99,9 +173,9 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Result' ) ) {
 		 */
 		private function prepare_status( string $status ): string {
 			$status  = sanitize_title( $status );
-			$allowed = array( 'adopted', 'updated', 'skipped', 'failed' );
+			$allowed = array( 'adopted', 'updated', 'skipped', 'failed', 'planned', 'applied', 'partial', 'needs-approval' );
 			if ( ! in_array( $status, $allowed, true ) ) {
-				throw new InvalidArgumentException( 'Agent package adoption result status must be one of adopted, updated, skipped, failed.' );
+				throw new InvalidArgumentException( 'Agent package adoption result status is invalid.' );
 			}
 
 			return $status;
@@ -119,6 +193,21 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Result' ) ) {
 				$message = trim( (string) $message );
 				if ( '' !== $message ) {
 					$prepared[] = $message;
+				}
+			}
+
+			return $prepared;
+		}
+
+		/**
+		 * @param array<int,mixed> $artifacts Raw artifacts.
+		 * @return array<int,WP_Agent_Package_Installed_Artifact>
+		 */
+		private function prepare_recorded_artifacts( array $artifacts ): array {
+			$prepared = array();
+			foreach ( $artifacts as $artifact ) {
+				if ( $artifact instanceof WP_Agent_Package_Installed_Artifact ) {
+					$prepared[] = $artifact;
 				}
 			}
 
