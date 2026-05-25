@@ -20,7 +20,7 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 		private string $source;
 		private ?string $installed_hash;
 		private ?string $current_hash;
-		private $installed_payload;
+		private mixed $installed_payload;
 		private string $status;
 		private string $installed_at;
 		private string $updated_at;

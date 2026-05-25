@@ -98,9 +98,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Plan' ) ) {
 				}
 
 				foreach ( $buckets[ $bucket ] as $entry ) {
-					if ( is_array( $entry ) ) {
-						$prepared[ $bucket ][] = $entry;
-					}
+					$prepared[ $bucket ][] = $entry;
 				}
 			}
 

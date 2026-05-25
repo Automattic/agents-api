@@ -93,12 +93,9 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 		private static function index_installed_artifacts( array $artifacts ): array {
 			$indexed = array();
 			foreach ( $artifacts as $artifact ) {
-				$row = $artifact instanceof WP_Agent_Package_Installed_Artifact ? $artifact->to_array() : $artifact;
-				if ( ! is_array( $row ) ) {
-					continue;
-				}
-				$row = self::normalize_artifact_row( $row );
-				$key = self::artifact_key( (string) $row['artifact_type'], (string) $row['artifact_id'] );
+				$row             = $artifact instanceof WP_Agent_Package_Installed_Artifact ? $artifact->to_array() : $artifact;
+				$row             = self::normalize_artifact_row( $row );
+				$key             = self::artifact_key( (string) $row['artifact_type'], (string) $row['artifact_id'] );
 				$indexed[ $key ] = $row;
 			}
 
@@ -113,12 +110,9 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 		private static function index_artifacts( array $artifacts ): array {
 			$indexed = array();
 			foreach ( $artifacts as $artifact ) {
-				$row = $artifact instanceof WP_Agent_Package_Artifact ? self::row_from_package_artifact( $artifact ) : $artifact;
-				if ( ! is_array( $row ) ) {
-					continue;
-				}
-				$row = self::normalize_artifact_row( $row );
-				$key = self::artifact_key( (string) $row['artifact_type'], (string) $row['artifact_id'] );
+				$row             = $artifact instanceof WP_Agent_Package_Artifact ? self::row_from_package_artifact( $artifact ) : $artifact;
+				$row             = self::normalize_artifact_row( $row );
+				$key             = self::artifact_key( (string) $row['artifact_type'], (string) $row['artifact_id'] );
 				$indexed[ $key ] = $row;
 			}
 
