@@ -78,6 +78,12 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Agents_Registry' ), 'WP_
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact' ), 'WP_Agent_Package_Artifact value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact_Type' ), 'WP_Agent_Package_Artifact_Type value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifacts_Registry' ), 'WP_Agent_Package_Artifacts_Registry facade is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact_Status' ), 'WP_Agent_Package_Artifact_Status vocabulary is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact_Hasher' ), 'WP_Agent_Package_Artifact_Hasher helper is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Installed_Artifact' ), 'WP_Agent_Package_Installed_Artifact value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Update_Plan' ), 'WP_Agent_Package_Update_Plan value object is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Update_Planner' ), 'WP_Agent_Package_Update_Planner service is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Package_Artifact_Callbacks' ), 'WP_Agent_Package_Artifact_Callbacks helper is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Access_Grant' ), 'WP_Agent_Access_Grant value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, interface_exists( 'WP_Agent_Access_Store' ), 'WP_Agent_Access_Store contract is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Token' ), 'WP_Agent_Token value object is available', $failures, $passes );
