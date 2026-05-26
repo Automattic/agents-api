@@ -39,4 +39,5 @@ jobs:
           commands: ${{ matrix.command }}
           expected-commands: lint,test
           app-token: ${{ steps.app-token.outputs.token || '' }}
-          autofix: 'false'
+          autofix: 'true'
+          autofix-commands: 'lint --fix'
