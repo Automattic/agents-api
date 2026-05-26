@@ -94,6 +94,7 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	agents_api_smoke_assert_equals( 'HELLO WORLD', $result['tool_execution_results'][0]['result']['result']['summary'], 'tool execution result carries executor payload', $failures, $passes );
 	agents_api_smoke_assert_equals( 'repeatable', $result['tool_execution_results'][0]['runtime']['duplicate_policy'] ?? '', 'tool execution result exposes duplicate policy runtime metadata', $failures, $passes );
 	agents_api_smoke_assert_equals( 'progress', $result['tool_execution_results'][0]['result']['runtime']['completion_signal'] ?? '', 'tool result preserves completion signal runtime metadata', $failures, $passes );
+	agents_api_smoke_assert_equals( 'I will summarize that for you.', $result['final_content'], 'final content skips synthetic tool-call messages', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $result['tool_audit_events'] ), 'result contains one tool audit event', $failures, $passes );
 agents_api_smoke_assert_equals( 'tool_call', $result['tool_audit_events'][0]['type'], 'tool audit event has stable type', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/summarize', $result['tool_audit_events'][0]['tool_name'], 'tool audit event has correct tool name', $failures, $passes );
@@ -251,7 +252,31 @@ agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'mediation exec
 agents_api_smoke_assert_equals( 2, $default_turn_count, 'mediation loop ran two turns with no explicit should_continue', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $default_result['tool_execution_results'] ), 'mediation default returned the tool result', $failures, $passes );
 
-echo "\n[6] Caller-managed path (no mediation) preserves break-after-1 default:\n";
+echo "\n[6] Tool-call-only tail has empty final content:\n";
+
+$tool_only_tail_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'go' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'tail' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 1,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+	)
+);
+
+agents_api_smoke_assert_equals( '', $tool_only_tail_result['final_content'], 'tool-call-only final turn does not become final content', $failures, $passes );
+
+echo "\n[7] Caller-managed path (no mediation) preserves break-after-1 default:\n";
 $caller_managed_default_count = 0;
 
 $caller_managed_default_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
@@ -279,7 +304,7 @@ $caller_managed_default_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 1, $caller_managed_default_count, 'caller-managed path still breaks after one turn without should_continue', $failures, $passes );
 agents_api_smoke_assert_equals( 2, count( $caller_managed_default_result['messages'] ), 'caller-managed transcript has user + one assistant message', $failures, $passes );
 
-echo "\n[7] Missing tools and executor exceptions produce safe audit events:\n";
+echo "\n[8] Missing tools and executor exceptions produce safe audit events:\n";
 $executor->executed = array();
 
 $missing_tool_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
