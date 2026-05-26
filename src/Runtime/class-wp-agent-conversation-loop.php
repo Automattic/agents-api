@@ -391,13 +391,20 @@ class WP_Agent_Conversation_Loop {
 			) );
 
 			// Build the tool_execution_results entry.
-			$tool_execution_results[] = array(
+			$execution_result = array(
 				'tool_name'    => $tool_name,
 				'tool_call_id' => $tool_call_id,
 				'result'       => $exec_result,
 				'parameters'   => is_array( $parameters ) ? $parameters : array(),
 				'turn_count'   => $turn,
 			);
+
+			$runtime = isset( $exec_result['runtime'] ) && is_array( $exec_result['runtime'] ) ? $exec_result['runtime'] : array();
+			if ( ! empty( $runtime ) ) {
+				$execution_result['runtime'] = $runtime;
+			}
+
+			$tool_execution_results[] = $execution_result;
 
 			$tool_audit_events[] = self::tool_audit_event(
 				$tool_name,

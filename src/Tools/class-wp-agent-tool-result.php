@@ -22,13 +22,14 @@ class WP_Agent_Tool_Result {
 	 * @param array  $metadata   Optional result metadata.
 	 * @return array<string, mixed>
 	 */
-	public static function success( string $tool_name, $result, array $metadata = array() ): array {
+	public static function success( string $tool_name, $result, array $metadata = array(), array $runtime = array() ): array {
 		return self::normalize(
 			array(
 				'success'   => true,
 				'tool_name' => $tool_name,
 				'result'    => $result,
 				'metadata'  => $metadata,
+				'runtime'   => $runtime,
 			)
 		);
 	}
@@ -41,13 +42,14 @@ class WP_Agent_Tool_Result {
 	 * @param array  $metadata  Optional result metadata.
 	 * @return array<string, mixed>
 	 */
-	public static function error( string $tool_name, string $error, array $metadata = array() ): array {
+	public static function error( string $tool_name, string $error, array $metadata = array(), array $runtime = array() ): array {
 		return self::normalize(
 			array(
 				'success'   => false,
 				'tool_name' => $tool_name,
 				'error'     => $error,
 				'metadata'  => $metadata,
+				'runtime'   => $runtime,
 			)
 		);
 	}
@@ -70,11 +72,17 @@ class WP_Agent_Tool_Result {
 			$metadata = array();
 		}
 
+		$runtime = WP_Agent_Tool_Declaration::normalizeRuntimeMetadata( $result['runtime'] ?? array() );
+
 		$normalized = array(
 			'success'   => $success,
 			'tool_name' => $tool_name,
 			'metadata'  => $metadata,
 		);
+
+		if ( ! empty( $runtime ) ) {
+			$normalized['runtime'] = $runtime;
+		}
 
 		if ( $success ) {
 			$normalized['result'] = $result['result'] ?? array();

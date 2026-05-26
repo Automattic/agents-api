@@ -33,11 +33,19 @@ $declaration = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalize(
 		),
 		'executor'    => 'client',
 		'scope'       => 'run',
+		'runtime'     => array(
+			'duplicate_policy' => 'repeatable',
+			'completion_signal' => 'progress',
+			'unsupported'       => new stdClass(),
+		),
 	)
 );
 agents_api_smoke_assert_equals( 'client/choose_post', $declaration['name'], 'runtime declaration keeps namespaced name', $failures, $passes );
 agents_api_smoke_assert_equals( 'client', $declaration['source'], 'runtime declaration records source', $failures, $passes );
 agents_api_smoke_assert_equals( 'run', $declaration['scope'], 'runtime declaration records run scope', $failures, $passes );
+agents_api_smoke_assert_equals( 'repeatable', $declaration['runtime']['duplicate_policy'] ?? '', 'runtime declaration preserves duplicate policy metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'progress', $declaration['runtime']['completion_signal'] ?? '', 'runtime declaration preserves completion signal metadata', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'unsupported', $declaration['runtime'] ?? array() ), 'runtime declaration drops unsupported metadata values', $failures, $passes );
 
 $registry = new AgentsAPI\AI\Tools\WP_Agent_Tool_Source_Registry();
 $registry->registerSource(
@@ -57,6 +65,10 @@ $registry->registerSource(
 				// this declaration, a `text` key in context never satisfies the
 				// required parameter — keeps required-arg sourcing auditable.
 				'client_context_bindings'  => array( 'text' ),
+				'runtime'                  => array(
+					'duplicate_policy' => 'repeatable',
+					'completion_signal' => 'progress',
+				),
 			),
 		);
 	}
@@ -199,5 +211,32 @@ agents_api_smoke_assert_equals( true, $result['success'], 'mediation returns nor
 agents_api_smoke_assert_equals( 'local/summarize', $result['tool_name'], 'mediated result records tool name', $failures, $passes );
 agents_api_smoke_assert_equals( 'HELLO', $result['result']['summary'], 'mediated result carries adapter payload', $failures, $passes );
 agents_api_smoke_assert_equals( 'req-123', $result['result']['request_id'], 'adapter receives merged parameters', $failures, $passes );
+agents_api_smoke_assert_equals( 'repeatable', $result['runtime']['duplicate_policy'] ?? '', 'mediated result preserves declaration duplicate policy runtime metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'progress', $result['runtime']['completion_signal'] ?? '', 'mediated result preserves declaration completion signal runtime metadata', $failures, $passes );
+
+$result_override_adapter = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
+	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
+		unset( $tool_definition, $context );
+
+		return array(
+			'success'   => true,
+			'tool_name' => $tool_call['tool_name'],
+			'result'    => array( 'summary' => 'OK' ),
+			'runtime'   => array(
+				'completion_signal' => 'complete',
+			),
+		);
+	}
+};
+
+$result_override = $executor->executeTool(
+	'local/summarize',
+	array( 'text' => 'hello' ),
+	$tools,
+	$result_override_adapter,
+	array()
+);
+agents_api_smoke_assert_equals( 'repeatable', $result_override['runtime']['duplicate_policy'] ?? '', 'result runtime keeps declaration metadata when executor adds runtime', $failures, $passes );
+agents_api_smoke_assert_equals( 'complete', $result_override['runtime']['completion_signal'] ?? '', 'executor runtime metadata can refine result runtime metadata', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API tool runtime', $failures, $passes );

@@ -91,6 +91,10 @@ class WP_Agent_Conversation_Result {
 				throw self::invalid( $path . '.is_handler_tool', 'must be a boolean when present' );
 			}
 
+			if ( array_key_exists( 'runtime', $tool_result ) && ! is_array( $tool_result['runtime'] ) ) {
+				throw self::invalid( $path . '.runtime', 'must be an array when present' );
+			}
+
 			if ( ! array_key_exists( 'turn_count', $tool_result ) || ! is_int( $tool_result['turn_count'] ) ) {
 				throw self::invalid( $path . '.turn_count', 'must be an integer' );
 			}
