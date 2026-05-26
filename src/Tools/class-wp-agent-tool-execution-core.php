@@ -34,6 +34,8 @@ class WP_Agent_Tool_Execution_Core {
 			);
 		}
 
+		$runtime = WP_Agent_Tool_Declaration::normalizeRuntimeMetadata( $tool_definition['runtime'] ?? array() );
+
 		$parameters = WP_Agent_Tool_Parameters::buildParameters( $tool_parameters, $context, $tool_definition );
 		$validation = WP_Agent_Tool_Parameters::validateRequiredParameters( $parameters, $tool_definition );
 		if ( ! $validation['valid'] ) {
@@ -45,7 +47,8 @@ class WP_Agent_Tool_Execution_Core {
 					array(
 						'error_type'         => 'missing_required_parameters',
 						'missing_parameters' => $validation['missing'],
-					)
+					),
+					$runtime
 				)
 			);
 		}
@@ -84,8 +87,18 @@ class WP_Agent_Tool_Execution_Core {
 		try {
 			$result = $executor->executeWP_Agent_Tool_Call( $tool_call, $tool_definition, $context );
 		} catch ( \Throwable $throwable ) {
-			return WP_Agent_Tool_Result::error( $tool_call['tool_name'], $throwable->getMessage(), array( 'error_type' => 'executor_exception' ) );
+			return WP_Agent_Tool_Result::error(
+				$tool_call['tool_name'],
+				$throwable->getMessage(),
+				array( 'error_type' => 'executor_exception' ),
+				WP_Agent_Tool_Declaration::normalizeRuntimeMetadata( $tool_definition['runtime'] ?? array() )
+			);
 		}
+
+		$runtime = array_merge(
+			WP_Agent_Tool_Declaration::normalizeRuntimeMetadata( $tool_definition['runtime'] ?? array() ),
+			WP_Agent_Tool_Declaration::normalizeRuntimeMetadata( $result['runtime'] ?? array() )
+		);
 
 		if ( ! array_key_exists( 'success', $result ) ) {
 			$result = array(
@@ -96,6 +109,9 @@ class WP_Agent_Tool_Execution_Core {
 		}
 
 		$result['tool_name'] = is_string( $result['tool_name'] ?? null ) ? $result['tool_name'] : $tool_call['tool_name'];
+		if ( ! empty( $runtime ) ) {
+			$result['runtime'] = $runtime;
+		}
 
 		return WP_Agent_Tool_Result::normalize( $result );
 	}

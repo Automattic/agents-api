@@ -134,11 +134,54 @@ $tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalize(
 		),
 		'executor'    => 'client',
 		'scope'       => 'run',
+		'runtime'     => array(
+			'duplicate_policy' => 'repeatable',
+			'completion_signal' => 'progress',
+		),
 	)
 );
 ```
 
 Invalid declarations produce machine-readable invalid field names through `validate()` or an `InvalidArgumentException` from `normalize()`.
+
+### Tool runtime metadata
+
+Tool declarations and tool results may include optional `runtime` metadata. This metadata is product-neutral execution policy data for the agent loop and host runtime; it is not a concrete tool implementation detail and should not encode product-specific tool names.
+
+Canonical keys:
+
+| Key | Value | Meaning |
+| --- | --- | --- |
+| `duplicate_policy` | `repeatable` | The same tool may be called repeatedly with the same parameters when the host considers that safe. |
+| `completion_signal` | `progress` | A successful tool result is progress toward completion and may be used by caller-owned completion policy. |
+
+The substrate treats `runtime` as a JSON-friendly associative array. It preserves scalar and nested array values with string keys, drops unsupported values, and leaves product-specific interpretation to callers.
+
+When the conversation loop mediates tool calls, declaration runtime metadata is propagated into the normalized tool result and exposed on the corresponding `tool_execution_results[]` entry:
+
+```php
+array(
+	'tool_name'    => 'client/search_docs',
+	'tool_call_id' => 'call_123',
+	'parameters'   => array( 'query' => 'runtime metadata' ),
+	'result'       => array(
+		'success'   => true,
+		'tool_name' => 'client/search_docs',
+		'result'    => array( 'matches' => array() ),
+		'runtime'   => array(
+			'duplicate_policy' => 'repeatable',
+			'completion_signal' => 'progress',
+		),
+	),
+	'runtime'      => array(
+		'duplicate_policy' => 'repeatable',
+		'completion_signal' => 'progress',
+	),
+	'turn_count'   => 1,
+)
+```
+
+If a concrete executor returns its own `runtime` metadata, the normalized result merges it over declaration metadata for that execution result. This lets the declaration advertise generic defaults while an executor refines result-scoped signals without changing the declaration.
 
 ## Tool execution core
 

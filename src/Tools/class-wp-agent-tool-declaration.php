@@ -24,6 +24,16 @@ class WP_Agent_Tool_Declaration {
 	public const SCOPE_RUN       = 'run';
 
 	/**
+	 * Generic runtime metadata key for duplicate-call behavior.
+	 */
+	public const RUNTIME_DUPLICATE_POLICY = 'duplicate_policy';
+
+	/**
+	 * Generic runtime metadata key for progress/completion signaling.
+	 */
+	public const RUNTIME_COMPLETION_SIGNAL = 'completion_signal';
+
+	/**
 	 * Normalize a runtime tool declaration or throw a field-scoped error.
 	 *
 	 * @param array $declaration Raw runtime tool declaration.
@@ -45,7 +55,7 @@ class WP_Agent_Tool_Declaration {
 		$name   = (string) $declaration['name'];
 		$source = self::sourceFromName( $name );
 
-		return array(
+		$normalized = array(
 			'name'        => $name,
 			'source'      => $source,
 			'description' => trim( (string) $declaration['description'] ),
@@ -53,6 +63,13 @@ class WP_Agent_Tool_Declaration {
 			'executor'    => self::EXECUTOR_CLIENT,
 			'scope'       => self::SCOPE_RUN,
 		);
+
+		$runtime = self::normalizeRuntimeMetadata( $declaration['runtime'] ?? array() );
+		if ( ! empty( $runtime ) ) {
+			$normalized['runtime'] = $runtime;
+		}
+
+		return $normalized;
 	}
 
 	/**
@@ -105,7 +122,76 @@ class WP_Agent_Tool_Declaration {
 			$errors[] = 'scope';
 		}
 
+		if ( isset( $declaration['runtime'] ) && ! is_array( $declaration['runtime'] ) ) {
+			$errors[] = 'runtime';
+		}
+
 		return array_values( array_unique( $errors ) );
+	}
+
+	/**
+	 * Normalize optional product-neutral runtime metadata.
+	 *
+	 * Runtime metadata is a JSON-friendly object used by agent loops and hosts to
+	 * make generic execution decisions without hardcoding product tool names. The
+	 * canonical keys are `duplicate_policy` and `completion_signal`, but callers
+	 * may include additional product-neutral scalar/list values for future policy.
+	 *
+	 * @param mixed $runtime Raw runtime metadata.
+	 * @return array<string, mixed> Normalized runtime metadata.
+	 */
+	public static function normalizeRuntimeMetadata( $runtime ): array {
+		if ( ! is_array( $runtime ) ) {
+			return array();
+		}
+
+		$normalized = array();
+		foreach ( $runtime as $key => $value ) {
+			if ( ! is_string( $key ) || '' === $key ) {
+				continue;
+			}
+
+			$normalized_value = self::normalizeRuntimeMetadataValue( $value );
+			if ( null === $normalized_value ) {
+				continue;
+			}
+
+			$normalized[ $key ] = $normalized_value;
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize one JSON-friendly runtime metadata value.
+	 *
+	 * @param mixed $value Raw metadata value.
+	 * @return mixed|null Normalized value, or null when unsupported.
+	 */
+	private static function normalizeRuntimeMetadataValue( $value ) {
+		if ( is_string( $value ) || is_int( $value ) || is_float( $value ) || is_bool( $value ) ) {
+			return $value;
+		}
+
+		if ( ! is_array( $value ) ) {
+			return null;
+		}
+
+		$normalized = array();
+		foreach ( $value as $key => $item ) {
+			$normalized_item = self::normalizeRuntimeMetadataValue( $item );
+			if ( null === $normalized_item ) {
+				continue;
+			}
+
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $normalized_item;
+			} else {
+				$normalized[] = $normalized_item;
+			}
+		}
+
+		return $normalized;
 	}
 
 	/**

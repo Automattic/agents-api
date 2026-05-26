@@ -52,6 +52,10 @@ $tools = array(
 		),
 		'executor'    => 'client',
 		'scope'       => 'run',
+		'runtime'     => array(
+			'duplicate_policy' => 'repeatable',
+			'completion_signal' => 'progress',
+		),
 	),
 );
 
@@ -88,6 +92,8 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	agents_api_smoke_assert_equals( 'client/summarize', $result['tool_execution_results'][0]['tool_name'], 'tool execution result has correct tool name', $failures, $passes );
 	agents_api_smoke_assert_equals( 'call_123', $result['tool_execution_results'][0]['tool_call_id'] ?? '', 'tool execution result preserves provider tool call id', $failures, $passes );
 	agents_api_smoke_assert_equals( 'HELLO WORLD', $result['tool_execution_results'][0]['result']['result']['summary'], 'tool execution result carries executor payload', $failures, $passes );
+	agents_api_smoke_assert_equals( 'repeatable', $result['tool_execution_results'][0]['runtime']['duplicate_policy'] ?? '', 'tool execution result exposes duplicate policy runtime metadata', $failures, $passes );
+	agents_api_smoke_assert_equals( 'progress', $result['tool_execution_results'][0]['result']['runtime']['completion_signal'] ?? '', 'tool result preserves completion signal runtime metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $result['tool_audit_events'] ), 'result contains one tool audit event', $failures, $passes );
 agents_api_smoke_assert_equals( 'tool_call', $result['tool_audit_events'][0]['type'], 'tool audit event has stable type', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/summarize', $result['tool_audit_events'][0]['tool_name'], 'tool audit event has correct tool name', $failures, $passes );
