@@ -25,6 +25,14 @@ final class WP_Agent_Execution_Principal {
 	public const AUTH_SOURCE_AUDIENCE             = 'audience';
 	public const AUTH_SOURCE_SYSTEM               = 'system';
 
+	public const KNOWN_AUTH_SOURCES = array(
+		self::AUTH_SOURCE_USER,
+		self::AUTH_SOURCE_APPLICATION_PASSWORD,
+		self::AUTH_SOURCE_AGENT_TOKEN,
+		self::AUTH_SOURCE_AUDIENCE,
+		self::AUTH_SOURCE_SYSTEM,
+	);
+
 	public const OWNER_TYPE_USER     = 'user';
 	public const OWNER_TYPE_AUDIENCE = 'audience';
 	public const OWNER_TYPE_TOKEN    = 'token';
@@ -50,6 +58,7 @@ final class WP_Agent_Execution_Principal {
 	 * @param array<string,mixed>               $audience_claims    Optional host-owned audience claims.
 	 * @param string|null                       $owner_type         Optional canonical transcript owner type.
 	 * @param string|null                       $owner_key          Optional opaque transcript owner key scoped to the owner type.
+	 * @param array<string,mixed>|null          $binding            Optional host-owned cryptographic binding claims.
 	 */
 	public function __construct(
 		public readonly int $acting_user_id,
@@ -66,6 +75,7 @@ final class WP_Agent_Execution_Principal {
 		public readonly array $audience_claims = array(),
 		public readonly ?string $owner_type = null,
 		public readonly ?string $owner_key = null,
+		private readonly ?array $binding = null,
 	) {
 		if ( $this->acting_user_id < 0 ) {
 			throw self::invalid( 'acting_user_id', 'must be zero or a positive integer' );
@@ -77,6 +87,10 @@ final class WP_Agent_Execution_Principal {
 
 		if ( '' === $this->auth_source ) {
 			throw self::invalid( 'auth_source', 'must be a non-empty string' );
+		}
+
+		if ( ! self::is_known_auth_source( $this->auth_source ) ) {
+			throw self::invalid( 'auth_source', 'must be a known authentication source' );
 		}
 
 		if ( '' === $this->request_context ) {
@@ -97,6 +111,10 @@ final class WP_Agent_Execution_Principal {
 
 		if ( false === self::jsonEncode( $this->audience_claims ) ) {
 			throw self::invalid( 'audience_claims', 'must be JSON serializable' );
+		}
+
+		if ( null !== $this->binding && false === self::jsonEncode( $this->binding ) ) {
+			throw self::invalid( 'binding', 'must be null or JSON serializable' );
 		}
 
 		if ( ( null === $this->owner_type ) !== ( null === $this->owner_key ) ) {
@@ -138,6 +156,22 @@ final class WP_Agent_Execution_Principal {
 		}
 
 		throw self::invalid( 'principal', 'resolver must return null, an array, or an WP_Agent_Execution_Principal' );
+	}
+
+	/**
+	 * Whether an auth source is known to Agents API or declared by the host.
+	 *
+	 * @param string $auth_source Authentication source identifier.
+	 * @return bool True when the auth source is allowed.
+	 */
+	public static function is_known_auth_source( string $auth_source ): bool {
+		$allowed = self::KNOWN_AUTH_SOURCES;
+
+		if ( function_exists( 'apply_filters' ) ) {
+			$allowed = apply_filters( 'wp_agent_known_auth_sources', $allowed );
+		}
+
+		return is_array( $allowed ) && in_array( $auth_source, $allowed, true );
 	}
 
 	/**
@@ -222,7 +256,8 @@ final class WP_Agent_Execution_Principal {
 			array_key_exists( 'audience_id', $principal ) && null !== $principal['audience_id'] ? (string) $principal['audience_id'] : null,
 			isset( $principal['audience_claims'] ) && is_array( $principal['audience_claims'] ) ? $principal['audience_claims'] : array(),
 			array_key_exists( 'owner_type', $principal ) && null !== $principal['owner_type'] ? (string) $principal['owner_type'] : null,
-			array_key_exists( 'owner_key', $principal ) && null !== $principal['owner_key'] ? (string) $principal['owner_key'] : null
+			array_key_exists( 'owner_key', $principal ) && null !== $principal['owner_key'] ? (string) $principal['owner_key'] : null,
+			isset( $principal['binding'] ) && is_array( $principal['binding'] ) ? $principal['binding'] : null
 		);
 	}
 
@@ -247,7 +282,17 @@ final class WP_Agent_Execution_Principal {
 			'audience_claims'    => $this->audience_claims,
 			'owner_type'         => $this->owner_type,
 			'owner_key'          => $this->owner_key,
+			'binding'            => $this->binding,
 		);
+	}
+
+	/**
+	 * Return host-owned cryptographic binding claims for this principal.
+	 *
+	 * @return array<string,mixed>|null Binding claims, or null when unbound.
+	 */
+	public function binding(): ?array {
+		return $this->binding;
 	}
 
 	/**
@@ -313,7 +358,8 @@ final class WP_Agent_Execution_Principal {
 			$this->audience_id,
 			$this->audience_claims,
 			$this->owner_type,
-			$this->owner_key
+			$this->owner_key,
+			$this->binding
 		);
 	}
 
