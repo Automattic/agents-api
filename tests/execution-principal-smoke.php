@@ -74,6 +74,10 @@ $from_array = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
 			'chain_depth'          => 1,
 			'chain_root_request_id' => 'root-1',
 		),
+		'binding'              => array(
+			'kid'       => 'key-1',
+			'signature' => 'sig-1',
+		),
 	)
 );
 agents_api_smoke_assert_equals( 7, $from_array->acting_user_id, 'from_array normalizes acting user id', $failures, $passes );
@@ -86,6 +90,8 @@ agents_api_smoke_assert_equals( 'browser', $from_array->client_id, 'from_array n
 agents_api_smoke_assert_equals( array( 'read' ), $from_array->capability_ceiling->allowed_capabilities, 'from_array normalizes capability ceiling', $failures, $passes );
 agents_api_smoke_assert_equals( 'caller-agent', $from_array->caller_context->caller_agent_id, 'from_array restores caller context', $failures, $passes );
 agents_api_smoke_assert_equals( 'root-1', $from_array->to_array()['caller_context']['chain_root_request_id'], 'principal exports caller context', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'kid' => 'key-1', 'signature' => 'sig-1' ), $from_array->binding(), 'from_array restores binding', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'kid' => 'key-1', 'signature' => 'sig-1' ), $from_array->to_array()['binding'], 'principal exports binding', $failures, $passes );
 
 $user_session = AgentsAPI\AI\WP_Agent_Execution_Principal::user_session(
 	99,
@@ -97,6 +103,8 @@ agents_api_smoke_assert_equals( 99, $user_session->acting_user_id, 'user_session
 agents_api_smoke_assert_equals( 'editor-agent', $user_session->effective_agent_id, 'user_session records effective agent id', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER, $user_session->auth_source, 'user_session records user auth source', $failures, $passes );
 agents_api_smoke_assert_equals( null, $user_session->token_id, 'user_session omits token id', $failures, $passes );
+agents_api_smoke_assert_equals( null, $user_session->binding(), 'user_session binding defaults to null', $failures, $passes );
+agents_api_smoke_assert_equals( null, $user_session->to_array()['binding'], 'principal exports null binding as no-op', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_USER, 'key' => '99' ), $user_session->conversation_owner(), 'user_session derives user conversation owner', $failures, $passes );
 
 add_filter(
@@ -189,6 +197,25 @@ try {
 } catch ( InvalidArgumentException $e ) {
 	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'effective_agent_id' ), 'empty effective agent id is rejected', $failures, $passes );
 }
+
+try {
+	new AgentsAPI\AI\WP_Agent_Execution_Principal( 1, 'agent', 'external_runtime', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );
+	agents_api_smoke_assert_equals( true, false, 'unknown auth source is rejected', $failures, $passes );
+} catch ( InvalidArgumentException $e ) {
+	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'auth_source' ), 'unknown auth source is rejected', $failures, $passes );
+}
+
+add_filter(
+	'wp_agent_known_auth_sources',
+	static function ( array $sources ): array {
+		$sources[] = 'external_runtime';
+		return $sources;
+	}
+);
+
+$filtered_auth_source = new AgentsAPI\AI\WP_Agent_Execution_Principal( 1, 'agent', 'external_runtime', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );
+agents_api_smoke_assert_equals( 'external_runtime', $filtered_auth_source->auth_source, 'filter-allowed auth source is accepted', $failures, $passes );
+agents_api_smoke_assert_equals( true, AgentsAPI\AI\WP_Agent_Execution_Principal::is_known_auth_source( 'external_runtime' ), 'filter declares known auth source', $failures, $passes );
 
 try {
 	new AgentsAPI\AI\WP_Agent_Execution_Principal( 1, 'agent', AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER, AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, 0 );
