@@ -21,7 +21,15 @@ agents_api_smoke_require_module();
 
 echo "\n[1] Conversation requests normalize runner inputs:\n";
 $principal = AgentsAPI\AI\WP_Agent_Execution_Principal::user_session( 123, 'example-agent', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );
-$request   = new AgentsAPI\AI\WP_Agent_Conversation_Request(
+$runtime_overrides = new WP_Agent_Runtime_Overrides(
+	array(
+		'provider_id'    => 'openai',
+		'model_id'       => 'gpt-5.5',
+		'temperature'    => 0.3,
+		'max_iterations' => 5,
+	)
+);
+$request           = new AgentsAPI\AI\WP_Agent_Conversation_Request(
 	array(
 		array( 'role' => 'user', 'content' => 'Hello' ),
 	),
@@ -37,7 +45,9 @@ $request   = new AgentsAPI\AI\WP_Agent_Conversation_Request(
 	array( 'request_kind' => 'interactive' ),
 	array( 'trace_id' => 'abc123' ),
 	0,
-	true
+	true,
+	null,
+	$runtime_overrides
 );
 
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Message::SCHEMA, $request->messages()[0]['schema'], 'request messages normalize to envelopes', $failures, $passes );
@@ -45,12 +55,15 @@ agents_api_smoke_assert_equals( $principal, $request->principal(), 'request expo
 agents_api_smoke_assert_equals( 'interactive', $request->runtimeContext()['request_kind'], 'request preserves caller runtime context', $failures, $passes );
 agents_api_smoke_assert_equals( 1, $request->maxTurns(), 'request enforces a positive turn budget', $failures, $passes );
 agents_api_smoke_assert_equals( true, $request->singleTurn(), 'request preserves single-turn flag', $failures, $passes );
+agents_api_smoke_assert_equals( 'openai', $request->runtimeContext()['provider_id'], 'request carries provider override to runtime context', $failures, $passes );
+agents_api_smoke_assert_equals( 'gpt-5.5', $request->runtimeContext()['model_id'], 'request carries model override to runtime context', $failures, $passes );
+agents_api_smoke_assert_equals( 0.3, $request->runtimeContext()['temperature'], 'request carries temperature override to runtime context', $failures, $passes );
 agents_api_smoke_assert_equals( 'abc123', $request->metadata()['trace_id'], 'request preserves caller metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/lookup', $request->tools()[0]['name'], 'request preserves normalized tool list', $failures, $passes );
 agents_api_smoke_assert_equals(
-	array( 'messages', 'tools', 'principal', 'runtime_context', 'metadata', 'max_turns', 'single_turn', 'workspace' ),
+	array( 'messages', 'tools', 'principal', 'runtime_context', 'metadata', 'max_turns', 'single_turn', 'workspace', 'runtime_overrides' ),
 	array_keys( $request->to_array() ),
-	'request array exposes neutral runner and workspace keys',
+	'request array exposes neutral runner, workspace, and override keys',
 	$failures,
 	$passes
 );

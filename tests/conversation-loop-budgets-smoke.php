@@ -299,4 +299,41 @@ agents_api_smoke_assert_equals( 3, $turn_count, 'explicit turns budget overrides
 agents_api_smoke_assert_equals( 'budget_exceeded', $result['status'] ?? null, 'explicit turns budget produces budget_exceeded status', $failures, $passes );
 agents_api_smoke_assert_equals( 'turns', $result['budget'] ?? null, 'explicit turns budget identified in result', $failures, $passes );
 
+echo "\n[9] Agent runtime max_iterations clamps loop turns and reaches runner context:\n";
+$turn_count  = 0;
+$provider_id = '';
+$agent       = new WP_Agent(
+	'budgeted-agent',
+	array(
+		'runtime_overrides' => array(
+			'max_iterations' => 2,
+			'provider_id'    => 'openai',
+		),
+	)
+);
+$result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'go' ) ),
+	static function ( array $messages, array $context ) use ( &$turn_count, &$provider_id ): array {
+		++$turn_count;
+		$provider_id = (string) ( $context['provider_id'] ?? '' );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'turn ' . $context['turn'] );
+
+		return array(
+			'messages'               => $messages,
+			'tool_execution_results' => array(),
+			'events'                 => array(),
+		);
+	},
+	array(
+		'agent'           => $agent,
+		'max_turns'       => 10,
+		'should_continue' => static function (): bool {
+			return true;
+		},
+	)
+);
+agents_api_smoke_assert_equals( 'openai', $provider_id, 'runtime provider override reaches runner context', $failures, $passes );
+agents_api_smoke_assert_equals( 2, $turn_count, 'runtime max_iterations clamps loop turns', $failures, $passes );
+agents_api_smoke_assert_equals( false, isset( $result['status'] ), 'runtime max_iterations clamp preserves max_turns exit semantics', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API conversation loop budgets', $failures, $passes );

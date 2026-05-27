@@ -70,4 +70,27 @@ agents_api_smoke_assert_equals(
 	$passes
 );
 
+$override_agent = new WP_Agent(
+	'persona-agent',
+	array(
+		'runtime_overrides' => array(
+			'system_prompt'  => 'Answer as the site concierge.',
+			'provider_id'    => 'openai',
+			'model_id'       => 'gpt-5.5',
+			'temperature'    => '0.2',
+			'max_iterations' => 4,
+			'tier_1_tools'   => array( 'agents/search', '', 'agents/search' ),
+			'greeting'       => 'How can I help?',
+		),
+	)
+);
+
+agents_api_smoke_assert_equals( true, $override_agent->runtime_overrides() instanceof WP_Agent_Runtime_Overrides, 'runtime overrides normalize to value object', $failures, $passes );
+agents_api_smoke_assert_equals( 'openai', $override_agent->runtime_overrides()->provider_id(), 'runtime overrides preserve provider', $failures, $passes );
+agents_api_smoke_assert_equals( 'gpt-5.5', $override_agent->runtime_overrides()->model_id(), 'runtime overrides preserve model', $failures, $passes );
+agents_api_smoke_assert_equals( 0.2, $override_agent->runtime_overrides()->temperature(), 'runtime overrides normalize temperature', $failures, $passes );
+agents_api_smoke_assert_equals( 4, $override_agent->runtime_overrides()->max_iterations(), 'runtime overrides preserve max_iterations', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'agents/search' ), $override_agent->runtime_overrides()->tier_1_tools(), 'runtime overrides normalize tier_1_tools', $failures, $passes );
+agents_api_smoke_assert_equals( null, ( new WP_Agent( 'empty-overrides' ) )->runtime_overrides()->model_id(), 'empty runtime overrides default to null fields', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API registry', $failures, $passes );

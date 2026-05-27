@@ -67,6 +67,8 @@ class WP_Agent_Conversation_Loop {
 	 * @return array Normalized conversation result.
 	 */
 	public static function run( array $messages, callable $turn_runner, array $options = array() ): array {
+		$runtime_overrides     = self::resolve_runtime_overrides( $options );
+		$options               = self::apply_runtime_overrides_to_options( $options, $runtime_overrides );
 		$max_turns             = self::max_turns( $options['max_turns'] ?? 1 );
 		$context               = isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array();
 		$tool_executor         = self::resolve_tool_executor( $options );
@@ -537,14 +539,62 @@ class WP_Agent_Conversation_Loop {
 			return $request;
 		}
 
+		$runtime_overrides = self::resolve_runtime_overrides( $options );
+
 		return new WP_Agent_Conversation_Request(
 			$messages,
 			array(),
 			null,
 			isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array(),
 			array(),
-			self::max_turns( $options['max_turns'] ?? 1 )
+			self::max_turns( $options['max_turns'] ?? 1 ),
+			false,
+			null,
+			$runtime_overrides
 		);
+	}
+
+	/**
+	 * Resolve runtime overrides from explicit options or an agent definition.
+	 *
+	 * @param array<string, mixed> $options Loop options.
+	 * @return \WP_Agent_Runtime_Overrides Runtime overrides.
+	 */
+	private static function resolve_runtime_overrides( array $options ): \WP_Agent_Runtime_Overrides {
+		$overrides = $options['runtime_overrides'] ?? null;
+		if ( $overrides instanceof \WP_Agent_Runtime_Overrides ) {
+			return $overrides;
+		}
+
+		if ( is_array( $overrides ) ) {
+			return new \WP_Agent_Runtime_Overrides( $overrides );
+		}
+
+		$agent = $options['agent'] ?? ( is_array( $options['context'] ?? null ) ? ( $options['context']['agent'] ?? null ) : null );
+		return $agent instanceof \WP_Agent ? $agent->runtime_overrides() : new \WP_Agent_Runtime_Overrides();
+	}
+
+	/**
+	 * Apply non-null runtime overrides to loop options.
+	 *
+	 * @param array<string, mixed>          $options   Loop options.
+	 * @param \WP_Agent_Runtime_Overrides $overrides Runtime overrides.
+	 * @return array<string, mixed> Loop options.
+	 */
+	private static function apply_runtime_overrides_to_options( array $options, \WP_Agent_Runtime_Overrides $overrides ): array {
+		if ( null !== $overrides->max_iterations() ) {
+			$options['max_turns'] = min( self::max_turns( $options['max_turns'] ?? $overrides->max_iterations() ), $overrides->max_iterations() );
+		}
+
+		$context = isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array();
+		foreach ( $overrides->to_array() as $key => $value ) {
+			if ( null !== $value && array() !== $value ) {
+				$context[ $key ] = $value;
+			}
+		}
+		$options['context'] = $context;
+
+		return $options;
 	}
 
 	/**
