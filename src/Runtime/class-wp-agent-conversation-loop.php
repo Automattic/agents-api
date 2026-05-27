@@ -57,6 +57,7 @@ class WP_Agent_Conversation_Loop {
 	 * - `completion_policy` (WP_Agent_Conversation_Completion_Policy|null): Typed completion policy.
 	 * - `spin_detector` (WP_Agent_Spin_Detector|null): Optional repeated tool-call detector.
 	 * - `identical_failure_tracker` (WP_Agent_Identical_Failure_Tracker|null): Optional repeated failure nudger.
+	 * - `tool_result_truncator` (WP_Agent_Tool_Result_Truncator|null): Optional mediated tool result truncator.
 	 * - `transcript_lock` or `transcript_lock_store` (WP_Agent_Conversation_Lock|null): Optional transcript lock.
 	 * - `transcript_session_id` (string): Session ID to lock when a lock store is provided.
 	 * - `transcript_lock_ttl` (int): Lock TTL in seconds. Defaults to 300.
@@ -82,6 +83,7 @@ class WP_Agent_Conversation_Loop {
 		$on_event              = self::resolve_event_sink( $options );
 		$spin_detector         = self::resolve_spin_detector( $options );
 		$failure_tracker       = self::resolve_identical_failure_tracker( $options );
+		$result_truncator      = self::resolve_tool_result_truncator( $options );
 		$request               = self::resolve_request( $messages, $options );
 		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
 		$lock_ttl              = self::resolve_lock_ttl( $options );
@@ -210,7 +212,8 @@ class WP_Agent_Conversation_Loop {
 						$turn,
 						$on_event,
 						$budgets,
-						$failure_tracker
+						$failure_tracker,
+						$result_truncator
 					);
 
 					$messages              = $mediation_result['messages'];
@@ -345,6 +348,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param callable|null                                     $on_event        Event sink.
 	 * @param array<string, WP_Agent_Iteration_Budget>                    $budgets         Named iteration budgets.
 	 * @param WP_Agent_Identical_Failure_Tracker|null                     $failure_tracker Optional identical-failure tracker.
+	 * @param WP_Agent_Tool_Result_Truncator|null                         $truncator       Optional tool result truncator.
 	 * @return array{messages: array, tool_execution_results: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null, spin_signatures: WP_Agent_Spin_Signature[]}
 	 */
 	private static function mediate_tool_calls(
@@ -356,7 +360,8 @@ class WP_Agent_Conversation_Loop {
 		int $turn,
 		?callable $on_event,
 		array $budgets = array(),
-		?WP_Agent_Identical_Failure_Tracker $failure_tracker = null
+		?WP_Agent_Identical_Failure_Tracker $failure_tracker = null,
+		?WP_Agent_Tool_Result_Truncator $truncator = null
 	): array {
 		$core                   = new WP_Agent_Tool_Execution_Core();
 		$messages               = isset( $result['messages'] ) && is_array( $result['messages'] )
@@ -414,6 +419,30 @@ class WP_Agent_Conversation_Loop {
 			);
 
 			$tool_def = $declarations[ $tool_name ] ?? null;
+			$original_exec_result = $exec_result;
+			$truncation           = self::maybe_truncate_tool_result( $truncator, $exec_result, $tool_name, $tool_context );
+			$exec_result          = $truncation['result'];
+
+			if ( $truncation['truncated'] ) {
+				$payload = array_merge(
+					$truncation['metadata'],
+					array(
+						'turn'            => $turn,
+						'tool_name'       => $tool_name,
+						'tool_call_id'    => $tool_call_id,
+						'original_result' => $original_exec_result,
+					)
+				);
+
+				self::emit_event( $on_event, 'tool_result_truncated', $payload );
+				$stored_payload = $payload;
+				unset( $stored_payload['original_result'] );
+
+				$events[] = array(
+					'type'     => 'tool_result_truncated',
+					'metadata' => $stored_payload,
+				);
+			}
 
 			self::emit_event( $on_event, 'tool_result', array(
 				'turn'         => $turn,
@@ -528,6 +557,41 @@ class WP_Agent_Conversation_Loop {
 			'conversation_complete'  => $complete,
 			'exceeded_budget'        => $exceeded_budget,
 			'spin_signatures'        => $spin_signatures,
+		);
+	}
+
+	/**
+	 * Apply the optional tool result truncator and normalize its return shape.
+	 *
+	 * @param WP_Agent_Tool_Result_Truncator|null $truncator Optional truncator.
+	 * @param array<string, mixed>                $result    Tool execution result.
+	 * @param string                              $tool_name Tool name.
+	 * @param array<string, mixed>                $context   Tool context.
+	 * @return array{result: array<string, mixed>, truncated: bool, metadata: array<string, mixed>}
+	 */
+	private static function maybe_truncate_tool_result( ?WP_Agent_Tool_Result_Truncator $truncator, array $result, string $tool_name, array $context ): array {
+		if ( null === $truncator ) {
+			return array(
+				'result'    => $result,
+				'truncated' => false,
+				'metadata'  => array(),
+			);
+		}
+
+		$truncated = $truncator->truncate_result( $result, $tool_name, $context );
+
+		if ( ! is_array( $truncated['result'] ?? null ) ) {
+			return array(
+				'result'    => $result,
+				'truncated' => false,
+				'metadata'  => array( 'reason' => 'invalid_truncator_result' ),
+			);
+		}
+
+		return array(
+			'result'    => $truncated['result'],
+			'truncated' => (bool) ( $truncated['truncated'] ?? false ),
+			'metadata'  => isset( $truncated['metadata'] ) && is_array( $truncated['metadata'] ) ? $truncated['metadata'] : array(),
 		);
 	}
 
@@ -1028,6 +1092,17 @@ class WP_Agent_Conversation_Loop {
 	private static function resolve_identical_failure_tracker( array $options ): ?WP_Agent_Identical_Failure_Tracker {
 		$tracker = $options['identical_failure_tracker'] ?? null;
 		return $tracker instanceof WP_Agent_Identical_Failure_Tracker ? $tracker : null;
+	}
+
+	/**
+	 * Resolve the tool result truncator from options.
+	 *
+	 * @param array $options Loop options.
+	 * @return WP_Agent_Tool_Result_Truncator|null
+	 */
+	private static function resolve_tool_result_truncator( array $options ): ?WP_Agent_Tool_Result_Truncator {
+		$truncator = $options['tool_result_truncator'] ?? null;
+		return $truncator instanceof WP_Agent_Tool_Result_Truncator ? $truncator : null;
 	}
 
 	/**

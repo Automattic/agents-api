@@ -30,6 +30,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Agent execution principal/context value objects.
 - Agent access grant, token, token authenticator, authorization policy, and capability ceiling contracts.
 - Multi-turn orchestration contracts.
+- Opt-in mediated tool result truncation for oversized transcript payloads.
 - Agent package and package-artifact contracts.
 - Shared `wp_guideline` / `wp_guideline_type` storage substrate polyfill when Core/Gutenberg do not provide it.
 - Agent memory store contracts and value objects.
@@ -171,6 +172,8 @@ wp_register_agent(
 - `AgentsAPI\AI\WP_Agent_Identical_Failure_Signature`
 - `AgentsAPI\AI\WP_Agent_Identical_Failure_Tracker`
 - `AgentsAPI\AI\WP_Agent_Consecutive_Identical_Failure_Tracker`
+- `AgentsAPI\AI\WP_Agent_Tool_Result_Truncator`
+- `AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator`
 - `AgentsAPI\AI\WP_Agent_Conversation_Result`
 - `AgentsAPI\AI\WP_Agent_Conversation_Loop`
 - `WP_Agent_Consent_Policy`
@@ -776,6 +779,9 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 		// Typed completion policy (#42)
 		'completion_policy' => $my_completion_policy,   // WP_Agent_Conversation_Completion_Policy
 
+		// Optional tool result truncation for oversized mediated results.
+		'tool_result_truncator' => new AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator( 8192 ),
+
 		// Transcript persistence (#43)
 		'transcript_persister' => $my_persister,        // WP_Agent_Transcript_Persister
 
@@ -787,7 +793,7 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 
 		// Lifecycle events (#44)
 		'on_event' => static function ( string $event, array $payload ): void {
-			// Events: turn_started, tool_call, tool_result, budget_exceeded, completed, failed
+			// Events: turn_started, tool_call, tool_result, tool_result_truncated, budget_exceeded, completed, failed
 			$logger->log( $event, $payload );
 		},
 
@@ -807,6 +813,8 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 ```
 
 All new options are opt-in. Existing callers passing only the original options continue to work identically.
+
+When `tool_result_truncator` is provided, the loop asks it to normalize mediated tool results before adding them to `tool_execution_results` and transcript `tool_result` messages. `WP_Agent_Byte_Limit_Tool_Result_Truncator` replaces oversized JSON-encoded results with an excerpt plus byte-count metadata and emits `tool_result_truncated`; the event payload includes `original_result` for observer-owned storage, logging, or artifact capture.
 
 The loop treats all adapter inputs and outputs as JSON-friendly arrays so products can map them to their own storage, streaming, audit, and transport layers without Agents API owning those layers.
 
