@@ -156,7 +156,7 @@ final class WP_Agent_Event_Trigger {
 	public function render_prompt( array $payload ): string {
 		$values = array();
 		foreach ( $this->placeholders as $name => $extractor ) {
-			$value = is_callable( $extractor )
+			$value           = is_callable( $extractor )
 				? call_user_func( $extractor, $payload )
 				: self::read_path( $payload, (string) $extractor );
 			$values[ $name ] = is_scalar( $value ) || null === $value ? (string) $value : wp_json_encode( $value );
