@@ -472,7 +472,7 @@ class WP_Agent_Conversation_Loop {
 					'assistant',
 					$nudge['message'],
 					array(
-						'type'                       => 'identical_failure_nudge',
+						'type'                        => 'identical_failure_nudge',
 						'identical_failure_signature' => $nudge,
 					)
 				);
