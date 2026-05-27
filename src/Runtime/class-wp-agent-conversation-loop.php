@@ -85,6 +85,8 @@ class WP_Agent_Conversation_Loop {
 		$budget_resolution     = self::resolve_budgets( $options, $max_turns );
 		$budgets               = $budget_resolution['budgets'];
 		$has_explicit_turns    = $budget_resolution['has_explicit_turns'];
+		$wall_clock_started_at = microtime( true );
+		$wall_clock_initial    = isset( $budgets['wall_clock_seconds'] ) ? $budgets['wall_clock_seconds']->current() : 0;
 		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
 		$messages              = WP_Agent_Message::normalize_many( $messages );
 		$events                = array();
@@ -124,6 +126,12 @@ class WP_Agent_Conversation_Loop {
 
 		try {
 			for ( $turn = 1; $turn <= $max_turns; ++$turn ) {
+				$wall_clock_exceeded = self::check_wall_clock_budget( $budgets, $wall_clock_started_at, $wall_clock_initial, $on_event );
+				if ( null !== $wall_clock_exceeded ) {
+					$exceeded_budget = $wall_clock_exceeded;
+					break;
+				}
+
 				$turns_run            = $turn;
 				$turn_context         = $context;
 				$turn_context['turn'] = $turn;
@@ -1006,16 +1014,74 @@ class WP_Agent_Conversation_Loop {
 		$budget->increment();
 
 		if ( $budget->exceeded() ) {
-			self::emit_event( $on_event, 'budget_exceeded', array(
-				'budget'  => $name,
-				'current' => $budget->current(),
-				'ceiling' => $budget->ceiling(),
-			) );
+			self::emit_event( $on_event, 'budget_exceeded', self::budget_event_payload( $budget ) );
 
 			return $name;
 		}
 
 		return null;
+	}
+
+	/**
+	 * Check the opt-in wall-clock budget before starting a turn.
+	 *
+	 * @param array<string, WP_Agent_Iteration_Budget> $budgets             Named budgets.
+	 * @param float                                    $started_at          Loop start timestamp.
+	 * @param int                                      $initial_elapsed_sec Existing elapsed seconds carried by the budget.
+	 * @param callable|null                            $on_event            Event sink.
+	 * @return string|null Exceeded budget name, or null.
+	 */
+	private static function check_wall_clock_budget( array $budgets, float $started_at, int $initial_elapsed_sec, ?callable $on_event ): ?string {
+		$name = 'wall_clock_seconds';
+		if ( ! isset( $budgets[ $name ] ) ) {
+			return null;
+		}
+
+		$budget  = $budgets[ $name ];
+		$elapsed = $initial_elapsed_sec + max( 0, (int) floor( microtime( true ) - $started_at ) );
+		$budget->set_current( $elapsed );
+
+		if ( $budget->exceeded() ) {
+			self::emit_event( $on_event, 'budget_exceeded', self::budget_event_payload( $budget ) );
+			return $name;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Build the standard budget-exceeded event payload.
+	 *
+	 * @param WP_Agent_Iteration_Budget $budget Exceeded budget.
+	 * @return array<string, mixed>
+	 */
+	private static function budget_event_payload( WP_Agent_Iteration_Budget $budget ): array {
+		$name = $budget->name();
+
+		return array(
+			'budget'    => $name,
+			'dimension' => self::budget_dimension( $name ),
+			'current'   => $budget->current(),
+			'ceiling'   => $budget->ceiling(),
+		);
+	}
+
+	/**
+	 * Map budget names to generic dimensions for observers.
+	 *
+	 * @param string $name Budget name.
+	 * @return string Dimension label.
+	 */
+	private static function budget_dimension( string $name ): string {
+		if ( 'wall_clock_seconds' === $name ) {
+			return 'wall_clock';
+		}
+
+		if ( 0 === strpos( $name, 'tool_calls' ) ) {
+			return 'tool_calls';
+		}
+
+		return $name;
 	}
 
 	/**
