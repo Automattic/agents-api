@@ -418,7 +418,7 @@ class WP_Agent_Conversation_Loop {
 				$tool_context
 			);
 
-			$tool_def = $declarations[ $tool_name ] ?? null;
+			$tool_def             = $declarations[ $tool_name ] ?? null;
 			$original_exec_result = $exec_result;
 			$truncation           = self::maybe_truncate_tool_result( $truncator, $exec_result, $tool_name, $tool_context );
 			$exec_result          = $truncation['result'];

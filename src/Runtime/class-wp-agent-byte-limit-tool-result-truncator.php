@@ -48,7 +48,7 @@ final class WP_Agent_Byte_Limit_Tool_Result_Truncator implements WP_Agent_Tool_R
 		$metadata  = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
 		$truncated = $result;
 
-		$truncated['result'] = array(
+		$truncated['result']   = array(
 			'truncated'      => true,
 			'excerpt'        => $excerpt,
 			'original_bytes' => $original_bytes,
