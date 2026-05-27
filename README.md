@@ -220,6 +220,10 @@ wp_register_agent(
 - `WP_Agent_Tool_Policy`
 - `WP_Agent_Tool_Policy_Filter`
 - `WP_Agent_Tool_Access_Policy`
+- `WP_Agent_Tool_Tier_Resolver`
+- `WP_Agent_Default_Tool_Tier_Resolver`
+- `WP_Agent_Tool_Usage_Tracker`
+- `WP_Agent_Null_Tool_Usage_Tracker`
 - `WP_Agent_Action_Policy_Resolver`
 - `WP_Agent_Action_Policy_Provider`
 - `AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope`
