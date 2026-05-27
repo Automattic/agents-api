@@ -108,6 +108,7 @@ require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-usage-tracker.php'
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-null-tool-usage-tracker.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-tier-resolver.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-default-tool-tier-resolver.php';
+require_once AGENTS_API_PATH . 'src/Tools/register-agent-ability-meta-abilities.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-request.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-runner.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-completion-decision.php';

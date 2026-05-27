@@ -32,6 +32,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Multi-turn orchestration contracts.
 - Opt-in mediated tool result truncation for oversized transcript payloads.
 - Opt-in between-turn interrupt sources for cancel, redirect, or additional instruction messages.
+- Canonical ability discovery and dispatch meta-abilities for large tool surfaces.
 - Agent package and package-artifact contracts.
 - Shared `wp_guideline` / `wp_guideline_type` storage substrate polyfill when Core/Gutenberg do not provide it.
 - Agent memory store contracts and value objects.
@@ -201,6 +202,7 @@ wp_register_agent(
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Executor`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Result`
+- `agents/ability-search` / `agents/ability-call`
 - `AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status`
@@ -823,6 +825,8 @@ All new options are opt-in. Existing callers passing only the original options c
 When `tool_result_truncator` is provided, the loop asks it to normalize mediated tool results before adding them to `tool_execution_results` and transcript `tool_result` messages. `WP_Agent_Byte_Limit_Tool_Result_Truncator` replaces oversized JSON-encoded results with an excerpt plus byte-count metadata and emits `tool_result_truncated`; the event payload includes `original_result` for observer-owned storage, logging, or artifact capture.
 
 When `interrupt_source` is provided, the loop checks it between turns with the current `WP_Agent_Conversation_Request`. Returning a message appends that message to the transcript and emits `interrupt_received`. Message metadata can set `interrupt_action` to `message`, `redirect`, or `cancel`; `cancel` stops the loop with `status: interrupted`, while `message` and `redirect` continue through the normal continuation policy.
+
+For large ability surfaces, Agents API registers two canonical meta-abilities. `agents/ability-search` searches registered abilities by name, category, substring, `+keyword`, or `select:foo/bar,baz/qux` and returns compact `{ name, summary, required_fields }` entries. `agents/ability-call` invokes a registered ability by name with JSON parameters, letting consumers keep lower-priority tools out of the prompt while still making them reachable through a stable discovery-and-call path.
 
 The loop treats all adapter inputs and outputs as JSON-friendly arrays so products can map them to their own storage, streaming, audit, and transport layers without Agents API owning those layers.
 
