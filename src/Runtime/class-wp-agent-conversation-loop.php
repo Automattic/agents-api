@@ -1040,6 +1040,9 @@ class WP_Agent_Conversation_Loop {
 			if ( ( $message['role'] ?? '' ) !== 'assistant' ) {
 				continue;
 			}
+			if ( WP_Agent_Message::TYPE_TOOL_CALL === ( $message['type'] ?? '' ) ) {
+				continue;
+			}
 			$content = $message['content'] ?? '';
 			if ( is_string( $content ) && '' !== $content ) {
 				return $content;
