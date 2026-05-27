@@ -31,6 +31,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Agent access grant, token, token authenticator, authorization policy, and capability ceiling contracts.
 - Multi-turn orchestration contracts.
 - Opt-in mediated tool result truncation for oversized transcript payloads.
+- Opt-in between-turn interrupt sources for cancel, redirect, or additional instruction messages.
 - Agent package and package-artifact contracts.
 - Shared `wp_guideline` / `wp_guideline_type` storage substrate polyfill when Core/Gutenberg do not provide it.
 - Agent memory store contracts and value objects.
@@ -782,6 +783,11 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 		// Optional tool result truncation for oversized mediated results.
 		'tool_result_truncator' => new AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator( 8192 ),
 
+		// Optional between-turn interruption. Return a message array or null.
+		'interrupt_source' => static function ( AgentsAPI\AI\WP_Agent_Conversation_Request $request ): ?array {
+			return $interrupt_queue->next_message_for( $request );
+		},
+
 		// Transcript persistence (#43)
 		'transcript_persister' => $my_persister,        // WP_Agent_Transcript_Persister
 
@@ -793,7 +799,7 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 
 		// Lifecycle events (#44)
 		'on_event' => static function ( string $event, array $payload ): void {
-			// Events: turn_started, tool_call, tool_result, tool_result_truncated, budget_exceeded, completed, failed
+			// Events: turn_started, tool_call, tool_result, tool_result_truncated, interrupt_received, budget_exceeded, completed, failed
 			$logger->log( $event, $payload );
 		},
 
@@ -815,6 +821,8 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 All new options are opt-in. Existing callers passing only the original options continue to work identically.
 
 When `tool_result_truncator` is provided, the loop asks it to normalize mediated tool results before adding them to `tool_execution_results` and transcript `tool_result` messages. `WP_Agent_Byte_Limit_Tool_Result_Truncator` replaces oversized JSON-encoded results with an excerpt plus byte-count metadata and emits `tool_result_truncated`; the event payload includes `original_result` for observer-owned storage, logging, or artifact capture.
+
+When `interrupt_source` is provided, the loop checks it between turns with the current `WP_Agent_Conversation_Request`. Returning a message appends that message to the transcript and emits `interrupt_received`. Message metadata can set `interrupt_action` to `message`, `redirect`, or `cancel`; `cancel` stops the loop with `status: interrupted`, while `message` and `redirect` continue through the normal continuation policy.
 
 The loop treats all adapter inputs and outputs as JSON-friendly arrays so products can map them to their own storage, streaming, audit, and transport layers without Agents API owning those layers.
 

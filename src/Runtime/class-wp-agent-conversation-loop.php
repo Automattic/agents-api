@@ -58,6 +58,7 @@ class WP_Agent_Conversation_Loop {
 	 * - `spin_detector` (WP_Agent_Spin_Detector|null): Optional repeated tool-call detector.
 	 * - `identical_failure_tracker` (WP_Agent_Identical_Failure_Tracker|null): Optional repeated failure nudger.
 	 * - `tool_result_truncator` (WP_Agent_Tool_Result_Truncator|null): Optional mediated tool result truncator.
+	 * - `interrupt_source` (callable|null): Optional source checked between turns. Returns a message array or null.
 	 * - `transcript_lock` or `transcript_lock_store` (WP_Agent_Conversation_Lock|null): Optional transcript lock.
 	 * - `transcript_session_id` (string): Session ID to lock when a lock store is provided.
 	 * - `transcript_lock_ttl` (int): Lock TTL in seconds. Defaults to 300.
@@ -84,6 +85,7 @@ class WP_Agent_Conversation_Loop {
 		$spin_detector         = self::resolve_spin_detector( $options );
 		$failure_tracker       = self::resolve_identical_failure_tracker( $options );
 		$result_truncator      = self::resolve_tool_result_truncator( $options );
+		$interrupt_source      = self::resolve_interrupt_source( $options );
 		$request               = self::resolve_request( $messages, $options );
 		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
 		$lock_ttl              = self::resolve_lock_ttl( $options );
@@ -101,6 +103,7 @@ class WP_Agent_Conversation_Loop {
 		$conversation_complete = false;
 		$exceeded_budget       = null;
 		$stalled               = null;
+		$interrupted           = null;
 
 		// Universal observability accumulators. Turn runners may report
 		// `usage` (token counts) and `request_metadata` (last provider request
@@ -270,6 +273,20 @@ class WP_Agent_Conversation_Loop {
 					break;
 				}
 
+				$interrupt = self::check_interrupt_source( $interrupt_source, $messages, $options, $turn_context, $on_event );
+				if ( null !== $interrupt ) {
+					$messages[] = $interrupt['message'];
+					$events[]   = array(
+						'type'     => 'interrupt_received',
+						'metadata' => $interrupt['metadata'],
+					);
+
+					if ( 'cancel' === $interrupt['action'] ) {
+						$interrupted = $interrupt['metadata'];
+						break;
+					}
+				}
+
 				// Increment the turns budget after a completed turn.
 				// Synthesized turns budgets (from max_turns) break the loop silently
 				// to preserve backwards compatibility. Explicit turns budgets signal
@@ -309,6 +326,12 @@ class WP_Agent_Conversation_Loop {
 				$final_result_data['status']    = 'stalled';
 				$final_result_data['stalled']   = $stalled;
 				$final_result_data['completed'] = false;
+			}
+
+			if ( null !== $interrupted ) {
+				$final_result_data['status']      = 'interrupted';
+				$final_result_data['interrupted'] = $interrupted;
+				$final_result_data['completed']   = false;
 			}
 
 			$final_result = WP_Agent_Conversation_Result::normalize( $final_result_data );
@@ -593,6 +616,96 @@ class WP_Agent_Conversation_Loop {
 			'truncated' => (bool) ( $truncated['truncated'] ?? false ),
 			'metadata'  => isset( $truncated['metadata'] ) && is_array( $truncated['metadata'] ) ? $truncated['metadata'] : array(),
 		);
+	}
+
+	/**
+	 * Check the optional interrupt source for a between-turn message.
+	 *
+	 * @param callable|null        $interrupt_source Optional interrupt source.
+	 * @param array<int, array>    $messages         Current transcript messages.
+	 * @param array<string, mixed> $options          Loop options.
+	 * @param array<string, mixed> $context          Current turn context.
+	 * @param callable|null        $on_event         Event sink.
+	 * @return array{message: array<string, mixed>, metadata: array<string, mixed>, action: string}|null Interrupt payload.
+	 */
+	private static function check_interrupt_source( ?callable $interrupt_source, array $messages, array $options, array $context, ?callable $on_event ): ?array {
+		if ( null === $interrupt_source ) {
+			return null;
+		}
+
+		$request = self::interrupt_request( $messages, $options );
+		$message = call_user_func( $interrupt_source, $request, $context );
+
+		if ( null === $message ) {
+			return null;
+		}
+
+		if ( ! is_array( $message ) ) {
+			self::emit_event( $on_event, 'interrupt_ignored', array(
+				'reason' => 'invalid_message',
+				'turn'   => (int) ( $context['turn'] ?? 0 ),
+			) );
+
+			return null;
+		}
+
+		$normalized       = WP_Agent_Message::normalize( $message );
+		$message_metadata = isset( $normalized['metadata'] ) && is_array( $normalized['metadata'] ) ? $normalized['metadata'] : array();
+		$action           = self::normalize_interrupt_action( $message_metadata['interrupt_action'] ?? ( $message_metadata['action'] ?? 'message' ) );
+		$metadata         = array(
+			'turn'    => (int) ( $context['turn'] ?? 0 ),
+			'action'  => $action,
+			'message' => $normalized,
+		);
+
+		self::emit_event( $on_event, 'interrupt_received', $metadata );
+
+		return array(
+			'message'  => $normalized,
+			'metadata' => $metadata,
+			'action'   => $action,
+		);
+	}
+
+	/**
+	 * Build an interrupt-source request with the current transcript.
+	 *
+	 * @param array<int, array>    $messages Current transcript messages.
+	 * @param array<string, mixed> $options  Loop options.
+	 * @return WP_Agent_Conversation_Request
+	 */
+	private static function interrupt_request( array $messages, array $options ): WP_Agent_Conversation_Request {
+		$request = $options['request'] ?? null;
+		if ( $request instanceof WP_Agent_Conversation_Request ) {
+			return new WP_Agent_Conversation_Request(
+				$messages,
+				$request->tools(),
+				$request->principal(),
+				$request->runtimeContext(),
+				$request->metadata(),
+				$request->maxTurns(),
+				$request->singleTurn(),
+				$request->workspace(),
+				$request->runtimeOverrides()
+			);
+		}
+
+		return self::resolve_request( $messages, $options );
+	}
+
+	/**
+	 * Normalize interrupt action vocabulary.
+	 *
+	 * @param mixed $action Raw action.
+	 * @return string Normalized action.
+	 */
+	private static function normalize_interrupt_action( $action ): string {
+		if ( ! is_string( $action ) ) {
+			return 'message';
+		}
+
+		$action = strtolower( trim( $action ) );
+		return in_array( $action, array( 'cancel', 'redirect', 'message' ), true ) ? $action : 'message';
 	}
 
 	/**
@@ -1103,6 +1216,17 @@ class WP_Agent_Conversation_Loop {
 	private static function resolve_tool_result_truncator( array $options ): ?WP_Agent_Tool_Result_Truncator {
 		$truncator = $options['tool_result_truncator'] ?? null;
 		return $truncator instanceof WP_Agent_Tool_Result_Truncator ? $truncator : null;
+	}
+
+	/**
+	 * Resolve the interrupt source from options.
+	 *
+	 * @param array $options Loop options.
+	 * @return callable|null
+	 */
+	private static function resolve_interrupt_source( array $options ): ?callable {
+		$source = $options['interrupt_source'] ?? null;
+		return is_callable( $source ) ? $source : null;
 	}
 
 	/**
