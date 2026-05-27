@@ -68,4 +68,11 @@ agents_api_smoke_assert_equals( 0, $pre_exceeded->remaining(), 'remaining is zer
 $above = new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'depth', 3, 5 );
 agents_api_smoke_assert_equals( true, $above->exceeded(), 'budget starting above ceiling is exceeded', $failures, $passes );
 
+echo "\n[7] Current can be replaced for externally measured budgets:\n";
+$wall_clock = new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'wall_clock_seconds', 5 );
+$wall_clock->set_current( 3 );
+agents_api_smoke_assert_equals( 3, $wall_clock->current(), 'set_current records measured value', $failures, $passes );
+$wall_clock->set_current( -10 );
+agents_api_smoke_assert_equals( 0, $wall_clock->current(), 'set_current clamps negative values', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API iteration budget', $failures, $passes );

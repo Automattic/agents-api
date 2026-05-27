@@ -2,7 +2,7 @@
 /**
  * Iteration Budget — generic bounded-iteration primitive.
  *
- * Counts a named dimension (turns, tool calls, chain depth, retries)
+ * Counts a named dimension (turns, tool calls, wall-clock seconds, retries)
  * and exposes a uniform API for checking exceedance. A budget is a
  * stateful value object — call {@see increment()} at each iteration,
  * then {@see exceeded()} to decide whether to continue.
@@ -58,6 +58,19 @@ final class WP_Agent_Iteration_Budget {
 	 */
 	public function increment(): void {
 		++$this->current;
+	}
+
+	/**
+	 * Replace the current counter value.
+	 *
+	 * Wall-clock budgets are measured externally by the loop, then recorded on
+	 * this value object so event payloads and diagnostics share the same shape
+	 * as iteration budgets.
+	 *
+	 * @param int $current Current counter value. Negative values are clamped to 0.
+	 */
+	public function set_current( int $current ): void {
+		$this->current = max( 0, $current );
 	}
 
 	/**
