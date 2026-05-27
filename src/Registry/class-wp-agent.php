@@ -74,6 +74,13 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		protected array $conversation_compaction_policy = array();
 
 		/**
+		 * Nullable runtime overrides for this agent.
+		 *
+		 * @var WP_Agent_Runtime_Overrides
+		 */
+		protected WP_Agent_Runtime_Overrides $runtime_overrides;
+
+		/**
 		 * Optional metadata.
 		 *
 		 * The following optional keys are reserved for source provenance so
@@ -109,7 +116,8 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		 * @param array  $args Registration arguments.
 		 */
 		public function __construct( string $slug, array $args = array() ) {
-			$this->slug = sanitize_title( $slug );
+			$this->slug              = sanitize_title( $slug );
+			$this->runtime_overrides = new WP_Agent_Runtime_Overrides();
 			if ( '' === $this->slug ) {
 				throw new InvalidArgumentException( 'Agent slug cannot be empty.' );
 			}
@@ -176,6 +184,16 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 				}
 
 				$properties['conversation_compaction_policy'] = \AgentsAPI\AI\WP_Agent_Conversation_Compaction::normalize_policy( $args['conversation_compaction_policy'] );
+			}
+
+			if ( isset( $args['runtime_overrides'] ) ) {
+				if ( $args['runtime_overrides'] instanceof WP_Agent_Runtime_Overrides ) {
+					$properties['runtime_overrides'] = $args['runtime_overrides'];
+				} elseif ( is_array( $args['runtime_overrides'] ) ) {
+					$properties['runtime_overrides'] = new WP_Agent_Runtime_Overrides( $args['runtime_overrides'] );
+				} else {
+					throw new InvalidArgumentException( 'Agent runtime_overrides property must be an array or WP_Agent_Runtime_Overrides.' );
+				}
 			}
 
 			if ( isset( $args['meta'] ) ) {
@@ -301,6 +319,15 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		}
 
 		/**
+		 * Retrieves runtime overrides.
+		 *
+		 * @return WP_Agent_Runtime_Overrides
+		 */
+		public function runtime_overrides(): WP_Agent_Runtime_Overrides {
+			return $this->runtime_overrides;
+		}
+
+		/**
 		 * Retrieves optional metadata.
 		 *
 		 * @return array<string, mixed>
@@ -344,6 +371,7 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 				'default_config'                   => $this->default_config,
 				'supports_conversation_compaction' => $this->supports_conversation_compaction,
 				'conversation_compaction_policy'   => $this->conversation_compaction_policy,
+				'runtime_overrides'                => $this->runtime_overrides->to_array(),
 				'meta'                             => $this->meta,
 				'subagents'                        => $this->subagents,
 			);

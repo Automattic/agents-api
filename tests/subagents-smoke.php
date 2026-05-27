@@ -62,6 +62,7 @@ if ( ! function_exists( 'esc_html' ) ) {
 	function esc_html( $s ) { return $s; }
 }
 
+require_once __DIR__ . '/../src/Registry/class-wp-agent-runtime-overrides.php';
 require_once __DIR__ . '/../src/Registry/class-wp-agent.php';
 
 $plain = new WP_Agent( 'commander', array( 'label' => 'Commander' ) );

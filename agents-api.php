@@ -27,6 +27,7 @@ define( 'AGENTS_API_LOADED', true );
 define( 'AGENTS_API_PATH', __DIR__ . '/' );
 define( 'AGENTS_API_PLUGIN_FILE', __FILE__ );
 
+require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-runtime-overrides.php';
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-type.php';

@@ -136,6 +136,7 @@ wp_register_agent(
 - `agents_api_loop_event`
 - `wp_register_agent()` / `wp_get_agent()` / `wp_get_agents()` / `wp_has_agent()` / `wp_unregister_agent()`
 - `WP_Agent`
+- `WP_Agent_Runtime_Overrides`
 - `WP_Agents_Registry`
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `WP_Agent_Access_Grant`
