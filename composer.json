@@ -63,6 +63,7 @@
       "php tests/conversation-loop-completion-policy-smoke.php",
       "php tests/conversation-loop-transcript-persister-smoke.php",
       "php tests/conversation-loop-events-smoke.php",
+      "php tests/conversation-loop-interrupt-source-smoke.php",
       "php tests/iteration-budget-smoke.php",
       "php tests/conversation-loop-budgets-smoke.php",
       "php tests/channels-smoke.php",
