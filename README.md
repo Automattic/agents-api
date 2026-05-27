@@ -165,6 +165,9 @@ wp_register_agent(
 - `AgentsAPI\AI\WP_Agent_Null_Transcript_Persister`
 - `AgentsAPI\AI\WP_Agent_Conversation_Compaction`
 - `AgentsAPI\AI\WP_Agent_Iteration_Budget`
+- `AgentsAPI\AI\WP_Agent_Spin_Signature`
+- `AgentsAPI\AI\WP_Agent_Spin_Detector`
+- `AgentsAPI\AI\WP_Agent_Consecutive_Spin_Detector`
 - `AgentsAPI\AI\WP_Agent_Conversation_Result`
 - `AgentsAPI\AI\WP_Agent_Conversation_Loop`
 - `WP_Agent_Consent_Policy`

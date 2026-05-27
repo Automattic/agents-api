@@ -118,6 +118,9 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-compacti
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-tool-pair-validator.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-markdown-section-compaction-adapter.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-iteration-budget.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-spin-signature.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-spin-detector.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-consecutive-spin-detector.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-result.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-loop.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-call.php';

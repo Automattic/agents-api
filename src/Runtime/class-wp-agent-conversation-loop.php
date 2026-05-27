@@ -55,6 +55,7 @@ class WP_Agent_Conversation_Loop {
 	 * - `tool_executor` (WP_Agent_Tool_Executor|null): Tool execution adapter.
 	 * - `tool_declarations` (array|null): Tool declarations keyed by name.
 	 * - `completion_policy` (WP_Agent_Conversation_Completion_Policy|null): Typed completion policy.
+	 * - `spin_detector` (WP_Agent_Spin_Detector|null): Optional repeated tool-call detector.
 	 * - `transcript_lock` or `transcript_lock_store` (WP_Agent_Conversation_Lock|null): Optional transcript lock.
 	 * - `transcript_session_id` (string): Session ID to lock when a lock store is provided.
 	 * - `transcript_lock_ttl` (int): Lock TTL in seconds. Defaults to 300.
@@ -78,6 +79,7 @@ class WP_Agent_Conversation_Loop {
 		$transcript_persister  = self::resolve_transcript_persister( $options );
 		$transcript_lock       = self::resolve_transcript_lock( $options );
 		$on_event              = self::resolve_event_sink( $options );
+		$spin_detector         = self::resolve_spin_detector( $options );
 		$request               = self::resolve_request( $messages, $options );
 		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
 		$lock_ttl              = self::resolve_lock_ttl( $options );
@@ -94,6 +96,7 @@ class WP_Agent_Conversation_Loop {
 		$tool_audit_events     = array();
 		$conversation_complete = false;
 		$exceeded_budget       = null;
+		$stalled               = null;
 
 		// Universal observability accumulators. Turn runners may report
 		// `usage` (token counts) and `request_metadata` (last provider request
@@ -213,6 +216,7 @@ class WP_Agent_Conversation_Loop {
 					$events                = array_merge( $events, $mediation_result['events'] );
 					$conversation_complete = $mediation_result['conversation_complete'];
 					$exceeded_budget       = $mediation_result['exceeded_budget'];
+					$stalled               = self::check_spin_detector( $spin_detector, $mediation_result['spin_signatures'], $turn_context, $on_event );
 				} else {
 					// Caller-managed path: turn runner handles everything internally.
 					$result       = WP_Agent_Conversation_Result::normalize( $result );
@@ -249,6 +253,10 @@ class WP_Agent_Conversation_Loop {
 
 				// Stop conditions: budget exceeded, completion policy, or caller should_continue.
 				if ( null !== $exceeded_budget ) {
+					break;
+				}
+
+				if ( null !== $stalled ) {
 					break;
 				}
 
@@ -291,6 +299,12 @@ class WP_Agent_Conversation_Loop {
 				$final_result_data['completed'] = false;
 			}
 
+			if ( null !== $stalled ) {
+				$final_result_data['status']    = 'stalled';
+				$final_result_data['stalled']   = $stalled;
+				$final_result_data['completed'] = false;
+			}
+
 			$final_result = WP_Agent_Conversation_Result::normalize( $final_result_data );
 
 			self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
@@ -327,7 +341,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param int                                               $turn            Current turn number.
 	 * @param callable|null                                     $on_event        Event sink.
 	 * @param array<string, WP_Agent_Iteration_Budget>                    $budgets         Named iteration budgets.
-	 * @return array{messages: array, tool_execution_results: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null}
+	 * @return array{messages: array, tool_execution_results: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null, spin_signatures: WP_Agent_Spin_Signature[]}
 	 */
 	private static function mediate_tool_calls(
 		array $result,
@@ -347,6 +361,7 @@ class WP_Agent_Conversation_Loop {
 		$tool_execution_results = array();
 		$tool_audit_events      = array();
 		$events                 = array();
+		$spin_signatures        = array();
 		$complete               = false;
 		$exceeded_budget        = null;
 
@@ -363,6 +378,8 @@ class WP_Agent_Conversation_Loop {
 			if ( ! is_string( $tool_name ) || '' === $tool_name ) {
 				continue;
 			}
+
+			$spin_signatures[] = new WP_Agent_Spin_Signature( $tool_name, is_array( $parameters ) ? $parameters : array() );
 
 			self::emit_event( $on_event, 'tool_call', array(
 				'turn'         => $turn,
@@ -486,7 +503,46 @@ class WP_Agent_Conversation_Loop {
 			'events'                 => $events,
 			'conversation_complete'  => $complete,
 			'exceeded_budget'        => $exceeded_budget,
+			'spin_signatures'        => $spin_signatures,
 		);
+	}
+
+	/**
+	 * Check a spin detector against tool-call signatures from one mediated turn.
+	 *
+	 * @param WP_Agent_Spin_Detector|null $detector   Optional spin detector.
+	 * @param WP_Agent_Spin_Signature[]   $signatures Tool-call signatures.
+	 * @param array<string, mixed>        $context    Current turn context.
+	 * @param callable|null               $on_event   Event sink.
+	 * @return array<string, mixed>|null Stalled diagnostics when the detector fires.
+	 */
+	private static function check_spin_detector( ?WP_Agent_Spin_Detector $detector, array $signatures, array $context, ?callable $on_event ): ?array {
+		if ( null === $detector ) {
+			return null;
+		}
+
+		foreach ( $signatures as $signature ) {
+			if ( ! $signature instanceof WP_Agent_Spin_Signature ) {
+				continue;
+			}
+
+			if ( $detector->record_signature( $signature, $context ) ) {
+				$payload = array_merge(
+					$signature->to_array(),
+					array(
+						'turn'         => (int) ( $context['turn'] ?? 0 ),
+						'repeat_count' => $detector->repeat_count(),
+						'threshold'    => $detector->threshold(),
+					)
+				);
+
+				self::emit_event( $on_event, 'loop_stalled', $payload );
+
+				return $payload;
+			}
+		}
+
+		return null;
 	}
 
 	/**
@@ -882,6 +938,17 @@ class WP_Agent_Conversation_Loop {
 	private static function resolve_completion_policy( array $options ): ?WP_Agent_Conversation_Completion_Policy {
 		$policy = $options['completion_policy'] ?? null;
 		return $policy instanceof WP_Agent_Conversation_Completion_Policy ? $policy : null;
+	}
+
+	/**
+	 * Resolve the spin detector from options.
+	 *
+	 * @param array $options Loop options.
+	 * @return WP_Agent_Spin_Detector|null
+	 */
+	private static function resolve_spin_detector( array $options ): ?WP_Agent_Spin_Detector {
+		$detector = $options['spin_detector'] ?? null;
+		return $detector instanceof WP_Agent_Spin_Detector ? $detector : null;
 	}
 
 	/**
