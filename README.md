@@ -193,6 +193,8 @@ wp_register_agent(
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Store`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Observer`
+- `AgentsAPI\AI\Approvals\WP_Agent_Approval_Memory_Store`
+- `AgentsAPI\AI\Approvals\WP_Agent_Null_Approval_Memory_Store`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Resolver`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Handler`
 - `AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier`
@@ -360,10 +362,11 @@ Resolution order is:
 2. Registered agent or runtime `action_policy.tools[tool_name]`.
 3. Registered agent or runtime `action_policy.categories[category]`.
 4. Host-provided `WP_Agent_Action_Policy_Provider` providers.
-5. Tool-declared `action_policy` default.
-6. Tool-declared mode-specific `action_policy_<mode>` default.
-7. Global default `direct`.
-8. Final `agents_api_tool_action_policy` filter, if present.
+5. Host-provided `WP_Agent_Approval_Memory_Store` remembered decisions.
+6. Tool-declared `action_policy` default.
+7. Tool-declared mode-specific `action_policy_<mode>` default.
+8. Global default `direct`.
+9. Final `agents_api_tool_action_policy` filter, if present.
 
 ```php
 $policy = ( new WP_Agent_Action_Policy_Resolver() )->resolve_for_tool(
@@ -382,6 +385,8 @@ $policy = ( new WP_Agent_Action_Policy_Resolver() )->resolve_for_tool(
 	)
 );
 ```
+
+Remembered approvals are host-owned. Pass an `approval_memory_store` context value, constructor argument, or filter-provided store through `agents_api_approval_memory_store` to let a user's "always allow" decision participate in the canonical resolver without maintaining a parallel cache.
 
 ## Workspace Scope
 
