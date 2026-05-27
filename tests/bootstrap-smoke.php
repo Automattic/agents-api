@@ -173,6 +173,7 @@ agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Dat
 
 echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(
+	'Abilities',
 	'Approvals',
 	'Auth',
 	'Channels',
