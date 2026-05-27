@@ -187,6 +187,7 @@ $expected_source_directories = array(
 	'Runtime',
 	'Tools',
 	'Transcripts',
+	'Triggers',
 	'Workflows',
 	'Workspace',
 );

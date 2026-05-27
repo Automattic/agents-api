@@ -138,6 +138,8 @@ wp_register_agent(
 - `WP_Agent`
 - `WP_Agent_Runtime_Overrides`
 - `WP_Agents_Registry`
+- `WP_Agent_Event_Trigger`
+- `WP_Agent_Event_Trigger_Registry`
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `WP_Agent_Access_Grant`
 - `WP_Agent_Access_Store`

@@ -178,6 +178,10 @@ require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine-action-sched
 require_once AGENTS_API_PATH . 'src/Routines/register-routines.php';
 require_once AGENTS_API_PATH . 'src/Routines/register-routine-bridge-sync.php';
 require_once AGENTS_API_PATH . 'src/Routines/register-action-scheduler-listener.php';
+require_once AGENTS_API_PATH . 'src/Triggers/class-wp-agent-event-trigger.php';
+require_once AGENTS_API_PATH . 'src/Triggers/class-wp-agent-event-trigger-registry.php';
+require_once AGENTS_API_PATH . 'src/Triggers/register-event-triggers.php';
+require_once AGENTS_API_PATH . 'src/Triggers/register-event-trigger-handler.php';
 
 add_action( 'init', array( 'WP_Agents_Registry', 'init' ), 10 );
 add_action( 'init', array( 'WP_Guidelines_Substrate', 'register' ), 9 );
