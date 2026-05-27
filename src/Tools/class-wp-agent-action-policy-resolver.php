@@ -6,6 +6,9 @@
  */
 
 use AgentsAPI\AI\Tools\WP_Agent_Action_Policy;
+use AgentsAPI\AI\Approvals\WP_Agent_Approval_Memory_Store;
+use AgentsAPI\AI\Approvals\WP_Agent_Null_Approval_Memory_Store;
+use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -26,14 +29,21 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		private WP_Agent_Tool_Policy_Filter $tool_filter;
 
 		/**
+		 * @var WP_Agent_Approval_Memory_Store
+		 */
+		private WP_Agent_Approval_Memory_Store $approval_memory_store;
+
+		/**
 		 * Constructor.
 		 *
-		 * @param WP_Agent_Action_Policy_Provider[]|null $policy_providers Host policy providers.
-		 * @param WP_Agent_Tool_Policy_Filter|null                 $tool_filter      Shared tool filter.
+		 * @param WP_Agent_Action_Policy_Provider[]|null $policy_providers      Host policy providers.
+		 * @param WP_Agent_Tool_Policy_Filter|null       $tool_filter           Shared tool filter.
+		 * @param WP_Agent_Approval_Memory_Store|null    $approval_memory_store Approval memory store.
 		 */
-		public function __construct( ?array $policy_providers = null, ?WP_Agent_Tool_Policy_Filter $tool_filter = null ) {
-			$this->policy_providers = is_array( $policy_providers ) ? $policy_providers : array();
-			$this->tool_filter      = $tool_filter ?? new WP_Agent_Tool_Policy_Filter();
+		public function __construct( ?array $policy_providers = null, ?WP_Agent_Tool_Policy_Filter $tool_filter = null, ?WP_Agent_Approval_Memory_Store $approval_memory_store = null ) {
+			$this->policy_providers      = is_array( $policy_providers ) ? $policy_providers : array();
+			$this->tool_filter           = $tool_filter ?? new WP_Agent_Tool_Policy_Filter();
+			$this->approval_memory_store = $approval_memory_store ?? new WP_Agent_Null_Approval_Memory_Store();
 		}
 
 		/**
@@ -73,6 +83,11 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 				}
 			}
 
+			$remembered = $this->remembered_action_policy( $context, $tool_name );
+			if ( null !== $remembered ) {
+				return $this->apply_filter( $remembered, $tool_name, $mode, $context );
+			}
+
 			$tool_default = $this->tool_declared_default( $tool_def );
 			if ( null !== $tool_default ) {
 				return $this->apply_filter( $tool_default, $tool_name, $mode, $context );
@@ -108,6 +123,66 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 					static fn( $provider ): bool => $provider instanceof WP_Agent_Action_Policy_Provider
 				)
 			);
+		}
+
+		/**
+		 * Return approval memory store from context, filters, or constructor.
+		 *
+		 * @param array<string, mixed> $context Runtime context.
+		 * @return WP_Agent_Approval_Memory_Store Store.
+		 */
+		private function get_approval_memory_store( array $context ): WP_Agent_Approval_Memory_Store {
+			$store = $context['approval_memory_store'] ?? $this->approval_memory_store;
+
+			if ( function_exists( 'apply_filters' ) ) {
+				$store = apply_filters( 'agents_api_approval_memory_store', $store, $context, $this );
+			}
+
+			return $store instanceof WP_Agent_Approval_Memory_Store ? $store : new WP_Agent_Null_Approval_Memory_Store();
+		}
+
+		/**
+		 * Recall remembered action policy for the current invocation, when enough identity exists.
+		 *
+		 * @param array<string, mixed> $context   Runtime context.
+		 * @param string               $tool_name Tool name.
+		 * @return string|null Normalized remembered policy or null.
+		 */
+		private function remembered_action_policy( array $context, string $tool_name ): ?string {
+			$workspace = $this->workspace_from_context( $context );
+			$user_id   = (int) ( $context['user_id'] ?? ( $context['acting_user_id'] ?? 0 ) );
+			$agent_id  = (string) ( $context['agent_id'] ?? ( $context['agent_slug'] ?? '' ) );
+
+			if ( null === $workspace || $user_id <= 0 || '' === $agent_id ) {
+				return null;
+			}
+
+			return WP_Agent_Action_Policy::normalize(
+				$this->get_approval_memory_store( $context )->recall( $workspace, $user_id, $agent_id, $tool_name )
+			);
+		}
+
+		/**
+		 * Return workspace scope from context.
+		 *
+		 * @param array<string, mixed> $context Runtime context.
+		 * @return WP_Agent_Workspace_Scope|null Workspace scope when present and valid.
+		 */
+		private function workspace_from_context( array $context ): ?WP_Agent_Workspace_Scope {
+			$workspace = $context['workspace'] ?? null;
+			if ( $workspace instanceof WP_Agent_Workspace_Scope ) {
+				return $workspace;
+			}
+
+			if ( is_array( $workspace ) ) {
+				try {
+					return WP_Agent_Workspace_Scope::from_array( $workspace );
+				} catch ( \InvalidArgumentException $e ) {
+					return null;
+				}
+			}
+
+			return null;
 		}
 
 		/**
