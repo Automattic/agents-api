@@ -132,13 +132,13 @@ class WP_Agent_Conversation_Request {
 	 */
 	public function to_array(): array {
 		return array(
-			'messages'        => $this->messages,
-			'tools'           => $this->tools,
-			'principal'       => $this->principal ? $this->principal->to_array() : null,
-			'runtime_context' => $this->runtime_context,
-			'metadata'        => $this->metadata,
-			'max_turns'       => $this->max_turns,
-			'single_turn'     => $this->single_turn,
+			'messages'          => $this->messages,
+			'tools'             => $this->tools,
+			'principal'         => $this->principal ? $this->principal->to_array() : null,
+			'runtime_context'   => $this->runtime_context,
+			'metadata'          => $this->metadata,
+			'max_turns'         => $this->max_turns,
+			'single_turn'       => $this->single_turn,
 			'workspace'         => $this->workspace ? $this->workspace->to_array() : null,
 			'runtime_overrides' => $this->runtime_overrides->to_array(),
 		);
