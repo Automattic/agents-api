@@ -56,6 +56,7 @@ class WP_Agent_Conversation_Loop {
 	 * - `tool_declarations` (array|null): Tool declarations keyed by name.
 	 * - `completion_policy` (WP_Agent_Conversation_Completion_Policy|null): Typed completion policy.
 	 * - `spin_detector` (WP_Agent_Spin_Detector|null): Optional repeated tool-call detector.
+	 * - `identical_failure_tracker` (WP_Agent_Identical_Failure_Tracker|null): Optional repeated failure nudger.
 	 * - `transcript_lock` or `transcript_lock_store` (WP_Agent_Conversation_Lock|null): Optional transcript lock.
 	 * - `transcript_session_id` (string): Session ID to lock when a lock store is provided.
 	 * - `transcript_lock_ttl` (int): Lock TTL in seconds. Defaults to 300.
@@ -80,6 +81,7 @@ class WP_Agent_Conversation_Loop {
 		$transcript_lock       = self::resolve_transcript_lock( $options );
 		$on_event              = self::resolve_event_sink( $options );
 		$spin_detector         = self::resolve_spin_detector( $options );
+		$failure_tracker       = self::resolve_identical_failure_tracker( $options );
 		$request               = self::resolve_request( $messages, $options );
 		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
 		$lock_ttl              = self::resolve_lock_ttl( $options );
@@ -207,7 +209,8 @@ class WP_Agent_Conversation_Loop {
 						$turn_context,
 						$turn,
 						$on_event,
-						$budgets
+						$budgets,
+						$failure_tracker
 					);
 
 					$messages              = $mediation_result['messages'];
@@ -341,6 +344,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param int                                               $turn            Current turn number.
 	 * @param callable|null                                     $on_event        Event sink.
 	 * @param array<string, WP_Agent_Iteration_Budget>                    $budgets         Named iteration budgets.
+	 * @param WP_Agent_Identical_Failure_Tracker|null                     $failure_tracker Optional identical-failure tracker.
 	 * @return array{messages: array, tool_execution_results: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null, spin_signatures: WP_Agent_Spin_Signature[]}
 	 */
 	private static function mediate_tool_calls(
@@ -351,7 +355,8 @@ class WP_Agent_Conversation_Loop {
 		array $turn_context,
 		int $turn,
 		?callable $on_event,
-		array $budgets = array()
+		array $budgets = array(),
+		?WP_Agent_Identical_Failure_Tracker $failure_tracker = null
 	): array {
 		$core                   = new WP_Agent_Tool_Execution_Core();
 		$messages               = isset( $result['messages'] ) && is_array( $result['messages'] )
@@ -454,6 +459,25 @@ class WP_Agent_Conversation_Loop {
 				array( 'tool_call_id' => $tool_call_id )
 			);
 
+			$nudge = self::check_identical_failure_tracker(
+				$failure_tracker,
+				$tool_name,
+				is_array( $parameters ) ? $parameters : array(),
+				$exec_result,
+				$turn_context,
+				$on_event
+			);
+			if ( null !== $nudge ) {
+				$messages[] = WP_Agent_Message::text(
+					'assistant',
+					$nudge['message'],
+					array(
+						'type'                       => 'identical_failure_nudge',
+						'identical_failure_signature' => $nudge,
+					)
+				);
+			}
+
 			// Increment tool-call budgets: total and per-tool-name.
 			$exceeded_budget = self::increment_budget( $budgets, 'tool_calls', $on_event );
 			if ( null === $exceeded_budget ) {
@@ -543,6 +567,50 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Check a repeated failure tracker and return nudge metadata when it fires.
+	 *
+	 * @param WP_Agent_Identical_Failure_Tracker|null $tracker    Optional failure tracker.
+	 * @param string                                  $tool_name  Tool name.
+	 * @param array<string, mixed>                    $parameters Tool parameters.
+	 * @param array<string, mixed>                    $result     Tool execution result.
+	 * @param array<string, mixed>                    $context    Current turn context.
+	 * @param callable|null                           $on_event   Event sink.
+	 * @return array<string, mixed>|null Nudge metadata when the tracker fires.
+	 */
+	private static function check_identical_failure_tracker(
+		?WP_Agent_Identical_Failure_Tracker $tracker,
+		string $tool_name,
+		array $parameters,
+		array $result,
+		array $context,
+		?callable $on_event
+	): ?array {
+		if ( null === $tracker || ! empty( $result['success'] ) ) {
+			return null;
+		}
+
+		$signature = new WP_Agent_Identical_Failure_Signature( $tool_name, $parameters, $result );
+		$message   = $tracker->record_failure( $signature, $context );
+		if ( null === $message || '' === trim( $message ) ) {
+			return null;
+		}
+
+		$payload = array_merge(
+			$signature->to_array(),
+			array(
+				'turn'         => (int) ( $context['turn'] ?? 0 ),
+				'repeat_count' => $tracker->repeat_count(),
+				'threshold'    => $tracker->threshold(),
+				'message'      => $message,
+			)
+		);
+
+		self::emit_event( $on_event, 'identical_failure_nudged', $payload );
+
+		return $payload;
 	}
 
 	/**
@@ -949,6 +1017,17 @@ class WP_Agent_Conversation_Loop {
 	private static function resolve_spin_detector( array $options ): ?WP_Agent_Spin_Detector {
 		$detector = $options['spin_detector'] ?? null;
 		return $detector instanceof WP_Agent_Spin_Detector ? $detector : null;
+	}
+
+	/**
+	 * Resolve the identical failure tracker from options.
+	 *
+	 * @param array $options Loop options.
+	 * @return WP_Agent_Identical_Failure_Tracker|null
+	 */
+	private static function resolve_identical_failure_tracker( array $options ): ?WP_Agent_Identical_Failure_Tracker {
+		$tracker = $options['identical_failure_tracker'] ?? null;
+		return $tracker instanceof WP_Agent_Identical_Failure_Tracker ? $tracker : null;
 	}
 
 	/**
