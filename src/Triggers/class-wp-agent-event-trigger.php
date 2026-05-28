@@ -159,7 +159,8 @@ final class WP_Agent_Event_Trigger {
 			$value           = is_callable( $extractor )
 				? call_user_func( $extractor, $payload )
 				: self::read_path( $payload, (string) $extractor );
-			$values[ $name ] = is_scalar( $value ) || null === $value ? (string) $value : wp_json_encode( $value );
+			$encoded         = is_scalar( $value ) || null === $value ? (string) $value : wp_json_encode( $value );
+			$values[ $name ] = is_string( $encoded ) ? $encoded : '';
 		}
 
 		$prompt = $this->prompt_template;

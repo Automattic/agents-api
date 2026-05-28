@@ -267,7 +267,7 @@ class WP_Agent_Message {
 			);
 		}
 
-		return $coalesced;
+		return array_values( $coalesced );
 	}
 
 	/**

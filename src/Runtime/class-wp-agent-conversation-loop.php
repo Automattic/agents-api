@@ -104,6 +104,7 @@ class WP_Agent_Conversation_Loop {
 		$conversation_complete = false;
 		$exceeded_budget       = null;
 		$stalled               = null;
+		$approval_required     = null;
 		$interrupted           = null;
 
 		// Universal observability accumulators. Turn runners may report
@@ -227,6 +228,7 @@ class WP_Agent_Conversation_Loop {
 					$events                = array_merge( $events, $mediation_result['events'] );
 					$conversation_complete = $mediation_result['conversation_complete'];
 					$exceeded_budget       = $mediation_result['exceeded_budget'];
+					$approval_required     = $mediation_result['approval_required'] ?? null;
 					$stalled               = self::check_spin_detector( $spin_detector, $mediation_result['spin_signatures'], $turn_context, $on_event );
 				} else {
 					// Caller-managed path: turn runner handles everything internally.
@@ -330,6 +332,12 @@ class WP_Agent_Conversation_Loop {
 				$final_result_data['completed'] = false;
 			}
 
+			if ( null !== $approval_required ) {
+				$final_result_data['status']            = 'approval_required';
+				$final_result_data['approval_required'] = $approval_required;
+				$final_result_data['completed']         = false;
+			}
+
 			if ( null !== $interrupted ) {
 				$final_result_data['status']      = 'interrupted';
 				$final_result_data['interrupted'] = $interrupted;
@@ -374,7 +382,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param array<string, WP_Agent_Iteration_Budget>                    $budgets         Named iteration budgets.
 	 * @param WP_Agent_Identical_Failure_Tracker|null                     $failure_tracker Optional identical-failure tracker.
 	 * @param WP_Agent_Tool_Result_Truncator|null                         $truncator       Optional tool result truncator.
-	 * @return array{messages: array, tool_execution_results: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null, spin_signatures: WP_Agent_Spin_Signature[]}
+	 * @return array{messages: array, tool_execution_results: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, spin_signatures: WP_Agent_Spin_Signature[]}
 	 */
 	private static function mediate_tool_calls(
 		array $result,
@@ -404,6 +412,7 @@ class WP_Agent_Conversation_Loop {
 		$spin_signatures        = array();
 		$complete               = false;
 		$exceeded_budget        = null;
+		$approval_required      = null;
 
 		// If the turn runner returned text content, add it as an assistant message.
 		if ( isset( $result['content'] ) && is_string( $result['content'] ) && '' !== $result['content'] ) {
@@ -447,6 +456,24 @@ class WP_Agent_Conversation_Loop {
 				$executor,
 				$tool_context
 			);
+
+			// Detect an approval_required envelope returned by an ability via the
+			// wp_pre_execute_ability bridge handler. The envelope replaces the
+			// tool_result message and halts mediation so the caller can surface
+			// the pending action and resume after the host records a decision.
+			$ability_envelope = is_array( $exec_result['result'] ?? null ) ? $exec_result['result'] : null;
+			if ( null !== $ability_envelope && WP_Agent_Message::TYPE_APPROVAL_REQUIRED === ( $ability_envelope['type'] ?? null ) ) {
+				$approval_required = $ability_envelope;
+				$messages[]        = $ability_envelope;
+				self::emit_event( $on_event, 'approval_required', array(
+					'turn'         => $turn,
+					'tool_name'    => $tool_name,
+					'tool_call_id' => $tool_call_id,
+					'action_id'    => $ability_envelope['payload']['action_id'] ?? null,
+				) );
+				$complete = true;
+				break;
+			}
 
 			$tool_def             = $declarations[ $tool_name ] ?? null;
 			$original_exec_result = $exec_result;
@@ -587,6 +614,7 @@ class WP_Agent_Conversation_Loop {
 			'events'                 => $events,
 			'conversation_complete'  => $complete,
 			'exceeded_budget'        => $exceeded_budget,
+			'approval_required'      => $approval_required,
 			'spin_signatures'        => $spin_signatures,
 		);
 	}
@@ -611,18 +639,10 @@ class WP_Agent_Conversation_Loop {
 
 		$truncated = $truncator->truncate_result( $result, $tool_name, $context );
 
-		if ( ! is_array( $truncated['result'] ?? null ) ) {
-			return array(
-				'result'    => $result,
-				'truncated' => false,
-				'metadata'  => array( 'reason' => 'invalid_truncator_result' ),
-			);
-		}
-
 		return array(
 			'result'    => $truncated['result'],
-			'truncated' => (bool) ( $truncated['truncated'] ?? false ),
-			'metadata'  => isset( $truncated['metadata'] ) && is_array( $truncated['metadata'] ) ? $truncated['metadata'] : array(),
+			'truncated' => $truncated['truncated'],
+			'metadata'  => $truncated['metadata'],
 		);
 	}
 
@@ -734,10 +754,6 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		foreach ( $signatures as $signature ) {
-			if ( ! $signature instanceof WP_Agent_Spin_Signature ) {
-				continue;
-			}
-
 			if ( $detector->record_signature( $signature, $context ) ) {
 				$payload = array_merge(
 					$signature->to_array(),
