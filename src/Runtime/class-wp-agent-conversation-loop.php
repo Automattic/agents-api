@@ -46,10 +46,11 @@ class WP_Agent_Conversation_Loop {
 	 *   Defaults to `null` in the caller-managed path (which causes the loop to break
 	 *   after one turn unless the caller supplies a callback). When tool
 	 *   mediation is enabled (`tool_executor` + `tool_declarations` provided),
-	 *   defaults to a `__return_true` callable so the loop continues until
-	 *   `tool_calls` is empty (natural completion), `completion_policy` fires,
-	 *   `max_turns` is reached, or a budget is exceeded — i.e. the caller no
-	 *   longer needs to supply this option just to get multi-turn mediation.
+	 *   defaults to a callable that returns `true` while the latest turn emitted
+	 *   `tool_calls` — so the loop stops on natural completion (empty `tool_calls`)
+	 *   and otherwise keeps going until `completion_policy` fires, `max_turns` is
+	 *   reached, or a budget is exceeded. Callers can pass `'__return_true'` to
+	 *   opt into the historical continue-always behavior.
 	 * - `compaction_policy` (array|null): Optional compaction policy.
 	 * - `summarizer` (callable|null): Optional compaction summarizer.
 	 * - `tool_executor` (WP_Agent_Tool_Executor|null): Tool execution adapter.
@@ -216,7 +217,8 @@ class WP_Agent_Conversation_Loop {
 						$on_event,
 						$budgets,
 						$failure_tracker,
-						$result_truncator
+						$result_truncator,
+						$messages
 					);
 
 					$messages              = $mediation_result['messages'];
@@ -384,12 +386,17 @@ class WP_Agent_Conversation_Loop {
 		?callable $on_event,
 		array $budgets = array(),
 		?WP_Agent_Identical_Failure_Tracker $failure_tracker = null,
-		?WP_Agent_Tool_Result_Truncator $truncator = null
+		?WP_Agent_Tool_Result_Truncator $truncator = null,
+		array $prior_messages = array()
 	): array {
-		$core                   = new WP_Agent_Tool_Execution_Core();
+		$core = new WP_Agent_Tool_Execution_Core();
+
+		// Fall back to the prior turn's messages when the turn runner omits
+		// `messages` from its return — without this, mediation starts from an
+		// empty list and silently drops history between rounds.
 		$messages               = isset( $result['messages'] ) && is_array( $result['messages'] )
 			? WP_Agent_Message::normalize_many( $result['messages'] )
-			: array();
+			: $prior_messages;
 		$tool_calls             = $result['tool_calls'];
 		$tool_execution_results = array();
 		$tool_audit_events      = array();
@@ -1125,11 +1132,12 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the should_continue callable for this run.
 	 *
-	 * When tool mediation is enabled, defaults to a continue-always callable so
-	 * `max_turns`, `completion_policy`, budgets, and natural completion (empty
-	 * `tool_calls`) become the only stop conditions. In the caller-managed path (no
-	 * mediation), preserves the historical break-after-1 behavior unless the
-	 * caller supplies their own continuation policy.
+	 * When tool mediation is enabled, defaults to a callable that returns true
+	 * only while the latest turn emitted `tool_calls` — so the loop stops on
+	 * natural completion and `max_turns` + `completion_policy` + budgets remain
+	 * upper bounds rather than the primary stop condition. In the caller-managed
+	 * path (no mediation), preserves the historical break-after-1 behavior unless
+	 * the caller supplies their own continuation policy.
 	 *
 	 * @param array                       $options           Loop options.
 	 * @param WP_Agent_Tool_Executor|null $tool_executor     Resolved tool executor.
@@ -1152,11 +1160,15 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		// No caller-supplied policy. When mediation is enabled, default to
-		// "keep going" so the loop's other stop conditions can do their job.
+		// "stop when the turn runner emitted no tool_calls" so the loop exits
+		// on natural completion instead of re-running until max_turns. The
+		// caller can still pass `'should_continue' => '__return_true'` to opt
+		// into the historical continue-always behavior, and budgets +
+		// `completion_policy` + `max_turns` continue to act as stop conditions.
 		$mediation_enabled = null !== $tool_executor && ! empty( $tool_declarations );
 		if ( $mediation_enabled ) {
-			return static function (): bool {
-				return true;
+			return static function ( array $result ): bool {
+				return ! empty( $result['tool_calls'] ?? array() );
 			};
 		}
 
