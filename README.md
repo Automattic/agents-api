@@ -373,6 +373,23 @@ $visible_tools = ( new WP_Agent_Tool_Policy() )->resolve(
 );
 ```
 
+Consumers that gather tools from multiple product-owned sources can use `WP_Agent_Tool_Source_Registry` before the policy pass. Sources are named callbacks that receive `(array $context, WP_Agent_Tool_Source_Registry $registry)` and return declarations keyed by tool name. Lower source priorities run earlier, `agents_api_tool_source_order` can reorder sources for runtime context such as modes, and earlier sources win duplicate tool names.
+
+```php
+$registry = new WP_Agent_Tool_Source_Registry();
+$registry->registerSource( 'runtime', $runtime_source, 10 );
+$registry->registerSource( 'static', $static_source, 20 );
+
+$all_tools = $registry->gather(
+	array(
+		'agent_id' => 'writer',
+		'modes'    => array( 'chat' ),
+	)
+);
+```
+
+The registry exposes three composition hooks: `agents_api_tool_sources` for injecting or replacing named sources, `agents_api_tool_source_order` for source precedence, and `agents_api_tool_source_tools` for context-aware adjustment of one source's gathered declarations.
+
 Action policy is resolved by `WP_Agent_Action_Policy_Resolver` and always returns one of the canonical values from `AgentsAPI\AI\Tools\WP_Agent_Action_Policy`: `direct`, `preview`, or `forbidden`.
 
 Resolution order is:
