@@ -389,7 +389,8 @@ class WP_Agent_Conversation_Loop {
 		?WP_Agent_Tool_Result_Truncator $truncator = null,
 		array $prior_messages = array()
 	): array {
-		$core                   = new WP_Agent_Tool_Execution_Core();
+		$core = new WP_Agent_Tool_Execution_Core();
+
 		// Fall back to the prior turn's messages when the turn runner omits
 		// `messages` from its return — without this, mediation starts from an
 		// empty list and silently drops history between rounds.
