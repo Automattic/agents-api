@@ -1,5 +1,5 @@
 {
-  "name": "automattic/agents-api",
+  "name": "wordpress/agents-api",
   "description": "WordPress-shaped agent runtime substrate.",
   "type": "wordpress-plugin",
   "license": "GPL-2.0-or-later",
