@@ -17,6 +17,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Validation exceptions are not rendered output.
 class WP_Agent_Conversation_Result {
 
+	public const SCHEMA  = 'agents-api.conversation-result';
+	public const VERSION = 1;
+
 	/**
 	 * Validate and normalize a loop result.
 	 *
@@ -28,6 +31,22 @@ class WP_Agent_Conversation_Result {
 	 * @throws \InvalidArgumentException When the result shape is invalid.
 	 */
 	public static function normalize( array $result ): array {
+		if ( ! array_key_exists( 'schema', $result ) ) {
+			$result['schema'] = self::SCHEMA;
+		}
+
+		if ( ! array_key_exists( 'version', $result ) ) {
+			$result['version'] = self::VERSION;
+		}
+
+		if ( self::SCHEMA !== $result['schema'] ) {
+			throw self::invalid( 'schema', 'must be ' . self::SCHEMA );
+		}
+
+		if ( self::VERSION !== (int) $result['version'] ) {
+			throw self::invalid( 'version', 'must be ' . self::VERSION );
+		}
+
 		if ( ! array_key_exists( 'messages', $result ) || ! is_array( $result['messages'] ) ) {
 			throw self::invalid( 'messages', 'must be an array' );
 		}
@@ -107,7 +126,7 @@ class WP_Agent_Conversation_Result {
 				throw self::invalid( $path, 'must be an array' );
 			}
 
-			foreach ( array( 'type', 'tool_name', 'parameters_sha256', 'result_sha256' ) as $field ) {
+			foreach ( array( 'type', 'tool_name', 'tool_call_id', 'parameters_sha256', 'result_sha256' ) as $field ) {
 				if ( ! array_key_exists( $field, $audit_event ) || ! is_string( $audit_event[ $field ] ) || '' === $audit_event[ $field ] ) {
 					throw self::invalid( $path . '.' . $field, 'must be a non-empty string' );
 				}
