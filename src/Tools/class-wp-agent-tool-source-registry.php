@@ -15,9 +15,16 @@ defined( 'ABSPATH' ) || exit;
 class WP_Agent_Tool_Source_Registry {
 
 	/**
-	 * @var array<string, callable>
+	 * @var array<string, array{callback: callable, priority: int, index: int}>
 	 */
 	private array $sources = array();
+
+	/**
+	 * Monotonic registration index used to keep same-priority ordering stable.
+	 *
+	 * @var int
+	 */
+	private int $registration_index = 0;
 
 	/**
 	 * Register a source callback.
@@ -27,14 +34,19 @@ class WP_Agent_Tool_Source_Registry {
 	 *
 	 * @param string   $source_slug Source slug.
 	 * @param callable $source      Source callback.
+	 * @param int      $priority    Source priority. Lower numbers run earlier.
 	 * @return void
 	 */
-	public function registerSource( string $source_slug, callable $source ): void {
+	public function registerSource( string $source_slug, callable $source, int $priority = 10 ): void {
 		if ( '' === $source_slug ) {
 			throw new \InvalidArgumentException( 'invalid_tool_source: source_slug must be a non-empty string' );
 		}
 
-		$this->sources[ $source_slug ] = $source;
+		$this->sources[ $source_slug ] = array(
+			'callback' => $source,
+			'priority' => $priority,
+			'index'    => $this->registration_index++,
+		);
 	}
 
 	/**
@@ -54,7 +66,7 @@ class WP_Agent_Tool_Source_Registry {
 	 * @return array<string, callable>
 	 */
 	public function getSources( array $context = array() ): array {
-		$sources = $this->sources;
+		$sources = $this->getRegisteredSources();
 		if ( function_exists( 'apply_filters' ) ) {
 			$sources = apply_filters( 'agents_api_tool_sources', $sources, $context, $this );
 		}
@@ -73,15 +85,7 @@ class WP_Agent_Tool_Source_Registry {
 	public function gather( array $context = array() ): array {
 		$tools   = array();
 		$sources = $this->getSources( $context );
-		$order   = array_keys( $sources );
-
-		if ( function_exists( 'apply_filters' ) ) {
-			$order = apply_filters( 'agents_api_tool_source_order', $order, $context, $this );
-		}
-
-		if ( ! is_array( $order ) ) {
-			return array();
-		}
+		$order   = $this->getSourceOrder( $sources, $context );
 
 		foreach ( $order as $source_slug ) {
 			if ( ! is_string( $source_slug ) || ! isset( $sources[ $source_slug ] ) ) {
@@ -89,6 +93,16 @@ class WP_Agent_Tool_Source_Registry {
 			}
 
 			$source_tools = call_user_func( $sources[ $source_slug ], $context, $this );
+			if ( function_exists( 'apply_filters' ) ) {
+				$source_tools = apply_filters(
+					'agents_api_tool_source_tools',
+					$source_tools,
+					$source_slug,
+					$context,
+					$this
+				);
+			}
+
 			if ( ! is_array( $source_tools ) ) {
 				continue;
 			}
@@ -103,6 +117,60 @@ class WP_Agent_Tool_Source_Registry {
 		}
 
 		return $tools;
+	}
+
+	/**
+	 * Return directly registered sources sorted by priority and registration order.
+	 *
+	 * @return array<string, callable>
+	 */
+	private function getRegisteredSources(): array {
+		$sources = $this->sources;
+		uasort(
+			$sources,
+			static function ( array $a, array $b ): int {
+				return ( $a['priority'] <=> $b['priority'] ) ?: ( $a['index'] <=> $b['index'] );
+			}
+		);
+
+		$callbacks = array();
+		foreach ( $sources as $source_slug => $source ) {
+			$callbacks[ $source_slug ] = $source['callback'];
+		}
+
+		return $callbacks;
+	}
+
+	/**
+	 * Return source slugs in final precedence order.
+	 *
+	 * @param array<string, callable> $sources Registered sources.
+	 * @param array                   $context Runtime context.
+	 * @return array<int, string>
+	 */
+	private function getSourceOrder( array $sources, array $context ): array {
+		$order = array_keys( $sources );
+
+		if ( function_exists( 'apply_filters' ) ) {
+			$order = apply_filters(
+				'agents_api_tool_source_order',
+				$order,
+				$context,
+				$this,
+				$sources
+			);
+		}
+
+		if ( ! is_array( $order ) ) {
+			return array();
+		}
+
+		return array_values(
+			array_filter(
+				$order,
+				static fn( $source_slug ): bool => is_string( $source_slug ) && isset( $sources[ $source_slug ] )
+			)
+		);
 	}
 
 	/**
