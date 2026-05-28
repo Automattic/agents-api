@@ -19,7 +19,7 @@ The companion package should require `agents-api`. `agents-api` must not require
 
 ## Proposed Package Shape
 
-Working package name: `automattic/agents-api-default-stores`.
+Working package name: `wordpress/agents-api-default-stores`.
 
 Working WordPress plugin slug: `agents-api-default-stores`.
 

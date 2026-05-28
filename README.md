@@ -88,7 +88,7 @@ Install and activate the Agents API plugin through the normal WordPress plugin m
 Require the package from a host plugin, mu-plugin, or Composer-managed WordPress project:
 
 ```sh
-composer require automattic/agents-api:^0.1
+composer require wordpress/agents-api:^0.1
 ```
 
 Composer autoloads `agents-api.php` through the package `files` autoload entry. The consuming project must load Composer's generated `vendor/autoload.php` during WordPress bootstrap. After that, the same public API is available as in the plugin activation path.
