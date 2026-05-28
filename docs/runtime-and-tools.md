@@ -278,6 +278,15 @@ The tool policy layer resolves which tools are visible and how each tool may exe
 
 Canonical action-policy values are `direct`, `preview`, and `forbidden`. Resolution considers explicit runtime denies, agent/runtime tool and category policy, host providers, tool defaults, mode-specific tool defaults, and the final `agents_api_tool_action_policy` filter.
 
+## Ability lifecycle bridge
+
+`WP_Agent_Ability_Lifecycle_Bridge` (in `src/Abilities/`) adopts the WordPress 7.1 `WP_Ability` execution lifecycle filters on behalf of the substrate so each ability author does not have to opt in.
+
+- `wp_ability_execute_result` -> `agents_api_ability_executed` action. The bridge emits the post-execute observer signal without modifying the result.
+- `wp_pre_execute_ability` -> decision-driven approval gate. Hosts opt into per-call approval by hooking `agents_api_ability_pre_execute_decision` and returning either a `WP_Agent_Pending_Action` or an array shape `WP_Agent_Pending_Action::from_array()` accepts. The bridge mints (when needed), best-effort stages through the `wp_agent_pending_action_store` filter, and short-circuits with a `WP_Agent_Message::approvalRequired` envelope. Sentinel pass-through preserves any earlier short-circuit so stacked consumers coexist.
+
+On WordPress < 7.1 the underlying filters are never applied, so registered handlers stay idle.
+
 ## Compaction and conservation
 
 Conversation compaction is opt-in. Agents can declare `supports_conversation_compaction` and a `conversation_compaction_policy`; callers provide the summarizer. `WP_Agent_Conversation_Compaction::compact()` returns transformed messages, compaction metadata, and lifecycle events. If summarization fails, the original transcript is preserved and a failure event is emitted.
@@ -287,6 +296,8 @@ Conversation compaction is opt-in. Agents can declare `supports_conversation_com
 ## Budgets, events, and failure behavior
 
 `WP_Agent_Iteration_Budget` tracks a named dimension such as `turns`, `tool_calls`, or `tool_calls_<tool_name>`. Budgets increment during the loop and produce `budget_exceeded` events and status when explicit budgets trip.
+
+When a tool ability returns an `approval_required` envelope (typically via the lifecycle bridge's pre-execute gate), the loop halts mediation, emits an `approval_required` event with the action_id, and surfaces `status: 'approval_required'` on the final result with `completed: false`. The envelope is preserved on the final result so callers can persist or relay the pending action and resume after a decision.
 
 The loop emits lifecycle events to two observer surfaces:
 

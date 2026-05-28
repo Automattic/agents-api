@@ -1,37 +1,49 @@
 <?php
 /**
- * Bridges Abilities API execution lifecycle filters into substrate observers.
+ * Bridges Abilities API execution lifecycle filters into substrate observers
+ * and envelopes.
  *
  * @package AgentsAPI
  */
 
 namespace AgentsAPI\AI\Abilities;
 
+use AgentsAPI\AI\Approvals\WP_Agent_Pending_Action;
+use AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Store;
+use AgentsAPI\AI\WP_Agent_Message;
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
 /**
- * Bridges WP_Ability execution lifecycle filters into substrate-level actions.
+ * Bridges WP_Ability execution lifecycle filters into substrate-level actions
+ * and envelopes.
  *
  * WordPress 7.1 introduced four execution lifecycle filters on `WP_Ability`:
  * `wp_pre_execute_ability`, `wp_ability_normalize_input`,
  * `wp_ability_permission_result`, and `wp_ability_execute_result`. This bridge
- * forwards them onto substrate-level observable actions so consumers can record
- * ability calls without each ability author opting in and without coupling
- * observers to the conversation loop's event surface.
+ * adopts them slice by slice (see #94).
  *
- * The bridge is a passive observer: handlers return the filter input unchanged.
- * Only the post-execute `wp_ability_execute_result` hook is wired in this slice
- * (issue #94 telemetry adoption); the remaining three hooks land in follow-up
- * slices that add their own substrate envelopes.
+ * Wired today:
+ * - `wp_ability_execute_result` -> `agents_api_ability_executed` action.
+ *   Telemetry without each ability author opting in.
+ * - `wp_pre_execute_ability` -> decision-driven approval gate. Hosts decide
+ *   via {@see self::FILTER_PRE_EXECUTE_DECISION}; the bridge handles the
+ *   sentinel, minting, staging, and `approval_required` envelope.
+ *
+ * The execute-result observer returns the filter input unchanged. The
+ * pre-execute gate short-circuits with an `approval_required` envelope when
+ * the host signals approval is needed, and passes through otherwise.
  *
  * On WordPress < 7.1 the underlying filters are never applied, so registered
  * handlers stay idle.
  */
 class WP_Agent_Ability_Lifecycle_Bridge {
 
-	public const ACTION_ABILITY_EXECUTED = 'agents_api_ability_executed';
+	public const ACTION_ABILITY_EXECUTED     = 'agents_api_ability_executed';
+	public const FILTER_PRE_EXECUTE_DECISION = 'agents_api_ability_pre_execute_decision';
+	public const FILTER_PENDING_ACTION_STORE = 'wp_agent_pending_action_store';
 
 	/**
 	 * Register lifecycle-filter handlers with WordPress.
@@ -46,6 +58,7 @@ class WP_Agent_Ability_Lifecycle_Bridge {
 		}
 
 		add_filter( 'wp_ability_execute_result', array( __CLASS__, 'observe_execute_result' ), 10, 4 );
+		add_filter( 'wp_pre_execute_ability', array( __CLASS__, 'gate_pre_execute' ), 10, 4 );
 	}
 
 	/**
@@ -67,5 +80,72 @@ class WP_Agent_Ability_Lifecycle_Bridge {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Decision-driven handler for the `wp_pre_execute_ability` filter.
+	 *
+	 * Hosts opt into approval gating per call by hooking
+	 * {@see self::FILTER_PRE_EXECUTE_DECISION}. The decision filter receives
+	 * (null, ability_name, input, ability) and returns one of:
+	 *
+	 * - `null` to let the call proceed without approval.
+	 * - A `WP_Agent_Pending_Action` instance the host already minted.
+	 * - An array shape `WP_Agent_Pending_Action::from_array()` accepts.
+	 *
+	 * On a non-null decision the bridge mints (when needed), best-effort stages
+	 * through {@see self::FILTER_PENDING_ACTION_STORE}, and returns the canonical
+	 * `approval_required` envelope so
+	 * `WP_Agent_Conversation_Loop::mediate_tool_calls()` can surface it as an
+	 * approval pause instead of running the call.
+	 *
+	 * Sentinel pass-through is honored: when another consumer already
+	 * short-circuited the filter (so `$pre` is not a `WP_Filter_Sentinel`), the
+	 * bridge returns `$pre` untouched so stacked consumers can coexist.
+	 *
+	 * @param mixed  $pre          Sentinel from core, or another handler's short-circuit value.
+	 * @param string $ability_name Ability name.
+	 * @param mixed  $input        Raw input passed to execute().
+	 * @param object $ability      `WP_Ability` instance.
+	 * @return mixed Original `$pre`, or the approval_required envelope on short-circuit.
+	 */
+	public static function gate_pre_execute( $pre, string $ability_name, $input, $ability ) {
+		if ( ! ( $pre instanceof \WP_Filter_Sentinel ) ) {
+			return $pre;
+		}
+
+		if ( ! function_exists( 'apply_filters' ) ) {
+			return $pre;
+		}
+
+		$decision = apply_filters( self::FILTER_PRE_EXECUTE_DECISION, null, $ability_name, $input, $ability );
+		if ( null === $decision ) {
+			return $pre;
+		}
+
+		$pending = $decision instanceof WP_Agent_Pending_Action
+			? $decision
+			: WP_Agent_Pending_Action::from_array( (array) $decision );
+
+		$store = apply_filters( self::FILTER_PENDING_ACTION_STORE, null );
+		if ( $store instanceof WP_Agent_Pending_Action_Store ) {
+			$store->store( $pending );
+		}
+
+		$pending_data = $pending->to_array();
+
+		return WP_Agent_Message::approvalRequired(
+			$pending_data['summary'],
+			array(
+				'action_id'  => $pending_data['action_id'],
+				'kind'       => $pending_data['kind'],
+				'summary'    => $pending_data['summary'],
+				'preview'    => $pending_data['preview'],
+				'expires_at' => $pending_data['expires_at'],
+			),
+			array(
+				'ability_name' => $ability_name,
+			)
+		);
 	}
 }
