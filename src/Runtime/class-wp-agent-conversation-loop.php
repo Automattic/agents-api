@@ -499,6 +499,7 @@ class WP_Agent_Conversation_Loop {
 
 			$tool_audit_events[] = self::tool_audit_event(
 				$tool_name,
+				$tool_call_id,
 				is_array( $parameters ) ? $parameters : array(),
 				$exec_result,
 				is_array( $tool_def ) ? $tool_def : null,
@@ -656,14 +657,17 @@ class WP_Agent_Conversation_Loop {
 			return null;
 		}
 
-		$normalized       = WP_Agent_Message::normalize( $message );
-		$message_metadata = isset( $normalized['metadata'] ) && is_array( $normalized['metadata'] ) ? $normalized['metadata'] : array();
-		$action           = self::normalize_interrupt_action( $message_metadata['interrupt_action'] ?? ( $message_metadata['action'] ?? 'message' ) );
-		$metadata         = array(
+		$normalized         = WP_Agent_Message::normalize( $message );
+		$message_metadata   = isset( $normalized['metadata'] ) && is_array( $normalized['metadata'] ) ? $normalized['metadata'] : array();
+		$action             = self::normalize_interrupt_action( $message_metadata['interrupt_action'] ?? ( $message_metadata['action'] ?? 'message' ) );
+		$interrupt_metadata = $message_metadata;
+		unset( $interrupt_metadata['action'], $interrupt_metadata['interrupt_action'] );
+
+		$metadata = array_merge( $interrupt_metadata, array(
 			'turn'    => (int) ( $context['turn'] ?? 0 ),
 			'action'  => $action,
 			'message' => $normalized,
-		);
+		) );
 
 		self::emit_event( $on_event, 'interrupt_received', $metadata );
 
@@ -962,6 +966,7 @@ class WP_Agent_Conversation_Loop {
 	 * secrets into generic observers.
 	 *
 	 * @param string     $tool_name       Tool identifier.
+	 * @param string     $tool_call_id    Provider or loop-assigned tool-call id.
 	 * @param array      $parameters      Runtime tool-call parameters.
 	 * @param array      $result          Normalized tool execution result.
 	 * @param array|null $tool_definition Tool declaration, when available.
@@ -969,7 +974,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param int        $turn            Turn number.
 	 * @return array<string, mixed> Audit event.
 	 */
-	private static function tool_audit_event( string $tool_name, array $parameters, array $result, ?array $tool_definition, array $context, int $turn ): array {
+	private static function tool_audit_event( string $tool_name, string $tool_call_id, array $parameters, array $result, ?array $tool_definition, array $context, int $turn ): array {
 		$safe_parameters = self::redact_tool_audit_parameters( $parameters, $tool_name, $tool_definition, $context );
 		$metadata        = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
 		$error_type      = isset( $metadata['error_type'] ) && is_string( $metadata['error_type'] ) ? $metadata['error_type'] : '';
@@ -979,6 +984,7 @@ class WP_Agent_Conversation_Loop {
 			'type'                => 'tool_call',
 			'turn_count'          => $turn,
 			'tool_name'           => $tool_name,
+			'tool_call_id'        => $tool_call_id,
 			'tool_source'         => is_array( $tool_definition ) && is_string( $tool_definition['source'] ?? null ) ? $tool_definition['source'] : '',
 			'parameters_sha256'   => self::stable_sha256( $safe_parameters ),
 			'parameters_redacted' => true,

@@ -28,10 +28,12 @@ Representative message roles include user, assistant, tool-call, and tool-result
 
 `AgentsAPI\AI\WP_Agent_Conversation_Request` carries the original messages, tool declarations, execution principal, caller-owned context, metadata, and max-turn settings. Runtime and transcript adapters can use the request object to stamp storage or audit records without Agents API choosing storage.
 
-`AgentsAPI\AI\WP_Agent_Conversation_Result` normalizes loop output. Typical keys include:
+`AgentsAPI\AI\WP_Agent_Conversation_Result` normalizes loop output. Replay consumers can pin to `schema: agents-api.conversation-result` and `version: 1` for the stable result envelope. Typical keys include:
 
 ```php
 array(
+	'schema'                 => 'agents-api.conversation-result',
+	'version'                => 1,
 	'messages'               => $messages,
 	'tool_execution_results' => $tool_results,
 	'tool_audit_events'      => $tool_audit_events,
@@ -48,6 +50,28 @@ array(
 ```
 
 When an explicit budget trips, the result includes `status => 'budget_exceeded'` and `budget => '<budget-name>'`.
+
+### Replay-critical result contract
+
+The version 1 conversation result contract is the product-neutral replay surface for downstream orchestrators, regraders, and transcript stores. Consumers should read the versioned fields below instead of inferring behavior from incidental provider adapter fields:
+
+| Field | Stability | Notes |
+| --- | --- | --- |
+| `schema` | Required, stable | Always `agents-api.conversation-result`. |
+| `version` | Required, stable | Integer contract version. Current value is `1`. |
+| `messages[]` | Required, stable | Normalized `agents-api.message` envelopes. Tool-call and tool-result envelopes carry matching `metadata.tool_call_id` when mediation knows the id. |
+| `tool_execution_results[]` | Required, stable | Raw caller-owned tool result data. Mediated entries include `tool_name`, `tool_call_id`, `parameters`, `result`, `runtime` when present, and `turn_count`. |
+| `tool_audit_events[]` | Required, stable | Safe generic replay trace for mediated tool calls. Entries include `schema_version`, `type`, `turn_count`, `tool_name`, `tool_call_id`, hashes, status, and `error_type` when classified. |
+| `events[]` | Required, stable | Loop lifecycle events such as `interrupt_received`, `tool_result_truncated`, and `completion_policy_stop`. |
+| `turn_count` | Required from the loop | Number of turns executed. |
+| `final_content` | Required from the loop | Last assistant text message, excluding synthetic tool-call/tool-result messages. |
+| `usage` | Required from the loop | Aggregated token usage when provided by the caller adapter. |
+| `request_metadata` | Required from the loop | Caller-supplied metadata preserved for transcript persisters and replay. |
+| `completed` | Required from the loop | Boolean completion signal. `false` when stopped by a budget, stall, or cancel interrupt. |
+| `status` | Optional | Machine-readable stop reason such as `budget_exceeded`, `stalled`, `interrupted`, or `transcript_lock_contention`. |
+| `interrupted` | Optional | Interrupt metadata copied from the normalized interrupt message. Includes `action` and any caller metadata such as `source`. |
+
+Transcript persisters receive the normalized versioned result after loop completion and before the `completed` event is emitted. Persisters should persist the result envelope as-is and use `schema` plus `version` to choose replay logic.
 
 ## Conversation loop
 
@@ -220,6 +244,7 @@ array(
 	'type'                => 'tool_call',
 	'turn_count'          => 1,
 	'tool_name'           => 'client/search_docs',
+	'tool_call_id'        => 'call_123',
 	'tool_source'         => 'client',
 	'parameters_sha256'   => 'sha256:...',
 	'parameters_redacted' => true,

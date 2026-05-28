@@ -80,6 +80,8 @@ $runner = new class() implements AgentsAPI\AI\WP_Agent_Conversation_Runner {
 };
 
 $runner_result = $runner->run( $request );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::SCHEMA, $runner_result['schema'], 'runner result exposes canonical schema', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::VERSION, $runner_result['version'], 'runner result exposes canonical version', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $runner_result['messages'] ), 'runner returns normalized messages', $failures, $passes );
 agents_api_smoke_assert_equals( array(), $runner_result['tool_execution_results'], 'runner result normalization provides empty tool results', $failures, $passes );
 

@@ -68,10 +68,14 @@ agents_api_smoke_assert_equals( 1, $source_calls, 'interrupt source was checked 
 agents_api_smoke_assert_equals( 2, $source_message_count, 'interrupt source receives current transcript', $failures, $passes );
 agents_api_smoke_assert_equals( 1, $source_turn, 'interrupt source receives turn context', $failures, $passes );
 agents_api_smoke_assert_equals( 'interrupted', $cancel_result['status'] ?? '', 'cancel interrupt returns interrupted status', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::SCHEMA, $cancel_result['schema'], 'interrupt result exposes replay schema', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::VERSION, $cancel_result['version'], 'interrupt result exposes replay version', $failures, $passes );
 agents_api_smoke_assert_equals( false, $cancel_result['completed'], 'cancel interrupt marks result incomplete', $failures, $passes );
 agents_api_smoke_assert_equals( 'cancel', $cancel_result['interrupted']['action'] ?? '', 'interrupted diagnostics record cancel action', $failures, $passes );
+agents_api_smoke_assert_equals( 'operator', $cancel_result['interrupted']['source'] ?? '', 'interrupted diagnostics preserve source metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 3, count( $cancel_result['messages'] ), 'cancel interrupt is appended to transcript', $failures, $passes );
 agents_api_smoke_assert_equals( 'Cancel this run.', $cancel_result['messages'][2]['content'] ?? '', 'cancel interrupt content is preserved', $failures, $passes );
+agents_api_smoke_assert_equals( 'operator', $cancel_result['messages'][2]['metadata']['source'] ?? '', 'cancel interrupt transcript preserves source metadata', $failures, $passes );
 
 $interrupt_events = array_values(
 	array_filter(

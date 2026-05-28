@@ -86,8 +86,11 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 );
 
 	agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'tool executor was called once', $failures, $passes );
+	agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::SCHEMA, $result['schema'], 'mediated result exposes replay schema', $failures, $passes );
+	agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::VERSION, $result['version'], 'mediated result exposes replay version', $failures, $passes );
 	agents_api_smoke_assert_equals( 'client/summarize', $executor->executed[0]['tool_name'], 'tool executor received correct tool name', $failures, $passes );
 	agents_api_smoke_assert_equals( 'call_123', $executor->executed[0]['id'] ?? '', 'tool executor received provider tool call id', $failures, $passes );
+	agents_api_smoke_assert_equals( 'call_123', $executor->executed[0]['metadata']['tool_call_id'] ?? '', 'tool executor received provider tool call id in metadata', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $result['tool_execution_results'] ), 'result contains one tool execution result', $failures, $passes );
 	agents_api_smoke_assert_equals( 'client/summarize', $result['tool_execution_results'][0]['tool_name'], 'tool execution result has correct tool name', $failures, $passes );
 	agents_api_smoke_assert_equals( 'call_123', $result['tool_execution_results'][0]['tool_call_id'] ?? '', 'tool execution result preserves provider tool call id', $failures, $passes );
@@ -98,6 +101,7 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 1, count( $result['tool_audit_events'] ), 'result contains one tool audit event', $failures, $passes );
 agents_api_smoke_assert_equals( 'tool_call', $result['tool_audit_events'][0]['type'], 'tool audit event has stable type', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/summarize', $result['tool_audit_events'][0]['tool_name'], 'tool audit event has correct tool name', $failures, $passes );
+agents_api_smoke_assert_equals( 'call_123', $result['tool_audit_events'][0]['tool_call_id'], 'tool audit event preserves provider tool call id', $failures, $passes );
 agents_api_smoke_assert_equals( true, $result['tool_audit_events'][0]['success'], 'tool audit event records success', $failures, $passes );
 agents_api_smoke_assert_equals( true, str_starts_with( $result['tool_audit_events'][0]['parameters_sha256'], 'sha256:' ), 'tool audit event hashes parameters', $failures, $passes );
 agents_api_smoke_assert_equals( true, ! array_key_exists( 'parameters', $result['tool_audit_events'][0] ), 'tool audit event omits raw parameters', $failures, $passes );
@@ -115,6 +119,17 @@ $tool_result_messages = array_values(
 );
 agents_api_smoke_assert_equals( 'call_123', $tool_result_messages[0]['metadata']['tool_call_id'] ?? '', 'tool result metadata preserves provider tool call id', $failures, $passes );
 agents_api_smoke_assert_equals( false, array_key_exists( 'tool_call_id', $tool_result_messages[0]['payload'] ?? array() ), 'tool result payload does not duplicate tool_call_id', $failures, $passes );
+
+$tool_call_messages = array_values(
+	array_filter(
+		$result['messages'],
+		static function ( array $message ): bool {
+			return ( $message['type'] ?? '' ) === AgentsAPI\AI\WP_Agent_Message::TYPE_TOOL_CALL;
+		}
+	)
+);
+agents_api_smoke_assert_equals( 'call_123', $tool_call_messages[0]['metadata']['tool_call_id'] ?? '', 'tool call metadata preserves provider tool call id', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'text' => 'hello world' ), $tool_call_messages[0]['payload']['parameters'] ?? array(), 'tool call payload preserves provider parameters for runtime replay', $failures, $passes );
 
 echo "\n[2] Loop runs without mediation when no tool_executor is provided (backwards compatible):\n";
 $executor->executed = array();
