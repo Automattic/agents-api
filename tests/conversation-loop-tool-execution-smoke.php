@@ -360,4 +360,74 @@ $exception_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 'executor_exception', $exception_result['tool_audit_events'][0]['error_type'], 'executor exception audit event records error type', $failures, $passes );
 agents_api_smoke_assert_equals( false, $exception_result['tool_audit_events'][0]['success'], 'executor exception audit event records failure', $failures, $passes );
 
+echo "\n[Default should_continue stops on natural completion (#226):\n";
+$executor->executed = array();
+$turn_count         = 0;
+
+$natural_stop_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'one tool round' ) ),
+	static function ( array $messages, array $context ) use ( &$turn_count ): array {
+		++$turn_count;
+		if ( 1 === $context['turn'] ) {
+			return array(
+				'messages'   => $messages,
+				'tool_calls' => array(
+					array( 'name' => 'client/summarize', 'parameters' => array( 'text' => 'once' ) ),
+				),
+			);
+		}
+		// Turn 2: model answers with text and no tool_calls. The default
+		// should_continue must stop the loop here rather than letting it run
+		// until max_turns.
+		return array(
+			'messages' => $messages,
+			'content'  => 'final answer',
+		);
+	},
+	array(
+		'max_turns'         => 8,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+		// No should_continue override on purpose — exercise the substrate default.
+	)
+);
+
+agents_api_smoke_assert_equals( 2, $turn_count, 'loop stops after the natural-completion turn instead of running to max_turns', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'executor was called exactly once', $failures, $passes );
+
+echo "\n[Mediation falls back to prior messages when turn runner omits the key (#227):\n";
+$executor->executed = array();
+$omit_turn          = 0;
+
+$omit_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'kick off' ) ),
+	static function ( array $unused, array $context ) use ( &$omit_turn ): array {
+		++$omit_turn;
+		// Intentionally omit the `messages` key. The substrate must fall back
+		// to the prior turn's messages so transcript history is preserved.
+		if ( 1 === $context['turn'] ) {
+			return array(
+				'tool_calls' => array(
+					array( 'name' => 'client/summarize', 'parameters' => array( 'text' => 'kick off' ) ),
+				),
+			);
+		}
+		// Empty tool_calls trips natural completion inside the mediation path.
+		return array(
+			'content'    => 'done',
+			'tool_calls' => array(),
+		);
+	},
+	array(
+		'max_turns'         => 4,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+	)
+);
+
+agents_api_smoke_assert_equals( 2, $omit_turn, 'loop completes naturally even when turn runner omits messages', $failures, $passes );
+agents_api_smoke_assert_equals( true, count( $omit_result['messages'] ) >= 4, 'transcript retains user + tool_call + tool_result + final content despite omitted messages key', $failures, $passes );
+$omit_roles = array_map( static fn( array $m ): string => (string) ( $m['role'] ?? '' ), $omit_result['messages'] );
+agents_api_smoke_assert_equals( 'user', $omit_roles[0] ?? '', 'first transcript message is the original user turn (history preserved)', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API conversation loop tool execution', $failures, $passes );
