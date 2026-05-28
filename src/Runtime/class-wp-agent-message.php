@@ -213,6 +213,105 @@ class WP_Agent_Message {
 	}
 
 	/**
+	 * Coalesce consecutive same-role envelopes into multi-part shapes.
+	 *
+	 * When an assistant turn emits both narrative text and one or more tool
+	 * calls, the substrate persists them as separate envelopes (one TYPE_TEXT
+	 * followed by one or more TYPE_TOOL_CALL, all role=assistant). Replay
+	 * against providers that reject consecutive same-role messages
+	 * (Anthropic notably) then fails until the consumer merges them back into
+	 * a single multi-part assistant message before dispatch.
+	 *
+	 * This helper does that merge: consecutive envelopes of the same role are
+	 * combined into one TYPE_MULTIMODAL_PART envelope whose `payload.parts`
+	 * carries each original envelope verbatim. Provider adapters can then map
+	 * the multi-part envelope to whatever shape the target provider expects
+	 * (Anthropic's content-block array, OpenAI's tool_calls + content split,
+	 * etc.) without losing per-part metadata or having to re-derive grouping
+	 * from message order.
+	 *
+	 * The helper is opt-in: it does not change the substrate's persisted
+	 * transcript format. Consumers call it on the message list immediately
+	 * before constructing the provider request. Calling it twice is a no-op
+	 * because already-multipart envelopes are preserved as-is.
+	 *
+	 * @param array<int, array<string, mixed>> $messages Messages to coalesce.
+	 * @return array<int, array<string, mixed>> Messages with consecutive same-role envelopes merged.
+	 */
+	public static function coalesce_consecutive_same_role( array $messages ): array {
+		$normalized = self::normalize_many( $messages );
+		$coalesced  = array();
+
+		foreach ( $normalized as $envelope ) {
+			$role = $envelope['role'] ?? '';
+			$tail = end( $coalesced );
+
+			if ( false === $tail || ( $tail['role'] ?? '' ) !== $role ) {
+				$coalesced[] = $envelope;
+				continue;
+			}
+
+			$tail_key   = array_key_last( $coalesced );
+			$tail_parts = self::extract_parts( $tail );
+			$new_parts  = self::extract_parts( $envelope );
+
+			$coalesced[ $tail_key ] = self::buildEnvelope(
+				$role,
+				self::join_text_content( $tail_parts, $new_parts ),
+				self::TYPE_MULTIMODAL_PART,
+				array(
+					'parts' => array_merge( $tail_parts, $new_parts ),
+				),
+				$tail['metadata'] ?? array(),
+				array()
+			);
+		}
+
+		return $coalesced;
+	}
+
+	/**
+	 * Return the parts that should be carried inside a coalesced envelope.
+	 *
+	 * Already-multipart envelopes contribute their existing parts; all other
+	 * envelopes contribute themselves as a single part so no payload data is
+	 * lost in the merge.
+	 *
+	 * @param array<string, mixed> $envelope Source envelope.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private static function extract_parts( array $envelope ): array {
+		if ( self::TYPE_MULTIMODAL_PART === ( $envelope['type'] ?? '' ) && isset( $envelope['payload']['parts'] ) && is_array( $envelope['payload']['parts'] ) ) {
+			return array_values( $envelope['payload']['parts'] );
+		}
+
+		return array( $envelope );
+	}
+
+	/**
+	 * Produce a human-readable content string for a coalesced envelope.
+	 *
+	 * The substrate keeps the original per-part envelopes inside the payload;
+	 * the top-level `content` is reduced to the concatenated text of any
+	 * TYPE_TEXT parts so logs and transcripts stay readable without provider
+	 * adapter introspection.
+	 *
+	 * @param array<int, array<string, mixed>> $left_parts  Parts already inside the coalesced envelope.
+	 * @param array<int, array<string, mixed>> $right_parts Parts being merged in.
+	 * @return string Joined text content.
+	 */
+	private static function join_text_content( array $left_parts, array $right_parts ): string {
+		$texts = array();
+		foreach ( array_merge( $left_parts, $right_parts ) as $part ) {
+			if ( self::TYPE_TEXT === ( $part['type'] ?? '' ) && is_string( $part['content'] ?? null ) && '' !== $part['content'] ) {
+				$texts[] = $part['content'];
+			}
+		}
+
+		return implode( "\n\n", $texts );
+	}
+
+	/**
 	 * Detect whether an array already uses the envelope shape.
 	 *
 	 * @param array $message Message array.
