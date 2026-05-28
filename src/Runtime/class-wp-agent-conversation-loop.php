@@ -650,9 +650,9 @@ class WP_Agent_Conversation_Loop {
 			return null;
 		}
 
-		$normalized       = WP_Agent_Message::normalize( $message );
-		$message_metadata = isset( $normalized['metadata'] ) && is_array( $normalized['metadata'] ) ? $normalized['metadata'] : array();
-		$action           = self::normalize_interrupt_action( $message_metadata['interrupt_action'] ?? ( $message_metadata['action'] ?? 'message' ) );
+		$normalized         = WP_Agent_Message::normalize( $message );
+		$message_metadata   = isset( $normalized['metadata'] ) && is_array( $normalized['metadata'] ) ? $normalized['metadata'] : array();
+		$action             = self::normalize_interrupt_action( $message_metadata['interrupt_action'] ?? ( $message_metadata['action'] ?? 'message' ) );
 		$interrupt_metadata = $message_metadata;
 		unset( $interrupt_metadata['action'], $interrupt_metadata['interrupt_action'] );
 
