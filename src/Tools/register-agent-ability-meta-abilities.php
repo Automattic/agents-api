@@ -91,10 +91,6 @@ function agents_ability_search( array $input ): array {
 	$entries  = array();
 
 	foreach ( wp_get_abilities() as $ability ) {
-		if ( ! $ability instanceof \WP_Ability ) {
-			continue;
-		}
-
 		if ( '' !== $category && $ability->get_category() !== $category ) {
 			continue;
 		}

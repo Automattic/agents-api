@@ -26,10 +26,15 @@ function register_event_trigger_handler( WP_Agent_Event_Trigger $trigger ): void
 		return;
 	}
 
+	$hook_name = $trigger->get_hook_name();
+	if ( '' === $hook_name ) {
+		return;
+	}
+
 	add_action(
-		$trigger->get_hook_name(),
+		$hook_name,
 		static function ( ...$hook_args ) use ( $trigger ): void {
-			dispatch_event_trigger_hook( $trigger, $hook_args );
+			dispatch_event_trigger_hook( $trigger, array_values( $hook_args ) );
 		},
 		PHP_INT_MAX,
 		max( 1, count( $trigger->get_args_shape() ) )

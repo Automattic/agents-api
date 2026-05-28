@@ -382,7 +382,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param array<string, WP_Agent_Iteration_Budget>                    $budgets         Named iteration budgets.
 	 * @param WP_Agent_Identical_Failure_Tracker|null                     $failure_tracker Optional identical-failure tracker.
 	 * @param WP_Agent_Tool_Result_Truncator|null                         $truncator       Optional tool result truncator.
-	 * @return array{messages: array, tool_execution_results: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null, spin_signatures: WP_Agent_Spin_Signature[]}
+	 * @return array{messages: array, tool_execution_results: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, spin_signatures: WP_Agent_Spin_Signature[]}
 	 */
 	private static function mediate_tool_calls(
 		array $result,
@@ -639,18 +639,10 @@ class WP_Agent_Conversation_Loop {
 
 		$truncated = $truncator->truncate_result( $result, $tool_name, $context );
 
-		if ( ! is_array( $truncated['result'] ?? null ) ) {
-			return array(
-				'result'    => $result,
-				'truncated' => false,
-				'metadata'  => array( 'reason' => 'invalid_truncator_result' ),
-			);
-		}
-
 		return array(
 			'result'    => $truncated['result'],
-			'truncated' => (bool) ( $truncated['truncated'] ?? false ),
-			'metadata'  => isset( $truncated['metadata'] ) && is_array( $truncated['metadata'] ) ? $truncated['metadata'] : array(),
+			'truncated' => $truncated['truncated'],
+			'metadata'  => $truncated['metadata'],
 		);
 	}
 
@@ -762,10 +754,6 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		foreach ( $signatures as $signature ) {
-			if ( ! $signature instanceof WP_Agent_Spin_Signature ) {
-				continue;
-			}
-
 			if ( $detector->record_signature( $signature, $context ) ) {
 				$payload = array_merge(
 					$signature->to_array(),

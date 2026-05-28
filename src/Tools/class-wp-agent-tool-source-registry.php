@@ -88,7 +88,7 @@ class WP_Agent_Tool_Source_Registry {
 		$order   = $this->getSourceOrder( $sources, $context );
 
 		foreach ( $order as $source_slug ) {
-			if ( ! is_string( $source_slug ) || ! isset( $sources[ $source_slug ] ) ) {
+			if ( ! isset( $sources[ $source_slug ] ) ) {
 				continue;
 			}
 
