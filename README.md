@@ -205,7 +205,7 @@ wp_register_agent(
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Result`
 - `agents/ability-search` / `agents/ability-call`
-- `agents/chat` / `agents/chat-run-control-capabilities` / `agents/get-chat-run` / `agents/cancel-chat-run` / `agents/queue-chat-message`
+- `agents/chat` / `agents/get-chat-run` / `agents/cancel-chat-run` / `agents/queue-chat-message`
 - `AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status`

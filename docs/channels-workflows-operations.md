@@ -66,16 +66,15 @@ The channel can consume either a single `reply` or assistant `messages` from the
 
 ## Chat run control
 
-Agents API owns the generic run-control ability contracts while runtimes own concrete storage, workers, provider aborts, and queue draining.
+Agents API owns the generic run-control ability contracts and default run-control storage. Every `agents/chat` run receives a `run_id`, stores status when a session is known, accepts best-effort cancellation, and accepts queued follow-up messages. Runtimes may override the hooks below only when they can provide stronger behavior such as immediate provider aborts or a custom queue worker.
 
 | Ability | Purpose | Runtime hook |
 | --- | --- | --- |
-| `agents/chat-run-control-capabilities` | Report whether the selected agent/runtime supports status, cancel, and queue controls. | Probes all run-control hooks |
 | `agents/get-chat-run` | Return status for a known chat run. | `wp_agent_chat_run_status_handler` |
 | `agents/cancel-chat-run` | Request best-effort cancellation for a known chat run. | `wp_agent_chat_run_cancel_handler` |
 | `agents/queue-chat-message` | Accept a next user message while a session has an active run. | `wp_agent_chat_message_queue_handler` |
 
-Capability detection is contextual. The run-control abilities are registered globally, while each runtime decides what a selected agent can actually honor. Adapters should call `agents/chat-run-control-capabilities` with the selected `agent` before exposing Stop or Queue UI.
+Clients can expose status, Stop, and Queue controls whenever these canonical abilities are available and the caller has permission for the selected agent. The default handlers preserve safe behavior for synchronous runtimes; runtime-specific handlers are enhancements, not prerequisites.
 
 Run status vocabulary is bounded to `queued`, `running`, `cancelling`, `cancelled`, `completed`, and `failed`. The canonical run payload is:
 

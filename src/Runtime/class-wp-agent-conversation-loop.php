@@ -89,6 +89,7 @@ class WP_Agent_Conversation_Loop {
 		$interrupt_source      = self::resolve_interrupt_source( $options );
 		$request               = self::resolve_request( $messages, $options );
 		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
+		$run_id                = self::resolve_run_id( $options, $request );
 		$lock_ttl              = self::resolve_lock_ttl( $options );
 		$lock_token            = null;
 		$budget_resolution     = self::resolve_budgets( $options, $max_turns );
@@ -98,6 +99,9 @@ class WP_Agent_Conversation_Loop {
 		$wall_clock_initial    = isset( $budgets['wall_clock_seconds'] ) ? $budgets['wall_clock_seconds']->current() : 0;
 		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
 		$messages              = WP_Agent_Message::normalize_many( $messages );
+		if ( '' !== $run_id && '' !== $lock_session_id ) {
+			WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, array( 'source' => 'conversation_loop' ) );
+		}
 		$events                = array();
 		$tool_results          = array();
 		$tool_audit_events     = array();
@@ -278,6 +282,12 @@ class WP_Agent_Conversation_Loop {
 				}
 
 				$interrupt = self::check_interrupt_source( $interrupt_source, $messages, $options, $turn_context, $on_event );
+				if ( null === $interrupt && '' !== $run_id ) {
+					$interrupt_message = WP_Agent_Chat_Run_Control::cancellation_interrupt_for_run( $run_id, $lock_session_id );
+					if ( null !== $interrupt_message ) {
+						$interrupt = self::normalize_interrupt_message( $interrupt_message, $turn_context, $on_event );
+					}
+				}
 				if ( null !== $interrupt ) {
 					$messages[] = $interrupt['message'];
 					$events[]   = array(
@@ -345,6 +355,13 @@ class WP_Agent_Conversation_Loop {
 			}
 
 			$final_result = WP_Agent_Conversation_Result::normalize( $final_result_data );
+
+			if ( '' !== $run_id && '' !== $lock_session_id ) {
+				WP_Agent_Chat_Run_Control::finish_run(
+					$run_id,
+					null !== $interrupted ? WP_Agent_Chat_Run_Control::STATUS_CANCELLED : WP_Agent_Chat_Run_Control::STATUS_COMPLETED
+				);
+			}
 
 			self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
 
@@ -677,6 +694,18 @@ class WP_Agent_Conversation_Loop {
 			return null;
 		}
 
+		return self::normalize_interrupt_message( $message, $context, $on_event );
+	}
+
+	/**
+	 * Normalize and emit a received interrupt message.
+	 *
+	 * @param array<string,mixed>  $message  Interrupt message.
+	 * @param array<string,mixed>  $context  Current turn context.
+	 * @param callable|null        $on_event Event sink.
+	 * @return array{message: array<string, mixed>, metadata: array<string, mixed>, action: string}
+	 */
+	private static function normalize_interrupt_message( array $message, array $context, ?callable $on_event ): array {
 		$normalized         = WP_Agent_Message::normalize( $message );
 		$message_metadata   = isset( $normalized['metadata'] ) && is_array( $normalized['metadata'] ) ? $normalized['metadata'] : array();
 		$action             = self::normalize_interrupt_action( $message_metadata['interrupt_action'] ?? ( $message_metadata['action'] ?? 'message' ) );
@@ -1308,6 +1337,32 @@ class WP_Agent_Conversation_Loop {
 
 		$metadata = $request->metadata();
 		foreach ( array( 'transcript_session_id', 'session_id', 'transcript_id' ) as $key ) {
+			$value = $metadata[ $key ] ?? null;
+			if ( is_string( $value ) && '' !== trim( $value ) ) {
+				return trim( $value );
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Resolve the chat run ID used by generic run-control.
+	 *
+	 * @param array                         $options Loop options.
+	 * @param WP_Agent_Conversation_Request $request Request object.
+	 * @return string
+	 */
+	private static function resolve_run_id( array $options, WP_Agent_Conversation_Request $request ): string {
+		foreach ( array( 'run_id', 'chat_run_id' ) as $key ) {
+			$value = $options[ $key ] ?? null;
+			if ( is_string( $value ) && '' !== trim( $value ) ) {
+				return trim( $value );
+			}
+		}
+
+		$metadata = $request->metadata();
+		foreach ( array( 'run_id', 'chat_run_id' ) as $key ) {
 			$value = $metadata[ $key ] ?? null;
 			if ( is_string( $value ) && '' !== trim( $value ) ) {
 				return trim( $value );

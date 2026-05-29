@@ -143,9 +143,19 @@ function agents_chat_dispatch( array $input ) {
 		);
 	}
 
+	$run_id     = (string) $input['run_id'];
+	$session_id = trim( (string) ( $input['session_id'] ?? '' ) );
+	if ( '' !== $session_id ) {
+		WP_Agent_Chat_Run_Control::start_run( $run_id, $session_id, array( 'agent' => (string) ( $input['agent'] ?? '' ) ) );
+	}
+
 	$result = call_user_func( $handler, $input );
 
 	if ( is_wp_error( $result ) ) {
+		if ( '' !== $session_id ) {
+			WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED );
+		}
+
 		/** This action is documented above. */
 		do_action( 'agents_chat_dispatch_failed', $result->get_error_code(), $input );
 
@@ -153,6 +163,10 @@ function agents_chat_dispatch( array $input ) {
 	}
 
 	if ( ! is_array( $result ) ) {
+		if ( '' !== $session_id ) {
+			WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED );
+		}
+
 		/** This action is documented above. */
 		do_action( 'agents_chat_dispatch_failed', 'invalid_result', $input );
 
@@ -164,6 +178,18 @@ function agents_chat_dispatch( array $input ) {
 
 	if ( ! isset( $result['run_id'] ) || '' === trim( (string) $result['run_id'] ) ) {
 		$result['run_id'] = $input['run_id'];
+	}
+
+	$resolved_session_id = trim( (string) ( $result['session_id'] ?? $session_id ) );
+	if ( '' !== $resolved_session_id ) {
+		if ( '' === $session_id ) {
+			WP_Agent_Chat_Run_Control::start_run( (string) $result['run_id'], $resolved_session_id, array( 'agent' => (string) ( $input['agent'] ?? '' ) ) );
+		}
+
+		$status = ! empty( $result['completed'] ) || ! array_key_exists( 'completed', $result )
+			? WP_Agent_Chat_Run_Control::STATUS_COMPLETED
+			: WP_Agent_Chat_Run_Control::STATUS_RUNNING;
+		WP_Agent_Chat_Run_Control::finish_run( (string) $result['run_id'], $status );
 	}
 
 	return $result;
@@ -339,7 +365,7 @@ function agents_chat_output_schema(): array {
 			),
 			'run_id'     => array(
 				'type'        => 'string',
-				'description' => 'Opaque ID for this accepted chat turn. Use with agents/get-chat-run, agents/cancel-chat-run, and agents/queue-chat-message when the runtime supports run control.',
+				'description' => 'Opaque ID for this accepted chat turn. Use with agents/get-chat-run, agents/cancel-chat-run, and agents/queue-chat-message for generic run control.',
 			),
 			'messages'   => array(
 				'type'        => 'array',
