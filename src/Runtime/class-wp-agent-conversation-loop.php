@@ -454,9 +454,19 @@ class WP_Agent_Conversation_Loop {
 				'parameters'   => $parameters,
 			) );
 
-			// Add tool-call message to transcript.
+			// Add tool-call message to transcript. The structured info
+			// (tool_name + parameters) lives in metadata; `content` is
+			// intentionally empty so adapters that flatten the transcript
+			// to provider text don't end up echoing the human-readable
+			// "Calling X" debug string back to the model. When the model
+			// sees "Calling foo" as a previous assistant text turn, it
+			// pattern-matches and starts emitting that literal string as
+			// text instead of issuing real function-calls — a sneaky
+			// failure mode on long multi-tool conversations (Gemini Flash
+			// in particular). Adapters that want a user-facing label can
+			// derive it from `metadata.tool_name`.
 			$messages[] = WP_Agent_Message::toolCall(
-				'Calling ' . $tool_name,
+				'',
 				$tool_name,
 				is_array( $parameters ) ? $parameters : array(),
 				$turn,
