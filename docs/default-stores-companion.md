@@ -4,34 +4,49 @@ Issues: https://github.com/Automattic/agents-api/issues/78, https://github.com/A
 
 `agents-api` remains the canonical substrate for contracts, value objects, and provider-neutral runtime seams. Concrete persistence policy belongs outside this repository unless the policy itself becomes a generic contract.
 
-## Decision (resolves #235)
+## Decision (resolves #235): opt-in default conversation store in canonical
 
 #235 reopened the question of whether canonical should ship a default conversation
-session store so that zero-store installs work out of the box. The decision is to
-keep that store in **this companion package, not canonical**:
+session store so that zero-store installs work out of the box. After weighing a
+separate companion package against an in-canonical option, the maintainers
+(@chubes4, @lezama) chose to ship the default conversation store **inside canonical,
+dormant behind an opt-in filter** rather than as a separate package.
 
-- Canonical is on the WordPress core landing path (#77). A default CPT session store
-  in canonical would become a session post type that core ships to every site — a
-  much larger imposition than a Composer-required companion, and likely a core-review
-  blocker. The companion never carries that liability.
-- The posts-table-bloat concern (Data Machine generating large post volumes) only
-  applies to consumers that do not override `wp_agent_conversation_store`. High-volume
-  adopters override and never touch the default; the remaining audience is low-volume
-  experiments for which a CPT is appropriate.
-- The reference implementation already exists in
-  [`lezama/openclawp`](https://github.com/lezama/openclawp/blob/main/includes/class-openclawp-conversation-store.php)
-  (CPT + postmeta, `WP_Agent_Conversation_Store` + `WP_Agent_Conversation_Lock`). The
-  companion's CPT transcript store is an extraction + generalization of it, not a
-  from-scratch design.
+Rationale:
 
-Canonical's contribution to the cold-start experience is limited to a more actionable
-`agents_conversation_session_no_store` error that points at this companion. The error
-code is unchanged.
+- **One package to consume.** A consumer enables the store with a single filter —
+  `add_filter( 'agents_api_enable_default_conversation_store', '__return_true' )` —
+  instead of installing and version-tracking a second tiny plugin.
+- **No CPT shipped to every site.** The store registers nothing unless opted in. A
+  vanilla install still has no `agents_api_session` post type and still returns the
+  no-store error, so the contracts-only default — and the WordPress core landing path
+  (#77) — is preserved at runtime. An off-by-default dormant class is a far smaller
+  core-review concern than a mandatory session post type.
+- **Fallback only.** When enabled, the store registers on `wp_agent_conversation_store`
+  at low priority (5), so any host store registered at the default priority wins.
+  Data Machine and WordPress.com keep their own custom backends and never enable this.
 
-Note: openclawp's store is **user-keyed only**. The generalized companion store must
-additionally implement `WP_Agent_Principal_Conversation_Store` so non-user principals
-(audience/token) do not require a custom backend on day one; the legacy int-user
-methods delegate to the `_for_owner` variants.
+Implementation: `WP_Agent_Cpt_Conversation_Store`
+(`src/Transcripts/class-wp-agent-cpt-conversation-store.php`), wired by
+`src/Transcripts/register-default-conversation-store.php`. It is a `wp_posts` +
+`wp_postmeta` store (no custom tables) generalized from the
+[`lezama/openclawp`](https://github.com/lezama/openclawp/blob/main/includes/class-openclawp-conversation-store.php)
+reference. openclawp's store is user-keyed only; the canonical store additionally
+implements `WP_Agent_Principal_Conversation_Store` so non-user principals
+(audience/token) work without a custom backend — the int-user methods delegate to the
+`_for_owner` variants.
+
+Retention/cleanup is intentionally not shipped: it stays a consumer responsibility so
+the substrate does not become a product runtime.
+
+### Superseded direction
+
+An earlier resolution favored a separate `wordpress/agents-api-default-stores`
+companion package (and the conversation-store error briefly pointed at it). That was
+superseded by the opt-in-in-canonical decision above for the consumption + maintenance
+reasons listed. The memory-store sections below remain a valid future companion
+candidate **if** their dependency surface ever justifies a separate package; the
+conversation store does not.
 
 ## Boundary
 
