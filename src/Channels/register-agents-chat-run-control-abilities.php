@@ -83,11 +83,16 @@ function agents_get_chat_run( array $input ) {
 		return agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_run_invalid_status' );
 	}
 
-	$run = WP_Agent_Chat_Run_Control::get_run( (string) ( $input['run_id'] ?? '' ) );
-	if ( $run && (string) $run['session_id'] !== (string) ( $input['session_id'] ?? '' ) ) {
+	$run                  = WP_Agent_Chat_Run_Control::get_run( (string) ( $input['run_id'] ?? '' ) );
+	$requested_session_id = (string) ( $input['session_id'] ?? '' );
+	if ( null !== $run && $requested_session_id !== (string) $run['session_id'] ) {
 		return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested session_id and run_id.' );
 	}
-	return $run ?: agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
+	if ( null !== $run ) {
+		return $run;
+	}
+
+	return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
 }
 
 /** @return array<string,mixed>|\WP_Error */
@@ -96,11 +101,12 @@ function agents_cancel_chat_run( array $input ) {
 	if ( is_callable( $handler ) ) {
 		$result = agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_run_invalid_cancel_result' );
 	} else {
-		$run = WP_Agent_Chat_Run_Control::get_run( (string) ( $input['run_id'] ?? '' ) );
+		$run                  = WP_Agent_Chat_Run_Control::get_run( (string) ( $input['run_id'] ?? '' ) );
+		$requested_session_id = (string) ( $input['session_id'] ?? '' );
 		if ( null === $run ) {
 			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
 		}
-		if ( (string) $run['session_id'] !== (string) ( $input['session_id'] ?? '' ) ) {
+		if ( $requested_session_id !== (string) $run['session_id'] ) {
 			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested session_id and run_id.' );
 		}
 

@@ -120,7 +120,7 @@ class WP_Agent_Chat_Run_Control {
 			'metadata'   => $metadata,
 		);
 
-		$state                  = self::state();
+		$state                    = self::state();
 		$state['runs'][ $run_id ] = $run;
 		self::save_state( $state );
 
@@ -136,7 +136,7 @@ class WP_Agent_Chat_Run_Control {
 	 */
 	public static function finish_run( string $run_id, string $status = self::STATUS_COMPLETED ): ?array {
 		$state = self::state();
-		if ( empty( $state['runs'][ $run_id ] ) || ! is_array( $state['runs'][ $run_id ] ) ) {
+		if ( ! isset( $state['runs'][ $run_id ] ) ) {
 			return null;
 		}
 
@@ -173,13 +173,13 @@ class WP_Agent_Chat_Run_Control {
 	 */
 	public static function request_cancel( string $run_id ): ?array {
 		$state = self::state();
-		if ( empty( $state['runs'][ $run_id ] ) || ! is_array( $state['runs'][ $run_id ] ) ) {
+		if ( ! isset( $state['runs'][ $run_id ] ) ) {
 			return null;
 		}
 
-		$run           = $state['runs'][ $run_id ];
-		$terminal      = in_array( self::normalize_status( $run['status'] ?? '' ), array( self::STATUS_COMPLETED, self::STATUS_FAILED, self::STATUS_CANCELLED ), true );
-		$run['status'] = $terminal ? self::normalize_status( $run['status'] ?? '' ) : self::STATUS_CANCELLING;
+		$run               = $state['runs'][ $run_id ];
+		$terminal          = in_array( self::normalize_status( $run['status'] ?? '' ), array( self::STATUS_COMPLETED, self::STATUS_FAILED, self::STATUS_CANCELLED ), true );
+		$run['status']     = $terminal ? self::normalize_status( $run['status'] ?? '' ) : self::STATUS_CANCELLING;
 		$run['cancelled']  = ! $terminal;
 		$run['updated_at'] = self::now();
 
@@ -198,11 +198,13 @@ class WP_Agent_Chat_Run_Control {
 	 */
 	public static function cancellation_interrupt_for_run( string $run_id, string $session_id = '' ): ?array {
 		$run = self::get_run( $run_id );
-		if ( ! $run || self::STATUS_CANCELLING !== $run['status'] ) {
+		if ( null === $run || self::STATUS_CANCELLING !== $run['status'] ) {
 			return null;
 		}
 
-		return self::cancellation_interrupt_message( $run_id, $session_id ?: (string) $run['session_id'] );
+		$resolved_session_id = '' !== $session_id ? $session_id : (string) $run['session_id'];
+
+		return self::cancellation_interrupt_message( $run_id, $resolved_session_id );
 	}
 
 	/**
@@ -230,10 +232,10 @@ class WP_Agent_Chat_Run_Control {
 			'created_at'        => self::now(),
 		);
 
-		$state                         = self::state();
-		$state['queues'][ $session_id ] = array_values( $state['queues'][ $session_id ] ?? array() );
+		$state                            = self::state();
+		$state['queues'][ $session_id ]   = array_values( $state['queues'][ $session_id ] ?? array() );
 		$state['queues'][ $session_id ][] = $item;
-		$position                      = count( $state['queues'][ $session_id ] );
+		$position                         = count( $state['queues'][ $session_id ] );
 		self::save_state( $state );
 
 		return self::normalize_run( array(
@@ -308,6 +310,6 @@ class WP_Agent_Chat_Run_Control {
 	}
 
 	private static function now(): string {
-		return function_exists( 'gmdate' ) ? gmdate( 'c' ) : date( 'c' );
+		return gmdate( 'c' );
 	}
 }
