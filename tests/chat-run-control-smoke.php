@@ -57,6 +57,7 @@ do_action( 'wp_abilities_api_init' );
 agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_GET_CHAT_RUN_ABILITY ] ), 'get-run ability registers', $failures, $passes );
 agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_CANCEL_CHAT_RUN_ABILITY ] ), 'cancel-run ability registers', $failures, $passes );
 agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_QUEUE_CHAT_MESSAGE_ABILITY ] ), 'queue-message ability registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_CHAT_RUN_CONTROL_CAPABILITIES_ABILITY ] ), 'run-control capabilities ability registers', $failures, $passes );
 agents_api_smoke_assert_equals( true, in_array( 'run_id', AgentsAPI\AI\Channels\agents_chat_output_schema()['required'] ?? array(), true ) || isset( AgentsAPI\AI\Channels\agents_chat_output_schema()['properties']['run_id'] ), 'chat output schema exposes run_id', $failures, $passes );
 
 $captured_chat_input = array();
@@ -88,6 +89,11 @@ agents_api_smoke_assert_equals( true, is_array( $chat ), 'chat dispatch succeeds
 agents_api_smoke_assert_equals( true, isset( $captured_chat_input['run_id'] ) && '' !== $captured_chat_input['run_id'], 'chat dispatch passes generated run_id to runtime', $failures, $passes );
 agents_api_smoke_assert_equals( $captured_chat_input['run_id'], $chat['run_id'] ?? null, 'chat dispatch returns generated run_id', $failures, $passes );
 
+$capabilities = AgentsAPI\AI\Channels\agents_chat_run_control_capabilities( array( 'agent' => 'demo-agent' ) );
+agents_api_smoke_assert_equals( false, $capabilities['chat_run_status'] ?? null, 'status capability false without runtime handler', $failures, $passes );
+agents_api_smoke_assert_equals( false, $capabilities['chat_run_cancel'] ?? null, 'cancel capability false without runtime handler', $failures, $passes );
+agents_api_smoke_assert_equals( false, $capabilities['chat_message_queue'] ?? null, 'queue capability false without runtime handler', $failures, $passes );
+
 add_filter(
 	'wp_agent_chat_run_status_handler',
 	static fn() => static fn( array $input ): array => array(
@@ -101,6 +107,11 @@ add_filter(
 	10,
 	2
 );
+
+$capabilities = AgentsAPI\AI\Channels\agents_chat_run_control_capabilities( array( 'agent' => 'demo-agent' ) );
+agents_api_smoke_assert_equals( true, $capabilities['chat_run_status'] ?? null, 'status capability true with runtime handler', $failures, $passes );
+agents_api_smoke_assert_equals( false, $capabilities['chat_run_cancel'] ?? null, 'cancel capability remains false without runtime handler', $failures, $passes );
+agents_api_smoke_assert_equals( false, $capabilities['chat_message_queue'] ?? null, 'queue capability remains false without runtime handler', $failures, $passes );
 
 $status = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) );
 agents_api_smoke_assert_equals( 'running', $status['status'] ?? null, 'get-run normalizes status payload', $failures, $passes );
@@ -117,6 +128,11 @@ add_filter(
 	2
 );
 
+$capabilities = AgentsAPI\AI\Channels\agents_chat_run_control_capabilities( array( 'agent' => 'demo-agent' ) );
+agents_api_smoke_assert_equals( true, $capabilities['chat_run_status'] ?? null, 'status capability stays true with runtime handler', $failures, $passes );
+agents_api_smoke_assert_equals( true, $capabilities['chat_run_cancel'] ?? null, 'cancel capability true with runtime handler', $failures, $passes );
+agents_api_smoke_assert_equals( false, $capabilities['chat_message_queue'] ?? null, 'queue capability remains false until handler exists', $failures, $passes );
+
 $cancelled = AgentsAPI\AI\Channels\agents_cancel_chat_run( array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) );
 agents_api_smoke_assert_equals( true, $cancelled['cancelled'] ?? null, 'cancel-run marks cancelling as cancelled request accepted', $failures, $passes );
 
@@ -132,6 +148,11 @@ add_filter(
 	10,
 	2
 );
+
+$capabilities = AgentsAPI\AI\Channels\agents_chat_run_control_capabilities( array( 'agent' => 'demo-agent' ) );
+agents_api_smoke_assert_equals( true, $capabilities['chat_run_status'] ?? null, 'status capability true in full runtime', $failures, $passes );
+agents_api_smoke_assert_equals( true, $capabilities['chat_run_cancel'] ?? null, 'cancel capability true in full runtime', $failures, $passes );
+agents_api_smoke_assert_equals( true, $capabilities['chat_message_queue'] ?? null, 'queue capability true with runtime handler', $failures, $passes );
 
 $queued = AgentsAPI\AI\Channels\agents_queue_chat_message(
 	array(

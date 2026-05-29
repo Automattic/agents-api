@@ -70,9 +70,12 @@ Agents API owns the generic run-control ability contracts while runtimes own con
 
 | Ability | Purpose | Runtime hook |
 | --- | --- | --- |
+| `agents/chat-run-control-capabilities` | Report whether the selected agent/runtime supports status, cancel, and queue controls. | Probes all run-control hooks |
 | `agents/get-chat-run` | Return status for a known chat run. | `wp_agent_chat_run_status_handler` |
 | `agents/cancel-chat-run` | Request best-effort cancellation for a known chat run. | `wp_agent_chat_run_cancel_handler` |
 | `agents/queue-chat-message` | Accept a next user message while a session has an active run. | `wp_agent_chat_message_queue_handler` |
+
+Capability detection is contextual. The run-control abilities are registered globally, while each runtime decides what a selected agent can actually honor. Adapters should call `agents/chat-run-control-capabilities` with the selected `agent` before exposing Stop or Queue UI.
 
 Run status vocabulary is bounded to `queued`, `running`, `cancelling`, `cancelled`, `completed`, and `failed`. The canonical run payload is:
 

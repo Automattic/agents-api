@@ -11,14 +11,23 @@ use AgentsAPI\AI\WP_Agent_Chat_Run_Control;
 
 defined( 'ABSPATH' ) || exit;
 
-const AGENTS_GET_CHAT_RUN_ABILITY       = 'agents/get-chat-run';
-const AGENTS_CANCEL_CHAT_RUN_ABILITY    = 'agents/cancel-chat-run';
-const AGENTS_QUEUE_CHAT_MESSAGE_ABILITY = 'agents/queue-chat-message';
+const AGENTS_GET_CHAT_RUN_ABILITY                  = 'agents/get-chat-run';
+const AGENTS_CANCEL_CHAT_RUN_ABILITY               = 'agents/cancel-chat-run';
+const AGENTS_QUEUE_CHAT_MESSAGE_ABILITY            = 'agents/queue-chat-message';
+const AGENTS_CHAT_RUN_CONTROL_CAPABILITIES_ABILITY = 'agents/chat-run-control-capabilities';
 
 add_action(
 	'wp_abilities_api_init',
 	static function (): void {
 		$abilities = array(
+			AGENTS_CHAT_RUN_CONTROL_CAPABILITIES_ABILITY => array(
+				'label'            => 'Get Chat Run-Control Capabilities',
+				'description'      => 'Detect run-control support for a selected agent and runtime.',
+				'input_schema'     => agents_chat_run_control_capabilities_input_schema(),
+				'output_schema'    => agents_chat_run_control_capabilities_output_schema(),
+				'execute_callback' => __NAMESPACE__ . '\agents_chat_run_control_capabilities',
+				'annotations'      => array( 'idempotent' => true ),
+			),
 			AGENTS_GET_CHAT_RUN_ABILITY       => array(
 				'label'            => 'Get Chat Run',
 				'description'      => 'Read the canonical status for an addressable chat run.',
@@ -75,6 +84,65 @@ add_action(
 		}
 	}
 );
+
+/**
+ * Detect contextual chat run-control support for the selected runtime.
+ *
+ * The canonical run-control abilities are registered globally, but support is
+ * runtime and agent specific. This probe lets adapters ask Agents API whether
+ * a selected agent can actually honor status, cancel, and queued-message
+ * controls before exposing UI for them.
+ *
+ * @param array<string,mixed> $input Capability probe input.
+ * @return array{chat_run_status:bool,chat_run_cancel:bool,chat_message_queue:bool}
+ */
+function agents_chat_run_control_capabilities( array $input ): array {
+	return array(
+		'chat_run_status'   => agents_chat_run_control_capability_supported(
+			$input,
+			AGENTS_GET_CHAT_RUN_ABILITY,
+			'wp_agent_chat_run_status_handler'
+		),
+		'chat_run_cancel'   => agents_chat_run_control_capability_supported(
+			$input,
+			AGENTS_CANCEL_CHAT_RUN_ABILITY,
+			'wp_agent_chat_run_cancel_handler'
+		),
+		'chat_message_queue' => agents_chat_run_control_capability_supported(
+			$input,
+			AGENTS_QUEUE_CHAT_MESSAGE_ABILITY,
+			'wp_agent_chat_message_queue_handler'
+		),
+	);
+}
+
+/**
+ * Check one run-control capability for ability, permission, and runtime handler.
+ *
+ * @param array<string,mixed> $input          Capability probe input.
+ * @param string              $ability        Canonical run-control ability name.
+ * @param string              $handler_filter Runtime handler filter name.
+ * @return bool Whether the selected runtime supports the capability.
+ */
+function agents_chat_run_control_capability_supported( array $input, string $ability, string $handler_filter ): bool {
+	$agent = sanitize_title( (string) ( $input['agent'] ?? '' ) );
+	if ( '' === $agent ) {
+		return false;
+	}
+
+	if ( function_exists( 'wp_has_ability' ) && ! wp_has_ability( $ability ) ) {
+		return false;
+	}
+
+	$probe_input          = $input;
+	$probe_input['agent'] = $agent;
+
+	if ( ! agents_chat_run_control_permission( $probe_input ) ) {
+		return false;
+	}
+
+	return is_callable( apply_filters( $handler_filter, null, $probe_input ) );
+}
 
 /** @return array<string,mixed>|\WP_Error */
 function agents_get_chat_run( array $input ) {
@@ -166,6 +234,32 @@ function agents_chat_run_id_input_schema(): array {
 			'session_id'    => array( 'type' => 'string' ),
 			'run_id'        => array( 'type' => 'string' ),
 			'session_owner' => agents_chat_session_owner_schema(),
+		),
+	);
+}
+
+function agents_chat_run_control_capabilities_input_schema(): array {
+	return array(
+		'type'       => 'object',
+		'required'   => array( 'agent' ),
+		'properties' => array(
+			'agent'         => array(
+				'type'        => 'string',
+				'description' => 'Slug or ID of the selected agent/runtime to probe.',
+			),
+			'session_owner' => agents_chat_session_owner_schema(),
+		),
+	);
+}
+
+function agents_chat_run_control_capabilities_output_schema(): array {
+	return array(
+		'type'       => 'object',
+		'required'   => array( 'chat_run_status', 'chat_run_cancel', 'chat_message_queue' ),
+		'properties' => array(
+			'chat_run_status'    => array( 'type' => 'boolean' ),
+			'chat_run_cancel'    => array( 'type' => 'boolean' ),
+			'chat_message_queue' => array( 'type' => 'boolean' ),
 		),
 	);
 }
