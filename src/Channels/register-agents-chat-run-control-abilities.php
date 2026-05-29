@@ -112,16 +112,7 @@ function agents_list_chat_run_events( array $input ) {
 		return agents_chat_run_events_normalize_result( $result );
 	}
 
-	try {
-		return WP_Agent_Chat_Run_Control::list_events(
-			(string) ( $input['session_id'] ?? '' ),
-			(string) ( $input['run_id'] ?? '' ),
-			(string) ( $input['cursor'] ?? '' ),
-			(int) ( $input['limit'] ?? 100 )
-		);
-	} catch ( \InvalidArgumentException $error ) {
-		return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', $error->getMessage() );
-	}
+	return agents_chat_run_control_no_handler( 'agents_chat_run_events_no_handler', 'No chat run events handler is registered.' );
 }
 
 /** @return array<string,mixed>|\WP_Error */

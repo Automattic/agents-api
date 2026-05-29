@@ -21,7 +21,6 @@ class WP_Agent_Chat_Run_Control {
 	public const STATUS_COMPLETED  = 'completed';
 	public const STATUS_FAILED     = 'failed';
 	private const OPTION_KEY       = 'agents_api_chat_run_control';
-	private const MAX_EVENTS       = 200;
 
 	/** @return string[] */
 	public static function statuses(): array {
@@ -121,97 +120,11 @@ class WP_Agent_Chat_Run_Control {
 			'metadata'   => $metadata,
 		);
 
-		$state                                     = self::state();
-		$state['runs'][ $run_id ]                  = $run;
-		$state['events'][ $session_id ][ $run_id ] = array_values( $state['events'][ $session_id ][ $run_id ] ?? array() );
+		$state                    = self::state();
+		$state['runs'][ $run_id ] = $run;
 		self::save_state( $state );
 
 		return self::normalize_run( $run );
-	}
-
-	/**
-	 * Persist a UI-safe lifecycle event for an addressable chat run.
-	 *
-	 * @param string              $session_id Session ID.
-	 * @param string              $run_id     Run ID.
-	 * @param string              $type       Lifecycle event type.
-	 * @param array<string,mixed> $payload    Raw internal event payload.
-	 * @return array<string,mixed> Stored event.
-	 */
-	public static function record_event( string $session_id, string $run_id, string $type, array $payload = array() ): array {
-		$session_id = trim( $session_id );
-		$run_id     = trim( $run_id );
-		$type       = strtolower( preg_replace( '/[^a-z0-9_\-]/', '', $type ) ?? '' );
-
-		if ( '' === $session_id || '' === $run_id || '' === $type ) {
-			throw new \InvalidArgumentException( 'session_id, run_id, and event type must be non-empty.' );
-		}
-
-		$state  = self::state();
-		$events = array_values( $state['events'][ $session_id ][ $run_id ] ?? array() );
-		$next   = (int) ( $state['event_sequences'][ $session_id ][ $run_id ] ?? 0 ) + 1;
-		$event  = array(
-			'id'         => 'evt_' . $next,
-			'type'       => $type,
-			'message'    => self::event_message( $type, $payload ),
-			'created_at' => self::now(),
-			'metadata'   => self::safe_event_metadata( $payload ),
-		);
-
-		$events[] = $event;
-		$events   = array_slice( $events, -1 * self::event_limit() );
-
-		$state['events'][ $session_id ][ $run_id ]          = $events;
-		$state['event_sequences'][ $session_id ][ $run_id ] = $next;
-		if ( isset( $state['runs'][ $run_id ] ) ) {
-			$state['runs'][ $run_id ]['updated_at'] = self::now();
-		}
-
-		self::save_state( $state );
-
-		return $event;
-	}
-
-	/**
-	 * List persisted lifecycle events after an optional cursor.
-	 *
-	 * @param string $session_id Session ID.
-	 * @param string $run_id     Run ID.
-	 * @param string $cursor     Last event ID seen by the client.
-	 * @param int    $limit      Maximum events to return.
-	 * @return array<string,mixed> Cursorable event page.
-	 */
-	public static function list_events( string $session_id, string $run_id, string $cursor = '', int $limit = 100 ): array {
-		$state  = self::state();
-		$run    = self::get_run( $run_id );
-		$events = array_values( $state['events'][ $session_id ][ $run_id ] ?? array() );
-
-		if ( null === $run || $session_id !== (string) $run['session_id'] ) {
-			throw new \InvalidArgumentException( 'No chat run was found for the requested session_id and run_id.' );
-		}
-
-		$offset = 0;
-		if ( '' !== $cursor ) {
-			foreach ( $events as $index => $event ) {
-				if ( (string) ( $event['id'] ?? '' ) === $cursor ) {
-					$offset = $index + 1;
-					break;
-				}
-			}
-		}
-
-		$limit       = max( 1, min( self::event_limit(), $limit ) );
-		$page        = array_slice( $events, $offset, $limit );
-		$next_cursor = ! empty( $page ) ? (string) ( $page[ count( $page ) - 1 ]['id'] ?? $cursor ) : $cursor;
-
-		return array(
-			'run_id'     => $run_id,
-			'session_id' => $session_id,
-			'status'     => $run['status'],
-			'events'     => $page,
-			'cursor'     => $next_cursor,
-			'has_more'   => ( $offset + count( $page ) ) < count( $events ),
-		);
 	}
 
 	/**
@@ -380,84 +293,13 @@ class WP_Agent_Chat_Run_Control {
 		);
 	}
 
-	/** @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<string,array<int,array<string,mixed>>>>,event_sequences:array<string,array<string,int>>} */
+	/** @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>} */
 	private static function state(): array {
 		$state = function_exists( 'get_option' ) ? get_option( self::OPTION_KEY, array() ) : array();
 		return array(
-			'runs'            => is_array( $state['runs'] ?? null ) ? $state['runs'] : array(),
-			'queues'          => is_array( $state['queues'] ?? null ) ? $state['queues'] : array(),
-			'events'          => is_array( $state['events'] ?? null ) ? $state['events'] : array(),
-			'event_sequences' => is_array( $state['event_sequences'] ?? null ) ? $state['event_sequences'] : array(),
+			'runs'   => is_array( $state['runs'] ?? null ) ? $state['runs'] : array(),
+			'queues' => is_array( $state['queues'] ?? null ) ? $state['queues'] : array(),
 		);
-	}
-
-	/** @param array<string,mixed> $payload Raw event payload. */
-	private static function safe_event_metadata( array $payload ): array {
-		$metadata = array();
-		foreach (
-			array(
-				'turn',
-				'max_turns',
-				'message_count',
-				'tool_results',
-				'tool_name',
-				'tool_call_id',
-				'success',
-				'action_id',
-				'budget',
-				'name',
-				'limit',
-				'current',
-				'elapsed_seconds',
-			) as $key
-		) {
-			if ( array_key_exists( $key, $payload ) && is_scalar( $payload[ $key ] ) ) {
-				$metadata[ 'name' === $key ? 'budget_name' : $key ] = $payload[ $key ];
-			}
-		}
-
-		if ( isset( $payload['error'] ) && is_scalar( $payload['error'] ) ) {
-			$metadata['error'] = self::summarize_error( (string) $payload['error'] );
-		}
-
-		return $metadata;
-	}
-
-	/** @param array<string,mixed> $payload Raw event payload. */
-	private static function event_message( string $type, array $payload ): string {
-		$tool = isset( $payload['tool_name'] ) && is_scalar( $payload['tool_name'] ) ? (string) $payload['tool_name'] : '';
-		switch ( $type ) {
-			case 'turn_started':
-				return 'Thinking...';
-			case 'tool_call':
-				return '' !== $tool ? 'Calling ' . $tool . '...' : 'Calling tool...';
-			case 'tool_result':
-				return '' !== $tool ? 'Finished ' . $tool . '.' : 'Tool finished.';
-			case 'approval_required':
-				return 'Approval required.';
-			case 'budget_exceeded':
-				return 'Budget exceeded.';
-			case 'completed':
-				return 'Run completed.';
-			case 'failed':
-				return 'Run failed.';
-			default:
-				return str_replace( '_', ' ', $type ) . '.';
-		}
-	}
-
-	private static function summarize_error( string $error ): string {
-		$error = trim( preg_replace( '/\s+/', ' ', $error ) ?? $error );
-		return substr( $error, 0, 300 );
-	}
-
-	private static function event_limit(): int {
-		$limit = self::MAX_EVENTS;
-		if ( function_exists( 'apply_filters' ) ) {
-			$limit = (int) apply_filters( 'agents_api_chat_run_event_limit', $limit );
-		}
-
-		return max( 1, min( 1000, $limit ) );
 	}
 
 	/** @param array<string,mixed> $state State to persist. */

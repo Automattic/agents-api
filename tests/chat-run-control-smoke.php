@@ -175,60 +175,47 @@ $interrupt = AgentsAPI\AI\WP_Agent_Chat_Run_Control::cancellation_interrupt_mess
 agents_api_smoke_assert_equals( 'cancel', $interrupt['metadata']['interrupt_action'] ?? null, 'cancellation helper maps to loop interrupt action', $failures, $passes );
 agents_api_smoke_assert_equals( 'run-1', $interrupt['metadata']['run_id'] ?? null, 'cancellation helper carries run id', $failures, $passes );
 
-AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-events-1', 'session-events-1' );
-AgentsAPI\AI\WP_Agent_Chat_Run_Control::record_event(
-	'session-events-1',
-	'run-events-1',
-	'tool_call',
-	array(
-		'turn'         => 1,
-		'tool_name'    => 'client/secret-tool',
-		'tool_call_id' => 'call-1',
-		'parameters'   => array( 'api_key' => 'secret-value' ),
-	)
-);
-AgentsAPI\AI\WP_Agent_Chat_Run_Control::record_event(
-	'session-events-1',
-	'run-events-1',
-	'custom_event',
-	array( 'success' => true )
-);
-AgentsAPI\AI\WP_Agent_Chat_Run_Control::record_event(
-	'session-events-1',
-	'run-events-1',
-	'tool_result',
-	array(
-		'turn'         => 1,
-		'tool_name'    => 'client/secret-tool',
-		'tool_call_id' => 'call-1',
-		'success'      => true,
-		'error'        => str_repeat( 'x', 400 ),
-	)
+$no_events_handler = AgentsAPI\AI\Channels\agents_list_chat_run_events( array( 'session_id' => 'session-events-1', 'run_id' => 'run-events-1' ) );
+agents_api_smoke_assert_equals( true, $no_events_handler instanceof WP_Error, 'run events require host handler', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_chat_run_events_no_handler', $no_events_handler->get_error_code(), 'run events no-handler error is explicit', $failures, $passes );
+
+add_filter(
+	'wp_agent_chat_run_events_handler',
+	static fn() => static fn( array $input ): array => array(
+		'run_id'     => $input['run_id'],
+		'session_id' => $input['session_id'],
+		'status'     => 'running',
+		'events'     => array(
+			array(
+				'id'         => 'evt_1',
+				'type'       => 'tool_call',
+				'message'    => 'Calling client/tool...',
+				'created_at' => '2026-01-01T00:00:00Z',
+				'metadata'   => array(
+					'turn'         => 1,
+					'tool_name'    => 'client/tool',
+					'tool_call_id' => 'call-1',
+				),
+			),
+		),
+		'cursor'     => 'evt_1',
+		'has_more'   => false,
+	),
+	10,
+	2
 );
 
 $event_page = AgentsAPI\AI\Channels\agents_list_chat_run_events(
 	array(
 		'session_id' => 'session-events-1',
 		'run_id'     => 'run-events-1',
-		'limit'      => 2,
+		'cursor'     => 'evt_0',
 	)
 );
-agents_api_smoke_assert_equals( 2, count( $event_page['events'] ?? array() ), 'run events list respects limit', $failures, $passes );
-agents_api_smoke_assert_equals( true, $event_page['has_more'] ?? null, 'run events page reports more results', $failures, $passes );
-agents_api_smoke_assert_equals( 'client/secret-tool', $event_page['events'][0]['metadata']['tool_name'] ?? null, 'run events preserve safe tool name', $failures, $passes );
-agents_api_smoke_assert_equals( false, isset( $event_page['events'][0]['metadata']['parameters'] ), 'run events omit raw tool parameters', $failures, $passes );
-
-$next_event_page = AgentsAPI\AI\Channels\agents_list_chat_run_events(
-	array(
-		'session_id' => 'session-events-1',
-		'run_id'     => 'run-events-1',
-		'cursor'     => $event_page['cursor'],
-	)
-);
-agents_api_smoke_assert_equals( 1, count( $next_event_page['events'] ?? array() ), 'run events cursor returns only newer events', $failures, $passes );
-agents_api_smoke_assert_equals( 300, strlen( $next_event_page['events'][0]['metadata']['error'] ?? '' ), 'run events summarize errors', $failures, $passes );
-
-$wrong_session_events = AgentsAPI\AI\Channels\agents_list_chat_run_events( array( 'session_id' => 'session-other', 'run_id' => 'run-events-1' ) );
-agents_api_smoke_assert_equals( true, $wrong_session_events instanceof WP_Error, 'run events are scoped by session and run id', $failures, $passes );
+agents_api_smoke_assert_equals( 'run-events-1', $event_page['run_id'] ?? null, 'run events handler preserves run id', $failures, $passes );
+agents_api_smoke_assert_equals( 'session-events-1', $event_page['session_id'] ?? null, 'run events handler preserves session id', $failures, $passes );
+agents_api_smoke_assert_equals( 'running', $event_page['status'] ?? null, 'run events handler normalizes status', $failures, $passes );
+agents_api_smoke_assert_equals( 'evt_1', $event_page['cursor'] ?? null, 'run events handler returns cursor', $failures, $passes );
+agents_api_smoke_assert_equals( 'client/tool', $event_page['events'][0]['metadata']['tool_name'] ?? null, 'run events handler returns safe metadata', $failures, $passes );
 
 agents_api_smoke_finish( 'chat run-control', $failures, $passes );
