@@ -43,6 +43,10 @@ use AgentsAPI\AI\WP_Agent_Chat_Run_Control;
 
 defined( 'ABSPATH' ) || exit;
 
+if ( ! class_exists( WP_Agent_Chat_Run_Control::class ) ) {
+	require_once dirname( __DIR__ ) . '/Runtime/class-wp-agent-chat-run-control.php';
+}
+
 /**
  * The slug under which this ability is registered. Stable. Consumers and
 	 * channels should target this string rather than a runtime-specific slug.
