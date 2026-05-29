@@ -281,7 +281,7 @@ function agents_conversation_sessions_context( array $input ) {
 
 	$store = WP_Agent_Conversation_Sessions::get_store( array( 'principal' => $principal ) + $input );
 	if ( ! $store instanceof WP_Agent_Conversation_Store ) {
-		return new \WP_Error( 'agents_conversation_session_no_store', 'No WP_Agent_Conversation_Store is registered. Provide one with the wp_agent_conversation_store filter.' );
+		return new \WP_Error( 'agents_conversation_session_no_store', 'No conversation store is registered. Install the wordpress/agents-api-default-stores companion for a zero-config WordPress-native store, or register your own with the wp_agent_conversation_store filter.' );
 	}
 
 	if ( ! $store instanceof WP_Agent_Principal_Conversation_Store && WP_Agent_Execution_Principal::OWNER_TYPE_USER !== $owner['type'] ) {
