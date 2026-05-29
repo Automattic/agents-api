@@ -1,8 +1,37 @@
 # Default Stores Companion Proposal
 
-Issue: https://github.com/Automattic/agents-api/issues/78
+Issues: https://github.com/Automattic/agents-api/issues/78, https://github.com/Automattic/agents-api/issues/235
 
 `agents-api` remains the canonical substrate for contracts, value objects, and provider-neutral runtime seams. Concrete persistence policy belongs outside this repository unless the policy itself becomes a generic contract.
+
+## Decision (resolves #235)
+
+#235 reopened the question of whether canonical should ship a default conversation
+session store so that zero-store installs work out of the box. The decision is to
+keep that store in **this companion package, not canonical**:
+
+- Canonical is on the WordPress core landing path (#77). A default CPT session store
+  in canonical would become a session post type that core ships to every site — a
+  much larger imposition than a Composer-required companion, and likely a core-review
+  blocker. The companion never carries that liability.
+- The posts-table-bloat concern (Data Machine generating large post volumes) only
+  applies to consumers that do not override `wp_agent_conversation_store`. High-volume
+  adopters override and never touch the default; the remaining audience is low-volume
+  experiments for which a CPT is appropriate.
+- The reference implementation already exists in
+  [`lezama/openclawp`](https://github.com/lezama/openclawp/blob/main/includes/class-openclawp-conversation-store.php)
+  (CPT + postmeta, `WP_Agent_Conversation_Store` + `WP_Agent_Conversation_Lock`). The
+  companion's CPT transcript store is an extraction + generalization of it, not a
+  from-scratch design.
+
+Canonical's contribution to the cold-start experience is limited to a more actionable
+`agents_conversation_session_no_store` error that points at this companion. The error
+code is unchanged.
+
+Note: openclawp's store is **user-keyed only**. The generalized companion store must
+additionally implement `WP_Agent_Principal_Conversation_Store` so non-user principals
+(audience/token) do not require a custom backend on day one; the legacy int-user
+methods delegate to the `_for_owner` variants.
 
 ## Boundary
 
