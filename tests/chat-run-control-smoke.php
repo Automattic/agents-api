@@ -68,6 +68,7 @@ do_action( 'wp_abilities_api_init' );
 agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_GET_CHAT_RUN_ABILITY ] ), 'get-run ability registers', $failures, $passes );
 agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_CANCEL_CHAT_RUN_ABILITY ] ), 'cancel-run ability registers', $failures, $passes );
 agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_QUEUE_CHAT_MESSAGE_ABILITY ] ), 'queue-message ability registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_LIST_CHAT_RUN_EVENTS_ABILITY ] ), 'list-run-events ability registers', $failures, $passes );
 agents_api_smoke_assert_equals( true, in_array( 'run_id', AgentsAPI\AI\Channels\agents_chat_output_schema()['required'] ?? array(), true ) || isset( AgentsAPI\AI\Channels\agents_chat_output_schema()['properties']['run_id'] ), 'chat output schema exposes run_id', $failures, $passes );
 
 $captured_chat_input = array();
@@ -173,5 +174,61 @@ agents_api_smoke_assert_equals( 1, $queued['position'] ?? null, 'queue-message r
 $interrupt = AgentsAPI\AI\WP_Agent_Chat_Run_Control::cancellation_interrupt_message( 'run-1', 'session-1' );
 agents_api_smoke_assert_equals( 'cancel', $interrupt['metadata']['interrupt_action'] ?? null, 'cancellation helper maps to loop interrupt action', $failures, $passes );
 agents_api_smoke_assert_equals( 'run-1', $interrupt['metadata']['run_id'] ?? null, 'cancellation helper carries run id', $failures, $passes );
+
+AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-events-1', 'session-events-1' );
+AgentsAPI\AI\WP_Agent_Chat_Run_Control::record_event(
+	'session-events-1',
+	'run-events-1',
+	'tool_call',
+	array(
+		'turn'         => 1,
+		'tool_name'    => 'client/secret-tool',
+		'tool_call_id' => 'call-1',
+		'parameters'   => array( 'api_key' => 'secret-value' ),
+	)
+);
+AgentsAPI\AI\WP_Agent_Chat_Run_Control::record_event(
+	'session-events-1',
+	'run-events-1',
+	'custom_event',
+	array( 'success' => true )
+);
+AgentsAPI\AI\WP_Agent_Chat_Run_Control::record_event(
+	'session-events-1',
+	'run-events-1',
+	'tool_result',
+	array(
+		'turn'         => 1,
+		'tool_name'    => 'client/secret-tool',
+		'tool_call_id' => 'call-1',
+		'success'      => true,
+		'error'        => str_repeat( 'x', 400 ),
+	)
+);
+
+$event_page = AgentsAPI\AI\Channels\agents_list_chat_run_events(
+	array(
+		'session_id' => 'session-events-1',
+		'run_id'     => 'run-events-1',
+		'limit'      => 2,
+	)
+);
+agents_api_smoke_assert_equals( 2, count( $event_page['events'] ?? array() ), 'run events list respects limit', $failures, $passes );
+agents_api_smoke_assert_equals( true, $event_page['has_more'] ?? null, 'run events page reports more results', $failures, $passes );
+agents_api_smoke_assert_equals( 'client/secret-tool', $event_page['events'][0]['metadata']['tool_name'] ?? null, 'run events preserve safe tool name', $failures, $passes );
+agents_api_smoke_assert_equals( false, isset( $event_page['events'][0]['metadata']['parameters'] ), 'run events omit raw tool parameters', $failures, $passes );
+
+$next_event_page = AgentsAPI\AI\Channels\agents_list_chat_run_events(
+	array(
+		'session_id' => 'session-events-1',
+		'run_id'     => 'run-events-1',
+		'cursor'     => $event_page['cursor'],
+	)
+);
+agents_api_smoke_assert_equals( 1, count( $next_event_page['events'] ?? array() ), 'run events cursor returns only newer events', $failures, $passes );
+agents_api_smoke_assert_equals( 300, strlen( $next_event_page['events'][0]['metadata']['error'] ?? '' ), 'run events summarize errors', $failures, $passes );
+
+$wrong_session_events = AgentsAPI\AI\Channels\agents_list_chat_run_events( array( 'session_id' => 'session-other', 'run_id' => 'run-events-1' ) );
+agents_api_smoke_assert_equals( true, $wrong_session_events instanceof WP_Error, 'run events are scoped by session and run id', $failures, $passes );
 
 agents_api_smoke_finish( 'chat run-control', $failures, $passes );

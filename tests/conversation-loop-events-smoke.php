@@ -17,6 +17,23 @@ $passes   = 0;
 echo "agents-api-conversation-loop-events-smoke\n";
 
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
+
+$GLOBALS['__agents_api_smoke_options'] = array();
+
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $option, $default = false ) {
+		return $GLOBALS['__agents_api_smoke_options'][ $option ] ?? $default;
+	}
+}
+
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $option, $value, $autoload = null ): bool {
+		unset( $autoload );
+		$GLOBALS['__agents_api_smoke_options'][ $option ] = $value;
+		return true;
+	}
+}
+
 agents_api_smoke_require_module();
 
 // Build a tool executor.
@@ -217,5 +234,31 @@ $no_event_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 );
 
 agents_api_smoke_assert_equals( 1, count( $no_event_result['messages'] ), 'loop works without event sink', $failures, $passes );
+
+echo "\n[7] Addressable runs persist safe lifecycle events:\n";
+
+$addressable_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'persist' ) ),
+	static function ( array $messages ): array {
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'stored' );
+
+		return array(
+			'messages'               => $messages,
+			'tool_execution_results' => array(),
+			'events'                 => array(),
+		);
+	},
+	array(
+		'max_turns'             => 1,
+		'transcript_session_id' => 'session-loop-events',
+		'run_id'                => 'run-loop-events',
+	)
+);
+
+$stored_event_page = AgentsAPI\AI\WP_Agent_Chat_Run_Control::list_events( 'session-loop-events', 'run-loop-events' );
+$stored_event_names = array_column( $stored_event_page['events'], 'type' );
+agents_api_smoke_assert_equals( 2, count( $addressable_result['messages'] ), 'addressable loop still returns result', $failures, $passes );
+agents_api_smoke_assert_equals( true, in_array( 'turn_started', $stored_event_names, true ), 'addressable loop persists turn_started event', $failures, $passes );
+agents_api_smoke_assert_equals( true, in_array( 'completed', $stored_event_names, true ), 'addressable loop persists completed event', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API conversation loop events', $failures, $passes );

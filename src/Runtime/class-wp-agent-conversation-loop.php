@@ -90,6 +90,9 @@ class WP_Agent_Conversation_Loop {
 		$request               = self::resolve_request( $messages, $options );
 		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
 		$run_id                = self::resolve_run_id( $options, $request );
+		if ( '' !== $run_id && '' !== $lock_session_id ) {
+			$on_event = self::decorate_chat_run_event_sink( $on_event, $lock_session_id, $run_id );
+		}
 		$lock_ttl              = self::resolve_lock_ttl( $options );
 		$lock_token            = null;
 		$budget_resolution     = self::resolve_budgets( $options, $max_turns );
@@ -1010,6 +1013,21 @@ class WP_Agent_Conversation_Loop {
 				unset( $error );
 			}
 		}
+	}
+
+	private static function decorate_chat_run_event_sink( ?callable $on_event, string $session_id, string $run_id ): callable {
+		return static function ( string $event, array $payload = array() ) use ( $on_event, $session_id, $run_id ): void {
+			try {
+				WP_Agent_Chat_Run_Control::record_event( $session_id, $run_id, $event, $payload );
+			} catch ( \Throwable $error ) {
+				// Event persistence must not change loop results.
+				unset( $error );
+			}
+
+			if ( null !== $on_event ) {
+				call_user_func( $on_event, $event, $payload );
+			}
+		};
 	}
 
 	/**
