@@ -482,8 +482,16 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			$metadata = array();
 		}
 
-		$owner_type = (string) ( get_post_meta( $post->ID, self::META_OWNER_TYPE, true ) ?: self::OWNER_TYPE_USER );
-		$owner_key  = (string) get_post_meta( $post->ID, self::META_OWNER_KEY, true );
+		$owner_type = (string) get_post_meta( $post->ID, self::META_OWNER_TYPE, true );
+		if ( '' === $owner_type ) {
+			$owner_type = self::OWNER_TYPE_USER;
+		}
+		$owner_key = (string) get_post_meta( $post->ID, self::META_OWNER_KEY, true );
+
+		$context = (string) get_post_meta( $post->ID, self::META_CONTEXT, true );
+		if ( '' === $context ) {
+			$context = 'chat';
+		}
 
 		return array(
 			'session_id'           => (string) get_post_meta( $post->ID, self::META_SESSION_ID, true ),
@@ -499,8 +507,8 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			'provider'             => (string) get_post_meta( $post->ID, self::META_PROVIDER, true ),
 			'model'                => (string) get_post_meta( $post->ID, self::META_MODEL, true ),
 			'provider_response_id' => $this->nullable_meta_string( $post->ID, self::META_PROVIDER_RESPONSE_ID ),
-			'context'              => (string) ( get_post_meta( $post->ID, self::META_CONTEXT, true ) ?: 'chat' ),
-			'mode'                 => (string) ( get_post_meta( $post->ID, self::META_CONTEXT, true ) ?: 'chat' ),
+			'context'              => $context,
+			'mode'                 => $context,
 			'created_at'           => (string) $post->post_date_gmt,
 			'updated_at'           => (string) $post->post_modified_gmt,
 			'last_read_at'         => $this->nullable_meta_string( $post->ID, self::META_LAST_READ_AT ),
