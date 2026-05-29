@@ -39,6 +39,8 @@
 
 namespace AgentsAPI\AI\Channels;
 
+use AgentsAPI\AI\WP_Agent_Chat_Run_Control;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -104,6 +106,10 @@ add_action(
  * @return array|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_chat_dispatch( array $input ) {
+	if ( ! isset( $input['run_id'] ) || '' === trim( (string) $input['run_id'] ) ) {
+		$input['run_id'] = WP_Agent_Chat_Run_Control::generate_run_id();
+	}
+
 	/**
 	 * Filter the chat runtime handler.
 	 *
@@ -156,6 +162,10 @@ function agents_chat_dispatch( array $input ) {
 		);
 	}
 
+	if ( ! isset( $result['run_id'] ) || '' === trim( (string) $result['run_id'] ) ) {
+		$result['run_id'] = $input['run_id'];
+	}
+
 	return $result;
 }
 
@@ -206,6 +216,10 @@ function agents_chat_input_schema(): array {
 			'session_id'     => array(
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Existing session ID to continue, or null to start a new session.',
+			),
+			'run_id'         => array(
+				'type'        => array( 'string', 'null' ),
+				'description' => 'Optional client-supplied idempotency/run key. If omitted, the dispatcher provides an opaque run ID to the runtime and response.',
 			),
 			'session_owner'  => agents_chat_session_owner_schema(),
 			'attachments'    => array(
@@ -322,6 +336,10 @@ function agents_chat_output_schema(): array {
 			'reply'      => array(
 				'type'        => 'string',
 				'description' => 'Primary assistant text. Must be set even when the runtime supplies multi-message output via `messages`.',
+			),
+			'run_id'     => array(
+				'type'        => 'string',
+				'description' => 'Opaque ID for this accepted chat turn. Use with agents/get-chat-run, agents/cancel-chat-run, and agents/queue-chat-message when the runtime supports run control.',
 			),
 			'messages'   => array(
 				'type'        => 'array',
