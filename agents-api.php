@@ -77,6 +77,8 @@ require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-principal-convers
 require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-conversation-sessions.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-conversation-lock.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-null-conversation-lock.php';
+require_once AGENTS_API_PATH . 'src/Transcripts/class-wp-agent-cpt-conversation-store.php';
+require_once AGENTS_API_PATH . 'src/Transcripts/register-default-conversation-store.php';
 require_once AGENTS_API_PATH . 'src/Approvals/class-wp-agent-pending-action-store.php';
 require_once AGENTS_API_PATH . 'src/Approvals/class-wp-agent-pending-action-status.php';
 require_once AGENTS_API_PATH . 'src/Approvals/class-wp-agent-pending-action.php';
