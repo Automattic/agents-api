@@ -32,6 +32,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Multi-turn orchestration contracts.
 - Opt-in mediated tool result truncation for oversized transcript payloads.
 - Opt-in between-turn interrupt sources for cancel, redirect, or additional instruction messages.
+- Canonical chat run-control contracts for run IDs, run status, best-effort cancellation, and queued messages.
 - Canonical ability discovery and dispatch meta-abilities for large tool surfaces.
 - Agent package and package-artifact contracts.
 - Shared `wp_guideline` / `wp_guideline_type` storage substrate polyfill when Core/Gutenberg do not provide it.
@@ -177,6 +178,7 @@ wp_register_agent(
 - `AgentsAPI\AI\WP_Agent_Tool_Result_Truncator`
 - `AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator`
 - `AgentsAPI\AI\WP_Agent_Conversation_Result`
+- `AgentsAPI\AI\WP_Agent_Chat_Run_Control`
 - `AgentsAPI\AI\WP_Agent_Conversation_Loop`
 - `WP_Agent_Consent_Policy`
 - `WP_Agent_Default_Consent_Policy`
@@ -203,6 +205,7 @@ wp_register_agent(
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Result`
 - `agents/ability-search` / `agents/ability-call`
+- `agents/chat` / `agents/get-chat-run` / `agents/cancel-chat-run` / `agents/queue-chat-message`
 - `AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status`

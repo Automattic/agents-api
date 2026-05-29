@@ -62,7 +62,34 @@ array(
 )
 ```
 
-The channel can consume either a single `reply` or assistant `messages` from the ability result. It stores a returned `session_id` before sending replies so delivery failures do not lose session continuity.
+The channel can consume either a single `reply` or assistant `messages` from the ability result. It stores a returned `session_id` before sending replies so delivery failures do not lose session continuity. `agents/chat` also exposes a canonical `run_id`; runtimes receive a generated `run_id` in the input when callers omit one, and responses include that same ID unless the runtime returns its own.
+
+## Chat run control
+
+Agents API owns the generic run-control ability contracts while runtimes own concrete storage, workers, provider aborts, and queue draining.
+
+| Ability | Purpose | Runtime hook |
+| --- | --- | --- |
+| `agents/get-chat-run` | Return status for a known chat run. | `wp_agent_chat_run_status_handler` |
+| `agents/cancel-chat-run` | Request best-effort cancellation for a known chat run. | `wp_agent_chat_run_cancel_handler` |
+| `agents/queue-chat-message` | Accept a next user message while a session has an active run. | `wp_agent_chat_message_queue_handler` |
+
+Run status vocabulary is bounded to `queued`, `running`, `cancelling`, `cancelled`, `completed`, and `failed`. The canonical run payload is:
+
+```php
+array(
+	'run_id'     => 'run_opaque',
+	'session_id' => 'session_opaque',
+	'status'     => 'running',
+	'started_at' => '2026-01-01T00:00:00Z',
+	'updated_at' => '2026-01-01T00:00:01Z',
+	'metadata'   => array(),
+)
+```
+
+Cancellation is best-effort. A runtime that can abort provider work immediately may do so; a runtime that cannot should mark the run `cancelling` and let its conversation loop stop at the next interrupt check. `WP_Agent_Chat_Run_Control::cancellation_interrupt_message()` builds the message shape expected by `WP_Agent_Conversation_Loop` `interrupt_source` callbacks.
+
+Queued messages return the same run payload plus `queued_message_id` and `position`. Async runtimes can drain queued messages through their worker, cron, or Action Scheduler integration. Synchronous runtimes can expose queued state and require polling or an explicit continue operation in the consuming product; the substrate does not force a background runner.
 
 ## Session, webhook, and idempotency helpers
 

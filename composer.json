@@ -72,6 +72,7 @@
       "php tests/iteration-budget-smoke.php",
       "php tests/conversation-loop-budgets-smoke.php",
       "php tests/channels-smoke.php",
+      "php tests/chat-run-control-smoke.php",
       "php tests/frontend-chat-rest-smoke.php",
       "php tests/agents-dispatch-message-ability-smoke.php",
       "php tests/webhook-safety-smoke.php",
