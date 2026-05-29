@@ -72,24 +72,24 @@ class WP_Agent_Conversation_Loop {
 	 * @return array Normalized conversation result.
 	 */
 	public static function run( array $messages, callable $turn_runner, array $options = array() ): array {
-		$runtime_overrides     = self::resolve_runtime_overrides( $options );
-		$options               = self::apply_runtime_overrides_to_options( $options, $runtime_overrides );
-		$max_turns             = self::max_turns( $options['max_turns'] ?? 1 );
-		$context               = isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array();
-		$tool_executor         = self::resolve_tool_executor( $options );
-		$tool_declarations     = self::resolve_tool_declarations( $options );
-		$should_continue       = self::resolve_should_continue( $options, $tool_executor, $tool_declarations );
-		$completion_policy     = self::resolve_completion_policy( $options );
-		$transcript_persister  = self::resolve_transcript_persister( $options );
-		$transcript_lock       = self::resolve_transcript_lock( $options );
-		$on_event              = self::resolve_event_sink( $options );
-		$spin_detector         = self::resolve_spin_detector( $options );
-		$failure_tracker       = self::resolve_identical_failure_tracker( $options );
-		$result_truncator      = self::resolve_tool_result_truncator( $options );
-		$interrupt_source      = self::resolve_interrupt_source( $options );
-		$request               = self::resolve_request( $messages, $options );
-		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
-		$run_id                = self::resolve_run_id( $options, $request );
+		$runtime_overrides    = self::resolve_runtime_overrides( $options );
+		$options              = self::apply_runtime_overrides_to_options( $options, $runtime_overrides );
+		$max_turns            = self::max_turns( $options['max_turns'] ?? 1 );
+		$context              = isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array();
+		$tool_executor        = self::resolve_tool_executor( $options );
+		$tool_declarations    = self::resolve_tool_declarations( $options );
+		$should_continue      = self::resolve_should_continue( $options, $tool_executor, $tool_declarations );
+		$completion_policy    = self::resolve_completion_policy( $options );
+		$transcript_persister = self::resolve_transcript_persister( $options );
+		$transcript_lock      = self::resolve_transcript_lock( $options );
+		$on_event             = self::resolve_event_sink( $options );
+		$spin_detector        = self::resolve_spin_detector( $options );
+		$failure_tracker      = self::resolve_identical_failure_tracker( $options );
+		$result_truncator     = self::resolve_tool_result_truncator( $options );
+		$interrupt_source     = self::resolve_interrupt_source( $options );
+		$request              = self::resolve_request( $messages, $options );
+		$lock_session_id      = self::resolve_lock_session_id( $options, $request );
+		$run_id               = self::resolve_run_id( $options, $request );
 		if ( '' !== $run_id && '' !== $lock_session_id ) {
 			$on_event = self::decorate_chat_run_event_sink( $on_event, $lock_session_id, $run_id );
 		}

@@ -121,8 +121,8 @@ class WP_Agent_Chat_Run_Control {
 			'metadata'   => $metadata,
 		);
 
-		$state                    = self::state();
-		$state['runs'][ $run_id ] = $run;
+		$state                                     = self::state();
+		$state['runs'][ $run_id ]                  = $run;
 		$state['events'][ $session_id ][ $run_id ] = array_values( $state['events'][ $session_id ][ $run_id ] ?? array() );
 		self::save_state( $state );
 
@@ -193,7 +193,7 @@ class WP_Agent_Chat_Run_Control {
 		$offset = 0;
 		if ( '' !== $cursor ) {
 			foreach ( $events as $index => $event ) {
-				if ( $cursor === (string) ( $event['id'] ?? '' ) ) {
+				if ( (string) ( $event['id'] ?? '' ) === $cursor ) {
 					$offset = $index + 1;
 					break;
 				}
@@ -394,7 +394,23 @@ class WP_Agent_Chat_Run_Control {
 	/** @param array<string,mixed> $payload Raw event payload. */
 	private static function safe_event_metadata( array $payload ): array {
 		$metadata = array();
-		foreach ( array( 'turn', 'max_turns', 'message_count', 'tool_results', 'tool_name', 'tool_call_id', 'success', 'action_id', 'budget', 'name', 'limit', 'current', 'elapsed_seconds' ) as $key ) {
+		foreach (
+			array(
+				'turn',
+				'max_turns',
+				'message_count',
+				'tool_results',
+				'tool_name',
+				'tool_call_id',
+				'success',
+				'action_id',
+				'budget',
+				'name',
+				'limit',
+				'current',
+				'elapsed_seconds',
+			) as $key
+		) {
 			if ( array_key_exists( $key, $payload ) && is_scalar( $payload[ $key ] ) ) {
 				$metadata[ 'name' === $key ? 'budget_name' : $key ] = $payload[ $key ];
 			}

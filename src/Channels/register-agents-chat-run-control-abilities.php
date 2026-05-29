@@ -28,7 +28,7 @@ add_action(
 				'execute_callback' => __NAMESPACE__ . '\\agents_list_chat_run_events',
 				'annotations'      => array( 'idempotent' => true ),
 			),
-			AGENTS_GET_CHAT_RUN_ABILITY       => array(
+			AGENTS_GET_CHAT_RUN_ABILITY         => array(
 				'label'            => 'Get Chat Run',
 				'description'      => 'Read the canonical status for an addressable chat run.',
 				'input_schema'     => agents_chat_run_id_input_schema(),
@@ -36,7 +36,7 @@ add_action(
 				'execute_callback' => __NAMESPACE__ . '\\agents_get_chat_run',
 				'annotations'      => array( 'idempotent' => true ),
 			),
-			AGENTS_CANCEL_CHAT_RUN_ABILITY    => array(
+			AGENTS_CANCEL_CHAT_RUN_ABILITY      => array(
 				'label'            => 'Cancel Chat Run',
 				'description'      => 'Request best-effort cancellation for an addressable chat run.',
 				'input_schema'     => agents_chat_run_id_input_schema(),
@@ -47,7 +47,7 @@ add_action(
 					'idempotent'  => true,
 				),
 			),
-			AGENTS_QUEUE_CHAT_MESSAGE_ABILITY => array(
+			AGENTS_QUEUE_CHAT_MESSAGE_ABILITY   => array(
 				'label'            => 'Queue Chat Message',
 				'description'      => 'Queue a user message for a conversation while another chat run is active.',
 				'input_schema'     => agents_queue_chat_message_input_schema(),
@@ -274,9 +274,13 @@ function agents_chat_run_id_input_schema(): array {
 }
 
 function agents_chat_run_events_input_schema(): array {
-	$schema                                 = agents_chat_run_id_input_schema();
-	$schema['properties']['cursor']         = array( 'type' => 'string' );
-	$schema['properties']['limit']          = array( 'type' => 'integer', 'minimum' => 1, 'maximum' => 1000 );
+	$schema                         = agents_chat_run_id_input_schema();
+	$schema['properties']['cursor'] = array( 'type' => 'string' );
+	$schema['properties']['limit']  = array(
+		'type'    => 'integer',
+		'minimum' => 1,
+		'maximum' => 1000,
+	);
 	return $schema;
 }
 
