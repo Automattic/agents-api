@@ -20,6 +20,7 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 
 $GLOBALS['__agents_api_smoke_abilities']  = array();
 $GLOBALS['__agents_api_smoke_categories'] = array();
+$GLOBALS['__agents_api_smoke_options']    = array();
 
 class WP_Error {
 	public function __construct( private string $code = '', private string $message = '', private array $data = array() ) {}
@@ -47,6 +48,16 @@ function wp_has_ability( string $ability ): bool {
 
 function wp_register_ability( string $ability, array $args ): void {
 	$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+}
+
+function get_option( string $option, $default = false ) {
+	return $GLOBALS['__agents_api_smoke_options'][ $option ] ?? $default;
+}
+
+function update_option( string $option, $value, $autoload = null ): bool {
+	unset( $autoload );
+	$GLOBALS['__agents_api_smoke_options'][ $option ] = $value;
+	return true;
 }
 
 agents_api_smoke_require_module();
@@ -79,14 +90,30 @@ add_filter(
 
 $chat = AgentsAPI\AI\Channels\agents_chat_dispatch(
 	array(
-		'agent'   => 'demo-agent',
-		'message' => 'Hello',
+		'agent'      => 'demo-agent',
+		'message'    => 'Hello',
+		'session_id' => 'session-1',
 	)
 );
 
 agents_api_smoke_assert_equals( true, is_array( $chat ), 'chat dispatch succeeds', $failures, $passes );
 agents_api_smoke_assert_equals( true, isset( $captured_chat_input['run_id'] ) && '' !== $captured_chat_input['run_id'], 'chat dispatch passes generated run_id to runtime', $failures, $passes );
 agents_api_smoke_assert_equals( $captured_chat_input['run_id'], $chat['run_id'] ?? null, 'chat dispatch returns generated run_id', $failures, $passes );
+$stored = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-1', 'run_id' => $chat['run_id'] ) );
+agents_api_smoke_assert_equals( 'completed', $stored['status'] ?? null, 'chat dispatch records completed run by default', $failures, $passes );
+
+AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-default-cancel', 'session-1' );
+$default_cancelled = AgentsAPI\AI\Channels\agents_cancel_chat_run( array( 'session_id' => 'session-1', 'run_id' => 'run-default-cancel' ) );
+agents_api_smoke_assert_equals( 'cancelling', $default_cancelled['status'] ?? null, 'default cancel marks running runs as cancelling', $failures, $passes );
+
+$default_queued = AgentsAPI\AI\Channels\agents_queue_chat_message(
+	array(
+		'agent'      => 'demo-agent',
+		'session_id' => 'session-default',
+		'message'    => 'Default queue',
+	)
+);
+agents_api_smoke_assert_equals( 'queued', $default_queued['status'] ?? null, 'default queue handler accepts messages', $failures, $passes );
 
 add_filter(
 	'wp_agent_chat_run_status_handler',

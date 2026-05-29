@@ -79,21 +79,43 @@ add_action(
 /** @return array<string,mixed>|\WP_Error */
 function agents_get_chat_run( array $input ) {
 	$handler = apply_filters( 'wp_agent_chat_run_status_handler', null, $input );
-	if ( ! is_callable( $handler ) ) {
-		return agents_chat_run_control_no_handler( 'agents_chat_run_status_unsupported', 'No chat run status handler is registered.' );
+	if ( is_callable( $handler ) ) {
+		return agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_run_invalid_status' );
 	}
 
-	return agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_run_invalid_status' );
+	$run                  = WP_Agent_Chat_Run_Control::get_run( (string) ( $input['run_id'] ?? '' ) );
+	$requested_session_id = (string) ( $input['session_id'] ?? '' );
+	if ( null !== $run && $requested_session_id !== (string) $run['session_id'] ) {
+		return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested session_id and run_id.' );
+	}
+	if ( null !== $run ) {
+		return $run;
+	}
+
+	return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
 }
 
 /** @return array<string,mixed>|\WP_Error */
 function agents_cancel_chat_run( array $input ) {
 	$handler = apply_filters( 'wp_agent_chat_run_cancel_handler', null, $input );
-	if ( ! is_callable( $handler ) ) {
-		return agents_chat_run_control_no_handler( 'agents_chat_run_cancel_unsupported', 'No chat run cancellation handler is registered.' );
+	if ( is_callable( $handler ) ) {
+		$result = agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_run_invalid_cancel_result' );
+	} else {
+		$run                  = WP_Agent_Chat_Run_Control::get_run( (string) ( $input['run_id'] ?? '' ) );
+		$requested_session_id = (string) ( $input['session_id'] ?? '' );
+		if ( null === $run ) {
+			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
+		}
+		if ( $requested_session_id !== (string) $run['session_id'] ) {
+			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested session_id and run_id.' );
+		}
+
+		$result = WP_Agent_Chat_Run_Control::request_cancel( (string) ( $input['run_id'] ?? '' ) );
+		if ( null === $result ) {
+			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
+		}
 	}
 
-	$result = agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_run_invalid_cancel_result' );
 	if ( is_wp_error( $result ) ) {
 		return $result;
 	}
@@ -113,11 +135,16 @@ function agents_cancel_chat_run( array $input ) {
 /** @return array<string,mixed>|\WP_Error */
 function agents_queue_chat_message( array $input ) {
 	$handler = apply_filters( 'wp_agent_chat_message_queue_handler', null, $input );
-	if ( ! is_callable( $handler ) ) {
-		return agents_chat_run_control_no_handler( 'agents_chat_message_queue_unsupported', 'No chat message queue handler is registered.' );
+	if ( is_callable( $handler ) ) {
+		$result = agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_message_queue_invalid_result' );
+	} else {
+		try {
+			$result = WP_Agent_Chat_Run_Control::queue_message( $input );
+		} catch ( \InvalidArgumentException $error ) {
+			return new \WP_Error( 'agents_chat_message_queue_invalid_result', $error->getMessage() );
+		}
 	}
 
-	$result = agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_message_queue_invalid_result' );
 	if ( is_wp_error( $result ) ) {
 		return $result;
 	}
@@ -133,8 +160,35 @@ function agents_queue_chat_message( array $input ) {
 }
 
 function agents_chat_run_control_permission( array $input ): bool {
-	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'read' ) : false;
+	$agent = sanitize_title( (string) ( $input['agent'] ?? '' ) );
+	if ( '' !== $agent && class_exists( '\WP_Agent_Access' ) && class_exists( '\WP_Agent_Access_Grant' ) ) {
+		$allowed = \WP_Agent_Access::can_current_principal_access_agent(
+			$agent,
+			\WP_Agent_Access_Grant::ROLE_VIEWER,
+			agents_chat_run_control_request_scope( $input )
+		);
+	} else {
+		$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'read' ) : false;
+	}
+
 	return (bool) apply_filters( 'agents_chat_run_control_permission', $allowed, $input );
+}
+
+/**
+ * Extract request-scope fields for run-control access checks.
+ *
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed> Access request scope.
+ */
+function agents_chat_run_control_request_scope( array $input ): array {
+	$scope = array();
+	foreach ( array( 'workspace_id', 'workspace_type', 'request_context', 'client_id', 'audience_id' ) as $key ) {
+		if ( isset( $input[ $key ] ) && is_scalar( $input[ $key ] ) ) {
+			$scope[ $key ] = (string) $input[ $key ];
+		}
+	}
+
+	return $scope;
 }
 
 /** @return array<string,mixed>|\WP_Error */
