@@ -7,6 +7,7 @@ Developer-facing documentation for Agents API, a WordPress-shaped substrate for 
 ### Architecture And Runtime
 
 - [Architecture](architecture.md) - module inventory, bootstrap lifecycle, substrate boundary, extension principles, and operational workflow.
+- [Adopting Agents API in an Existing Runtime](adopting-agents-api.md) - draft migration guide: capability map from a custom runtime onto substrate primitives, and an incremental, contract-test-gated adoption strategy.
 - [Registry and Packages](registry-and-packages.md) - agent registration, `WP_Agent`, package manifests, package artifacts, and artifact type registration.
 - [Runtime and Tools](runtime-and-tools.md) - conversation loop, request/result objects, tool declarations, mediation, policies, budgets, compaction, and events.
 
@@ -28,6 +29,7 @@ Developer-facing documentation for Agents API, a WordPress-shaped substrate for 
 docs/
 +-- README.md                         # This navigation index
 +-- architecture.md                   # Substrate architecture and module inventory
++-- adopting-agents-api.md            # Draft adoption/migration guide for existing runtimes
 +-- registry-and-packages.md          # Agent and package registration contracts
 +-- runtime-and-tools.md              # Runtime loop and tool mediation contracts
 +-- auth-consent-context-memory.md    # Auth, consent, context, and memory contracts
