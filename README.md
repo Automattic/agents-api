@@ -10,7 +10,7 @@ It's a small, focused WordPress package maintained by Automattic. Think of it as
 
 **What you don't get — and shouldn't expect:** a concrete workflow runtime, durable run history, an editor UI, admin screens, or any provider-specific AI client. Those belong to your product. Agents API is the substrate, not the application.
 
-New here? Start with the [developer documentation](docs/README.md).
+New here? Start with the [Introduction](docs/introduction.md) — it breaks down the core concepts and vocabulary in plain language — then browse the [developer documentation](docs/README.md).
 
 ## Layer Boundary
 

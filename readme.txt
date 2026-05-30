@@ -14,6 +14,8 @@ Shared WordPress runtime substrate for registering AI agents, mediating tools, r
 
 Agents API is a shared foundation for building AI agents in WordPress.
 
+New to the project? Start with the Introduction, which breaks down the core concepts and vocabulary in plain language: https://github.com/Automattic/agents-api/blob/main/docs/introduction.md
+
 It provides the reusable substrate that product plugins need when they add agent-backed features: agent registration, runtime value objects, tool mediation contracts, transcript and memory interfaces, approval primitives, messaging-channel adapters, and lightweight workflow scaffolding.
 
 Agents API is intentionally not a full agent product. It does not provide admin screens, provider-specific model execution, product workflows, concrete storage implementations, or an end-user chat application. Those pieces belong to consumer plugins.

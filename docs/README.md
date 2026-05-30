@@ -2,7 +2,13 @@
 
 Developer-facing documentation for Agents API, a WordPress-shaped substrate for agent registration, runtime contracts, channels, workflows, auth, memory, and related extension points.
 
+**New here? Read the [Introduction](introduction.md) first** — it explains the core idea and the vocabulary the rest of these docs assume.
+
 ## Quick Navigation
+
+### Start Here
+
+- [Introduction](introduction.md) - the one-sentence version, the three layers, the core vocabulary, and how a single request flows through the runtime. The on-ramp for anyone new to the concepts.
 
 ### Architecture And Runtime
 
@@ -28,6 +34,7 @@ Developer-facing documentation for Agents API, a WordPress-shaped substrate for 
 ```text
 docs/
 +-- README.md                         # This navigation index
++-- introduction.md                   # Concepts + vocabulary on-ramp for newcomers
 +-- architecture.md                   # Substrate architecture and module inventory
 +-- capability-map.md                 # Capability -> primitive reference map
 +-- registry-and-packages.md          # Agent and package registration contracts
