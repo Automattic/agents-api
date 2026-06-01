@@ -122,7 +122,10 @@ add_action(
 	}
 );
 
-/** @return array|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_list_conversation_sessions( array $input ) {
 	$context = agents_conversation_sessions_context( $input );
 	if ( is_wp_error( $context ) ) {
@@ -162,7 +165,10 @@ function agents_list_conversation_sessions( array $input ) {
 	);
 }
 
-/** @return array|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_get_conversation_session( array $input ) {
 	$context = agents_conversation_sessions_context( $input );
 	if ( is_wp_error( $context ) ) {
@@ -177,7 +183,10 @@ function agents_get_conversation_session( array $input ) {
 	return array( 'session' => agents_conversation_session_full( $session ) );
 }
 
-/** @return array|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_create_conversation_session( array $input ) {
 	$context = agents_conversation_sessions_context( $input );
 	if ( is_wp_error( $context ) ) {
@@ -205,7 +214,10 @@ function agents_create_conversation_session( array $input ) {
 	return array( 'session' => agents_conversation_session_full( is_array( $session ) ? $session : array( 'session_id' => $session_id ) ) );
 }
 
-/** @return array|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_update_conversation_session_title( array $input ) {
 	$context = agents_conversation_sessions_context( $input );
 	if ( is_wp_error( $context ) ) {
@@ -231,7 +243,10 @@ function agents_update_conversation_session_title( array $input ) {
 	return array( 'session' => agents_conversation_session_full( $session ) );
 }
 
-/** @return array|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_delete_conversation_session( array $input ) {
 	$context = agents_conversation_sessions_context( $input );
 	if ( is_wp_error( $context ) ) {
