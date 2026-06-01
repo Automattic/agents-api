@@ -107,14 +107,17 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		return $this->create_session_for_owner( $workspace, self::user_owner( $user_id ), $agent_slug, $metadata, $context );
 	}
 
+	/** @return array<int,array<string,mixed>> */
 	public function list_sessions( WP_Agent_Workspace_Scope $workspace, int $user_id, array $args = array() ): array {
 		return $this->list_sessions_for_owner( $workspace, self::user_owner( $user_id ), $args );
 	}
 
+	/** @return array<string,mixed>|null */
 	public function get_recent_pending_session( WP_Agent_Workspace_Scope $workspace, int $user_id, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array {
 		return $this->get_recent_pending_session_for_owner( $workspace, self::user_owner( $user_id ), $seconds, $context, $token_id );
 	}
 
+	/** @return array<string,mixed>|null */
 	public function get_session( string $session_id ): ?array {
 		$post = $this->find_post_by_session_id( $session_id );
 		return null === $post ? null : $this->session_array( $post );
@@ -137,7 +140,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			true
 		);
 
-		if ( is_wp_error( $updated ) || ! $updated ) {
+		if ( ! self::post_write_succeeded( $updated ) ) {
 			return false;
 		}
 
@@ -178,7 +181,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			true
 		);
 
-		return ! is_wp_error( $updated ) && (bool) $updated;
+		return self::post_write_succeeded( $updated );
 	}
 
 	/* ---------------- Principal conversation store contract --------------- */
@@ -200,7 +203,8 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			true
 		);
 
-		if ( is_wp_error( $post_id ) || ! $post_id ) {
+		$post_id = self::post_id_value( $post_id );
+		if ( 0 === $post_id ) {
 			return '';
 		}
 
@@ -214,16 +218,17 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		update_post_meta( $post_id, self::META_CONTEXT, $context );
 
 		if ( isset( $metadata['token_id'] ) ) {
-			update_post_meta( $post_id, self::META_TOKEN_ID, (int) $metadata['token_id'] );
+			update_post_meta( $post_id, self::META_TOKEN_ID, self::int_value( $metadata['token_id'] ) );
 		}
 
 		return $session_id;
 	}
 
+	/** @return array<int,array<string,mixed>> */
 	public function list_sessions_for_owner( WP_Agent_Workspace_Scope $workspace, array $owner, array $args = array() ): array {
 		$owner            = $this->normalize_owner( $owner );
-		$limit            = isset( $args['limit'] ) ? max( 1, (int) $args['limit'] ) : 50;
-		$offset           = isset( $args['offset'] ) ? max( 0, (int) $args['offset'] ) : 0;
+		$limit            = isset( $args['limit'] ) ? max( 1, self::int_value( $args['limit'] ) ) : 50;
+		$offset           = isset( $args['offset'] ) ? max( 0, self::int_value( $args['offset'] ) ) : 0;
 		$include_messages = ! empty( $args['include_messages'] );
 
 		$meta_query = $this->owner_meta_query( $workspace, $owner );
@@ -231,14 +236,14 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		if ( isset( $args['agent_slug'] ) && '' !== $args['agent_slug'] ) {
 			$meta_query[] = array(
 				'key'   => self::META_AGENT_SLUG,
-				'value' => (string) $args['agent_slug'],
+				'value' => self::string_value( $args['agent_slug'] ),
 			);
 		}
 
 		if ( isset( $args['context'] ) && '' !== $args['context'] ) {
 			$meta_query[] = array(
 				'key'   => self::META_CONTEXT,
-				'value' => (string) $args['context'],
+				'value' => self::string_value( $args['context'] ),
 			);
 		}
 
@@ -259,6 +264,10 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 
 		$sessions = array();
 		foreach ( $query->posts as $post ) {
+			if ( ! $post instanceof \WP_Post ) {
+				continue;
+			}
+
 			$session = $this->session_array( $post );
 			if ( ! $include_messages ) {
 				unset( $session['messages'] );
@@ -269,6 +278,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		return $sessions;
 	}
 
+	/** @return array<string,mixed>|null */
 	public function get_recent_pending_session_for_owner( WP_Agent_Workspace_Scope $workspace, array $owner, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array {
 		$owner  = $this->normalize_owner( $owner );
 		$cutoff = gmdate( 'Y-m-d H:i:s', time() - max( 1, $seconds ) );
@@ -313,7 +323,11 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			return null;
 		}
 
-		$post     = $query->posts[0];
+		$post = $query->posts[0];
+		if ( ! $post instanceof \WP_Post ) {
+			return null;
+		}
+
 		$messages = $this->decode_messages( $post->post_content );
 
 		// "Pending" = empty transcript or actively-locked session.
@@ -359,7 +373,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		}
 
 		$existing = json_decode( $existing_raw, true );
-		if ( ! is_array( $existing ) || (int) ( $existing['expires'] ?? 0 ) > time() ) {
+		if ( ! is_array( $existing ) || self::int_value( $existing['expires'] ?? 0 ) > time() ) {
 			return null;
 		}
 
@@ -387,7 +401,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		// Bust the post-meta cache so subsequent reads see the new lock value.
 		wp_cache_delete( $post->ID, 'post_meta' );
 
-		return 1 === (int) $rows ? $token : null;
+		return 1 === $rows ? $token : null;
 	}
 
 	public function release_session_lock( string $session_id, string $lock_token ): bool {
@@ -447,8 +461,8 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 	 * @return array{type:string,key:string}
 	 */
 	private function normalize_owner( array $owner ): array {
-		$type = isset( $owner['type'] ) && is_string( $owner['type'] ) && '' !== $owner['type'] ? $owner['type'] : self::OWNER_TYPE_USER;
-		$key  = isset( $owner['key'] ) ? (string) $owner['key'] : '0';
+		$type = isset( $owner['type'] ) && '' !== $owner['type'] ? $owner['type'] : self::OWNER_TYPE_USER;
+		$key  = isset( $owner['key'] ) ? self::string_value( $owner['key'] ) : '0';
 		return array(
 			'type' => $type,
 			'key'  => $key,
@@ -473,9 +487,11 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			)
 		);
 
-		return ! empty( $query->posts ) ? $query->posts[0] : null;
+		$post = ! empty( $query->posts ) ? $query->posts[0] : null;
+		return $post instanceof \WP_Post ? $post : null;
 	}
 
+	/** @return array<string,mixed> */
 	private function session_array( \WP_Post $post ): array {
 		$metadata_raw = get_post_meta( $post->ID, self::META_METADATA, true );
 		$metadata     = is_string( $metadata_raw ) && '' !== $metadata_raw ? json_decode( $metadata_raw, true ) : array();
@@ -529,6 +545,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		return is_scalar( $value ) ? (string) $value : '';
 	}
 
+	/** @return array<int,mixed> */
 	private function decode_messages( string $raw ): array {
 		if ( '' === $raw ) {
 			return array();
@@ -545,6 +562,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		return (string) $value;
 	}
 
+	/** @return array{token?:mixed,expires?:mixed}|null */
 	private function read_lock( int $post_id ): ?array {
 		$raw = get_post_meta( $post_id, self::META_LOCK, true );
 		if ( ! is_string( $raw ) || '' === $raw ) {
@@ -559,7 +577,35 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		if ( null === $lock ) {
 			return false;
 		}
-		return (int) ( $lock['expires'] ?? 0 ) > time();
+		return self::int_value( $lock['expires'] ?? 0 ) > time();
+	}
+
+	private static function int_value( mixed $value ): int {
+		if ( is_int( $value ) ) {
+			return $value;
+		}
+
+		if ( is_float( $value ) || is_string( $value ) || is_bool( $value ) ) {
+			return (int) $value;
+		}
+
+		return 0;
+	}
+
+	private static function string_value( mixed $value ): string {
+		return is_scalar( $value ) ? (string) $value : '';
+	}
+
+	private static function post_write_succeeded( mixed $result ): bool {
+		return ! is_wp_error( $result ) && is_int( $result ) && $result > 0;
+	}
+
+	private static function post_id_value( mixed $result ): int {
+		if ( ! self::post_write_succeeded( $result ) || ! is_int( $result ) ) {
+			return 0;
+		}
+
+		return $result;
 	}
 
 	private static function uuid4(): string {

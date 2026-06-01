@@ -143,16 +143,16 @@ function agents_list_conversation_sessions( array $input ) {
 		'include_messages' => false,
 	);
 	if ( isset( $input['limit'] ) ) {
-		$args['limit'] = max( 1, min( 100, (int) $input['limit'] ) );
+		$args['limit'] = max( 1, min( 100, agents_conversation_sessions_int_value( $input['limit'] ) ) );
 	}
 	if ( isset( $input['offset'] ) ) {
-		$args['offset'] = max( 0, (int) $input['offset'] );
+		$args['offset'] = max( 0, agents_conversation_sessions_int_value( $input['offset'] ) );
 	}
 	if ( isset( $input['agent'] ) ) {
-		$args['agent_slug'] = (string) $input['agent'];
+		$args['agent_slug'] = agents_conversation_sessions_string_value( $input['agent'] );
 	}
 	if ( isset( $input['context'] ) ) {
-		$args['context'] = (string) $input['context'];
+		$args['context'] = agents_conversation_sessions_string_value( $input['context'] );
 	}
 
 	$sessions = agents_conversation_sessions_list_for_owner( $context['store'], $workspace, $context['owner'], $args );
@@ -175,7 +175,7 @@ function agents_get_conversation_session( array $input ) {
 		return $context;
 	}
 
-	$session = agents_conversation_sessions_owned_session( (string) ( $input['session_id'] ?? '' ), $context );
+	$session = agents_conversation_sessions_owned_session( agents_conversation_sessions_string_value( $input['session_id'] ?? '' ), $context );
 	if ( is_wp_error( $session ) ) {
 		return $session;
 	}
@@ -198,9 +198,9 @@ function agents_create_conversation_session( array $input ) {
 		return $workspace;
 	}
 
-	$metadata   = isset( $input['metadata'] ) && is_array( $input['metadata'] ) ? $input['metadata'] : array();
-	$agent_slug = isset( $input['agent'] ) ? (string) $input['agent'] : $context['principal']->effective_agent_id;
-	$mode       = isset( $input['context'] ) ? (string) $input['context'] : WP_Agent_Execution_Principal::REQUEST_CONTEXT_CHAT;
+	$metadata   = agents_conversation_sessions_array_value( $input['metadata'] ?? array() );
+	$agent_slug = isset( $input['agent'] ) ? agents_conversation_sessions_string_value( $input['agent'] ) : $context['principal']->effective_agent_id;
+	$mode       = isset( $input['context'] ) ? agents_conversation_sessions_string_value( $input['context'] ) : WP_Agent_Execution_Principal::REQUEST_CONTEXT_CHAT;
 	$session_id = agents_conversation_sessions_create_for_owner( $context['store'], $workspace, $context['owner'], $agent_slug, $metadata, $mode );
 	if ( is_wp_error( $session_id ) ) {
 		return $session_id;
@@ -211,7 +211,7 @@ function agents_create_conversation_session( array $input ) {
 	}
 
 	$session = $context['store']->get_session( $session_id );
-	return array( 'session' => agents_conversation_session_full( is_array( $session ) ? $session : array( 'session_id' => $session_id ) ) );
+	return array( 'session' => agents_conversation_session_full( is_array( $session ) ? agents_conversation_sessions_array_value( $session ) : array( 'session_id' => $session_id ) ) );
 }
 
 /**
@@ -224,17 +224,17 @@ function agents_update_conversation_session_title( array $input ) {
 		return $context;
 	}
 
-	$session = agents_conversation_sessions_owned_session( (string) ( $input['session_id'] ?? '' ), $context );
+	$session = agents_conversation_sessions_owned_session( agents_conversation_sessions_string_value( $input['session_id'] ?? '' ), $context );
 	if ( is_wp_error( $session ) ) {
 		return $session;
 	}
 
-	$title = trim( (string) ( $input['title'] ?? '' ) );
+	$title = trim( agents_conversation_sessions_string_value( $input['title'] ?? '' ) );
 	if ( '' === $title ) {
 		return new \WP_Error( 'agents_conversation_session_invalid_title', 'Conversation session title must be a non-empty string.' );
 	}
 
-	if ( ! $context['store']->update_title( $session['session_id'], $title ) ) {
+	if ( ! $context['store']->update_title( agents_conversation_sessions_string_value( $session['session_id'] ?? '' ), $title ) ) {
 		return new \WP_Error( 'agents_conversation_session_update_failed', 'The conversation session store did not update the title.' );
 	}
 
@@ -253,18 +253,19 @@ function agents_delete_conversation_session( array $input ) {
 		return $context;
 	}
 
-	$session = agents_conversation_sessions_owned_session( (string) ( $input['session_id'] ?? '' ), $context );
+	$session = agents_conversation_sessions_owned_session( agents_conversation_sessions_string_value( $input['session_id'] ?? '' ), $context );
 	if ( is_wp_error( $session ) ) {
 		return $session;
 	}
 
-	if ( ! $context['store']->delete_session( $session['session_id'] ) ) {
+	if ( ! $context['store']->delete_session( agents_conversation_sessions_string_value( $session['session_id'] ?? '' ) ) ) {
 		return new \WP_Error( 'agents_conversation_session_delete_failed', 'The conversation session store did not delete the session.' );
 	}
 
 	return array( 'deleted' => true );
 }
 
+/** @param array<string,mixed> $input Ability input. */
 function agents_conversation_sessions_permission( array $input ): bool {
 	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'read' ) : false;
 	if ( ! $allowed ) {
@@ -275,7 +276,10 @@ function agents_conversation_sessions_permission( array $input ): bool {
 	return (bool) apply_filters( 'agents_conversation_sessions_permission', $allowed, $input );
 }
 
-/** @return array{store:WP_Agent_Conversation_Store,principal:WP_Agent_Execution_Principal,owner:array{type:string,key:string},input:array}|\WP_Error */
+/**
+ * @param array<string,mixed> $input Ability input.
+ * @return array{store:WP_Agent_Conversation_Store,principal:WP_Agent_Execution_Principal,owner:array{type:string,key:string},input:array<string,mixed>}|\WP_Error
+ */
 function agents_conversation_sessions_context( array $input ) {
 	$principal = agents_conversation_sessions_principal( $input );
 	if ( ! $principal instanceof WP_Agent_Execution_Principal ) {
@@ -294,7 +298,8 @@ function agents_conversation_sessions_context( array $input ) {
 		return new \WP_Error( 'agents_conversation_session_owner_required', 'The current principal does not provide a conversation session owner key.' );
 	}
 
-	$store = WP_Agent_Conversation_Sessions::get_store( array( 'principal' => $principal ) + $input );
+	$store_context = array( 'principal' => $principal ) + $input;
+	$store         = WP_Agent_Conversation_Sessions::get_store( $store_context );
 	if ( ! $store instanceof WP_Agent_Conversation_Store ) {
 		return new \WP_Error( 'agents_conversation_session_no_store', "No conversation store is registered. Enable the built-in WordPress-native store with add_filter( 'agents_api_enable_default_conversation_store', '__return_true' ), or register your own with the wp_agent_conversation_store filter." );
 	}
@@ -314,7 +319,7 @@ function agents_conversation_sessions_context( array $input ) {
 /**
  * Resolve an explicit canonical session owner from ability input.
  *
- * @param array<mixed>                        $input     Ability input.
+ * @param array<string,mixed>           $input     Ability input.
  * @param WP_Agent_Execution_Principal $principal Authenticated execution principal.
  * @return array{type:string,key:string}|null|\WP_Error
  */
@@ -329,8 +334,8 @@ function agents_conversation_session_owner_from_input( array $input, WP_Agent_Ex
 		return null;
 	}
 
-	$type = sanitize_key( (string) ( $owner['type'] ?? $owner['owner_type'] ?? '' ) );
-	$key  = trim( (string) ( $owner['key'] ?? $owner['owner_key'] ?? '' ) );
+	$type = sanitize_key( agents_conversation_sessions_string_value( $owner['type'] ?? $owner['owner_type'] ?? '' ) );
+	$key  = trim( agents_conversation_sessions_string_value( $owner['key'] ?? $owner['owner_key'] ?? '' ) );
 	if ( '' === $type || '' === $key ) {
 		return new \WP_Error( 'agents_conversation_session_invalid_owner', 'Conversation session owner type and key are required.' );
 	}
@@ -355,7 +360,8 @@ function agents_conversation_session_owner_from_input( array $input, WP_Agent_Ex
 }
 
 /**
- * @param array{type:string,key:string} $owner Canonical principal owner.
+ * @param array{type:string,key:string} $owner    Canonical principal owner.
+ * @param array<string,mixed>           $metadata Session metadata.
  * @return string|\WP_Error
  */
 function agents_conversation_sessions_create_for_owner( WP_Agent_Conversation_Store $store, WP_Agent_Workspace_Scope $workspace, array $owner, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ) {
@@ -372,6 +378,7 @@ function agents_conversation_sessions_create_for_owner( WP_Agent_Conversation_St
 
 /**
  * @param array{type:string,key:string} $owner Canonical principal owner.
+ * @param array<string,mixed>           $args  List arguments.
  * @return array<int,array<string,mixed>>|\WP_Error
  */
 function agents_conversation_sessions_list_for_owner( WP_Agent_Conversation_Store $store, WP_Agent_Workspace_Scope $workspace, array $owner, array $args = array() ) {
@@ -386,6 +393,7 @@ function agents_conversation_sessions_list_for_owner( WP_Agent_Conversation_Stor
 	return $store->list_sessions( $workspace, (int) $owner['key'], $args );
 }
 
+/** @param array<string,mixed> $input Ability input. */
 function agents_conversation_sessions_principal( array $input ): ?WP_Agent_Execution_Principal {
 	// Caller-supplied principals are honored only outside REST request context.
 	// REST callers go through the standard resolver chain so identity is
@@ -401,7 +409,8 @@ function agents_conversation_sessions_principal( array $input ): ?WP_Agent_Execu
 		}
 	}
 
-	$principal = WP_Agent_Execution_Principal::resolve( array( 'request_context' => WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST ) + $input );
+	$request_context = array( 'request_context' => WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST ) + $input;
+	$principal       = WP_Agent_Execution_Principal::resolve( $request_context );
 	if ( $principal instanceof WP_Agent_Execution_Principal ) {
 		return $principal;
 	}
@@ -413,14 +422,17 @@ function agents_conversation_sessions_principal( array $input ): ?WP_Agent_Execu
 
 	return WP_Agent_Execution_Principal::user_session(
 		$user_id,
-		isset( $input['agent'] ) ? (string) $input['agent'] : '__wordpress_user__',
+		isset( $input['agent'] ) ? agents_conversation_sessions_string_value( $input['agent'] ) : '__wordpress_user__',
 		WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
 		array(),
 		agents_conversation_sessions_workspace_key( $input )
 	);
 }
 
-/** @return WP_Agent_Workspace_Scope|\WP_Error */
+/**
+ * @param array<string,mixed> $input Ability input.
+ * @return WP_Agent_Workspace_Scope|\WP_Error
+ */
 function agents_conversation_sessions_workspace( array $input ) {
 	try {
 		if ( isset( $input['workspace'] ) && is_array( $input['workspace'] ) ) {
@@ -428,14 +440,15 @@ function agents_conversation_sessions_workspace( array $input ) {
 		}
 
 		return WP_Agent_Workspace_Scope::from_parts(
-			(string) ( $input['workspace_type'] ?? 'site' ),
-			(string) ( $input['workspace_id'] ?? agents_conversation_sessions_default_workspace_id() )
+			agents_conversation_sessions_string_value( $input['workspace_type'] ?? 'site' ),
+			agents_conversation_sessions_string_value( $input['workspace_id'] ?? agents_conversation_sessions_default_workspace_id() )
 		);
 	} catch ( \InvalidArgumentException $exception ) {
 		return new \WP_Error( 'agents_conversation_session_invalid_workspace', $exception->getMessage() );
 	}
 }
 
+/** @param array<string,mixed> $input Ability input. */
 function agents_conversation_sessions_workspace_key( array $input ): ?string {
 	$workspace = agents_conversation_sessions_workspace( $input );
 	return $workspace instanceof WP_Agent_Workspace_Scope ? $workspace->key() : null;
@@ -449,13 +462,16 @@ function agents_conversation_sessions_default_workspace_id(): string {
 	return 'default';
 }
 
-/** @return array<string,mixed>|\WP_Error */
+/**
+ * @param array{store:WP_Agent_Conversation_Store,owner:array{type:string,key:string},input:array<string,mixed>} $context Session context.
+ * @return array<string,mixed>|\WP_Error
+ */
 function agents_conversation_sessions_owned_session( string $session_id, array $context ) {
 	if ( '' === trim( $session_id ) ) {
 		return new \WP_Error( 'agents_conversation_session_invalid_id', 'Conversation session ID must be a non-empty string.' );
 	}
 
-	$workspace = agents_conversation_sessions_workspace( is_array( $context['input'] ?? null ) ? $context['input'] : array() );
+	$workspace = agents_conversation_sessions_workspace( $context['input'] );
 	if ( is_wp_error( $workspace ) ) {
 		return $workspace;
 	}
@@ -466,7 +482,7 @@ function agents_conversation_sessions_owned_session( string $session_id, array $
 			return new \WP_Error( 'agents_conversation_session_not_found', 'Conversation session not found.' );
 		}
 
-		return $session;
+		return agents_conversation_sessions_array_value( $session );
 	}
 
 	$session = $context['store']->get_session( $session_id );
@@ -474,6 +490,7 @@ function agents_conversation_sessions_owned_session( string $session_id, array $
 		return new \WP_Error( 'agents_conversation_session_not_found', 'Conversation session not found.' );
 	}
 
+	$session = agents_conversation_sessions_array_value( $session );
 	if ( ! agents_conversation_sessions_session_matches_owner( $session, $context['owner'] ) && ! agents_conversation_sessions_can_manage_any() ) {
 		return new \WP_Error( 'agents_conversation_session_forbidden', 'The current principal cannot access this conversation session.' );
 	}
@@ -482,30 +499,37 @@ function agents_conversation_sessions_owned_session( string $session_id, array $
 }
 
 /**
- * @param array{type:string,key:string} $owner Canonical principal owner.
+ * @param array<string,mixed>           $session Session row.
+ * @param array{type:string,key:string} $owner   Canonical principal owner.
  */
 function agents_conversation_sessions_session_matches_owner( array $session, array $owner ): bool {
 	$session_owner_type = $session['owner_type'] ?? $session['principal_owner_type'] ?? null;
 	$session_owner_key  = $session['owner_key'] ?? $session['principal_owner_key'] ?? null;
 
 	if ( null !== $session_owner_type || null !== $session_owner_key ) {
-		return (string) $session_owner_type === $owner['type'] && (string) $session_owner_key === $owner['key'];
+		return agents_conversation_sessions_string_value( $session_owner_type ) === $owner['type'] && agents_conversation_sessions_string_value( $session_owner_key ) === $owner['key'];
 	}
 
-	return WP_Agent_Execution_Principal::OWNER_TYPE_USER === $owner['type'] && (int) ( $session['user_id'] ?? 0 ) === (int) $owner['key'];
+	return WP_Agent_Execution_Principal::OWNER_TYPE_USER === $owner['type'] && agents_conversation_sessions_int_value( $session['user_id'] ?? 0 ) === (int) $owner['key'];
 }
 
 function agents_conversation_sessions_can_manage_any(): bool {
 	return function_exists( 'current_user_can' ) && current_user_can( 'manage_options' );
 }
 
-/** @return array<string,mixed> */
+/**
+ * @param array<string,mixed> $session Session row.
+ * @return array<string,mixed>
+ */
 function agents_conversation_session_summary( array $session ): array {
 	unset( $session['messages'] );
 	return $session;
 }
 
-/** @return array<string,mixed> */
+/**
+ * @param array<string,mixed> $session Session row.
+ * @return array<string,mixed>
+ */
 function agents_conversation_session_full( array $session ): array {
 	if ( ! isset( $session['messages'] ) || ! is_array( $session['messages'] ) ) {
 		$session['messages'] = array();
@@ -518,6 +542,7 @@ function agents_conversation_session_full( array $session ): array {
 	return $session;
 }
 
+/** @return array<string,mixed> */
 function agents_conversation_sessions_workspace_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -529,6 +554,7 @@ function agents_conversation_sessions_workspace_schema(): array {
 	);
 }
 
+/** @return array<string,mixed> */
 function agents_conversation_sessions_list_input_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -543,6 +569,7 @@ function agents_conversation_sessions_list_input_schema(): array {
 	);
 }
 
+/** @return array<string,mixed> */
 function agents_conversation_session_owner_schema(): array {
 	return array(
 		'type'        => array( 'object', 'null' ),
@@ -555,12 +582,16 @@ function agents_conversation_session_owner_schema(): array {
 	);
 }
 
+/** @return array<string,mixed> */
 function agents_conversation_sessions_create_input_schema(): array {
 	$schema                           = agents_conversation_sessions_list_input_schema();
-	$schema['properties']['metadata'] = array( 'type' => 'object' );
+	if ( isset( $schema['properties'] ) && is_array( $schema['properties'] ) ) {
+		$schema['properties']['metadata'] = array( 'type' => 'object' );
+	}
 	return $schema;
 }
 
+/** @return array<string,mixed> */
 function agents_conversation_session_id_input_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -572,13 +603,19 @@ function agents_conversation_session_id_input_schema(): array {
 	);
 }
 
+/** @return array<string,mixed> */
 function agents_conversation_sessions_update_title_input_schema(): array {
 	$schema                        = agents_conversation_session_id_input_schema();
-	$schema['required'][]          = 'title';
-	$schema['properties']['title'] = array( 'type' => 'string' );
+	if ( isset( $schema['required'] ) && is_array( $schema['required'] ) ) {
+		$schema['required'][] = 'title';
+	}
+	if ( isset( $schema['properties'] ) && is_array( $schema['properties'] ) ) {
+		$schema['properties']['title'] = array( 'type' => 'string' );
+	}
 	return $schema;
 }
 
+/** @return array<string,mixed> */
 function agents_conversation_sessions_list_output_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -592,10 +629,43 @@ function agents_conversation_sessions_list_output_schema(): array {
 	);
 }
 
+/** @return array<string,mixed> */
 function agents_conversation_session_output_schema(): array {
 	return array(
 		'type'       => 'object',
 		'required'   => array( 'session' ),
 		'properties' => array( 'session' => array( 'type' => 'object' ) ),
 	);
+}
+
+function agents_conversation_sessions_int_value( mixed $value ): int {
+	if ( is_int( $value ) ) {
+		return $value;
+	}
+
+	if ( is_float( $value ) || is_string( $value ) || is_bool( $value ) ) {
+		return (int) $value;
+	}
+
+	return 0;
+}
+
+function agents_conversation_sessions_string_value( mixed $value ): string {
+	return is_scalar( $value ) ? (string) $value : '';
+}
+
+/** @return array<string,mixed> */
+function agents_conversation_sessions_array_value( mixed $value ): array {
+	if ( ! is_array( $value ) ) {
+		return array();
+	}
+
+	$result = array();
+	foreach ( $value as $key => $item ) {
+		if ( is_string( $key ) ) {
+			$result[ $key ] = $item;
+		}
+	}
+
+	return $result;
 }
