@@ -937,6 +937,5 @@ The substrate ships only the per-execution value object. Registries, configurati
 ## Tests
 
 ```bash
-composer phpunit
 composer test
 ```
