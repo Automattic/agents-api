@@ -68,6 +68,15 @@ Products can require Agents API because they build on the substrate. Agents API 
 
 Agents API requires **WordPress 7.0 or higher**. The substrate itself is provider-agnostic and loads on earlier versions, but every realistic consumer needs an AI provider. The only WordPress-native provider story is `wp-ai-client`, which ships in WordPress 7.0 core. Sites running 6.8–6.9 can install Agents API without errors but won't have a working AI provider unless they manually install the deprecated `wp-ai-client` plugin.
 
+## Quality Gates
+
+Agents API uses [Homeboy](https://github.com/Extra-Chill/homeboy) as the single CI entry point for repository checks.
+
+- `Homeboy lint (PHPCS + PHPStan)` runs WordPress coding standards and PHPStan at max level through the repo-local `phpstan.neon.dist` config.
+- `Homeboy tests (PHP smoke tests)` runs the current PHP smoke-test suite. When PHPUnit coverage is added, this lane should become `Homeboy tests (PHPUnit + smoke tests)`.
+
+Keeping these checks behind Homeboy gives reviewers one consistent quality surface while still preserving the underlying tools' strengths: PHPCS catches WordPress style issues, PHPStan catches type and contract drift, and the smoke tests prove the runtime wiring still behaves as expected.
+
 ## Core-Candidate API Naming
 
 Agents API intentionally exposes WordPress-shaped public APIs such as `wp_register_agent()`, `wp_get_agent()`, `wp_agents_api_init`, and `wp_agent_*` hooks.
