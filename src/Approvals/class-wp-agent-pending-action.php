@@ -17,11 +17,13 @@ defined( 'ABSPATH' ) || exit;
 // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Validation exceptions are not rendered output.
 class WP_Agent_Pending_Action {
 
-	/** @var array<string,mixed> */
+	/**
+	 * @var array{action_id: string, kind: string, summary: string, preview: mixed, apply_input: mixed, workspace: array<string, mixed>|null, agent: string|null, creator: string|null, status: string, created_at: string, expires_at: string|null, resolved_at: string|null, resolver: string|null, resolution_result: mixed, resolution_error: string|null, resolution_metadata: array<string, mixed>, metadata: array<string, mixed>}
+	 */
 	private array $data;
 
 	/**
-	 * @param array<string,mixed> $data Canonical pending action data.
+	 * @param array{action_id: string, kind: string, summary: string, preview: mixed, apply_input: mixed, workspace: array<string, mixed>|null, agent: string|null, creator: string|null, status: string, created_at: string, expires_at: string|null, resolved_at: string|null, resolver: string|null, resolution_result: mixed, resolution_error: string|null, resolution_metadata: array<string, mixed>, metadata: array<string, mixed>} $data Canonical pending action data.
 	 */
 	private function __construct( array $data ) {
 		$this->data = $data;
@@ -80,10 +82,12 @@ class WP_Agent_Pending_Action {
 		return $this->data['summary'];
 	}
 
+	/** @return mixed */
 	public function get_preview() {
 		return $this->data['preview'];
 	}
 
+	/** @return mixed */
 	public function get_apply_input() {
 		return $this->data['apply_input'];
 	}
@@ -120,6 +124,7 @@ class WP_Agent_Pending_Action {
 		return $this->data['resolver'];
 	}
 
+	/** @return mixed */
 	public function get_resolution_result() {
 		return $this->data['resolution_result'];
 	}
@@ -222,6 +227,7 @@ class WP_Agent_Pending_Action {
 		}
 
 		self::assert_json_serializable( $value, $field );
+		/** @var array<string, mixed> $value */
 		return $value;
 	}
 
@@ -261,7 +267,8 @@ class WP_Agent_Pending_Action {
 	 * @param array<string,mixed> $data Normalized data.
 	 */
 	private static function assert_resolution_audit_is_consistent( array $data ): void {
-		if ( ! WP_Agent_Pending_Action_Status::is_terminal( $data['status'] ) ) {
+		$status = is_string( $data['status'] ?? null ) ? $data['status'] : '';
+		if ( ! WP_Agent_Pending_Action_Status::is_terminal( $status ) ) {
 			return;
 		}
 
