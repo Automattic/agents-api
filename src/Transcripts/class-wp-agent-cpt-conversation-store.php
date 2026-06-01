@@ -357,6 +357,9 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 				'expires' => $expires,
 			)
 		);
+		if ( ! is_string( $value ) ) {
+			return null;
+		}
 
 		// Fast path: no lock present. add_post_meta with $unique=true is atomic.
 		$added = add_post_meta( $post->ID, self::META_LOCK, $value, true );
@@ -368,8 +371,9 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		$existing_raw = get_post_meta( $post->ID, self::META_LOCK, true );
 		if ( ! is_string( $existing_raw ) || '' === $existing_raw ) {
 			// Race: meta disappeared between calls. Retry once.
-			$retry = add_post_meta( $post->ID, self::META_LOCK, $value, true );
-			return $retry ? $token : null;
+			add_post_meta( $post->ID, self::META_LOCK, $value, true );
+			$current_raw = get_post_meta( $post->ID, self::META_LOCK, true );
+			return is_string( $current_raw ) && hash_equals( $value, $current_raw ) ? $token : null;
 		}
 
 		$existing = json_decode( $existing_raw, true );

@@ -223,7 +223,7 @@ if ( ! function_exists( '_wp_guidelines_maybe_map_term_label' ) ) {
 		}
 
 		$types = wp_guideline_types();
-		$slug = $data['slug'];
+		$slug  = $data['slug'];
 		if ( is_string( $slug ) && isset( $types[ $slug ] ) ) {
 			$data['name'] = $types[ $slug ]['title'];
 		}

@@ -13,23 +13,34 @@
  * @param string               $name Ability name.
  * @param array<string, mixed> $args Ability arguments.
  */
-function wp_register_ability( string $name, array $args = array() ): ?WP_Ability {}
+function wp_register_ability( string $name, array $args = array() ): void {}
 
-function wp_get_ability( string $name ): ?WP_Ability {}
+function wp_get_ability( string $name ): ?WP_Ability {
+	return '' === $name ? null : new WP_Ability( $name );
+}
 
-function wp_has_ability( string $name ): bool {}
+function wp_has_ability( string $name ): bool {
+	unset( $name );
+	return false;
+}
 
-function wp_unregister_ability( string $name ): bool {}
+function wp_unregister_ability( string $name ): bool {
+	unset( $name );
+	return false;
+}
 
 /**
  * @return array<string, WP_Ability>
  */
-function wp_get_abilities(): array {}
+function wp_get_abilities(): array { return array(); }
 
 /**
  * @param string               $slug Category slug.
  * @param array<string, mixed> $args Category arguments.
  */
-function wp_register_ability_category( string $slug, array $args = array() ): bool {}
+function wp_register_ability_category( string $slug, array $args = array() ): void {}
 
-function wp_has_ability_category( string $slug ): bool {}
+function wp_has_ability_category( string $slug ): bool {
+	unset( $slug );
+	return false;
+}

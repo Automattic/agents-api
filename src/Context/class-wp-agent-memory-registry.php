@@ -232,11 +232,11 @@ if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 
 		/**
 		 * @param mixed $value Raw value.
-		 * @param int   $default Default value.
+		 * @param int   $fallback Default value.
 		 * @return int
 		 */
-		private static function optional_int( $value, int $default ): int {
-			return is_scalar( $value ) ? (int) $value : $default;
+		private static function optional_int( $value, int $fallback ): int {
+			return is_scalar( $value ) ? (int) $value : $fallback;
 		}
 
 		/**

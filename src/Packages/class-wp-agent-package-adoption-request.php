@@ -91,7 +91,7 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Request' ) ) {
 		 */
 		private static function prepare_string_list( $values ): array {
 			$prepared = array();
-			$values = is_array( $values ) ? $values : array( $values );
+			$values   = is_array( $values ) ? $values : array( $values );
 			foreach ( $values as $value ) {
 				$value = is_scalar( $value ) ? trim( (string) $value ) : '';
 				if ( '' !== $value ) {

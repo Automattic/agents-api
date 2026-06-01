@@ -23,7 +23,7 @@ function as_unschedule_all_actions( string $hook, array $args = array(), string 
  * @param array<int, mixed>    $args      Arguments to pass to the hook.
  * @param string               $group     Group to assign the action to.
  */
-function as_schedule_cron_action( int $timestamp, string $schedule, string $hook, array $args = array(), string $group = '' ): int {}
+function as_schedule_cron_action( int $timestamp, string $schedule, string $hook, array $args = array(), string $group = '' ): void {}
 
 /**
  * @param int                  $timestamp        When the first instance should run.
@@ -32,7 +32,7 @@ function as_schedule_cron_action( int $timestamp, string $schedule, string $hook
  * @param array<int, mixed>    $args             Arguments to pass to the hook.
  * @param string               $group            Group to assign the action to.
  */
-function as_schedule_recurring_action( int $timestamp, int $interval_seconds, string $hook, array $args = array(), string $group = '' ): int {}
+function as_schedule_recurring_action( int $timestamp, int $interval_seconds, string $hook, array $args = array(), string $group = '' ): void {}
 
 /**
  * @param int                  $timestamp When the action should run.
@@ -40,13 +40,20 @@ function as_schedule_recurring_action( int $timestamp, int $interval_seconds, st
  * @param array<int, mixed>    $args      Arguments to pass to the hook.
  * @param string               $group     Group to assign the action to.
  */
-function as_schedule_single_action( int $timestamp, string $hook, array $args = array(), string $group = '' ): int {}
+function as_schedule_single_action( int $timestamp, string $hook, array $args = array(), string $group = '' ): void {}
 
 /**
  * @param string            $hook  Hook name.
  * @param array<int, mixed> $args  Arguments that were passed when scheduling.
  * @param string            $group Group the action belongs to.
  */
-function as_next_scheduled_action( string $hook, array $args = array(), string $group = '' ): int|bool {}
+function as_next_scheduled_action( string $hook, array $args = array(), string $group = '' ): int|bool {
+	unset( $args, $group );
+	return '' === $hook ? false : 0;
+}
 
-function as_has_scheduled_action( string $hook, ?array $args = null, string $group = '' ): bool {}
+/** @param array<int,mixed>|null $args */
+function as_has_scheduled_action( string $hook, ?array $args = null, string $group = '' ): bool {
+	unset( $hook, $args, $group );
+	return false;
+}

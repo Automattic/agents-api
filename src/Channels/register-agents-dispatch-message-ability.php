@@ -69,7 +69,7 @@ add_action(
  * @since 0.107.0
  *
  * @param array<mixed> $input Canonical dispatch-message input.
- * @return array|\WP_Error Canonical output, or WP_Error if no runtime is registered.
+ * @return array<mixed>|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_dispatch_message_dispatch( array $input ) {
 	/**

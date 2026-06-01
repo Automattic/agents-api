@@ -36,7 +36,7 @@ if ( ! class_exists( 'WP_Agent_Package_Artifacts_Registry' ) ) {
 		 */
 		public function register( $type, array $args = array() ): ?WP_Agent_Package_Artifact_Type {
 			try {
-				$type = $type instanceof WP_Agent_Package_Artifact_Type ? $type : new WP_Agent_Package_Artifact_Type( (string) $type, $args );
+				$type = $type instanceof WP_Agent_Package_Artifact_Type ? $type : new WP_Agent_Package_Artifact_Type( (string) $type, $this->string_keyed_array( $args ) );
 			} catch ( InvalidArgumentException $e ) {
 				$this->notice_invalid_registration( __METHOD__, $e->getMessage() );
 				return null;
@@ -195,6 +195,20 @@ if ( ! class_exists( 'WP_Agent_Package_Artifacts_Registry' ) ) {
 				$message       = function_exists( 'esc_html' ) ? esc_html( $message ) : $message;
 				_doing_it_wrong( $function_name, $message, '0.102.8' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- _doing_it_wrong receives a message, not direct output.
 			}
+		}
+
+		/**
+		 * @param array<mixed> $values
+		 * @return array<string,mixed>
+		 */
+		private function string_keyed_array( array $values ): array {
+			$prepared = array();
+			foreach ( $values as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+			return $prepared;
 		}
 	}
 }
