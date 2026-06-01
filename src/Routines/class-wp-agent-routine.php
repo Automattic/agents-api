@@ -41,7 +41,7 @@ final class WP_Agent_Routine {
 	private string $prompt     = '';
 	private string $session_id = '';
 	/** @var array<string, mixed> */
-	private array $meta        = array();
+	private array $meta = array();
 
 	/**
 	 * @param string                $id   Unique routine slug.

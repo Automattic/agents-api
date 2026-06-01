@@ -140,12 +140,12 @@ final class WP_Agent_Workflow_Spec {
 	}
 
 	/**
-	 * @param array<mixed> $array
+	 * @param array<mixed> $items
 	 * @return array<string, mixed>
 	 */
-	private static function string_keyed_array( array $array ): array {
+	private static function string_keyed_array( array $items ): array {
 		$out = array();
-		foreach ( $array as $key => $value ) {
+		foreach ( $items as $key => $value ) {
 			if ( is_string( $key ) ) {
 				$out[ $key ] = $value;
 			}
@@ -154,12 +154,12 @@ final class WP_Agent_Workflow_Spec {
 	}
 
 	/**
-	 * @param array<mixed> $array
+	 * @param array<mixed> $items
 	 * @return array<int, array<string, mixed>>
 	 */
-	private static function list_of_arrays( array $array ): array {
+	private static function list_of_arrays( array $items ): array {
 		$out = array();
-		foreach ( $array as $value ) {
+		foreach ( $items as $value ) {
 			if ( is_array( $value ) ) {
 				$out[] = self::string_keyed_array( $value );
 			}

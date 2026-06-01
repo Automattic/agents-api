@@ -340,7 +340,6 @@ abstract class WP_Agent_Channel {
 			);
 		}
 
-
 		$result = $ability->execute( $this->build_chat_payload( $message_text, $data ) );
 		if ( is_wp_error( $result ) ) {
 			return $result;
