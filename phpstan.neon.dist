@@ -6,8 +6,9 @@ parameters:
 	paths:
 		- src
 		- agents-api.php
-	stubFiles:
+	scanFiles:
 		- stubs/class-wp-ability.php
 		- stubs/class-wp-abilities-registry.php
 		- stubs/class-wp-filter-sentinel.php
 		- stubs/abilities-api-functions.php
+		- stubs/action-scheduler-functions.php
