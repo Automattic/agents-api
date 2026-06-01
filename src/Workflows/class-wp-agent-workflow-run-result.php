@@ -62,6 +62,9 @@ final class WP_Agent_Workflow_Run_Result {
 		private array $metadata
 	) {}
 
+	/**
+	 * @param array<mixed> $inputs
+	 */
 	public static function pending( string $run_id, string $workflow_id, array $inputs, int $started_at ): self {
 		return new self( $run_id, $workflow_id, self::STATUS_PENDING, $inputs, array(), array(), array(), $started_at, 0, array() );
 	}
@@ -78,18 +81,30 @@ final class WP_Agent_Workflow_Run_Result {
 		return $this->status;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_inputs(): array {
 		return $this->inputs;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_output(): array {
 		return $this->output;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_steps(): array {
 		return $this->steps;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_error(): array {
 		return $this->error;
 	}
@@ -102,6 +117,9 @@ final class WP_Agent_Workflow_Run_Result {
 		return $this->ended_at;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_metadata(): array {
 		return $this->metadata;
 	}
@@ -125,17 +143,40 @@ final class WP_Agent_Workflow_Run_Result {
 	 */
 	public function with( array $patch ): self {
 		return new self(
-			(string) ( $patch['run_id'] ?? $this->run_id ),
-			(string) ( $patch['workflow_id'] ?? $this->workflow_id ),
-			(string) ( $patch['status'] ?? $this->status ),
-			(array) ( $patch['inputs'] ?? $this->inputs ),
-			(array) ( $patch['output'] ?? $this->output ),
-			(array) ( $patch['steps'] ?? $this->steps ),
-			(array) ( $patch['error'] ?? $this->error ),
-			(int) ( $patch['started_at'] ?? $this->started_at ),
-			(int) ( $patch['ended_at'] ?? $this->ended_at ),
-			(array) ( $patch['metadata'] ?? $this->metadata ),
+			self::string_patch_value( $patch, 'run_id', $this->run_id ),
+			self::string_patch_value( $patch, 'workflow_id', $this->workflow_id ),
+			self::string_patch_value( $patch, 'status', $this->status ),
+			self::array_patch_value( $patch, 'inputs', $this->inputs ),
+			self::array_patch_value( $patch, 'output', $this->output ),
+			self::array_patch_value( $patch, 'steps', $this->steps ),
+			self::array_patch_value( $patch, 'error', $this->error ),
+			self::int_patch_value( $patch, 'started_at', $this->started_at ),
+			self::int_patch_value( $patch, 'ended_at', $this->ended_at ),
+			self::array_patch_value( $patch, 'metadata', $this->metadata ),
 		);
+	}
+
+	/**
+	 * @param array<mixed> $patch
+	 */
+	private static function string_patch_value( array $patch, string $key, string $fallback ): string {
+		return isset( $patch[ $key ] ) && is_scalar( $patch[ $key ] ) ? (string) $patch[ $key ] : $fallback;
+	}
+
+	/**
+	 * @param array<mixed> $patch
+	 */
+	private static function int_patch_value( array $patch, string $key, int $fallback ): int {
+		return isset( $patch[ $key ] ) && is_numeric( $patch[ $key ] ) ? (int) $patch[ $key ] : $fallback;
+	}
+
+	/**
+	 * @param array<mixed> $patch
+	 * @param array<mixed> $fallback
+	 * @return array<mixed>
+	 */
+	private static function array_patch_value( array $patch, string $key, array $fallback ): array {
+		return isset( $patch[ $key ] ) && is_array( $patch[ $key ] ) ? $patch[ $key ] : $fallback;
 	}
 
 	/**
@@ -144,7 +185,7 @@ final class WP_Agent_Workflow_Run_Result {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @return array<mixed>
+	 * @return array<string, mixed>
 	 */
 	public function to_array(): array {
 		return array(
