@@ -8,3 +8,4 @@ parameters:
 		- agents-api.php
 	stubFiles:
 		- stubs/abilities-api.php
+		- stubs/abilities-api-functions.php
