@@ -55,7 +55,7 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 					self::PUBLIC_AUDIENCE_ID,
 					self::PUBLIC_AUDIENCE_ID,
 					self::string_field( $context, 'request_context', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST ),
-					isset( $context['request_metadata'] ) && is_array( $context['request_metadata'] ) ? $context['request_metadata'] : array(),
+					self::array_field( $context, 'request_metadata' ),
 					self::nullable_string_field( $context, 'workspace_id' ),
 					self::nullable_string_field( $context, 'client_id' )
 				);
@@ -65,7 +65,7 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 				$user_id,
 				self::CURRENT_USER_EFFECTIVE_AGENT_ID,
 				self::string_field( $context, 'request_context', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST ),
-				isset( $context['request_metadata'] ) && is_array( $context['request_metadata'] ) ? $context['request_metadata'] : array(),
+				self::array_field( $context, 'request_metadata' ),
 				self::nullable_string_field( $context, 'workspace_id' ),
 				self::nullable_string_field( $context, 'client_id' )
 			);
@@ -253,6 +253,26 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 			}
 
 			return self::string_field( $source, $key );
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 * @return array<string,mixed>
+		 */
+		private static function array_field( array $source, string $key ): array {
+			$value = $source[ $key ] ?? array();
+			if ( ! is_array( $value ) ) {
+				return array();
+			}
+
+			$result = array();
+			foreach ( $value as $item_key => $item ) {
+				if ( is_string( $item_key ) ) {
+					$result[ $item_key ] = $item;
+				}
+			}
+
+			return $result;
 		}
 	}
 }

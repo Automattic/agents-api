@@ -79,8 +79,8 @@ add_action(
  * @return array<string,mixed>
  */
 function agents_can_access_agent( array $input ): array {
-	$agent_id      = isset( $input['agent'] ) ? sanitize_title( (string) $input['agent'] ) : '';
-	$minimum_role  = isset( $input['minimum_role'] ) ? (string) $input['minimum_role'] : \WP_Agent_Access_Grant::ROLE_VIEWER;
+	$agent_id      = sanitize_title( agents_access_string_input( $input, 'agent' ) );
+	$minimum_role  = agents_access_string_input( $input, 'minimum_role', \WP_Agent_Access_Grant::ROLE_VIEWER );
 	$request_scope = agents_access_request_scope( $input );
 
 	$allowed = '' !== $agent_id && \WP_Agent_Access::can_current_principal_access_agent( $agent_id, $minimum_role, $request_scope );
@@ -99,7 +99,7 @@ function agents_can_access_agent( array $input ): array {
  * @return array<string,mixed>
  */
 function agents_list_accessible_agents( array $input ): array {
-	$minimum_role = isset( $input['minimum_role'] ) ? (string) $input['minimum_role'] : \WP_Agent_Access_Grant::ROLE_VIEWER;
+	$minimum_role = agents_access_string_input( $input, 'minimum_role', \WP_Agent_Access_Grant::ROLE_VIEWER );
 	$agents       = \WP_Agent_Access::list_accessible_agents_for_current_principal( $minimum_role, agents_access_request_scope( $input ) );
 
 	return array( 'agents' => $agents );
@@ -128,14 +128,38 @@ function agents_access_request_scope( array $input ): array {
 	);
 
 	if ( array_key_exists( 'workspace_id', $input ) ) {
-		$scope['workspace_id'] = null !== $input['workspace_id'] ? (string) $input['workspace_id'] : null;
+		$scope['workspace_id'] = agents_access_nullable_string_input( $input, 'workspace_id' );
 	}
 
 	if ( array_key_exists( 'client_id', $input ) ) {
-		$scope['client_id'] = null !== $input['client_id'] ? (string) $input['client_id'] : null;
+		$scope['client_id'] = agents_access_nullable_string_input( $input, 'client_id' );
 	}
 
 	return $scope;
+}
+
+/**
+ * Read a scalar string from ability input.
+ *
+ * @param array<string,mixed> $input Ability input.
+ */
+function agents_access_string_input( array $input, string $key, string $fallback = '' ): string {
+	$value = $input[ $key ] ?? null;
+
+	return is_scalar( $value ) ? (string) $value : $fallback;
+}
+
+/**
+ * Read a nullable scalar string from ability input.
+ *
+ * @param array<string,mixed> $input Ability input.
+ */
+function agents_access_nullable_string_input( array $input, string $key ): ?string {
+	if ( ! array_key_exists( $key, $input ) || null === $input[ $key ] ) {
+		return null;
+	}
+
+	return agents_access_string_input( $input, $key );
 }
 
 /**
