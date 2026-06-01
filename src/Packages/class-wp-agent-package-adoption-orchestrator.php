@@ -66,12 +66,12 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 			$approved_keys = array_fill_keys( $request->get_approved_artifact_keys(), true );
 			$target_index  = self::index_artifacts( $target );
 			/** @var array<int,array<string,mixed>> $applied */
-			$applied       = array();
+			$applied = array();
 			/** @var array<int,array<string,mixed>> $skipped */
-			$skipped       = array();
+			$skipped = array();
 			/** @var array<int,array<string,mixed>> $failed */
-			$failed        = array();
-			$snapshots     = array();
+			$failed    = array();
+			$snapshots = array();
 
 			foreach ( $plan->get_buckets() as $bucket => $entries ) {
 				foreach ( $entries as $entry ) {

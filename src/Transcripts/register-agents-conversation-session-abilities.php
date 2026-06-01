@@ -584,7 +584,7 @@ function agents_conversation_session_owner_schema(): array {
 
 /** @return array<string,mixed> */
 function agents_conversation_sessions_create_input_schema(): array {
-	$schema                           = agents_conversation_sessions_list_input_schema();
+	$schema = agents_conversation_sessions_list_input_schema();
 	if ( isset( $schema['properties'] ) && is_array( $schema['properties'] ) ) {
 		$schema['properties']['metadata'] = array( 'type' => 'object' );
 	}
@@ -605,7 +605,7 @@ function agents_conversation_session_id_input_schema(): array {
 
 /** @return array<string,mixed> */
 function agents_conversation_sessions_update_title_input_schema(): array {
-	$schema                        = agents_conversation_session_id_input_schema();
+	$schema = agents_conversation_session_id_input_schema();
 	if ( isset( $schema['required'] ) && is_array( $schema['required'] ) ) {
 		$schema['required'][] = 'title';
 	}

@@ -445,12 +445,12 @@ class WP_Agent_Conversation_Loop {
 				continue;
 			}
 
-			$raw_call     = self::normalize_assoc_array( $raw_call );
-			$tool_name    = $raw_call['name'] ?? $raw_call['tool_name'] ?? '';
-			$parameters   = is_array( $raw_call['parameters'] ?? null ) ? $raw_call['parameters'] : array();
+			$raw_call              = self::normalize_assoc_array( $raw_call );
+			$tool_name             = $raw_call['name'] ?? $raw_call['tool_name'] ?? '';
+			$parameters            = is_array( $raw_call['parameters'] ?? null ) ? $raw_call['parameters'] : array();
 			$parameters_for_policy = self::normalize_assoc_array( $parameters );
-			$sequence     = is_int( $index ) ? $index + 1 : count( $spin_signatures ) + 1;
-			$tool_call_id = self::resolve_tool_call_id( $raw_call, $turn, $sequence );
+			$sequence              = is_int( $index ) ? $index + 1 : count( $spin_signatures ) + 1;
+			$tool_call_id          = self::resolve_tool_call_id( $raw_call, $turn, $sequence );
 
 			if ( ! is_string( $tool_name ) || '' === $tool_name ) {
 				continue;
@@ -594,7 +594,7 @@ class WP_Agent_Conversation_Loop {
 			);
 			if ( null !== $nudge ) {
 				$nudge_message = is_string( $nudge['message'] ?? null ) || is_array( $nudge['message'] ?? null ) ? $nudge['message'] : '';
-				$messages[] = WP_Agent_Message::text(
+				$messages[]    = WP_Agent_Message::text(
 					'assistant',
 					$nudge_message,
 					array(

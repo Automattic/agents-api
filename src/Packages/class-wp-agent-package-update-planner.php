@@ -30,7 +30,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			$current   = self::index_artifacts( $current_artifacts );
 			$target    = self::index_artifacts( $target_artifacts );
 			/** @var array<string,array<int,array<string,mixed>>> $buckets */
-			$buckets   = array(
+			$buckets = array(
 				'auto_apply'     => array(),
 				'needs_approval' => array(),
 				'warnings'       => array(),
