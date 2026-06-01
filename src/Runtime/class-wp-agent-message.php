@@ -54,7 +54,7 @@ class WP_Agent_Message {
 	 * Build a canonical text envelope.
 	 *
 	 * @param string       $role     Message role.
-	 * @param string|array $content  Message content.
+	 * @param string|array<mixed> $content  Message content.
 	 * @param array<mixed>        $metadata Extension metadata.
 	 * @return array<string, mixed>
 	 */
@@ -161,12 +161,14 @@ class WP_Agent_Message {
 	 */
 	public static function to_provider_message( array $message ): array {
 		$envelope = self::normalize( $message );
-		$metadata = $envelope['metadata'];
+		$metadata = is_array( $envelope['metadata'] ?? null ) ? $envelope['metadata'] : array();
+		$type     = self::string_value( $envelope['type'] ?? self::TYPE_TEXT );
+		$payload  = is_array( $envelope['payload'] ?? null ) ? $envelope['payload'] : array();
 
-		if ( self::TYPE_TEXT !== $envelope['type'] || ! empty( $envelope['payload'] ) || ! empty( $metadata ) ) {
-			$metadata['type'] = $envelope['type'];
+		if ( self::TYPE_TEXT !== $type || ! empty( $payload ) || ! empty( $metadata ) ) {
+			$metadata['type'] = $type;
 		}
-		foreach ( $envelope['payload'] as $key => $value ) {
+		foreach ( $payload as $key => $value ) {
 			if ( ! array_key_exists( $key, $metadata ) ) {
 				$metadata[ $key ] = $value;
 			}
@@ -209,7 +211,7 @@ class WP_Agent_Message {
 	 */
 	public static function type( array $message ): string {
 		$envelope = self::normalize( $message );
-		return $envelope['type'];
+		return self::string_value( $envelope['type'] ?? self::TYPE_TEXT );
 	}
 
 	/**
@@ -252,6 +254,11 @@ class WP_Agent_Message {
 			}
 
 			$tail_key   = array_key_last( $coalesced );
+			if ( null === $tail_key ) {
+				$coalesced[] = $envelope;
+				continue;
+			}
+
 			$tail_parts = self::extract_parts( $tail );
 			$new_parts  = self::extract_parts( $envelope );
 
@@ -262,12 +269,12 @@ class WP_Agent_Message {
 				array(
 					'parts' => array_merge( $tail_parts, $new_parts ),
 				),
-				$tail['metadata'] ?? array(),
+				is_array( $tail['metadata'] ?? null ) ? $tail['metadata'] : array(),
 				array()
 			);
 		}
 
-		return array_values( $coalesced );
+		return $coalesced;
 	}
 
 	/**
@@ -281,8 +288,16 @@ class WP_Agent_Message {
 	 * @return array<int, array<string, mixed>>
 	 */
 	private static function extract_parts( array $envelope ): array {
-		if ( self::TYPE_MULTIMODAL_PART === ( $envelope['type'] ?? '' ) && isset( $envelope['payload']['parts'] ) && is_array( $envelope['payload']['parts'] ) ) {
-			return array_values( $envelope['payload']['parts'] );
+		$payload = is_array( $envelope['payload'] ?? null ) ? $envelope['payload'] : array();
+		if ( self::TYPE_MULTIMODAL_PART === ( $envelope['type'] ?? '' ) && isset( $payload['parts'] ) && is_array( $payload['parts'] ) ) {
+			$parts = array();
+			foreach ( $payload['parts'] as $part ) {
+				if ( is_array( $part ) ) {
+					$parts[] = self::assoc_array( $part );
+				}
+			}
+
+			return $parts;
 		}
 
 		return array( $envelope );
@@ -329,7 +344,12 @@ class WP_Agent_Message {
 	 * @return array<string, mixed> Canonical envelope.
 	 */
 	private static function normalizeEnvelope( array $message ): array {
-		if ( self::VERSION !== (int) $message['version'] ) {
+		$version = $message['version'] ?? null;
+		if ( ! is_int( $version ) && ! is_string( $version ) ) {
+			throw new \InvalidArgumentException( 'invalid_ai_message_envelope: unsupported version' );
+		}
+
+		if ( self::VERSION !== (int) $version ) {
 			throw new \InvalidArgumentException( 'invalid_ai_message_envelope: unsupported version' );
 		}
 
@@ -484,6 +504,25 @@ class WP_Agent_Message {
 			throw new \InvalidArgumentException( 'invalid_ai_message_envelope: unsupported type' );
 		}
 		return $type;
+	}
+
+	private static function string_value( mixed $value ): string {
+		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (string) $value : '';
+	}
+
+	/**
+	 * @param array<mixed> $value Raw array.
+	 * @return array<string,mixed>
+	 */
+	private static function assoc_array( array $value ): array {
+		$assoc = array();
+		foreach ( $value as $field => $field_value ) {
+			if ( is_string( $field ) ) {
+				$assoc[ $field ] = $field_value;
+			}
+		}
+
+		return $assoc;
 	}
 
 	/**
