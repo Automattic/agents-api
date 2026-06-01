@@ -31,17 +31,17 @@ final class WP_Agent_Bridge_Queue_Item {
 	 * @param array<string,mixed> $args Queue item fields.
 	 */
 	public function __construct( array $args ) {
-		$this->queue_id        = self::normalize_required_string( (string) ( $args['queue_id'] ?? self::new_queue_id() ), 'queue_id' );
-		$this->client_id       = self::normalize_required_slug( (string) ( $args['client_id'] ?? '' ), 'client_id' );
-		$this->connector_id    = isset( $args['connector_id'] ) ? self::normalize_optional_slug( (string) $args['connector_id'] ) : null;
-		$this->agent           = self::normalize_required_slug( (string) ( $args['agent'] ?? '' ), 'agent' );
-		$this->session_id      = isset( $args['session_id'] ) ? self::normalize_optional_string( (string) $args['session_id'] ) : null;
-		$this->role            = self::normalize_role( (string) ( $args['role'] ?? 'assistant' ) );
-		$this->content         = self::normalize_required_string( (string) ( $args['content'] ?? '' ), 'content' );
+		$this->queue_id        = self::normalize_required_string( self::string_value( $args['queue_id'] ?? self::new_queue_id() ), 'queue_id' );
+		$this->client_id       = self::normalize_required_slug( self::string_value( $args['client_id'] ?? '' ), 'client_id' );
+		$this->connector_id    = isset( $args['connector_id'] ) ? self::normalize_optional_slug( self::string_value( $args['connector_id'] ) ) : null;
+		$this->agent           = self::normalize_required_slug( self::string_value( $args['agent'] ?? '' ), 'agent' );
+		$this->session_id      = isset( $args['session_id'] ) ? self::normalize_optional_string( self::string_value( $args['session_id'] ) ) : null;
+		$this->role            = self::normalize_role( self::string_value( $args['role'] ?? 'assistant' ) );
+		$this->content         = self::normalize_required_string( self::string_value( $args['content'] ?? '' ), 'content' );
 		$this->completed       = (bool) ( $args['completed'] ?? true );
-		$this->created_at      = isset( $args['created_at'] ) ? (string) $args['created_at'] : gmdate( 'c' );
-		$this->delivery_status = self::normalize_delivery_status( (string) ( $args['delivery_status'] ?? 'pending' ) );
-		$this->metadata        = isset( $args['metadata'] ) && is_array( $args['metadata'] ) ? $args['metadata'] : array();
+		$this->created_at      = isset( $args['created_at'] ) ? self::string_value( $args['created_at'] ) : gmdate( 'c' );
+		$this->delivery_status = self::normalize_delivery_status( self::string_value( $args['delivery_status'] ?? 'pending' ) );
+		$this->metadata        = isset( $args['metadata'] ) && is_array( $args['metadata'] ) ? self::string_keyed_array( $args['metadata'] ) : array();
 	}
 
 	/**
@@ -89,6 +89,24 @@ final class WP_Agent_Bridge_Queue_Item {
 
 	private static function new_queue_id(): string {
 		return 'bridge_' . bin2hex( random_bytes( 16 ) );
+	}
+
+	private static function string_value( mixed $value ): string {
+		return is_scalar( $value ) || $value instanceof \Stringable ? (string) $value : '';
+	}
+
+	/**
+	 * @param array<mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private static function string_keyed_array( array $data ): array {
+		$result = array();
+		foreach ( $data as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$result[ $key ] = $value;
+			}
+		}
+		return $result;
 	}
 
 	private static function normalize_required_slug( string $value, string $field ): string {

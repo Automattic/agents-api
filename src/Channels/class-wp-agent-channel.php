@@ -236,7 +236,7 @@ abstract class WP_Agent_Channel {
 	 *     → on_complete
 	 *
 	 * @param array<mixed> $data Channel-specific per-message data.
-	 * @return array|WP_Error Agent result or error.
+	 * @return array<string,mixed>|WP_Error Agent result or error.
 	 */
 	public function handle( array $data ): array|WP_Error {
 		$error = $this->validate( $data );
@@ -307,7 +307,7 @@ abstract class WP_Agent_Channel {
 	 * @param string $message_text The user-message string from extract_message().
 	 * @param array<mixed>  $data         The original webhook payload, in case the runner
 	 *                             needs metadata beyond the text (sender, timestamp).
-	 * @return array|WP_Error      `{ session_id, reply, completed?, … }` or WP_Error.
+	 * @return array<string,mixed>|WP_Error `{ session_id, reply, completed?, … }` or WP_Error.
 	 */
 	protected function run_agent( string $message_text, array $data ): array|WP_Error {
 		if ( ! function_exists( 'wp_get_ability' ) ) {
@@ -340,7 +340,20 @@ abstract class WP_Agent_Channel {
 			);
 		}
 
-		return $ability->execute( $this->build_chat_payload( $message_text, $data ) );
+
+		$result = $ability->execute( $this->build_chat_payload( $message_text, $data ) );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		if ( is_array( $result ) ) {
+			return $this->string_keyed_array( $result );
+		}
+
+		return new WP_Error(
+			'chat_ability_invalid_result',
+			'Chat ability returned an unexpected result type. Abilities must return an array or WP_Error.'
+		);
 	}
 
 	/**
@@ -353,7 +366,7 @@ abstract class WP_Agent_Channel {
 	 *
 	 * @param string $message_text
 	 * @param array<mixed>  $data
-	 * @return array<mixed>
+	 * @return array<string,mixed>
 	 */
 	public function build_chat_payload( string $message_text, array $data ): array {
 		$external_message              = $this->build_external_message( $message_text, $data );
@@ -386,8 +399,8 @@ abstract class WP_Agent_Channel {
 			$this->extract_sender_id( $data ),
 			false,
 			$this->get_room_kind( $data ),
-			$this->extract_attachments( $data ),
-			$data
+			array_values( $this->extract_attachments( $data ) ),
+			$this->string_keyed_array( $data )
 		);
 	}
 
@@ -476,7 +489,7 @@ abstract class WP_Agent_Channel {
 	 * session_id returned in the result so the next inbound message
 	 * continues the same conversation.
 	 *
-	 * @param array|WP_Error $result Agent run result.
+	 * @param array<string,mixed>|WP_Error $result Agent run result.
 	 */
 	protected function deliver_result( $result ): void {
 		if ( is_wp_error( $result ) ) {
@@ -488,8 +501,9 @@ abstract class WP_Agent_Channel {
 
 		// Persist session continuity before delivering the reply, so a slow
 		// send_response() doesn't lose the new session if it errors.
-		if ( ! empty( $result['session_id'] ) && (string) $result['session_id'] !== $this->session_id ) {
-			$this->store_session_id( (string) $result['session_id'] );
+		$result_session_id = $this->optional_string( $result['session_id'] ?? null );
+		if ( null !== $result_session_id && $result_session_id !== $this->session_id ) {
+			$this->store_session_id( $result_session_id );
 		}
 
 		$replies = $this->extract_replies( $result );
@@ -515,8 +529,9 @@ abstract class WP_Agent_Channel {
 	 * @return string[]
 	 */
 	protected function extract_replies( array $result ): array {
-		if ( ! empty( $result['reply'] ) ) {
-			return array( (string) $result['reply'] );
+		$reply = $this->optional_string( $result['reply'] ?? null );
+		if ( null !== $reply ) {
+			return array( $reply );
 		}
 
 		if ( ! empty( $result['messages'] ) && is_array( $result['messages'] ) ) {
@@ -529,8 +544,8 @@ abstract class WP_Agent_Channel {
 				if ( 'assistant' !== $role ) {
 					continue;
 				}
-				$content = (string) ( $message['content'] ?? '' );
-				if ( '' !== $content ) {
+				$content = $this->optional_string( $message['content'] ?? null );
+				if ( null !== $content ) {
 					$texts[] = $content;
 				}
 			}
@@ -571,7 +586,7 @@ abstract class WP_Agent_Channel {
 		}
 
 		$value = get_option( $this->session_storage_key(), '' );
-		return '' === $value ? null : (string) $value;
+		return $this->optional_string( $value );
 	}
 
 	/**
@@ -596,5 +611,28 @@ abstract class WP_Agent_Channel {
 	private function uses_custom_session_storage_key(): bool {
 		$method = new \ReflectionMethod( $this, 'session_storage_key' );
 		return self::class !== $method->getDeclaringClass()->getName();
+	}
+
+	private function optional_string( mixed $value ): ?string {
+		if ( ! is_scalar( $value ) && ! $value instanceof \Stringable ) {
+			return null;
+		}
+
+		$value = trim( (string) $value );
+		return '' === $value ? null : $value;
+	}
+
+	/**
+	 * @param array<mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function string_keyed_array( array $data ): array {
+		$result = array();
+		foreach ( $data as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$result[ $key ] = $value;
+			}
+		}
+		return $result;
 	}
 }

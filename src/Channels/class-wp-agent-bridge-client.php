@@ -44,11 +44,11 @@ final class WP_Agent_Bridge_Client {
 	 */
 	public static function from_array( array $data ): self {
 		return new self(
-			(string) ( $data['client_id'] ?? '' ),
-			isset( $data['connector_id'] ) ? (string) $data['connector_id'] : null,
-			isset( $data['callback_url'] ) ? (string) $data['callback_url'] : null,
-			isset( $data['context'] ) && is_array( $data['context'] ) ? $data['context'] : array(),
-			isset( $data['registered_at'] ) ? (string) $data['registered_at'] : null
+			self::string_value( $data['client_id'] ?? '' ),
+			self::nullable_string_value( $data['connector_id'] ?? null ),
+			self::nullable_string_value( $data['callback_url'] ?? null ),
+			isset( $data['context'] ) && is_array( $data['context'] ) ? self::string_keyed_array( $data['context'] ) : array(),
+			self::nullable_string_value( $data['registered_at'] ?? null )
 		);
 	}
 
@@ -78,7 +78,29 @@ final class WP_Agent_Bridge_Client {
 		}
 
 		$connector = wp_get_connector( $this->connector_id );
-		return is_array( $connector ) ? $connector : null;
+		return is_array( $connector ) ? self::string_keyed_array( $connector ) : null;
+	}
+
+	private static function string_value( mixed $value ): string {
+		return is_scalar( $value ) || $value instanceof \Stringable ? (string) $value : '';
+	}
+
+	private static function nullable_string_value( mixed $value ): ?string {
+		return null === $value ? null : self::string_value( $value );
+	}
+
+	/**
+	 * @param array<mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private static function string_keyed_array( array $data ): array {
+		$result = array();
+		foreach ( $data as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$result[ $key ] = $value;
+			}
+		}
+		return $result;
 	}
 
 	private static function normalize_required_id( string $value, string $field ): string {

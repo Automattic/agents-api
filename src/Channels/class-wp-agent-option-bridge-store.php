@@ -28,14 +28,14 @@ final class WP_Agent_Option_Bridge_Store implements WP_Agent_Bridge_Store {
 			return null;
 		}
 
-		return WP_Agent_Bridge_Client::from_array( $clients[ $client_id ] );
+		return WP_Agent_Bridge_Client::from_array( $this->string_keyed_array( $clients[ $client_id ] ) );
 	}
 
 	public function enqueue( WP_Agent_Bridge_Queue_Item $item ): WP_Agent_Bridge_Queue_Item {
 		$queue = $this->read_queue();
 
 		if ( isset( $queue[ $item->queue_id ] ) && is_array( $queue[ $item->queue_id ] ) ) {
-			$existing = WP_Agent_Bridge_Queue_Item::from_array( $queue[ $item->queue_id ] );
+			$existing = WP_Agent_Bridge_Queue_Item::from_array( $this->string_keyed_array( $queue[ $item->queue_id ] ) );
 			if ( $existing->client_id !== $item->client_id ) {
 				throw new \InvalidArgumentException( 'Cannot overwrite a queue item owned by another client.' );
 			}
@@ -57,7 +57,7 @@ final class WP_Agent_Option_Bridge_Store implements WP_Agent_Bridge_Store {
 				continue;
 			}
 
-			$item = WP_Agent_Bridge_Queue_Item::from_array( $data );
+			$item = WP_Agent_Bridge_Queue_Item::from_array( $this->string_keyed_array( $data ) );
 			if ( $item->client_id !== $client_id ) {
 				continue;
 			}
@@ -86,7 +86,7 @@ final class WP_Agent_Option_Bridge_Store implements WP_Agent_Bridge_Store {
 				continue;
 			}
 
-			$item = WP_Agent_Bridge_Queue_Item::from_array( $data );
+			$item = WP_Agent_Bridge_Queue_Item::from_array( $this->string_keyed_array( $data ) );
 			if ( $item->client_id !== $client_id ) {
 				continue;
 			}
@@ -107,7 +107,7 @@ final class WP_Agent_Option_Bridge_Store implements WP_Agent_Bridge_Store {
 	 */
 	private function read_clients(): array {
 		$clients = get_option( self::CLIENTS_OPTION, array() );
-		return is_array( $clients ) ? $clients : array();
+		return is_array( $clients ) ? $this->string_keyed_array( $clients ) : array();
 	}
 
 	/**
@@ -115,7 +115,21 @@ final class WP_Agent_Option_Bridge_Store implements WP_Agent_Bridge_Store {
 	 */
 	private function read_queue(): array {
 		$queue = get_option( self::QUEUE_OPTION, array() );
-		return is_array( $queue ) ? $queue : array();
+		return is_array( $queue ) ? $this->string_keyed_array( $queue ) : array();
+	}
+
+	/**
+	 * @param array<mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function string_keyed_array( array $data ): array {
+		$result = array();
+		foreach ( $data as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$result[ $key ] = $value;
+			}
+		}
+		return $result;
 	}
 
 	private function normalize_id( string $value ): string {
