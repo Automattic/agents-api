@@ -63,13 +63,13 @@ function agents_frontend_chat_rest_dispatch( \WP_REST_Request $request ) {
  *
  * @param \WP_REST_Request $request REST request.
  */
-function agents_frontend_chat_rest_permission( \WP_REST_Request $request ) {
+function agents_frontend_chat_rest_permission( \WP_REST_Request $request ): bool|\WP_Error {
 	$input = agents_frontend_chat_rest_input( $request );
 	if ( is_wp_error( $input ) ) {
 		return $input;
 	}
 
-	$agent   = isset( $input['agent'] ) ? (string) $input['agent'] : '';
+	$agent   = agents_frontend_chat_rest_string_value( $input['agent'] ?? null );
 	$allowed = '' !== $agent && agents_chat_permission( $input );
 
 	if ( ! $allowed && '' !== $agent ) {
@@ -110,25 +110,32 @@ function agents_frontend_chat_rest_input( \WP_REST_Request $request ) {
 	}
 
 	if ( $cache->offsetExists( $request ) ) {
-		return $cache[ $request ];
+		$cached = $cache[ $request ];
+		if ( is_wp_error( $cached ) ) {
+			return $cached;
+		}
+		if ( is_array( $cached ) ) {
+			return agents_frontend_chat_rest_string_key_array( $cached );
+		}
 	}
 
 	$client_context = $request->get_param( 'client_context' );
-	$client_context = is_array( $client_context ) ? $client_context : array();
+	$client_context = is_array( $client_context ) ? agents_frontend_chat_rest_string_key_array( $client_context ) : array();
 	$session_id     = $request->get_param( 'session_id' );
+	$client_name    = agents_frontend_chat_rest_string_value( $client_context['client_name'] ?? null );
 	$client_context = array_merge(
 		$client_context,
 		array(
 			'source'      => 'rest',
-			'client_name' => isset( $client_context['client_name'] ) && '' !== (string) $client_context['client_name'] ? (string) $client_context['client_name'] : 'frontend-chat',
+			'client_name' => '' !== $client_name ? $client_name : 'frontend-chat',
 		)
 	);
 
 	$attachments = $request->get_param( 'attachments' );
 	$input       = array(
-		'agent'          => sanitize_title( (string) $request->get_param( 'agent' ) ),
-		'message'        => (string) $request->get_param( 'message' ),
-		'session_id'     => null !== $session_id ? (string) $session_id : null,
+		'agent'          => sanitize_title( agents_frontend_chat_rest_string_value( $request->get_param( 'agent' ) ) ),
+		'message'        => agents_frontend_chat_rest_string_value( $request->get_param( 'message' ) ),
+		'session_id'     => null !== $session_id ? agents_frontend_chat_rest_string_value( $session_id ) : null,
 		'attachments'    => is_array( $attachments ) ? $attachments : array(),
 		'client_context' => $client_context,
 	);
@@ -150,9 +157,9 @@ function agents_frontend_chat_rest_input( \WP_REST_Request $request ) {
 
 		return $cache[ $request ];
 	}
-	$input = $filtered_input;
+	$input = agents_frontend_chat_rest_string_key_array( $filtered_input );
 
-	if ( '' === (string) ( $input['agent'] ?? '' ) || '' === trim( (string) ( $input['message'] ?? '' ) ) ) {
+	if ( '' === agents_frontend_chat_rest_string_value( $input['agent'] ?? null ) || '' === trim( agents_frontend_chat_rest_string_value( $input['message'] ?? null ) ) ) {
 		$cache[ $request ] = new \WP_Error(
 			'agents_frontend_chat_invalid_input',
 			'The frontend chat REST request requires a non-empty agent and message.',
@@ -164,6 +171,36 @@ function agents_frontend_chat_rest_input( \WP_REST_Request $request ) {
 
 	$cache[ $request ] = $input;
 	return $input;
+}
+
+/**
+ * Return a string only for values that can safely be represented as text.
+ *
+ * @param mixed $value Value to normalize.
+ */
+function agents_frontend_chat_rest_string_value( $value ): string {
+	if ( is_scalar( $value ) || $value instanceof \Stringable ) {
+		return (string) $value;
+	}
+
+	return '';
+}
+
+/**
+ * Keep only string-keyed entries for canonical associative input arrays.
+ *
+ * @param array<mixed> $value Input array.
+ * @return array<string,mixed>
+ */
+function agents_frontend_chat_rest_string_key_array( array $value ): array {
+	$result = array();
+	foreach ( $value as $key => $item ) {
+		if ( is_string( $key ) ) {
+			$result[ $key ] = $item;
+		}
+	}
+
+	return $result;
 }
 
 /**
@@ -193,11 +230,11 @@ function agents_frontend_chat_rest_scope( \WP_REST_Request $request ): array {
  */
 function agents_frontend_chat_rest_args(): array {
 	$schema     = agents_chat_input_schema();
-	$properties = $schema['properties'] ?? array();
+	$properties = is_array( $schema['properties'] ?? null ) ? $schema['properties'] : array();
 
 	return array(
 		'agent'          => array_merge(
-			$properties['agent'] ?? array( 'type' => 'string' ),
+			agents_frontend_chat_rest_schema_property( $properties, 'agent', array( 'type' => 'string' ) ),
 			array(
 				'required'          => true,
 				'sanitize_callback' => 'sanitize_title',
@@ -205,15 +242,15 @@ function agents_frontend_chat_rest_args(): array {
 			)
 		),
 		'message'        => array_merge(
-			$properties['message'] ?? array( 'type' => 'string' ),
+			agents_frontend_chat_rest_schema_property( $properties, 'message', array( 'type' => 'string' ) ),
 			array(
 				'required'          => true,
 				'validate_callback' => __NAMESPACE__ . '\\agents_frontend_chat_rest_validate_non_empty_string',
 			)
 		),
-		'session_id'     => array_merge( $properties['session_id'] ?? array( 'type' => array( 'string', 'null' ) ), array( 'required' => false ) ),
-		'attachments'    => array_merge( $properties['attachments'] ?? array( 'type' => 'array' ), array( 'required' => false ) ),
-		'client_context' => array_merge( $properties['client_context'] ?? array( 'type' => 'object' ), array( 'required' => false ) ),
+		'session_id'     => array_merge( agents_frontend_chat_rest_schema_property( $properties, 'session_id', array( 'type' => array( 'string', 'null' ) ) ), array( 'required' => false ) ),
+		'attachments'    => array_merge( agents_frontend_chat_rest_schema_property( $properties, 'attachments', array( 'type' => 'array' ) ), array( 'required' => false ) ),
+		'client_context' => array_merge( agents_frontend_chat_rest_schema_property( $properties, 'client_context', array( 'type' => 'object' ) ), array( 'required' => false ) ),
 		'workspace_id'   => array(
 			'type'        => array( 'string', 'null' ),
 			'required'    => false,
@@ -225,6 +262,23 @@ function agents_frontend_chat_rest_args(): array {
 			'description' => 'Optional host client identifier for access checks.',
 		),
 	);
+}
+
+/**
+ * Read a string-keyed schema property from the chat input schema.
+ *
+ * @param array<mixed>        $properties Schema properties.
+ * @param string              $name       Property name.
+ * @param array<string,mixed> $fallback   Fallback schema.
+ * @return array<string,mixed>
+ */
+function agents_frontend_chat_rest_schema_property( array $properties, string $name, array $fallback ): array {
+	$property = $properties[ $name ] ?? null;
+	if ( ! is_array( $property ) ) {
+		return $fallback;
+	}
+
+	return agents_frontend_chat_rest_string_key_array( $property );
 }
 
 /**
