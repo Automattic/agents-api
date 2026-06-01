@@ -519,9 +519,10 @@ class WP_Agent_Conversation_Loop {
 
 			$pending_request = self::runtime_tool_pending_request( $exec_result, $tool_name, $tool_call_id, is_array( $parameters ) ? $parameters : array(), $turn_context );
 			if ( null !== $pending_request ) {
+				$pending_request_json = self::json_encode_safe( $pending_request );
 				$runtime_tool_pending = $pending_request;
 				$messages[]           = WP_Agent_Message::toolResult(
-					self::json_encode_safe( $pending_request ),
+					false !== $pending_request_json ? $pending_request_json : '',
 					$tool_name,
 					array(
 						'success' => false,
@@ -547,7 +548,7 @@ class WP_Agent_Conversation_Loop {
 						'request_id' => $pending_request['request_id'],
 					)
 				);
-				$complete = true;
+				$complete      = true;
 				break;
 			}
 
@@ -755,7 +756,7 @@ class WP_Agent_Conversation_Loop {
 			'failure'                => array(
 				'type'       => get_class( $error ),
 				'message'    => $error->getMessage(),
-				'code'       => is_scalar( $error->getCode() ) ? (string) $error->getCode() : '',
+				'code'       => (string) $error->getCode(),
 				'turn_count' => $turn,
 			),
 		) );
