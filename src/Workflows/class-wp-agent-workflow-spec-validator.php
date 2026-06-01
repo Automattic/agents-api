@@ -45,7 +45,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $spec Raw spec.
+	 * @param array<mixed> $spec Raw spec.
 	 * @return array<int,array{path:string,code:string,message:string}> Empty when valid.
 	 */
 	public static function validate( array $spec ): array {
@@ -280,7 +280,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 	 * Pull step references from a top-level step without validating nested
 	 * foreach step bodies against the outer step order.
 	 *
-	 * @param array $step
+	 * @param array<mixed> $step
 	 * @return array<int,string>
 	 */
 	private static function extract_top_level_step_binding_ids( array $step ): array {

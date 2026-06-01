@@ -34,7 +34,7 @@ if ( ! class_exists( 'WP_Agent_Context_Section_Registry' ) ) {
 		 * @param string   $section_slug Section identifier.
 		 * @param int      $priority     Sort priority. Lower numbers compose first.
 		 * @param callable $callback     Receives `(array $context, array $section)` and returns content.
-		 * @param array    $args         Section metadata.
+		 * @param array<mixed>    $args         Section metadata.
 		 * @return array<string, mixed>|null Normalized section metadata, or null on invalid input.
 		 */
 		public static function register( string $context_slug, string $section_slug, int $priority, callable $callback, array $args = array() ): ?array {
@@ -81,7 +81,7 @@ if ( ! class_exists( 'WP_Agent_Context_Section_Registry' ) ) {
 		 * Return sections for a context in priority order.
 		 *
 		 * @param string $context_slug Context identifier.
-		 * @param array  $context      Runtime context, optionally including `mode`.
+		 * @param array<mixed>  $context      Runtime context, optionally including `mode`.
 		 * @return array<string, array<string, mixed>>
 		 */
 		public static function get_sections( string $context_slug, array $context = array() ): array {
@@ -114,7 +114,7 @@ if ( ! class_exists( 'WP_Agent_Context_Section_Registry' ) ) {
 		 * Compose a context from registered sections.
 		 *
 		 * @param string $context_slug Context identifier.
-		 * @param array  $context      Runtime context passed to callbacks.
+		 * @param array<mixed>  $context      Runtime context passed to callbacks.
 		 * @return WP_Agent_Composable_Context
 		 */
 		public static function compose( string $context_slug, array $context = array() ): WP_Agent_Composable_Context {

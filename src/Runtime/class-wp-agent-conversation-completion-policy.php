@@ -19,8 +19,8 @@ interface WP_Agent_Conversation_Completion_Policy {
 	 *
 	 * @param string     $tool_name       Tool name from the assistant response.
 	 * @param array|null $tool_def    Tool definition from the active tool set.
-	 * @param array      $tool_result Tool execution result.
-	 * @param array      $runtime_context Caller-owned runtime context.
+	 * @param array<mixed>      $tool_result Tool execution result.
+	 * @param array<mixed>      $runtime_context Caller-owned runtime context.
 	 * @param int        $turn_count      Current turn count.
 	 * @return WP_Agent_Conversation_Completion_Decision Completion decision.
 	 */

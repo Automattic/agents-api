@@ -118,7 +118,7 @@ abstract class WP_Agent_Channel {
 	 * string that gets handed to the agent. Override to extract text from
 	 * non-text messages (download images, transcribe voice, follow links).
 	 *
-	 * @param array $data The same map passed to receive() / handle().
+	 * @param array<mixed> $data The same map passed to receive() / handle().
 	 * @return string The user message to send to the agent.
 	 */
 	abstract protected function extract_message( array $data ): string;
@@ -183,7 +183,7 @@ abstract class WP_Agent_Channel {
 	 * Validate the channel-specific webhook payload before processing.
 	 * Return a WP_Error to short-circuit; null to continue.
 	 *
-	 * @param array $data Per-message data from receive() / handle().
+	 * @param array<mixed> $data Per-message data from receive() / handle().
 	 * @return WP_Error|null
 	 */
 	protected function validate( array $data ): ?WP_Error {
@@ -208,7 +208,7 @@ abstract class WP_Agent_Channel {
 	 * for concurrency control (per-conversation lock + pending queue,
 	 * debounced drain, durable persistence).
 	 *
-	 * @param array $data Channel-specific message data passed to the job.
+	 * @param array<mixed> $data Channel-specific message data passed to the job.
 	 */
 	public function receive( array $data ): void {
 		$action = $this->get_job_action();
@@ -235,7 +235,7 @@ abstract class WP_Agent_Channel {
 	 *     → deliver_result (send_response / send_error)
 	 *     → on_complete
 	 *
-	 * @param array $data Channel-specific per-message data.
+	 * @param array<mixed> $data Channel-specific per-message data.
 	 * @return array|WP_Error Agent result or error.
 	 */
 	public function handle( array $data ): array|WP_Error {
@@ -305,7 +305,7 @@ abstract class WP_Agent_Channel {
 	 * having to know about WP_Agent_Channel.
 	 *
 	 * @param string $message_text The user-message string from extract_message().
-	 * @param array  $data         The original webhook payload, in case the runner
+	 * @param array<mixed>  $data         The original webhook payload, in case the runner
 	 *                             needs metadata beyond the text (sender, timestamp).
 	 * @return array|WP_Error      `{ session_id, reply, completed?, … }` or WP_Error.
 	 */
@@ -352,8 +352,8 @@ abstract class WP_Agent_Channel {
 	 * transport-specific bits without rewriting this method.
 	 *
 	 * @param string $message_text
-	 * @param array  $data
-	 * @return array
+	 * @param array<mixed>  $data
+	 * @return array<mixed>
 	 */
 	public function build_chat_payload( string $message_text, array $data ): array {
 		$external_message              = $this->build_external_message( $message_text, $data );
@@ -373,7 +373,7 @@ abstract class WP_Agent_Channel {
 	 * Build the normalized external message value for this inbound payload.
 	 *
 	 * @param string $message_text
-	 * @param array  $data
+	 * @param array<mixed>  $data
 	 * @return WP_Agent_External_Message
 	 */
 	public function build_external_message( string $message_text, array $data ): WP_Agent_External_Message {
@@ -399,8 +399,8 @@ abstract class WP_Agent_Channel {
 	 * voice notes, files, link previews, etc., from the channel-specific
 	 * payload shape.
 	 *
-	 * @param array $data
-	 * @return array
+	 * @param array<mixed> $data
+	 * @return array<mixed>
 	 */
 	protected function extract_attachments( array $data ): array {
 		unset( $data );
@@ -423,7 +423,7 @@ abstract class WP_Agent_Channel {
 	 * threading, dedup, and audit. Default null. Override to expose the
 	 * inbound `msg_id` from your payload.
 	 *
-	 * @param array $data
+	 * @param array<mixed> $data
 	 * @return string|null
 	 */
 	protected function extract_external_message_id( array $data ): ?string {
@@ -435,7 +435,7 @@ abstract class WP_Agent_Channel {
 	 * Opaque external sender id. In DMs this may equal the conversation id;
 	 * in group chats it identifies the human sender inside the room.
 	 *
-	 * @param array $data
+	 * @param array<mixed> $data
 	 * @return string|null
 	 */
 	protected function extract_sender_id( array $data ): ?string {
@@ -448,7 +448,7 @@ abstract class WP_Agent_Channel {
 	 * Override per transport — WhatsApp can derive from the JID suffix,
 	 * Slack from the channel type, Telegram from the chat type.
 	 *
-	 * @param array $data
+	 * @param array<mixed> $data
 	 * @return string|null
 	 */
 	protected function get_room_kind( array $data ): ?string {
@@ -511,7 +511,7 @@ abstract class WP_Agent_Channel {
 	 * `{ messages: [ { role, content } ] }` (multi-message). Override for
 	 * exotic result shapes.
 	 *
-	 * @param array $result
+	 * @param array<mixed> $result
 	 * @return string[]
 	 */
 	protected function extract_replies( array $result ): array {

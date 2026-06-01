@@ -31,7 +31,7 @@ if ( ! class_exists( 'WP_Agent_Package_Artifacts_Registry' ) ) {
 		 * Register an artifact type.
 		 *
 		 * @param string|WP_Agent_Package_Artifact_Type $type Artifact type slug or object.
-		 * @param array                                 $args Registration arguments when `$type` is a slug.
+		 * @param array<mixed>                                 $args Registration arguments when `$type` is a slug.
 		 * @return WP_Agent_Package_Artifact_Type|null Registered type, or null on invalid arguments.
 		 */
 		public function register( $type, array $args = array() ): ?WP_Agent_Package_Artifact_Type {

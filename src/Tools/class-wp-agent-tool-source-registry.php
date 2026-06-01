@@ -62,7 +62,7 @@ class WP_Agent_Tool_Source_Registry {
 	/**
 	 * Return registered source callbacks.
 	 *
-	 * @param array $context Runtime context.
+	 * @param array<mixed> $context Runtime context.
 	 * @return array<string, callable>
 	 */
 	public function getSources( array $context = array() ): array {
@@ -79,8 +79,8 @@ class WP_Agent_Tool_Source_Registry {
 	 *
 	 * Earlier sources win when two sources return the same tool name.
 	 *
-	 * @param array $context Runtime context.
-	 * @return array<string, array> Tool declarations keyed by tool name.
+	 * @param array<mixed> $context Runtime context.
+	 * @return array<string, array<mixed>> Tool declarations keyed by tool name.
 	 */
 	public function gather( array $context = array() ): array {
 		$tools   = array();
@@ -145,7 +145,7 @@ class WP_Agent_Tool_Source_Registry {
 	 * Return source slugs in final precedence order.
 	 *
 	 * @param array<string, callable> $sources Registered sources.
-	 * @param array                   $context Runtime context.
+	 * @param array<mixed>                   $context Runtime context.
 	 * @return array<int, string>
 	 */
 	private function getSourceOrder( array $sources, array $context ): array {
@@ -178,7 +178,7 @@ class WP_Agent_Tool_Source_Registry {
 	 *
 	 * @param string $tool_name       Tool identifier.
 	 * @param string $source_slug     Source slug.
-	 * @param array  $tool_definition Raw tool declaration.
+	 * @param array<mixed>  $tool_definition Raw tool declaration.
 	 * @return array<string, mixed>
 	 */
 	private function normalizeGatheredTool( string $tool_name, string $source_slug, array $tool_definition ): array {

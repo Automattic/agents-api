@@ -392,11 +392,11 @@ class WP_Agent_Conversation_Loop {
 	 *
 	 * Handles the tool-call → validate → execute → message assembly cycle.
 	 *
-	 * @param array                                             $result          Turn runner result with tool_calls.
+	 * @param array<mixed>                                             $result          Turn runner result with tool_calls.
 	 * @param WP_Agent_Tool_Executor                             $executor        Tool executor adapter.
-	 * @param array                                             $declarations    Tool declarations keyed by name.
+	 * @param array<mixed>                                             $declarations    Tool declarations keyed by name.
 	 * @param WP_Agent_Conversation_Completion_Policy|null   $policy          Completion policy.
-	 * @param array                                             $turn_context    Turn context.
+	 * @param array<mixed>                                             $turn_context    Turn context.
 	 * @param int                                               $turn            Current turn number.
 	 * @param callable|null                                     $on_event        Event sink.
 	 * @param array<string, WP_Agent_Iteration_Budget>                    $budgets         Named iteration budgets.
@@ -880,9 +880,9 @@ class WP_Agent_Conversation_Loop {
 	 * Persist the transcript through the persister if available.
 	 *
 	 * @param WP_Agent_Transcript_Persister|null $persister Transcript persister.
-	 * @param array                                              $messages  Final messages.
-	 * @param array                                              $options   Loop options.
-	 * @param array                                              $result    Loop result.
+	 * @param array<mixed>                                              $messages  Final messages.
+	 * @param array<mixed>                                              $options   Loop options.
+	 * @param array<mixed>                                              $result    Loop result.
 	 */
 	private static function persist_transcript(
 		?WP_Agent_Transcript_Persister $persister,
@@ -984,7 +984,7 @@ class WP_Agent_Conversation_Loop {
 	 *
 	 * @param callable|null $on_event Event sink.
 	 * @param string        $event    Event name.
-	 * @param array         $payload  Event payload.
+	 * @param array<mixed>         $payload  Event payload.
 	 */
 	private static function emit_event( ?callable $on_event, string $event, array $payload = array() ): void {
 		if ( null !== $on_event ) {
@@ -1005,7 +1005,7 @@ class WP_Agent_Conversation_Loop {
 				 * observers are swallowed and cannot change loop results.
 				 *
 				 * @param string $event   Event name.
-				 * @param array  $payload Event payload snapshot.
+				 * @param array<mixed>  $payload Event payload snapshot.
 				 */
 				do_action( 'agents_api_loop_event', $event, $payload );
 			} catch ( \Throwable $error ) {
@@ -1025,10 +1025,10 @@ class WP_Agent_Conversation_Loop {
 	 *
 	 * @param string     $tool_name       Tool identifier.
 	 * @param string     $tool_call_id    Provider or loop-assigned tool-call id.
-	 * @param array      $parameters      Runtime tool-call parameters.
-	 * @param array      $result          Normalized tool execution result.
+	 * @param array<mixed>      $parameters      Runtime tool-call parameters.
+	 * @param array<mixed>      $result          Normalized tool execution result.
 	 * @param array|null $tool_definition Tool declaration, when available.
-	 * @param array      $context         Turn context.
+	 * @param array<mixed>      $context         Turn context.
 	 * @param int        $turn            Turn number.
 	 * @return array<string, mixed> Audit event.
 	 */
@@ -1064,10 +1064,10 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Redact tool parameters before hashing them for audit events.
 	 *
-	 * @param array      $parameters      Raw tool-call parameters.
+	 * @param array<mixed>      $parameters      Raw tool-call parameters.
 	 * @param string     $tool_name       Tool identifier.
 	 * @param array|null $tool_definition Tool declaration, when available.
-	 * @param array      $context         Turn context.
+	 * @param array<mixed>      $context         Turn context.
 	 * @return array<string, mixed> Redacted parameters.
 	 */
 	private static function redact_tool_audit_parameters( array $parameters, string $tool_name, ?array $tool_definition, array $context ): array {
@@ -1082,11 +1082,11 @@ class WP_Agent_Conversation_Loop {
 				 * keeping deterministic replay hashes. Returning a non-array falls back to
 				 * the default redacted parameters.
 				 *
-				 * @param array      $redacted        Default redacted parameters.
-				 * @param array      $parameters      Raw tool-call parameters.
+				 * @param array<mixed>      $redacted        Default redacted parameters.
+				 * @param array<mixed>      $parameters      Raw tool-call parameters.
 				 * @param string     $tool_name       Tool identifier.
 				 * @param array|null $tool_definition Tool declaration, when available.
-				 * @param array      $context         Turn context.
+				 * @param array<mixed>      $context         Turn context.
 				 */
 				$redacted = apply_filters( 'agents_api_tool_audit_parameters', $redacted, $parameters, $tool_name, $tool_definition, $context );
 			} catch ( \Throwable $error ) {
@@ -1203,9 +1203,9 @@ class WP_Agent_Conversation_Loop {
 	 * path (no mediation), preserves the historical break-after-1 behavior unless
 	 * the caller supplies their own continuation policy.
 	 *
-	 * @param array                       $options           Loop options.
+	 * @param array<mixed>                       $options           Loop options.
 	 * @param WP_Agent_Tool_Executor|null $tool_executor     Resolved tool executor.
-	 * @param array                       $tool_declarations Resolved tool declarations.
+	 * @param array<mixed>                       $tool_declarations Resolved tool declarations.
 	 * @return callable|null
 	 */
 	private static function resolve_should_continue(
@@ -1336,7 +1336,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the transcript session ID to lock.
 	 *
-	 * @param array                    $options Loop options.
+	 * @param array<mixed>                    $options Loop options.
 	 * @param WP_Agent_Conversation_Request $request Request object.
 	 * @return string
 	 */
@@ -1362,7 +1362,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the chat run ID used by generic run-control.
 	 *
-	 * @param array                         $options Loop options.
+	 * @param array<mixed>                         $options Loop options.
 	 * @param WP_Agent_Conversation_Request $request Request object.
 	 * @return string
 	 */

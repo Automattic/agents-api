@@ -48,8 +48,8 @@ class WP_Agent_Conversation_Request {
 	private \WP_Agent_Runtime_Overrides $runtime_overrides;
 
 	/**
-	 * @param array                         $messages        Initial conversation messages.
-	 * @param array                         $tools           Runtime tool declarations available to the run.
+	 * @param array<mixed>                         $messages        Initial conversation messages.
+	 * @param array<mixed>                         $tools           Runtime tool declarations available to the run.
 	 * @param WP_Agent_Execution_Principal|null  $principal       Execution principal for the run.
 	 * @param array<string, mixed>          $runtime_context Caller-owned runtime context.
 	 * @param array<string, mixed>          $metadata        Caller-owned metadata.
@@ -165,7 +165,7 @@ class WP_Agent_Conversation_Request {
 	/**
 	 * Normalize runtime tool declarations.
 	 *
-	 * @param array $tools Runtime tool declarations.
+	 * @param array<mixed> $tools Runtime tool declarations.
 	 * @return array<int, array<string, mixed>>
 	 */
 	private static function normalize_tools( array $tools ): array {
@@ -188,7 +188,7 @@ class WP_Agent_Conversation_Request {
 	/**
 	 * Validate that a caller-owned array is JSON-serializable.
 	 *
-	 * @param array  $value Raw array.
+	 * @param array<mixed>  $value Raw array.
 	 * @param string $path  Field path.
 	 * @return array<string, mixed>
 	 */

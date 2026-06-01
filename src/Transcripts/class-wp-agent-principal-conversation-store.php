@@ -30,7 +30,7 @@ interface WP_Agent_Principal_Conversation_Store extends WP_Agent_Conversation_St
 	 * @param WP_Agent_Workspace_Scope     $workspace  Workspace owning the session.
 	 * @param array{type:string,key:string} $owner     Canonical principal owner.
 	 * @param string                       $agent_slug Registered agent slug, or empty string for agent-less sessions.
-	 * @param array                        $metadata   Arbitrary session metadata (JSON-serializable).
+	 * @param array<mixed>                        $metadata   Arbitrary session metadata (JSON-serializable).
 	 * @param string                       $context    Execution mode ('chat', 'pipeline', 'system').
 	 * @return string Session ID (UUIDv4), or empty string on failure.
 	 */
@@ -41,7 +41,7 @@ interface WP_Agent_Principal_Conversation_Store extends WP_Agent_Conversation_St
 	 *
 	 * @param WP_Agent_Workspace_Scope     $workspace Workspace owning the sessions.
 	 * @param array{type:string,key:string} $owner    Canonical principal owner.
-	 * @param array                        $args      Optional host-supported filters/pagination.
+	 * @param array<mixed>                        $args      Optional host-supported filters/pagination.
 	 * @return array<int,array<string,mixed>> Session rows.
 	 */
 	public function list_sessions_for_owner( WP_Agent_Workspace_Scope $workspace, array $owner, array $args = array() ): array;

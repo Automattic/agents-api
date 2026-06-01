@@ -20,9 +20,9 @@ class WP_Agent_Tool_Execution_Core {
 	 * Prepare a tool call for a caller-supplied execution adapter.
 	 *
 	 * @param string $tool_name       Tool identifier.
-	 * @param array  $tool_parameters Runtime tool-call parameters.
-	 * @param array  $available_tools Tool declarations keyed by name.
-	 * @param array  $context         Host runtime context for this invocation.
+	 * @param array<mixed>  $tool_parameters Runtime tool-call parameters.
+	 * @param array<mixed>  $available_tools Tool declarations keyed by name.
+	 * @param array<mixed>  $context         Host runtime context for this invocation.
 	 * @return array<string, mixed> Prepared call or normalized error result.
 	 */
 	public function prepareWP_Agent_Tool_Call( string $tool_name, array $tool_parameters, array $available_tools, array $context = array() ): array {
@@ -76,10 +76,10 @@ class WP_Agent_Tool_Execution_Core {
 	/**
 	 * Execute a prepared tool call through a caller-supplied adapter.
 	 *
-	 * @param array  $tool_call       Prepared tool call.
-	 * @param array  $tool_definition Normalized tool declaration.
+	 * @param array<mixed>  $tool_call       Prepared tool call.
+	 * @param array<mixed>  $tool_definition Normalized tool declaration.
 	 * @param WP_Agent_Tool_Executor $executor Host runtime execution adapter.
-	 * @param array  $context         Host runtime context for this invocation.
+	 * @param array<mixed>  $context         Host runtime context for this invocation.
 	 * @return array<string, mixed> Normalized execution result.
 	 */
 	public function executePreparedTool( array $tool_call, array $tool_definition, WP_Agent_Tool_Executor $executor, array $context = array() ): array {
@@ -120,10 +120,10 @@ class WP_Agent_Tool_Execution_Core {
 	 * Prepare and execute a tool call through a caller-supplied adapter.
 	 *
 	 * @param string $tool_name       Tool identifier.
-	 * @param array  $tool_parameters Runtime tool-call parameters.
-	 * @param array  $available_tools Tool declarations keyed by name.
+	 * @param array<mixed>  $tool_parameters Runtime tool-call parameters.
+	 * @param array<mixed>  $available_tools Tool declarations keyed by name.
 	 * @param WP_Agent_Tool_Executor $executor Host runtime execution adapter.
-	 * @param array  $context         Host runtime context for this invocation.
+	 * @param array<mixed>  $context         Host runtime context for this invocation.
 	 * @return array<string, mixed> Normalized execution result.
 	 */
 	public function executeTool( string $tool_name, array $tool_parameters, array $available_tools, WP_Agent_Tool_Executor $executor, array $context = array() ): array {

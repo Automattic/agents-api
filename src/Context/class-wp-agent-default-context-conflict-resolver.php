@@ -16,7 +16,7 @@ final class WP_Agent_Default_Context_Conflict_Resolver implements WP_Agent_Conte
 
 	/**
 	 * @param WP_Agent_Context_Item[] $items   Retrieved context items.
-	 * @param array                  $context Optional caller context.
+	 * @param array<mixed>                  $context Optional caller context.
 	 * @return WP_Agent_Context_Conflict_Resolution[] Conflict resolutions keyed by conflict key.
 	 */
 	public function resolve( array $items, array $context = array() ): array {
@@ -44,7 +44,7 @@ final class WP_Agent_Default_Context_Conflict_Resolver implements WP_Agent_Conte
 
 	/**
 	 * @param string $conflict_key Conflict key.
-	 * @param array  $group        Group rows with item/index keys.
+	 * @param array<mixed>  $group        Group rows with item/index keys.
 	 * @return WP_Agent_Context_Conflict_Resolution
 	 */
 	private function resolve_group( string $conflict_key, array $group ): WP_Agent_Context_Conflict_Resolution {
@@ -100,7 +100,7 @@ final class WP_Agent_Default_Context_Conflict_Resolver implements WP_Agent_Conte
 	}
 
 	/**
-	 * @param array                $group  Group rows with item/index keys.
+	 * @param array<mixed>                $group  Group rows with item/index keys.
 	 * @param WP_Agent_Context_Item $winner Selected winner.
 	 * @return WP_Agent_Context_Item[]
 	 */

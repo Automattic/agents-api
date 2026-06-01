@@ -23,7 +23,7 @@ class WP_Agent_Compaction_Item {
 	/**
 	 * Normalize a raw item to the canonical compaction item shape.
 	 *
-	 * @param array    $item  Raw compaction item.
+	 * @param array<mixed>    $item  Raw compaction item.
 	 * @param int|null $index Optional item position used for generated IDs.
 	 * @return array<string, mixed> Normalized compaction item.
 	 * @throws \InvalidArgumentException When the item is invalid.
@@ -62,7 +62,7 @@ class WP_Agent_Compaction_Item {
 	/**
 	 * Normalize an ordered list of compaction items.
 	 *
-	 * @param array $items Raw compaction items.
+	 * @param array<mixed> $items Raw compaction items.
 	 * @return array<int, array<string, mixed>>
 	 * @throws \InvalidArgumentException When an item is invalid.
 	 */
@@ -82,7 +82,7 @@ class WP_Agent_Compaction_Item {
 	/**
 	 * Project a message envelope into the generic compaction item contract.
 	 *
-	 * @param array    $message Message envelope or plain role/content message.
+	 * @param array<mixed>    $message Message envelope or plain role/content message.
 	 * @param int|null $index   Optional item position used for generated IDs.
 	 * @return array<string, mixed> Normalized compaction item.
 	 */
@@ -110,7 +110,7 @@ class WP_Agent_Compaction_Item {
 	/**
 	 * Project message envelopes into ordered compaction items.
 	 *
-	 * @param array $messages Message envelopes or plain role/content messages.
+	 * @param array<mixed> $messages Message envelopes or plain role/content messages.
 	 * @return array<int, array<string, mixed>>
 	 */
 	public static function from_messages( array $messages ): array {
@@ -159,7 +159,7 @@ class WP_Agent_Compaction_Item {
 	/**
 	 * Normalize item content.
 	 *
-	 * @param array $item Raw item.
+	 * @param array<mixed> $item Raw item.
 	 * @return string|array
 	 */
 	private static function normalize_content( array $item ) {
@@ -213,7 +213,7 @@ class WP_Agent_Compaction_Item {
 	 * @param mixed       $id       Raw ID.
 	 * @param string      $type     Item type.
 	 * @param string|array $content Item content.
-	 * @param array       $metadata Item metadata.
+	 * @param array<mixed>       $metadata Item metadata.
 	 * @param string|null $group    Item group.
 	 * @param array|null  $boundary Boundary hints.
 	 * @param int|null    $index    Item position.

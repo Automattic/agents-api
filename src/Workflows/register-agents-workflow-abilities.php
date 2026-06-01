@@ -150,7 +150,7 @@ add_action(
  *
  * @since  0.103.0
  *
- * @param  array $input Canonical run-workflow input.
+ * @param  array<mixed> $input Canonical run-workflow input.
  * @return array|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_run_workflow_dispatch( array $input ) {
@@ -165,7 +165,7 @@ function agents_run_workflow_dispatch( array $input ) {
 	 *
 	 * @param callable|null $handler Currently registered handler. Null when
 	 *                               no runtime has registered.
-	 * @param array         $input   The canonical input being dispatched.
+	 * @param array<mixed>         $input   The canonical input being dispatched.
 	 */
 	$handler = apply_filters( 'wp_agent_workflow_handler', null, $input );
 
@@ -177,7 +177,7 @@ function agents_run_workflow_dispatch( array $input ) {
 		 * @since 0.103.0
 		 *
 		 * @param string $reason Always `'no_handler'` for this branch.
-		 * @param array  $input  The canonical input that was rejected.
+		 * @param array<mixed>  $input  The canonical input that was rejected.
 		 */
 		do_action( 'agents_run_workflow_dispatch_failed', 'no_handler', $input );
 
@@ -213,8 +213,8 @@ function agents_run_workflow_dispatch( array $input ) {
  *
  * @since  0.103.0
  *
- * @param  array $input
- * @return array
+ * @param  array<mixed> $input
+ * @return array<mixed>
  */
 function agents_validate_workflow( array $input ): array {
 	$errors = WP_Agent_Workflow_Spec_Validator::validate( (array) ( $input['spec'] ?? array() ) );
@@ -230,8 +230,8 @@ function agents_validate_workflow( array $input ): array {
  *
  * @since  0.103.0
  *
- * @param  array $input
- * @return array
+ * @param  array<mixed> $input
+ * @return array<mixed>
  */
 function agents_describe_workflow( array $input ): array {
 	$workflow_id = (string) ( $input['workflow_id'] ?? '' );
@@ -256,7 +256,7 @@ function agents_describe_workflow( array $input ): array {
  *
  * @since 0.103.0
  *
- * @param array $input Canonical input.
+ * @param array<mixed> $input Canonical input.
  * @return bool
  */
 function agents_run_workflow_permission( array $input ): bool {
@@ -266,7 +266,7 @@ function agents_run_workflow_permission( array $input ): bool {
 	 * @since 0.103.0
 	 *
 	 * @param bool  $allowed Default: current_user_can( 'manage_options' ).
-	 * @param array $input   The canonical input being authorized.
+	 * @param array<mixed> $input   The canonical input being authorized.
 	 */
 	return (bool) apply_filters(
 		'agents_run_workflow_permission',
@@ -284,7 +284,7 @@ function agents_run_workflow_permission( array $input ): bool {
  *
  * @since 0.103.0
  *
- * @param array $input
+ * @param array<mixed> $input
  * @return bool
  */
 function agents_validate_workflow_permission( array $input ): bool {
@@ -294,7 +294,7 @@ function agents_validate_workflow_permission( array $input ): bool {
 	 * @since 0.103.0
 	 *
 	 * @param bool  $allowed Default: any logged-in user.
-	 * @param array $input
+	 * @param array<mixed> $input
 	 */
 	return (bool) apply_filters(
 		'agents_validate_workflow_permission',
@@ -308,7 +308,7 @@ function agents_validate_workflow_permission( array $input ): bool {
  *
  * @since  0.103.0
  *
- * @return array
+ * @return array<mixed>
  */
 function agents_run_workflow_input_schema(): array {
 	return array(
@@ -341,7 +341,7 @@ function agents_run_workflow_input_schema(): array {
  *
  * @since  0.103.0
  *
- * @return array
+ * @return array<mixed>
  */
 function agents_run_workflow_output_schema(): array {
 	return array(

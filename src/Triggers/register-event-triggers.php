@@ -12,7 +12,7 @@ if ( ! function_exists( 'wp_register_event_trigger' ) ) {
 	 * Register a code-defined event trigger.
 	 *
 	 * @param string $id   Unique trigger slug.
-	 * @param array  $args Trigger arguments.
+	 * @param array<mixed>  $args Trigger arguments.
 	 * @return AgentsAPI\AI\Triggers\WP_Agent_Event_Trigger|WP_Error
 	 */
 	function wp_register_event_trigger( string $id, array $args ) {

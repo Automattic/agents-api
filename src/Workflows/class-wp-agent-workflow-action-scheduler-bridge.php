@@ -68,7 +68,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 			 * @since 0.103.0
 			 *
 			 * @param WP_Agent_Workflow_Spec $spec
-			 * @param array                  $trigger
+			 * @param array<mixed>                  $trigger
 			 */
 			do_action( 'wp_agent_workflow_schedule_requested', $spec, $trigger );
 

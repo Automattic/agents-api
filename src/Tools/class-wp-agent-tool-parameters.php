@@ -33,10 +33,10 @@ class WP_Agent_Tool_Parameters {
 	 * Empty / null context values are ignored so they don't silently
 	 * satisfy a required-parameter check.
 	 *
-	 * @param array $tool_parameters Runtime tool-call parameters.
-	 * @param array $context         Host runtime context for this invocation.
-	 * @param array $tool_definition Normalized tool declaration.
-	 * @return array Complete parameters for execution.
+	 * @param array<mixed> $tool_parameters Runtime tool-call parameters.
+	 * @param array<mixed> $context         Host runtime context for this invocation.
+	 * @param array<mixed> $tool_definition Normalized tool declaration.
+	 * @return array<mixed> Complete parameters for execution.
 	 */
 	public static function buildParameters( array $tool_parameters, array $context = array(), array $tool_definition = array() ): array {
 		$parameters = array();
@@ -64,7 +64,7 @@ class WP_Agent_Tool_Parameters {
 	 * `parameter_name => context_key` map. Skips malformed entries silently
 	 * — the declaration is best-effort metadata, not validated input.
 	 *
-	 * @param array $tool_definition Normalized tool declaration.
+	 * @param array<mixed> $tool_definition Normalized tool declaration.
 	 * @return array<string, string>
 	 */
 	private static function clientContextBindings( array $tool_definition ): array {
@@ -93,8 +93,8 @@ class WP_Agent_Tool_Parameters {
 	 * Supports both the compact Agents API shape (`required` as a list of names)
 	 * and per-property `required => true` flags.
 	 *
-	 * @param array $tool_parameters Runtime tool-call parameters.
-	 * @param array $tool_definition Normalized tool declaration.
+	 * @param array<mixed> $tool_parameters Runtime tool-call parameters.
+	 * @param array<mixed> $tool_definition Normalized tool declaration.
 	 * @return array{valid: bool, required: array<int, string>, missing: array<int, string>}
 	 */
 	public static function validateRequiredParameters( array $tool_parameters, array $tool_definition ): array {
@@ -117,7 +117,7 @@ class WP_Agent_Tool_Parameters {
 	/**
 	 * Extract required parameter names from known declaration shapes.
 	 *
-	 * @param array $tool_definition Normalized tool declaration.
+	 * @param array<mixed> $tool_definition Normalized tool declaration.
 	 * @return array<int, string>
 	 */
 	private static function requiredParameterNames( array $tool_definition ): array {

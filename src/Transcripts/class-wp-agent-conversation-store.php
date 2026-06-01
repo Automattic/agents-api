@@ -30,7 +30,7 @@ interface WP_Agent_Conversation_Store {
 	 * @param WP_Agent_Workspace_Scope $workspace Workspace owning the session.
 	 * @param int                      $user_id   WordPress user ID owning the session.
 	 * @param string                   $agent_slug Registered agent slug, or empty string for agent-less sessions.
-	 * @param array                    $metadata  Arbitrary session metadata (JSON-serializable).
+	 * @param array<mixed>                    $metadata  Arbitrary session metadata (JSON-serializable).
 	 * @param string                   $context   Execution mode ('chat', 'pipeline', 'system').
 	 * @return string Session ID (UUIDv4), or empty string on failure.
 	 */
@@ -47,7 +47,7 @@ interface WP_Agent_Conversation_Store {
 	 *
 	 * @param WP_Agent_Workspace_Scope $workspace Workspace owning the sessions.
 	 * @param int                      $user_id   WordPress user ID owning the sessions.
-	 * @param array                    $args      Optional host-supported filters/pagination.
+	 * @param array<mixed>                    $args      Optional host-supported filters/pagination.
 	 * @return array<int,array<string,mixed>> Session rows.
 	 */
 	public function list_sessions( WP_Agent_Workspace_Scope $workspace, int $user_id, array $args = array() ): array;
@@ -69,8 +69,8 @@ interface WP_Agent_Conversation_Store {
 	 * Replace a session's messages + metadata.
 	 *
 	 * @param string      $session_id           Session UUID.
-	 * @param array       $messages             Complete messages array (not a delta).
-	 * @param array       $metadata             Updated metadata.
+	 * @param array<mixed>       $messages             Complete messages array (not a delta).
+	 * @param array<mixed>       $metadata             Updated metadata.
 	 * @param string      $provider             Optional AI provider identifier.
 	 * @param string      $model                Optional AI model identifier.
 	 * @param string|null $provider_response_id Opaque provider-side response/state ID, or null when none.

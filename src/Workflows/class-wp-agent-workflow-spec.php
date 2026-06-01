@@ -45,13 +45,13 @@ final class WP_Agent_Workflow_Spec {
 	 *
 	 * @param string $id        Stable, namespaced workflow identifier (`my-plugin/triage-comments`).
 	 * @param string $version   Caller-defined version string (semver suggested but not enforced).
-	 * @param array  $inputs    Map of `<input_name> => <schema>`. Each schema is a JSON-Schema-like
+	 * @param array<mixed>  $inputs    Map of `<input_name> => <schema>`. Each schema is a JSON-Schema-like
 	 *                          fragment with `type`, optional `required`, optional `default`.
-	 * @param array  $steps     Ordered list of step definitions. v0 supports `ability` and `agent`
+	 * @param array<mixed>  $steps     Ordered list of step definitions. v0 supports `ability` and `agent`
 	 *                          types; consumers may register additional types via a step handler map.
-	 * @param array  $triggers  List of trigger definitions. v0 supports `on_demand`, `wp_action`, `cron`.
-	 * @param array  $meta      Free-form metadata for the registering plugin. Opaque to the runner.
-	 * @param array  $raw       The full raw array the spec was constructed from. Used for round-tripping
+	 * @param array<mixed>  $triggers  List of trigger definitions. v0 supports `on_demand`, `wp_action`, `cron`.
+	 * @param array<mixed>  $meta      Free-form metadata for the registering plugin. Opaque to the runner.
+	 * @param array<mixed>  $raw       The full raw array the spec was constructed from. Used for round-tripping
 	 *                          a spec back to its caller-supplied shape.
 	 */
 	public function __construct(
@@ -71,7 +71,7 @@ final class WP_Agent_Workflow_Spec {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $raw Raw spec input.
+	 * @param array<mixed> $raw Raw spec input.
 	 * @return self|WP_Error
 	 */
 	public static function from_array( array $raw ) {
@@ -134,7 +134,7 @@ final class WP_Agent_Workflow_Spec {
 	}
 
 	/**
-	 * @return array The raw spec array as supplied to {@see from_array()}.
+	 * @return array<mixed> The raw spec array as supplied to {@see from_array()}.
 	 */
 	public function to_array(): array {
 		return $this->raw;

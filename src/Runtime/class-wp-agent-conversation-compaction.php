@@ -100,8 +100,8 @@ class WP_Agent_Conversation_Compaction {
 	 * `archived_items`. On failure the original transcript is returned unchanged
 	 * with a `compaction_failed` lifecycle event.
 	 *
-	 * @param array    $messages   Complete transcript messages.
-	 * @param array    $policy     Compaction policy.
+	 * @param array<mixed>    $messages   Complete transcript messages.
+	 * @param array<mixed>    $policy     Compaction policy.
 	 * @param callable $summarizer Summary producer supplied by the runtime.
 	 * @return array{messages: array<int, array<string, mixed>>, metadata: array<string, mixed>, events: array<int, array<string, mixed>>, archive_items?: array<int, array<string, mixed>>}
 	 */

@@ -16,8 +16,8 @@ if ( ! class_exists( 'WP_Agent_Composable_Context' ) ) {
 		/**
 		 * @param string $slug     Context slug.
 		 * @param string $content  Composed content.
-		 * @param array  $sections Section metadata keyed by section slug.
-		 * @param array  $metadata Composition metadata.
+		 * @param array<mixed>  $sections Section metadata keyed by section slug.
+		 * @param array<mixed>  $metadata Composition metadata.
 		 */
 		public function __construct(
 			public readonly string $slug,
@@ -30,8 +30,8 @@ if ( ! class_exists( 'WP_Agent_Composable_Context' ) ) {
 		 * Compose context content from ordered section metadata.
 		 *
 		 * @param string $context_slug Context identifier.
-		 * @param array  $sections     Section metadata keyed by section slug.
-		 * @param array  $context      Runtime context passed to section callbacks.
+		 * @param array<mixed>  $sections     Section metadata keyed by section slug.
+		 * @param array<mixed>  $context      Runtime context passed to section callbacks.
 		 * @return self
 		 */
 		public static function compose( string $context_slug, array $sections, array $context = array() ): self {

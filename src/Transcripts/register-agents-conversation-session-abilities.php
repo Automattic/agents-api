@@ -314,7 +314,7 @@ function agents_conversation_sessions_context( array $input ) {
 /**
  * Resolve an explicit canonical session owner from ability input.
  *
- * @param array                        $input     Ability input.
+ * @param array<mixed>                        $input     Ability input.
  * @param WP_Agent_Execution_Principal $principal Authenticated execution principal.
  * @return array{type:string,key:string}|null|\WP_Error
  */

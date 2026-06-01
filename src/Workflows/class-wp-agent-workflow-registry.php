@@ -36,7 +36,7 @@ final class WP_Agent_Workflow_Registry {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $raw
+	 * @param array<mixed> $raw
 	 * @return WP_Agent_Workflow_Spec|WP_Error
 	 */
 	public static function register( array $raw ) {

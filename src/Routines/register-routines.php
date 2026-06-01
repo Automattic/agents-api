@@ -31,7 +31,7 @@ if ( ! function_exists( 'wp_register_routine' ) ) {
 	 * @since 0.105.0
 	 *
 	 * @param string $id   Unique routine slug.
-	 * @param array  $args Routine arguments. See {@see WP_Agent_Routine::__construct()}.
+	 * @param array<mixed>  $args Routine arguments. See {@see WP_Agent_Routine::__construct()}.
 	 *
 	 * @return AgentsAPI\AI\Routines\WP_Agent_Routine|WP_Error
 	 */

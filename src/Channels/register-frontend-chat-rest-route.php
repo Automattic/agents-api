@@ -80,7 +80,7 @@ function agents_frontend_chat_rest_permission( \WP_REST_Request $request ) {
 	 * Filter the frontend chat REST permission decision.
 	 *
 	 * @param bool             $allowed Default access decision.
-	 * @param array            $input   Canonical agents/chat input.
+	 * @param array<mixed>            $input   Canonical agents/chat input.
 	 * @param \WP_REST_Request $request REST request.
 	 */
 	$allowed = (bool) apply_filters( 'agents_frontend_chat_rest_permission', $allowed, $input, $request );
@@ -136,7 +136,7 @@ function agents_frontend_chat_rest_input( \WP_REST_Request $request ) {
 	/**
 	 * Filter the canonical agents/chat input built by the REST adapter.
 	 *
-	 * @param array            $input   Canonical agents/chat input.
+	 * @param array<mixed>            $input   Canonical agents/chat input.
 	 * @param \WP_REST_Request $request REST request.
 	 */
 	/** @var mixed $filtered_input Hosts may accidentally return invalid values from this filter. */

@@ -26,8 +26,8 @@ class WP_Agent_Conversation_Result {
 	 * `tool_execution_results` is optional because a valid no-tool response has
 	 * no tool output; when omitted it normalizes to an empty list.
 	 *
-	 * @param array $result Raw loop result.
-	 * @return array Normalized loop result.
+	 * @param array<mixed> $result Raw loop result.
+	 * @return array<mixed> Normalized loop result.
 	 * @throws \InvalidArgumentException When the result shape is invalid.
 	 */
 	public static function normalize( array $result ): array {

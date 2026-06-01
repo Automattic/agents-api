@@ -33,7 +33,7 @@ if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 		 * Register a memory or context source.
 		 *
 		 * @param string $source_id Source identifier, e.g. `workspace/instructions`.
-		 * @param array  $args      Registration metadata.
+		 * @param array<mixed>  $args      Registration metadata.
 		 * @return array<string, mixed>|null Normalized source metadata, or null on invalid ID.
 		 */
 		public static function register( string $source_id, array $args = array() ): ?array {

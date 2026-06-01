@@ -40,14 +40,14 @@ final class WP_Agent_Workflow_Run_Result {
 	 * @param string $run_id      Caller-stable id (UUID, post id, custom-table row id).
 	 * @param string $workflow_id Spec id this run belongs to.
 	 * @param string $status      One of the STATUS_* constants.
-	 * @param array  $inputs      Resolved inputs the run was started with.
-	 * @param array  $output      Final aggregated output map (or partial if failed).
-	 * @param array  $steps       List of step records, each shaped as
+	 * @param array<mixed>  $inputs      Resolved inputs the run was started with.
+	 * @param array<mixed>  $output      Final aggregated output map (or partial if failed).
+	 * @param array<mixed>  $steps       List of step records, each shaped as
 	 *                            `[ id, type, status, output, error?, started_at, ended_at ]`.
-	 * @param array  $error       Top-level error info (`code`, `message`, `data`) when status === failed.
+	 * @param array<mixed>  $error       Top-level error info (`code`, `message`, `data`) when status === failed.
 	 * @param int    $started_at  Unix timestamp.
 	 * @param int    $ended_at    Unix timestamp; 0 while running.
-	 * @param array  $metadata    Free-form metadata for recorders / tracers (Langfuse trace ids, etc.).
+	 * @param array<mixed>  $metadata    Free-form metadata for recorders / tracers (Langfuse trace ids, etc.).
 	 */
 	public function __construct(
 		private string $run_id,
@@ -120,7 +120,7 @@ final class WP_Agent_Workflow_Run_Result {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $patch Field => new value. Unknown keys are ignored.
+	 * @param array<mixed> $patch Field => new value. Unknown keys are ignored.
 	 * @return self
 	 */
 	public function with( array $patch ): self {
@@ -144,7 +144,7 @@ final class WP_Agent_Workflow_Run_Result {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @return array
+	 * @return array<mixed>
 	 */
 	public function to_array(): array {
 		return array(

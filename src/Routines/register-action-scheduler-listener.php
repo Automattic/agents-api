@@ -115,7 +115,7 @@ function dispatch_scheduled_routine_run( $args ): void {
 	 * @since 0.105.0
 	 *
 	 * @param WP_Agent_Routine $routine
-	 * @param array            $result Canonical chat output.
+	 * @param array<mixed>            $result Canonical chat output.
 	 */
 	do_action( 'wp_agent_routine_run_completed', $routine, $result );
 }

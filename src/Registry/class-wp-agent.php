@@ -113,7 +113,7 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		 * Constructor.
 		 *
 		 * @param string $slug Unique agent slug.
-		 * @param array  $args Registration arguments.
+		 * @param array<mixed>  $args Registration arguments.
 		 */
 		public function __construct( string $slug, array $args = array() ) {
 			$this->slug              = sanitize_title( $slug );
@@ -359,7 +359,7 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		/**
 		 * Return registration arguments for the registry.
 		 *
-		 * @return array
+		 * @return array<mixed>
 		 */
 		public function to_array(): array {
 			return array(

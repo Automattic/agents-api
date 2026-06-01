@@ -18,7 +18,7 @@ final class WP_Agent_Webhook_Signature {
 	 * @param string $body    Raw request body.
 	 * @param string $header  Signature header value.
 	 * @param string $secret  Shared webhook secret. Empty secrets are rejected.
-	 * @param array  $options Optional settings: expected_prefix, allow_raw_hex.
+	 * @param array<mixed>  $options Optional settings: expected_prefix, allow_raw_hex.
 	 * @return bool True when the signature is valid.
 	 */
 	public static function verify_hmac_sha256( string $body, string $header, string $secret, array $options = array() ): bool {

@@ -49,7 +49,7 @@ final class WP_Agent_Execution_Principal {
 	 * @param string      $auth_source       Authentication source identifier.
 	 * @param string      $request_context   Request context such as rest, cli, cron, or chat.
 	 * @param int|null    $token_id          Optional caller-owned token identifier. Agents API does not load or store the token.
-	 * @param array       $request_metadata  JSON-serializable request metadata supplied by the caller.
+	 * @param array<mixed>       $request_metadata  JSON-serializable request metadata supplied by the caller.
 	 * @param string|null $workspace_id      Optional host workspace/scope identifier.
 	 * @param string|null $client_id         Optional client/login identifier.
 	 * @param \WP_Agent_Capability_Ceiling|null $capability_ceiling Optional capability ceiling for this execution.
@@ -180,7 +180,7 @@ final class WP_Agent_Execution_Principal {
 	 * @param int    $acting_user_id    WordPress user ID.
 	 * @param string $effective_agent_id Registered agent ID/slug.
 	 * @param string $request_context   Request context.
-	 * @param array  $request_metadata  Request metadata.
+	 * @param array<mixed>  $request_metadata  Request metadata.
 	 * @return self
 	 */
 	public static function user_session( int $acting_user_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, ?\WP_Agent_Capability_Ceiling $capability_ceiling = null, ?\WP_Agent_Caller_Context $caller_context = null ): self {
@@ -194,7 +194,7 @@ final class WP_Agent_Execution_Principal {
 	 * @param string $effective_agent_id Registered agent ID/slug.
 	 * @param int    $token_id          Caller-owned token identifier.
 	 * @param string $request_context   Request context.
-	 * @param array  $request_metadata  Request metadata.
+	 * @param array<mixed>  $request_metadata  Request metadata.
 	 * @return self
 	 */
 	public static function agent_token( int $acting_user_id, string $effective_agent_id, int $token_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, ?\WP_Agent_Capability_Ceiling $capability_ceiling = null, ?\WP_Agent_Caller_Context $caller_context = null ): self {
@@ -207,10 +207,10 @@ final class WP_Agent_Execution_Principal {
 	 * @param string $audience_id        Host-owned audience identifier.
 	 * @param string $effective_agent_id Registered agent ID/slug effective for the run.
 	 * @param string $request_context    Request context.
-	 * @param array  $request_metadata   Request metadata.
+	 * @param array<mixed>  $request_metadata   Request metadata.
 	 * @param string|null $workspace_id  Optional host workspace/scope identifier.
 	 * @param string|null $client_id     Optional client/login identifier.
-	 * @param array  $audience_claims    Host-owned audience claims.
+	 * @param array<mixed>  $audience_claims    Host-owned audience claims.
 	 * @return self
 	 */
 	public static function audience( string $audience_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, array $audience_claims = array(), ?string $owner_key = null ): self {
@@ -220,7 +220,7 @@ final class WP_Agent_Execution_Principal {
 	/**
 	 * Build a principal from a request/context array.
 	 *
-	 * @param array $principal Raw principal fields.
+	 * @param array<mixed> $principal Raw principal fields.
 	 * @return self
 	 */
 	public static function from_array( array $principal ): self {
@@ -340,7 +340,7 @@ final class WP_Agent_Execution_Principal {
 	/**
 	 * Return a copy with additional request metadata.
 	 *
-	 * @param array $request_metadata Replacement request metadata.
+	 * @param array<mixed> $request_metadata Replacement request metadata.
 	 * @return self
 	 */
 	public function with_request_metadata( array $request_metadata ): self {

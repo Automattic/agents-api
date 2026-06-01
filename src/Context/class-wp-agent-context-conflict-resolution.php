@@ -32,7 +32,7 @@ final class WP_Agent_Context_Conflict_Resolution {
 	/**
 	 * Export as a JSON-friendly array.
 	 *
-	 * @return array
+	 * @return array<mixed>
 	 */
 	public function to_array(): array {
 		return array(

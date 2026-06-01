@@ -18,9 +18,9 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		 *
 		 * Tools without a mode declaration are available in every mode.
 		 *
-		 * @param array<string, array> $tools Tool definitions keyed by tool name.
+		 * @param array<string, array<mixed>> $tools Tool definitions keyed by tool name.
 		 * @param string              $mode Runtime mode.
-		 * @return array<string, array> Filtered tools.
+		 * @return array<string, array<mixed>> Filtered tools.
 		 */
 		public function filter_by_mode( array $tools, string $mode ): array {
 			if ( '' === $mode ) {
@@ -47,9 +47,9 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		/**
 		 * Filter tools through a caller-owned access checker.
 		 *
-		 * @param array<string, array> $tools          Tool definitions keyed by tool name.
+		 * @param array<string, array<mixed>> $tools          Tool definitions keyed by tool name.
 		 * @param callable            $access_checker Callback receiving ($tool, $name).
-		 * @return array<string, array> Filtered tools.
+		 * @return array<string, array<mixed>> Filtered tools.
 		 */
 		public function filter_by_access_checker( array $tools, callable $access_checker ): array {
 			$filtered = array();
@@ -65,10 +65,10 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		/**
 		 * Apply an allow/deny policy to optional tools.
 		 *
-		 * @param array<string, array>   $tools         Tool definitions keyed by tool name.
+		 * @param array<string, array<mixed>>   $tools         Tool definitions keyed by tool name.
 		 * @param array<string, mixed>|null $policy     Policy with mode/tools/categories keys.
 		 * @param callable|null         $preserve_tool Optional callback for mandatory tools.
-		 * @return array<string, array> Filtered tools.
+		 * @return array<string, array<mixed>> Filtered tools.
 		 */
 		public function apply_named_policy( array $tools, ?array $policy, ?callable $preserve_tool = null ): array {
 			if ( null === $policy ) {
@@ -101,10 +101,10 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		/**
 		 * Filter tools by category while preserving mandatory tools.
 		 *
-		 * @param array<string, array> $tools         Tool definitions keyed by tool name.
+		 * @param array<string, array<mixed>> $tools         Tool definitions keyed by tool name.
 		 * @param string[]            $categories    Allowed categories.
 		 * @param callable|null       $preserve_tool Optional callback for mandatory tools.
-		 * @return array<string, array> Filtered tools.
+		 * @return array<string, array<mixed>> Filtered tools.
 		 */
 		public function filter_by_categories( array $tools, array $categories, ?callable $preserve_tool = null ): array {
 			$categories = $this->string_list( $categories );
@@ -130,10 +130,10 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		/**
 		 * Apply an allow-only list while preserving mandatory tools.
 		 *
-		 * @param array<string, array> $tools         Tool definitions keyed by tool name.
+		 * @param array<string, array<mixed>> $tools         Tool definitions keyed by tool name.
 		 * @param string[]            $allow_only    Tool names to allow.
 		 * @param callable|null       $preserve_tool Optional callback for mandatory tools.
-		 * @return array<string, array> Filtered tools.
+		 * @return array<string, array<mixed>> Filtered tools.
 		 */
 		public function filter_by_allow_only( array $tools, array $allow_only, ?callable $preserve_tool = null ): array {
 			$allow_only = $this->string_list( $allow_only );
@@ -215,9 +215,9 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		/**
 		 * Split mandatory tools from optional tools.
 		 *
-		 * @param array<string, array> $tools         Tool definitions keyed by tool name.
+		 * @param array<string, array<mixed>> $tools         Tool definitions keyed by tool name.
 		 * @param callable|null       $preserve_tool Optional callback.
-		 * @return array{preserved: array<string, array>, optional: array<string, array>} Split buckets.
+		 * @return array{preserved: array<string, array<mixed>>, optional: array<string, array<mixed>>} Split buckets.
 		 */
 		private function split_preserved_tools( array $tools, ?callable $preserve_tool ): array {
 			if ( null === $preserve_tool ) {

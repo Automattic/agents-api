@@ -56,7 +56,7 @@ final class WP_Agent_Workflow_Bindings {
 	 * @since 0.103.0
 	 *
 	 * @param mixed $value   Raw spec fragment (string, array, scalar).
-	 * @param array $context Resolution context. Required keys:
+	 * @param array<mixed> $context Resolution context. Required keys:
 	 *                       - `inputs` (array): workflow input values.
 	 *                       - `steps`  (array<string,array>): each entry
 	 *                         shaped `[ 'output' => mixed ]`, keyed by step id.
@@ -112,7 +112,7 @@ final class WP_Agent_Workflow_Bindings {
 	 * @since 0.103.0
 	 *
 	 * @param string $expression Path expression without the surrounding `${}`.
-	 * @param array  $context    Resolution context (see {@see expand()}).
+	 * @param array<mixed>  $context    Resolution context (see {@see expand()}).
 	 * @return mixed|null
 	 */
 	public static function resolve_path( string $expression, array $context ) {

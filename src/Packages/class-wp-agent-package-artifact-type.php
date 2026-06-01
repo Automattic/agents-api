@@ -73,7 +73,7 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact_Type' ) ) {
 		 * Constructor.
 		 *
 		 * @param string $type Artifact type slug.
-		 * @param array  $args Registration arguments.
+		 * @param array<mixed>  $args Registration arguments.
 		 */
 		public function __construct( string $type, array $args = array() ) {
 			$this->type  = WP_Agent_Package_Artifact::prepare_type( $type );

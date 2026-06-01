@@ -207,7 +207,7 @@ function agents_parse_ability_search_query( string $query ): array {
  * Check whether an ability matches a parsed query.
  *
  * @param \WP_Ability $ability Ability object.
- * @param array       $query   Parsed query.
+ * @param array<mixed>       $query   Parsed query.
  * @return bool
  */
 function agents_ability_matches_query( \WP_Ability $ability, array $query ): bool {

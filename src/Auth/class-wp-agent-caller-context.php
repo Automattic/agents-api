@@ -31,7 +31,7 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 		 * @param string $caller_host          "self" or an absolute URL for a remote caller host.
 		 * @param int    $chain_depth          0 means top-of-chain.
 		 * @param string $chain_root_request_id Stable identifier for the originating request.
-		 * @param array  $metadata             JSON-serializable host-owned extension payload.
+		 * @param array<mixed>  $metadata             JSON-serializable host-owned extension payload.
 		 */
 		public function __construct(
 			public readonly string $caller_agent_id = '',

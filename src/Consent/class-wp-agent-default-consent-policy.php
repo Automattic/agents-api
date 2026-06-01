@@ -54,7 +54,7 @@ class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy {
 	 * Make a conservative explicit-consent decision for one operation.
 	 *
 	 * @param string $operation Consent operation value.
-	 * @param array  $context   JSON-friendly policy context.
+	 * @param array<mixed>  $context   JSON-friendly policy context.
 	 * @return WP_Agent_Consent_Decision
 	 */
 	private function decide( string $operation, array $context ): WP_Agent_Consent_Decision {
@@ -74,7 +74,7 @@ class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy {
 	/**
 	 * Whether the policy context represents an interactive user flow.
 	 *
-	 * @param array $context JSON-friendly policy context.
+	 * @param array<mixed> $context JSON-friendly policy context.
 	 * @return bool
 	 */
 	private function is_interactive( array $context ): bool {
@@ -91,7 +91,7 @@ class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy {
 	 * Resolve explicit consent for an operation.
 	 *
 	 * @param string $operation Consent operation value.
-	 * @param array  $context   JSON-friendly policy context.
+	 * @param array<mixed>  $context   JSON-friendly policy context.
 	 * @return bool|null
 	 */
 	private function explicit_consent( string $operation, array $context ): ?bool {
@@ -111,8 +111,8 @@ class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy {
 	 * Build audit metadata common to all decisions.
 	 *
 	 * @param string $operation Consent operation value.
-	 * @param array  $context   JSON-friendly policy context.
-	 * @return array
+	 * @param array<mixed>  $context   JSON-friendly policy context.
+	 * @return array<mixed>
 	 */
 	private function audit_metadata( string $operation, array $context ): array {
 		return array(

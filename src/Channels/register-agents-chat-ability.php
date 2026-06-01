@@ -106,7 +106,7 @@ add_action(
  *
  * @since  0.103.0
  *
- * @param  array $input Canonical chat-ability input.
+ * @param  array<mixed> $input Canonical chat-ability input.
  * @return array|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_chat_dispatch( array $input ) {
@@ -124,7 +124,7 @@ function agents_chat_dispatch( array $input ) {
 	 *
 	 * @param callable|null $handler Currently registered handler. Null when
 	 *                               no runtime has registered.
-	 * @param array         $input   The canonical input being dispatched. Use
+	 * @param array<mixed>         $input   The canonical input being dispatched. Use
 	 *                               $input['agent'] to route per agent slug.
 	 */
 	$handler = apply_filters( 'wp_agent_chat_handler', null, $input );
@@ -137,7 +137,7 @@ function agents_chat_dispatch( array $input ) {
 		 * @since 0.103.0
 		 *
 		 * @param string $reason Dispatch failure reason. Always `'no_handler'`.
-		 * @param array  $input  The canonical input that was rejected.
+		 * @param array<mixed>  $input  The canonical input that was rejected.
 		 */
 		do_action( 'agents_chat_dispatch_failed', 'no_handler', $input );
 
@@ -206,7 +206,7 @@ function agents_chat_dispatch( array $input ) {
  *
  * @since 0.103.0
  *
- * @param array $input Canonical input.
+ * @param array<mixed> $input Canonical input.
  * @return bool
  */
 function agents_chat_permission( array $input ): bool {
@@ -214,7 +214,7 @@ function agents_chat_permission( array $input ): bool {
 	 * Filter the permission decision for the canonical chat ability.
 	 *
 	 * @param bool  $allowed Default: current_user_can( 'manage_options' ).
-	 * @param array $input   The canonical input being authorized.
+	 * @param array<mixed> $input   The canonical input being authorized.
 	 */
 	return (bool) apply_filters(
 		'agents_chat_permission',
@@ -228,7 +228,7 @@ function agents_chat_permission( array $input ): bool {
  *
  * @since  0.103.0
  *
- * @return array
+ * @return array<mixed>
  */
 function agents_chat_input_schema(): array {
 	return array(
@@ -324,7 +324,7 @@ function agents_chat_input_schema(): array {
  *
  * @since 0.103.0
  *
- * @return array
+ * @return array<mixed>
  */
 function agents_chat_session_owner_schema(): array {
 	return array(
@@ -352,7 +352,7 @@ function agents_chat_session_owner_schema(): array {
  *
  * @since  0.103.0
  *
- * @return array
+ * @return array<mixed>
  */
 function agents_chat_output_schema(): array {
 	return array(

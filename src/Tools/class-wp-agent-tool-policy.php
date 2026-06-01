@@ -44,9 +44,9 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		/**
 		 * Resolve the visible tool set for a runtime context.
 		 *
-		 * @param array<string, array> $tools   Tool definitions keyed by tool name.
+		 * @param array<string, array<mixed>> $tools   Tool definitions keyed by tool name.
 		 * @param array<string, mixed> $context Runtime context.
-		 * @return array<string, array> Visible tools keyed by tool name.
+		 * @return array<string, array<mixed>> Visible tools keyed by tool name.
 		 */
 		public function resolve( array $tools, array $context = array() ): array {
 			$mode            = (string) ( $context['mode'] ?? self::RUNTIME_CHAT );

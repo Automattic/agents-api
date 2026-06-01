@@ -87,10 +87,10 @@ class WP_Agent_Workflow_Runner {
 	 * @since 0.103.0
 	 *
 	 * @param WP_Agent_Workflow_Spec $spec
-	 * @param array                  $inputs Caller-supplied inputs. Required
+	 * @param array<mixed>                  $inputs Caller-supplied inputs. Required
 	 *                                       inputs missing here cause an early
 	 *                                       failure with a structured error.
-	 * @param array                  $options Runtime options:
+	 * @param array<mixed>                  $options Runtime options:
 	 *                                        - `run_id` (string, optional): caller-suggested run id.
 	 *                                        - `continue_on_error` (bool): keep running after a failed step. Default false.
 	 *                                        - `metadata` (array): forwarded to the run result.
@@ -282,9 +282,9 @@ class WP_Agent_Workflow_Runner {
 	 *
 	 * @since 0.107.0
 	 *
-	 * @param array $step
-	 * @param array $context
-	 * @return array
+	 * @param array<mixed> $step
+	 * @param array<mixed> $context
+	 * @return array<mixed>
 	 */
 	private static function expand_foreach_outer_step( array $step, array $context ): array {
 		$nested = $step['steps'] ?? array();
@@ -326,8 +326,8 @@ class WP_Agent_Workflow_Runner {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $step    Resolved step (bindings already expanded).
-	 * @param array $context Resolution context (unused here).
+	 * @param array<mixed> $step    Resolved step (bindings already expanded).
+	 * @param array<mixed> $context Resolution context (unused here).
 	 * @return array|WP_Error
 	 */
 	public static function default_ability_handler( array $step, array $context ) {
@@ -360,8 +360,8 @@ class WP_Agent_Workflow_Runner {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $step    Resolved step (bindings already expanded).
-	 * @param array $context Resolution context (unused here).
+	 * @param array<mixed> $step    Resolved step (bindings already expanded).
+	 * @param array<mixed> $context Resolution context (unused here).
 	 * @return array|WP_Error
 	 */
 	public static function default_agent_handler( array $step, array $context ) {
@@ -397,8 +397,8 @@ class WP_Agent_Workflow_Runner {
 	 *
 	 * @since 0.107.0
 	 *
-	 * @param array $step    Resolved outer foreach step.
-	 * @param array $context Resolution context.
+	 * @param array<mixed> $step    Resolved outer foreach step.
+	 * @param array<mixed> $context Resolution context.
 	 * @return array|WP_Error
 	 */
 	public static function default_foreach_handler( array $step, array $context ) {
