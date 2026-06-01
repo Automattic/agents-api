@@ -22,7 +22,7 @@ jobs:
           - command: lint
             check_name: Homeboy lint (PHPCS + PHPStan)
           - command: test
-            check_name: Homeboy tests
+            check_name: Homeboy tests (PHP smoke tests)
 
     steps:
       - uses: actions/checkout@v4
