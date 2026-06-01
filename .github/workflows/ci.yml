@@ -13,12 +13,16 @@ concurrency:
 
 jobs:
   homeboy:
-    name: Homeboy (${{ matrix.command }})
+    name: ${{ matrix.check_name }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        command: [lint, test]
+        include:
+          - command: lint
+            check_name: Homeboy lint (PHPCS + PHPStan)
+          - command: test
+            check_name: Homeboy tests
 
     steps:
       - uses: actions/checkout@v4
