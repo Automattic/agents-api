@@ -287,6 +287,7 @@ function agents_string_list( array $items ): array {
  * Input schema for ability search.
  *
  * @return array<string, mixed>
+ * @return array<string, mixed>
  */
 function agents_ability_search_input_schema(): array {
 	return array(
@@ -316,6 +317,7 @@ function agents_ability_search_input_schema(): array {
 /**
  * Output schema for ability search.
  *
+ * @return array<string, mixed>
  * @return array<string, mixed>
  */
 function agents_ability_search_output_schema(): array {
@@ -348,6 +350,7 @@ function agents_ability_search_output_schema(): array {
  * Input schema for ability call.
  *
  * @return array<string, mixed>
+ * @return array<string, mixed>
  */
 function agents_ability_call_input_schema(): array {
 	return array(
@@ -370,6 +373,7 @@ function agents_ability_call_input_schema(): array {
 /**
  * Output schema for ability call.
  *
+ * @return array<string, mixed>
  * @return array<string, mixed>
  */
 function agents_ability_call_output_schema(): array {

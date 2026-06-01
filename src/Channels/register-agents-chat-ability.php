@@ -229,6 +229,7 @@ function agents_chat_permission( array $input ): bool {
  * @since  0.103.0
  *
  * @return array<mixed>
+ * @return array<string, mixed>
  */
 function agents_chat_input_schema(): array {
 	return array(
@@ -325,6 +326,7 @@ function agents_chat_input_schema(): array {
  * @since 0.103.0
  *
  * @return array<mixed>
+ * @return array<string, mixed>
  */
 function agents_chat_session_owner_schema(): array {
 	return array(
@@ -353,6 +355,7 @@ function agents_chat_session_owner_schema(): array {
  * @since  0.103.0
  *
  * @return array<mixed>
+ * @return array<string, mixed>
  */
 function agents_chat_output_schema(): array {
 	return array(

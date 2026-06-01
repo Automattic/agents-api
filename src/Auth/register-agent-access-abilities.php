@@ -140,6 +140,7 @@ function agents_access_request_scope( array $input ): array {
 
 /**
  * Input schema for `agents/can-access-agent`.
+ * @return array<string, mixed>
  */
 function agents_can_access_agent_input_schema(): array {
 	return array(
@@ -159,6 +160,7 @@ function agents_can_access_agent_input_schema(): array {
 
 /**
  * Output schema for `agents/can-access-agent`.
+ * @return array<string, mixed>
  */
 function agents_can_access_agent_output_schema(): array {
 	return array(
@@ -174,6 +176,7 @@ function agents_can_access_agent_output_schema(): array {
 
 /**
  * Input schema for `agents/list-accessible-agents`.
+ * @return array<string, mixed>
  */
 function agents_list_accessible_agents_input_schema(): array {
 	return array(
@@ -188,6 +191,7 @@ function agents_list_accessible_agents_input_schema(): array {
 
 /**
  * Output schema for `agents/list-accessible-agents`.
+ * @return array<string, mixed>
  */
 function agents_list_accessible_agents_output_schema(): array {
 	return array(
@@ -213,6 +217,7 @@ function agents_list_accessible_agents_output_schema(): array {
 
 /**
  * JSON schema fragment for access roles.
+ * @return array<string, mixed>
  */
 function agents_access_role_schema(): array {
 	return array(

@@ -131,6 +131,7 @@ function agents_dispatch_message_permission( array $input ): bool {
  * Canonical input schema.
  *
  * @since 0.107.0
+ * @return array<string, mixed>
  */
 function agents_dispatch_message_input_schema(): array {
 	return array(
@@ -175,6 +176,7 @@ function agents_dispatch_message_input_schema(): array {
  * Canonical output schema.
  *
  * @since 0.107.0
+ * @return array<string, mixed>
  */
 function agents_dispatch_message_output_schema(): array {
 	return array(

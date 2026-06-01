@@ -309,6 +309,7 @@ function agents_validate_workflow_permission( array $input ): bool {
  * @since  0.103.0
  *
  * @return array<mixed>
+ * @return array<string, mixed>
  */
 function agents_run_workflow_input_schema(): array {
 	return array(
@@ -342,6 +343,7 @@ function agents_run_workflow_input_schema(): array {
  * @since  0.103.0
  *
  * @return array<mixed>
+ * @return array<string, mixed>
  */
 function agents_run_workflow_output_schema(): array {
 	return array(

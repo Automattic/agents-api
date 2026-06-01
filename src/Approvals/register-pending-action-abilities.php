@@ -264,7 +264,8 @@ function agents_pending_action_no_store_error(): \WP_Error {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_pending_action_filters_input_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -278,7 +279,8 @@ function agents_pending_action_filters_input_schema(): array {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_get_pending_action_input_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -294,7 +296,8 @@ function agents_get_pending_action_input_schema(): array {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_resolve_pending_action_input_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -323,7 +326,8 @@ function agents_resolve_pending_action_input_schema(): array {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_list_pending_actions_output_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -337,7 +341,8 @@ function agents_list_pending_actions_output_schema(): array {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_get_pending_action_output_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -348,7 +353,8 @@ function agents_get_pending_action_output_schema(): array {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_resolve_pending_action_output_schema(): array {
 	return array(
 		'type'       => 'object',
