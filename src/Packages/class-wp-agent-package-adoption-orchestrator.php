@@ -65,14 +65,17 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 
 			$approved_keys = array_fill_keys( $request->get_approved_artifact_keys(), true );
 			$target_index  = self::index_artifacts( $target );
+			/** @var array<int,array<string,mixed>> $applied */
 			$applied       = array();
+			/** @var array<int,array<string,mixed>> $skipped */
 			$skipped       = array();
+			/** @var array<int,array<string,mixed>> $failed */
 			$failed        = array();
 			$snapshots     = array();
 
 			foreach ( $plan->get_buckets() as $bucket => $entries ) {
 				foreach ( $entries as $entry ) {
-					$artifact_key = (string) ( $entry['artifact_key'] ?? '' );
+					$artifact_key = self::string_value( $entry['artifact_key'] ?? '' );
 					$can_apply    = ( 'auto_apply' === $bucket && $request->allows_auto_apply() ) || isset( $approved_keys[ $artifact_key ] );
 
 					if ( ! $can_apply ) {
@@ -124,7 +127,10 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 			);
 		}
 
-		/** @param array<int,array<string,mixed>> $artifacts */
+		/**
+		 * @param array<int,array<string,mixed>> $artifacts
+		 * @return array<string,array<string,mixed>>
+		 */
 		private static function index_artifacts( array $artifacts ): array {
 			$indexed = array();
 			foreach ( $artifacts as $artifact ) {
@@ -142,10 +148,13 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 			return $indexed;
 		}
 
-		/** @param array<string,mixed> $entry */
+		/**
+		 * @param array<string,mixed> $entry
+		 * @param array<string,mixed> $target
+		 */
 		private static function artifact_from_entry( WP_Agent_Package $package, array $entry, array $target ): WP_Agent_Package_Artifact {
-			$type = (string) ( $entry['artifact_type'] ?? $target['artifact_type'] );
-			$id   = (string) ( $entry['artifact_id'] ?? $target['artifact_id'] );
+			$type = self::string_value( $entry['artifact_type'] ?? $target['artifact_type'] );
+			$id   = self::string_value( $entry['artifact_id'] ?? $target['artifact_id'] );
 			foreach ( $package->get_artifacts() as $artifact ) {
 				if ( $artifact->get_type() === $type && $artifact->get_slug() === sanitize_title( $id ) ) {
 					return $artifact;
@@ -156,23 +165,26 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 				array(
 					'type'   => $type,
 					'slug'   => $id,
-					'source' => (string) ( $target['source'] ?? $entry['source'] ?? '' ),
+					'source' => self::string_value( $target['source'] ?? $entry['source'] ?? '' ),
 				)
 			);
 		}
 
-		/** @param array<string,mixed> $target */
+		/**
+		 * @param array<string,mixed> $target
+		 * @param array<string,mixed> $context
+		 */
 		private static function snapshot_from_target( WP_Agent_Package $package, array $target, array $context ): WP_Agent_Package_Installed_Artifact {
-			$hash      = (string) ( $target['hash'] ?? WP_Agent_Package_Artifact_Hasher::hash( $target['payload'] ?? null ) );
-			$timestamp = (string) ( $context['timestamp'] ?? gmdate( 'c' ) );
+			$hash      = self::string_value( $target['hash'] ?? WP_Agent_Package_Artifact_Hasher::hash( $target['payload'] ?? null ) );
+			$timestamp = self::string_value( $context['timestamp'] ?? gmdate( 'c' ) );
 
 			return new WP_Agent_Package_Installed_Artifact(
 				array(
 					'package_slug'      => $package->get_slug(),
 					'package_version'   => $package->get_version(),
-					'artifact_type'     => (string) $target['artifact_type'],
+					'artifact_type'     => self::string_value( $target['artifact_type'] ),
 					'artifact_id'       => self::artifact_id( $target ),
-					'source'            => (string) ( $target['source'] ?? '' ),
+					'source'            => self::string_value( $target['source'] ?? '' ),
 					'installed_hash'    => $hash,
 					'current_hash'      => $hash,
 					'installed_payload' => $target['payload'] ?? null,
@@ -182,15 +194,19 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 			);
 		}
 
+		/** @param array<string,mixed> $artifact */
 		private static function artifact_id( array $artifact ): string {
-			return trim( str_replace( '\\', '/', (string) ( $artifact['artifact_id'] ?? ( $artifact['slug'] ?? '' ) ) ) );
+			return trim( str_replace( '\\', '/', self::string_value( $artifact['artifact_id'] ?? ( $artifact['slug'] ?? '' ) ) ) );
 		}
 
 		private static function artifact_key( string $type, string $id ): string {
 			return $type . ':' . $id;
 		}
 
-		/** @param array<string,mixed> $entry */
+		/**
+		 * @param array<string,mixed> $entry
+		 * @return array<string,mixed>
+		 */
 		private static function entry_with_status( array $entry, string $status, string $reason ): array {
 			return array_merge(
 				$entry,
@@ -201,6 +217,11 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 			);
 		}
 
+		/**
+		 * @param array<int,array<string,mixed>> $applied
+		 * @param array<int,array<string,mixed>> $skipped
+		 * @param array<int,array<string,mixed>> $failed
+		 */
 		private static function result_status( array $applied, array $skipped, array $failed ): string {
 			if ( $failed ) {
 				return $applied ? 'partial' : 'failed';
@@ -211,6 +232,18 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 			}
 
 			return $applied ? 'applied' : 'skipped';
+		}
+
+		private static function string_value( mixed $value ): string {
+			if ( null === $value ) {
+				return '';
+			}
+
+			if ( is_scalar( $value ) || $value instanceof Stringable ) {
+				return (string) $value;
+			}
+
+			return '';
 		}
 	}
 }

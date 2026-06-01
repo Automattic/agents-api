@@ -29,6 +29,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			$installed = self::index_installed_artifacts( $installed_artifacts );
 			$current   = self::index_artifacts( $current_artifacts );
 			$target    = self::index_artifacts( $target_artifacts );
+			/** @var array<string,array<int,array<string,mixed>>> $buckets */
 			$buckets   = array(
 				'auto_apply'     => array(),
 				'needs_approval' => array(),
@@ -40,8 +41,8 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 				$current_artifact   = $current[ $key ] ?? null;
 				$installed_artifact = $installed[ $key ] ?? null;
 				$current_hash       = self::artifact_hash( $current_artifact );
-				$target_hash        = self::artifact_hash( $target_artifact );
-				$installed_hash     = isset( $installed_artifact['installed_hash'] ) ? (string) $installed_artifact['installed_hash'] : null;
+				$target_hash        = self::artifact_hash( $target_artifact ) ?? '';
+				$installed_hash     = self::optional_string_value( $installed_artifact['installed_hash'] ?? null );
 
 				if ( null !== $current_hash && hash_equals( $target_hash, $current_hash ) ) {
 					$buckets['no_op'][] = self::entry( $key, $target_artifact, $installed_hash, $current_hash, $target_hash, 'already_matches_target', $current_artifact );
@@ -75,11 +76,11 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 
 				$buckets['warnings'][] = array(
 					'artifact_key'  => $key,
-					'artifact_type' => (string) $installed_artifact['artifact_type'],
-					'artifact_id'   => (string) $installed_artifact['artifact_id'],
-					'source'        => (string) ( $installed_artifact['source'] ?? '' ),
+					'artifact_type' => self::string_value( $installed_artifact['artifact_type'] ),
+					'artifact_id'   => self::string_value( $installed_artifact['artifact_id'] ),
+					'source'        => self::string_value( $installed_artifact['source'] ?? '' ),
 					'reason'        => 'orphaned_installed_artifact',
-					'summary'       => sprintf( '%s %s is not present in the target package.', $installed_artifact['artifact_type'], $installed_artifact['artifact_id'] ),
+					'summary'       => sprintf( '%s %s is not present in the target package.', self::string_value( $installed_artifact['artifact_type'] ), self::string_value( $installed_artifact['artifact_id'] ) ),
 				);
 			}
 
@@ -95,7 +96,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			foreach ( $artifacts as $artifact ) {
 				$row             = $artifact instanceof WP_Agent_Package_Installed_Artifact ? $artifact->to_array() : $artifact;
 				$row             = self::normalize_artifact_row( $row );
-				$key             = self::artifact_key( (string) $row['artifact_type'], (string) $row['artifact_id'] );
+				$key             = self::artifact_key( self::string_value( $row['artifact_type'] ), self::string_value( $row['artifact_id'] ) );
 				$indexed[ $key ] = $row;
 			}
 
@@ -112,7 +113,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			foreach ( $artifacts as $artifact ) {
 				$row             = $artifact instanceof WP_Agent_Package_Artifact ? self::row_from_package_artifact( $artifact ) : $artifact;
 				$row             = self::normalize_artifact_row( $row );
-				$key             = self::artifact_key( (string) $row['artifact_type'], (string) $row['artifact_id'] );
+				$key             = self::artifact_key( self::string_value( $row['artifact_type'] ), self::string_value( $row['artifact_id'] ) );
 				$indexed[ $key ] = $row;
 			}
 
@@ -120,6 +121,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			return $indexed;
 		}
 
+		/** @return array<string,mixed> */
 		private static function row_from_package_artifact( WP_Agent_Package_Artifact $artifact ): array {
 			return array(
 				'artifact_type' => $artifact->get_type(),
@@ -129,28 +131,37 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			);
 		}
 
+		/**
+		 * @param array<string,mixed> $row
+		 * @return array<string,mixed>
+		 */
 		private static function normalize_artifact_row( array $row ): array {
 			return array_merge(
 				$row,
 				array(
 					'artifact_type' => WP_Agent_Package_Artifact::prepare_type( $row['artifact_type'] ?? '' ),
 					'artifact_id'   => self::normalize_artifact_id( $row['artifact_id'] ?? ( $row['artifact_slug'] ?? '' ) ),
-					'source'        => (string) ( $row['source'] ?? ( $row['source_path'] ?? '' ) ),
+					'source'        => self::string_value( $row['source'] ?? ( $row['source_path'] ?? '' ) ),
 				)
 			);
 		}
 
+		/**
+		 * @param array<string,mixed>      $target
+		 * @param array<string,mixed>|null $current
+		 * @return array<string,mixed>
+		 */
 		private static function entry( string $key, array $target, ?string $installed_hash, ?string $current_hash, string $target_hash, string $reason, ?array $current ): array {
 			return array(
 				'artifact_key'   => $key,
-				'artifact_type'  => (string) $target['artifact_type'],
-				'artifact_id'    => (string) $target['artifact_id'],
-				'source'         => (string) ( $target['source'] ?? '' ),
+				'artifact_type'  => self::string_value( $target['artifact_type'] ),
+				'artifact_id'    => self::string_value( $target['artifact_id'] ),
+				'source'         => self::string_value( $target['source'] ?? '' ),
 				'reason'         => $reason,
 				'installed_hash' => $installed_hash,
 				'current_hash'   => $current_hash,
 				'target_hash'    => $target_hash,
-				'summary'        => sprintf( '%s %s: %s', (string) $target['artifact_type'], (string) $target['artifact_id'], str_replace( '_', ' ', $reason ) ),
+				'summary'        => sprintf( '%s %s: %s', self::string_value( $target['artifact_type'] ), self::string_value( $target['artifact_id'] ), str_replace( '_', ' ', $reason ) ),
 				'diff'           => array(
 					'before' => self::redact( $current['payload'] ?? null ),
 					'after'  => self::redact( $target['payload'] ?? null ),
@@ -162,8 +173,8 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			return $type . ':' . $slug;
 		}
 
-		private static function normalize_artifact_id( $artifact_id ): string {
-			$artifact_id = trim( str_replace( '\\', '/', (string) $artifact_id ) );
+		private static function normalize_artifact_id( mixed $artifact_id ): string {
+			$artifact_id = trim( str_replace( '\\', '/', self::string_value( $artifact_id ) ) );
 			if ( '' === $artifact_id || str_starts_with( $artifact_id, '/' ) || str_contains( $artifact_id, '..' ) ) {
 				throw new InvalidArgumentException( 'Agent package artifact rows require a package-local artifact_id.' );
 			}
@@ -171,13 +182,15 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			return $artifact_id;
 		}
 
+		/** @param array<string,mixed>|null $artifact */
 		private static function artifact_hash( ?array $artifact ): ?string {
 			if ( null === $artifact ) {
 				return null;
 			}
 
-			if ( isset( $artifact['hash'] ) && '' !== trim( (string) $artifact['hash'] ) ) {
-				return (string) $artifact['hash'];
+			$hash = self::optional_string_value( $artifact['hash'] ?? null );
+			if ( null !== $hash ) {
+				return $hash;
 			}
 
 			if ( ! array_key_exists( 'payload', $artifact ) || null === $artifact['payload'] ) {
@@ -187,7 +200,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			return WP_Agent_Package_Artifact_Hasher::hash( $artifact['payload'] );
 		}
 
-		private static function redact( $value ) {
+		private static function redact( mixed $value ): mixed {
 			if ( ! is_array( $value ) ) {
 				return $value;
 			}
@@ -203,6 +216,23 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 			}
 
 			return $redacted;
+		}
+
+		private static function optional_string_value( mixed $value ): ?string {
+			$value = self::string_value( $value );
+			return '' === trim( $value ) ? null : $value;
+		}
+
+		private static function string_value( mixed $value ): string {
+			if ( null === $value ) {
+				return '';
+			}
+
+			if ( is_scalar( $value ) || $value instanceof Stringable ) {
+				return (string) $value;
+			}
+
+			return '';
 		}
 
 		/**
