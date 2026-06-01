@@ -85,7 +85,10 @@ add_action(
 	}
 );
 
-/** @return array<string,mixed>|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_get_chat_run( array $input ) {
 	$handler = apply_filters( 'wp_agent_chat_run_status_handler', null, $input );
 	if ( is_callable( $handler ) ) {
@@ -104,7 +107,10 @@ function agents_get_chat_run( array $input ) {
 	return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
 }
 
-/** @return array<string,mixed>|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_list_chat_run_events( array $input ) {
 	$handler = apply_filters( 'wp_agent_chat_run_events_handler', null, $input );
 	if ( is_callable( $handler ) ) {
@@ -115,7 +121,10 @@ function agents_list_chat_run_events( array $input ) {
 	return agents_chat_run_control_no_handler( 'agents_chat_run_events_no_handler', 'No chat run events handler is registered.' );
 }
 
-/** @return array<string,mixed>|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_cancel_chat_run( array $input ) {
 	$handler = apply_filters( 'wp_agent_chat_run_cancel_handler', null, $input );
 	if ( is_callable( $handler ) ) {
@@ -152,7 +161,10 @@ function agents_cancel_chat_run( array $input ) {
 	return $result;
 }
 
-/** @return array<string,mixed>|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_queue_chat_message( array $input ) {
 	$handler = apply_filters( 'wp_agent_chat_message_queue_handler', null, $input );
 	if ( is_callable( $handler ) ) {
@@ -211,7 +223,10 @@ function agents_chat_run_control_request_scope( array $input ): array {
 	return $scope;
 }
 
-/** @return array<string,mixed>|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_chat_run_control_normalize_result( $result, string $error_code ) {
 	if ( is_wp_error( $result ) ) {
 		return $result;
@@ -228,7 +243,10 @@ function agents_chat_run_control_normalize_result( $result, string $error_code )
 	}
 }
 
-/** @return array<string,mixed>|\WP_Error */
+/**
+ * @param array<string, mixed> $input Ability input.
+ * @return array<string, mixed>|\WP_Error
+ */
 function agents_chat_run_events_normalize_result( $result ) {
 	if ( is_wp_error( $result ) ) {
 		return $result;
