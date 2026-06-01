@@ -66,10 +66,10 @@ class WP_Agent_Conversation_Loop {
 	 * - `transcript_persister` (WP_Agent_Transcript_Persister|null): Transcript persister.
 	 * - `on_event` (callable|null): Caller-owned lifecycle event sink `fn(string $event, array $payload)`.
 	 *
-	 * @param array    $messages    Initial transcript messages.
-	 * @param callable $turn_runner Caller-owned turn adapter.
-	 * @param array    $options     Loop options.
-	 * @return array Normalized conversation result.
+	 * @param array<int, array<string, mixed>> $messages    Initial transcript messages.
+	 * @param callable                         $turn_runner Caller-owned turn adapter.
+	 * @param array<string, mixed>             $options     Loop options.
+	 * @return array<string, mixed> Normalized conversation result.
 	 */
 	public static function run( array $messages, callable $turn_runner, array $options = array() ): array {
 		$runtime_overrides     = self::resolve_runtime_overrides( $options );
@@ -249,10 +249,13 @@ class WP_Agent_Conversation_Loop {
 
 					// Apply completion policy to tool results from the turn runner
 					// when the loop owns policy but the turn runner handled execution.
-					if ( null !== $completion_policy && ! empty( $result['tool_execution_results'] ) ) {
+					if ( null !== $completion_policy && isset( $result['tool_execution_results'] ) && is_array( $result['tool_execution_results'] ) ) {
 						foreach ( $result['tool_execution_results'] as $tool_exec_result ) {
-							$tool_name = $tool_exec_result['tool_name'] ?? '';
-							$tool_def  = $tool_declarations[ $tool_name ] ?? null;
+							if ( ! is_array( $tool_exec_result ) ) {
+								continue;
+							}
+							$tool_name = is_string( $tool_exec_result['tool_name'] ?? null ) ? $tool_exec_result['tool_name'] : '';
+							$tool_def  = '' !== $tool_name ? ( $tool_declarations[ $tool_name ] ?? null ) : null;
 							$decision  = $completion_policy->recordToolResult(
 								$tool_name,
 								is_array( $tool_def ) ? $tool_def : null,
@@ -677,7 +680,7 @@ class WP_Agent_Conversation_Loop {
 	 * Check the optional interrupt source for a between-turn message.
 	 *
 	 * @param callable|null        $interrupt_source Optional interrupt source.
-	 * @param array<int, array>    $messages         Current transcript messages.
+	 * @param array<int, array<string, mixed>> $messages         Current transcript messages.
 	 * @param array<string, mixed> $options          Loop options.
 	 * @param array<string, mixed> $context          Current turn context.
 	 * @param callable|null        $on_event         Event sink.
@@ -740,7 +743,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Build an interrupt-source request with the current transcript.
 	 *
-	 * @param array<int, array>    $messages Current transcript messages.
+	 * @param array<int, array<string, mixed>> $messages Current transcript messages.
 	 * @param array<string, mixed> $options  Loop options.
 	 * @return WP_Agent_Conversation_Request
 	 */
@@ -859,7 +862,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve a stable tool-call identifier for transcript pairing.
 	 *
-	 * @param array $raw_call Raw tool call emitted by a turn runner.
+	 * @param array<string, mixed> $raw_call Raw tool call emitted by a turn runner.
 	 * @param int   $turn Current turn number.
 	 * @param int   $sequence Tool-call sequence in this turn.
 	 * @return string
@@ -904,8 +907,8 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the request object from options, or build a minimal one.
 	 *
-	 * @param array $messages Current messages.
-	 * @param array $options  Loop options.
+	 * @param array<int, array<string, mixed>> $messages Current messages.
+	 * @param array<string, mixed> $options  Loop options.
 	 * @return WP_Agent_Conversation_Request
 	 */
 	private static function resolve_request( array $messages, array $options ): WP_Agent_Conversation_Request {
@@ -1065,7 +1068,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param string     $tool_name       Tool identifier.
 	 * @param array|null $tool_definition Tool declaration, when available.
 	 * @param array      $context         Turn context.
-	 * @return array Redacted parameters.
+	 * @return array<string, mixed> Redacted parameters.
 	 */
 	private static function redact_tool_audit_parameters( array $parameters, string $tool_name, ?array $tool_definition, array $context ): array {
 		$redacted = self::redact_sensitive_values( $parameters );
@@ -1121,7 +1124,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Keep the audit result hash focused on normalized status, not raw payloads.
 	 *
-	 * @param array $result Normalized tool result.
+	 * @param array<string, mixed> $result Normalized tool result.
 	 * @return array<string, mixed> Hashable result summary.
 	 */
 	private static function audit_result_summary( array $result ): array {
@@ -1182,7 +1185,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the tool executor from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Tool_Executor|null
 	 */
 	private static function resolve_tool_executor( array $options ): ?WP_Agent_Tool_Executor {
@@ -1239,8 +1242,8 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve tool declarations from options.
 	 *
-	 * @param array $options Loop options.
-	 * @return array Tool declarations keyed by name.
+	 * @param array<string, mixed> $options Loop options.
+	 * @return array<string, array<string, mixed>> Tool declarations keyed by name.
 	 */
 	private static function resolve_tool_declarations( array $options ): array {
 		$declarations = $options['tool_declarations'] ?? null;
@@ -1250,7 +1253,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the completion policy from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Conversation_Completion_Policy|null
 	 */
 	private static function resolve_completion_policy( array $options ): ?WP_Agent_Conversation_Completion_Policy {
@@ -1261,7 +1264,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the spin detector from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Spin_Detector|null
 	 */
 	private static function resolve_spin_detector( array $options ): ?WP_Agent_Spin_Detector {
@@ -1272,7 +1275,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the identical failure tracker from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Identical_Failure_Tracker|null
 	 */
 	private static function resolve_identical_failure_tracker( array $options ): ?WP_Agent_Identical_Failure_Tracker {
@@ -1283,7 +1286,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the tool result truncator from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Tool_Result_Truncator|null
 	 */
 	private static function resolve_tool_result_truncator( array $options ): ?WP_Agent_Tool_Result_Truncator {
@@ -1294,7 +1297,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the interrupt source from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return callable|null
 	 */
 	private static function resolve_interrupt_source( array $options ): ?callable {
@@ -1305,7 +1308,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the transcript persister from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Transcript_Persister|null
 	 */
 	private static function resolve_transcript_persister( array $options ): ?WP_Agent_Transcript_Persister {
@@ -1316,7 +1319,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the transcript lock primitive from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Conversation_Lock|null
 	 */
 	private static function resolve_transcript_lock( array $options ): ?WP_Agent_Conversation_Lock {
@@ -1385,7 +1388,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve transcript lock TTL.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return int TTL in seconds.
 	 */
 	private static function resolve_lock_ttl( array $options ): int {
@@ -1395,7 +1398,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the event sink from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return callable|null
 	 */
 	private static function resolve_event_sink( array $options ): ?callable {
@@ -1409,7 +1412,7 @@ class WP_Agent_Conversation_Loop {
 	 * Synthesizes a `turns` budget from `max_turns` when no explicit `turns`
 	 * budget is provided, preserving backwards compatibility.
 	 *
-	 * @param array $options   Loop options.
+	 * @param array<string, mixed> $options   Loop options.
 	 * @param int   $max_turns Resolved max turns value.
 	 * @return array{budgets: array<string, WP_Agent_Iteration_Budget>, has_explicit_turns: bool}
 	 */
@@ -1531,8 +1534,8 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Apply optional transcript compaction through caller-owned summarization.
 	 *
-	 * @param array $messages Current messages.
-	 * @param array $options  Loop options.
+	 * @param array<int, array<string, mixed>> $messages Current messages.
+	 * @param array<string, mixed> $options  Loop options.
 	 * @return array{messages: array<int, array<string, mixed>>, events: array<int, array<string, mixed>>}
 	 */
 	private static function maybe_compact( array $messages, array $options ): array {
@@ -1588,7 +1591,7 @@ class WP_Agent_Conversation_Loop {
 	 * latest assistant message has no text content (e.g. tool-call-only
 	 * turns at the tail).
 	 *
-	 * @param array $messages Normalized transcript messages.
+	 * @param array<int, array<string, mixed>> $messages Normalized transcript messages.
 	 * @return string Final assistant text content.
 	 */
 	private static function extract_final_content( array $messages ): string {
