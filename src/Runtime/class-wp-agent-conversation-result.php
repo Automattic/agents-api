@@ -43,7 +43,7 @@ class WP_Agent_Conversation_Result {
 			throw self::invalid( 'schema', 'must be ' . self::SCHEMA );
 		}
 
-		if ( self::VERSION !== (int) $result['version'] ) {
+		if ( ! is_int( $result['version'] ) || self::VERSION !== $result['version'] ) {
 			throw self::invalid( 'version', 'must be ' . self::VERSION );
 		}
 

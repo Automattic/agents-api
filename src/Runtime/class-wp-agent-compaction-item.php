@@ -88,14 +88,16 @@ class WP_Agent_Compaction_Item {
 	 */
 	public static function from_message( array $message, ?int $index = null ): array {
 		$envelope            = WP_Agent_Message::normalize( $message );
-		$metadata            = $envelope['metadata'];
+		$metadata            = self::normalize_metadata( $envelope['metadata'] ?? array() );
+		$role                = self::normalize_string( $envelope['role'] ?? null, 'role' );
+		$type                = self::normalize_string( $envelope['type'] ?? null, 'type' );
 		$metadata['message'] = array(
-			'role'    => $envelope['role'],
+			'role'    => $role,
 			'payload' => $envelope['payload'],
 		);
 
 		$item = array(
-			'type'     => 'message:' . $envelope['type'],
+			'type'     => 'message:' . $type,
 			'content'  => $envelope['content'],
 			'metadata' => $metadata,
 		);
@@ -160,7 +162,7 @@ class WP_Agent_Compaction_Item {
 	 * Normalize item content.
 	 *
 	 * @param array<mixed> $item Raw item.
-	 * @return string|array
+	 * @return string|array<mixed>
 	 */
 	private static function normalize_content( array $item ) {
 		if ( ! array_key_exists( 'content', $item ) ) {
@@ -186,7 +188,7 @@ class WP_Agent_Compaction_Item {
 			throw new \InvalidArgumentException( 'invalid_ai_compaction_item: metadata must be an array' );
 		}
 
-		return $metadata;
+		return self::string_keyed_array( $metadata );
 	}
 
 	/**
@@ -204,7 +206,7 @@ class WP_Agent_Compaction_Item {
 			throw new \InvalidArgumentException( 'invalid_ai_compaction_item: boundary must be an array' );
 		}
 
-		return $boundary;
+		return self::string_keyed_array( $boundary );
 	}
 
 	/**
@@ -212,10 +214,10 @@ class WP_Agent_Compaction_Item {
 	 *
 	 * @param mixed       $id       Raw ID.
 	 * @param string      $type     Item type.
-	 * @param string|array $content Item content.
-	 * @param array<mixed>       $metadata Item metadata.
+	 * @param string|array<mixed> $content Item content.
+	 * @param array<string, mixed> $metadata Item metadata.
 	 * @param string|null $group    Item group.
-	 * @param array|null  $boundary Boundary hints.
+	 * @param array<string, mixed>|null $boundary Boundary hints.
 	 * @param int|null    $index    Item position.
 	 * @return string
 	 */
@@ -256,6 +258,23 @@ class WP_Agent_Compaction_Item {
 		}
 
 		return $value;
+	}
+
+	/**
+	 * Keep only associative string keys while preserving values.
+	 *
+	 * @param array<mixed> $value Raw array.
+	 * @return array<string, mixed>
+	 */
+	private static function string_keyed_array( array $value ): array {
+		$normalized = array();
+		foreach ( $value as $key => $item ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $item;
+			}
+		}
+
+		return $normalized;
 	}
 
 	/**

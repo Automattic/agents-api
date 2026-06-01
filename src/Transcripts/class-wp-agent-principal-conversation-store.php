@@ -54,7 +54,7 @@ interface WP_Agent_Principal_Conversation_Store extends WP_Agent_Conversation_St
 	 * @param int                          $seconds  Lookback window.
 	 * @param string                       $context  Context filter.
 	 * @param int|null                     $token_id Optional token ID for token-scoped dedup.
-	 * @return array|null Session data or null if none.
+	 * @return array<string,mixed>|null Session data or null if none.
 	 */
 	public function get_recent_pending_session_for_owner( WP_Agent_Workspace_Scope $workspace, array $owner, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array;
 }

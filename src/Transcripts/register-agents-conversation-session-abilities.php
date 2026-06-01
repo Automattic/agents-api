@@ -405,7 +405,7 @@ function agents_conversation_sessions_principal( array $input ): ?WP_Agent_Execu
 			return $input['principal'];
 		}
 		if ( is_array( $input['principal'] ) ) {
-			return WP_Agent_Execution_Principal::from_array( $input['principal'] );
+			return WP_Agent_Execution_Principal::from_array( agents_conversation_sessions_array_value( $input['principal'] ) );
 		}
 	}
 

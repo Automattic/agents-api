@@ -26,7 +26,7 @@ class WP_Agent_Conversation_Completion_Decision {
 	/**
 	 * @param bool   $complete Whether the current conversation should stop.
 	 * @param string $message  Optional diagnostic message.
-	 * @param array<mixed>  $context  Optional diagnostic context.
+	 * @param array<string, mixed> $context  Optional diagnostic context.
 	 */
 	private function __construct( bool $complete, string $message = '', array $context = array() ) {
 		$this->complete = $complete;
@@ -38,7 +38,7 @@ class WP_Agent_Conversation_Completion_Decision {
 	 * Build a non-completing decision.
 	 *
 	 * @param string $message Optional diagnostic message.
-	 * @param array<mixed>  $context Optional diagnostic context.
+	 * @param array<string, mixed> $context Optional diagnostic context.
 	 * @return self
 	 */
 	public static function incomplete( string $message = '', array $context = array() ): self {
@@ -49,7 +49,7 @@ class WP_Agent_Conversation_Completion_Decision {
 	 * Build a completing decision.
 	 *
 	 * @param string $message Optional diagnostic message.
-	 * @param array<mixed>  $context Optional diagnostic context.
+	 * @param array<string, mixed> $context Optional diagnostic context.
 	 * @return self
 	 */
 	public static function complete( string $message = '', array $context = array() ): self {

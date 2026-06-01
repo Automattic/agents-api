@@ -259,7 +259,7 @@ class WP_Agent_Conversation_Loop {
 							$decision  = $completion_policy->recordToolResult(
 								$tool_name,
 								is_array( $tool_def ) ? $tool_def : null,
-								$tool_exec_result,
+								self::normalize_assoc_array( $tool_exec_result ),
 								$turn_context,
 								$turn
 							);
@@ -1560,7 +1560,7 @@ class WP_Agent_Conversation_Loop {
 			);
 		}
 
-		$compaction = WP_Agent_Conversation_Compaction::compact( $messages, $policy, $summarizer );
+		$compaction = WP_Agent_Conversation_Compaction::compact( $messages, self::normalize_assoc_array( $policy ), $summarizer );
 		return array(
 			'messages' => $compaction['messages'],
 			'events'   => self::normalize_events( $compaction['events'] ),

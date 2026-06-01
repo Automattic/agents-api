@@ -61,7 +61,7 @@ interface WP_Agent_Conversation_Store {
 	 * updated_at, last_read_at, expires_at.
 	 *
 	 * @param string $session_id Session UUID.
-	 * @return array|null Session data or null if not found.
+	 * @return array<string,mixed>|null Session data or null if not found.
 	 */
 	public function get_session( string $session_id ): ?array;
 
@@ -99,7 +99,7 @@ interface WP_Agent_Conversation_Store {
 	 * @param int                 $seconds   Lookback window (default 600 = 10 minutes).
 	 * @param string              $context   Context filter.
 	 * @param int|null            $token_id  Optional token ID for login-scoped dedup.
-	 * @return array|null Session data or null if none.
+	 * @return array<string,mixed>|null Session data or null if none.
 	 */
 	public function get_recent_pending_session( WP_Agent_Workspace_Scope $workspace, int $user_id, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array;
 

@@ -176,7 +176,7 @@ class WP_Agent_Conversation_Request {
 			}
 
 			try {
-				$normalized[] = WP_Agent_Tool_Declaration::normalize( $tool );
+				$normalized[] = self::string_keyed_array( WP_Agent_Tool_Declaration::normalize( self::string_keyed_array( $tool ) ) );
 			} catch ( \InvalidArgumentException $error ) {
 				throw self::invalid( 'tools[' . $index . ']', $error->getMessage() );
 			}
@@ -197,7 +197,24 @@ class WP_Agent_Conversation_Request {
 			throw self::invalid( $path, 'must be JSON serializable' );
 		}
 
-		return $value;
+		return self::string_keyed_array( $value );
+	}
+
+	/**
+	 * Normalize an associative array to string keys.
+	 *
+	 * @param array<mixed> $value Raw array.
+	 * @return array<string, mixed>
+	 */
+	private static function string_keyed_array( array $value ): array {
+		$normalized = array();
+		foreach ( $value as $key => $item ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $item;
+			}
+		}
+
+		return $normalized;
 	}
 
 	/**
