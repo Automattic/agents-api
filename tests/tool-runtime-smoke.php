@@ -239,4 +239,28 @@ $result_override = $executor->executeTool(
 agents_api_smoke_assert_equals( 'repeatable', $result_override['runtime']['duplicate_policy'] ?? '', 'result runtime keeps declaration metadata when executor adds runtime', $failures, $passes );
 agents_api_smoke_assert_equals( 'complete', $result_override['runtime']['completion_signal'] ?? '', 'executor runtime metadata can refine result runtime metadata', $failures, $passes );
 
+$pending_request = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::from_tool_call(
+	'client/choose_post',
+	'call_abc',
+	array( 'post_id' => 123 ),
+	array( 'run_id' => 'run-1', 'runtime_tool_timeout_at' => '2026-06-01T00:00:00Z' ),
+	array( 'completion_signal' => 'external_result' ),
+	array( 'transport' => 'browser' )
+);
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING, $pending_request['status'], 'runtime tool request has canonical pending status', $failures, $passes );
+agents_api_smoke_assert_equals( 'client/choose_post', $pending_request['tool_name'], 'runtime tool request carries tool name', $failures, $passes );
+agents_api_smoke_assert_equals( 'call_abc', $pending_request['tool_call_id'], 'runtime tool request carries tool call id', $failures, $passes );
+agents_api_smoke_assert_equals( 'browser', $pending_request['metadata']['transport'] ?? '', 'runtime tool request preserves host metadata', $failures, $passes );
+
+$submitted_result = AgentsAPI\AI\WP_Agent_Runtime_Tool_Result::normalize(
+	array(
+		'request_id' => $pending_request['request_id'],
+		'tool_name'  => 'client/choose_post',
+		'success'    => true,
+		'result'     => array( 'post_id' => 123 ),
+	)
+);
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Result::STATUS_SUBMITTED, $submitted_result['status'], 'runtime tool result has canonical submitted status', $failures, $passes );
+agents_api_smoke_assert_equals( 123, $submitted_result['result']['post_id'] ?? null, 'runtime tool result preserves payload', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API tool runtime', $failures, $passes );

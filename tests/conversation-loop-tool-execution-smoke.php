@@ -105,6 +105,8 @@ agents_api_smoke_assert_equals( 'call_123', $result['tool_audit_events'][0]['too
 agents_api_smoke_assert_equals( true, $result['tool_audit_events'][0]['success'], 'tool audit event records success', $failures, $passes );
 agents_api_smoke_assert_equals( true, str_starts_with( $result['tool_audit_events'][0]['parameters_sha256'], 'sha256:' ), 'tool audit event hashes parameters', $failures, $passes );
 agents_api_smoke_assert_equals( true, ! array_key_exists( 'parameters', $result['tool_audit_events'][0] ), 'tool audit event omits raw parameters', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'tool_call', 'tool_result' ), array_column( $result['tool_events'], 'type' ), 'result contains canonical tool call/result events', $failures, $passes );
+agents_api_smoke_assert_equals( 'success', $result['tool_events'][1]['status'] ?? '', 'tool result event records status', $failures, $passes );
 
 // Messages should contain: user, assistant text, tool_call, tool_result.
 $message_count = count( $result['messages'] );
@@ -444,5 +446,52 @@ agents_api_smoke_assert_equals( 2, $omit_turn, 'loop completes naturally even wh
 agents_api_smoke_assert_equals( true, count( $omit_result['messages'] ) >= 4, 'transcript retains user + tool_call + tool_result + final content despite omitted messages key', $failures, $passes );
 $omit_roles = array_map( static fn( array $m ): string => (string) ( $m['role'] ?? '' ), $omit_result['messages'] );
 agents_api_smoke_assert_equals( 'user', $omit_roles[0] ?? '', 'first transcript message is the original user turn (history preserved)', $failures, $passes );
+
+echo "\n[Runtime tools can pause the loop with a canonical pending request (#250):\n";
+$pending_executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
+	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
+		return array(
+			'success'              => false,
+			'tool_name'            => $tool_call['tool_name'],
+			'status'               => AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING,
+			'error'                => 'Waiting for client runtime tool result.',
+			'runtime_tool_request' => AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::from_tool_call(
+				$tool_call['tool_name'],
+				$tool_call['id'] ?? 'pending-call',
+				$tool_call['parameters'],
+				$context,
+				array( 'completion_signal' => 'external_result' ),
+				array( 'transport' => 'browser' )
+			),
+		);
+	}
+};
+
+$pending_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'choose' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'id'         => 'client-call-1',
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'needs browser' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 3,
+		'tool_executor'     => $pending_executor,
+		'tool_declarations' => $tools,
+	)
+);
+
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING, $pending_result['status'] ?? '', 'pending runtime tool sets canonical loop status', $failures, $passes );
+agents_api_smoke_assert_equals( false, $pending_result['completed'] ?? true, 'pending runtime tool result is incomplete', $failures, $passes );
+agents_api_smoke_assert_equals( 'client/summarize', $pending_result['runtime_tool_pending']['tool_name'] ?? '', 'pending request carries tool name', $failures, $passes );
+agents_api_smoke_assert_equals( 'client-call-1', $pending_result['runtime_tool_pending']['tool_call_id'] ?? '', 'pending request carries tool call id', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'tool_call', AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING ), array_column( $pending_result['tool_events'], 'type' ), 'pending request is recorded in canonical tool events', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API conversation loop tool execution', $failures, $passes );

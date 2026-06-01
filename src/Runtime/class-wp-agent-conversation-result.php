@@ -79,12 +79,20 @@ class WP_Agent_Conversation_Result {
 			$result['tool_audit_events'] = array();
 		}
 
+		if ( ! array_key_exists( 'tool_events', $result ) ) {
+			$result['tool_events'] = array();
+		}
+
 		if ( ! is_array( $result['tool_execution_results'] ) ) {
 			throw self::invalid( 'tool_execution_results', 'must be an array' );
 		}
 
 		if ( ! is_array( $result['tool_audit_events'] ) ) {
 			throw self::invalid( 'tool_audit_events', 'must be an array' );
+		}
+
+		if ( ! is_array( $result['tool_events'] ) ) {
+			throw self::invalid( 'tool_events', 'must be an array' );
 		}
 
 		foreach ( $result['tool_execution_results'] as $index => $tool_result ) {
@@ -149,6 +157,32 @@ class WP_Agent_Conversation_Result {
 			}
 		}
 
+		foreach ( $result['tool_events'] as $index => $tool_event ) {
+			$path = 'tool_events[' . $index . ']';
+
+			if ( ! is_array( $tool_event ) ) {
+				throw self::invalid( $path, 'must be an array' );
+			}
+
+			foreach ( array( 'type', 'tool_name', 'tool_call_id' ) as $field ) {
+				if ( ! array_key_exists( $field, $tool_event ) || ! is_string( $tool_event[ $field ] ) || '' === $tool_event[ $field ] ) {
+					throw self::invalid( $path . '.' . $field, 'must be a non-empty string' );
+				}
+			}
+
+			if ( ! array_key_exists( 'turn_count', $tool_event ) || ! is_int( $tool_event['turn_count'] ) ) {
+				throw self::invalid( $path . '.turn_count', 'must be an integer' );
+			}
+
+			if ( array_key_exists( 'status', $tool_event ) && ! is_string( $tool_event['status'] ) ) {
+				throw self::invalid( $path . '.status', 'must be a string when present' );
+			}
+
+			if ( array_key_exists( 'metadata', $tool_event ) && ! is_array( $tool_event['metadata'] ) ) {
+				throw self::invalid( $path . '.metadata', 'must be an array when present' );
+			}
+		}
+
 		// Validate optional budget-exceeded status fields.
 		if ( array_key_exists( 'status', $result ) && ! is_string( $result['status'] ) ) {
 			throw self::invalid( 'status', 'must be a string when present' );
@@ -173,6 +207,30 @@ class WP_Agent_Conversation_Result {
 
 		if ( array_key_exists( 'request_metadata', $result ) && ! is_array( $result['request_metadata'] ) ) {
 			throw self::invalid( 'request_metadata', 'must be an array when present' );
+		}
+
+		if ( array_key_exists( 'completed', $result ) && ! is_bool( $result['completed'] ) ) {
+			throw self::invalid( 'completed', 'must be a boolean when present' );
+		}
+
+		if ( array_key_exists( 'failure', $result ) ) {
+			if ( ! is_array( $result['failure'] ) ) {
+				throw self::invalid( 'failure', 'must be an array when present' );
+			}
+
+			foreach ( array( 'type', 'message' ) as $field ) {
+				if ( ! array_key_exists( $field, $result['failure'] ) || ! is_string( $result['failure'][ $field ] ) || '' === $result['failure'][ $field ] ) {
+					throw self::invalid( 'failure.' . $field, 'must be a non-empty string' );
+				}
+			}
+
+			if ( array_key_exists( 'turn_count', $result['failure'] ) && ! is_int( $result['failure']['turn_count'] ) ) {
+				throw self::invalid( 'failure.turn_count', 'must be an integer when present' );
+			}
+		}
+
+		if ( array_key_exists( 'runtime_tool_pending', $result ) && ! is_array( $result['runtime_tool_pending'] ) ) {
+			throw self::invalid( 'runtime_tool_pending', 'must be an array when present' );
 		}
 
 		return $result;
