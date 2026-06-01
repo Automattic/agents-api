@@ -1,0 +1,10 @@
+includes:
+	- vendor/szepeviktor/phpstan-wordpress/extension.neon
+
+parameters:
+	level: max
+	paths:
+		- src
+		- agents-api.php
+	stubFiles:
+		- stubs/abilities-api.php

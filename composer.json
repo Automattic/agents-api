@@ -20,6 +20,7 @@
     "woocommerce/action-scheduler": "Required to actually run cron-triggered workflows. The substrate detects Action Scheduler at runtime and no-ops cleanly when absent; install this package (or any plugin that ships it, like WooCommerce) to enable scheduled workflow runs."
   },
   "scripts": {
+    "phpstan": "phpstan analyse --no-progress",
     "test": [
       "php tests/bootstrap-smoke.php",
       "php tests/message-envelope-smoke.php",
@@ -90,5 +91,9 @@
       "php tests/subagents-smoke.php",
       "php tests/no-product-imports-smoke.php"
     ]
+  },
+  "require-dev": {
+    "phpstan/phpstan": "^2.0",
+    "szepeviktor/phpstan-wordpress": "^2.0"
   }
 }
