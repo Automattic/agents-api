@@ -99,25 +99,22 @@ agents_api_smoke_assert_equals( 'client/work', $tool_call_event['payload']['tool
 echo "\n[2] Failed event emits on turn runner exception:\n";
 $event_log = array();
 
-$threw = false;
-try {
-	AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
-		array( array( 'role' => 'user', 'content' => 'fail' ) ),
-		static function (): array {
-			throw new \RuntimeException( 'provider down' );
+$failure_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'fail' ) ),
+	static function (): array {
+		throw new \RuntimeException( 'provider down' );
+	},
+	array(
+		'max_turns' => 1,
+		'on_event'  => static function ( string $event, array $payload ) use ( &$event_log ): void {
+			$event_log[] = array( 'event' => $event, 'payload' => $payload );
 		},
-		array(
-			'max_turns' => 1,
-			'on_event'  => static function ( string $event, array $payload ) use ( &$event_log ): void {
-				$event_log[] = array( 'event' => $event, 'payload' => $payload );
-			},
-		)
-	);
-} catch ( \RuntimeException $e ) {
-	$threw = true;
-}
+	)
+);
 
-agents_api_smoke_assert_equals( true, $threw, 'exception was re-thrown', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $failure_result['status'] ?? '', 'exception returns structured failed status', $failures, $passes );
+agents_api_smoke_assert_equals( false, $failure_result['completed'] ?? true, 'structured failure is not completed', $failures, $passes );
+agents_api_smoke_assert_equals( 'provider down', $failure_result['failure']['message'] ?? '', 'structured failure carries error message', $failures, $passes );
 $event_names = array_column( $event_log, 'event' );
 agents_api_smoke_assert_equals( true, in_array( 'failed', $event_names, true ), 'failed event was emitted on exception', $failures, $passes );
 

@@ -129,6 +129,9 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-identical-failure-tra
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-consecutive-identical-failure-tracker.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-tool-result-truncator.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-byte-limit-tool-result-truncator.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-request.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-result.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-request-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-result.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-chat-run-control.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-loop.php';
