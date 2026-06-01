@@ -23,7 +23,7 @@ final class WP_Agent_Consent_Decision {
 	/** @var string */
 	private $reason;
 
-	/** @var array */
+	/** @var array<mixed> */
 	private $audit_metadata;
 
 	/**

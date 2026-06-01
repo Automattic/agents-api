@@ -88,6 +88,7 @@ final class WP_Agent_Identity_Scope {
 	public static function normalize_instance_key( string $instance_key ): string {
 		$instance_key = strtolower( trim( $instance_key ) );
 		$instance_key = preg_replace( '/\s*\/\s*/', '/', $instance_key );
+		$instance_key = is_string( $instance_key ) ? $instance_key : '';
 		$instance_key = preg_replace( '/[^a-z0-9_.:\/-]+/', '-', $instance_key );
 
 		return trim( (string) $instance_key, '-/' );

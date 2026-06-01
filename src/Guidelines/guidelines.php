@@ -50,7 +50,7 @@ if ( ! function_exists( '_wp_guidelines_map_meta_cap' ) ) {
 	 */
 	function _wp_guidelines_map_meta_cap( array $caps, string $cap, int $user_id, array $args ): array {
 		if ( in_array( $cap, array( 'read_post', 'edit_post', 'delete_post' ), true ) ) {
-			$post_id = isset( $args[0] ) ? (int) $args[0] : 0;
+			$post_id = isset( $args[0] ) && is_scalar( $args[0] ) ? (int) $args[0] : 0;
 			if ( $post_id <= 0 || ! _wp_guidelines_is_guideline_post( $post_id ) ) {
 				return $caps;
 			}
@@ -67,7 +67,7 @@ if ( ! function_exists( '_wp_guidelines_map_meta_cap' ) ) {
 		}
 
 		if ( in_array( $cap, array( 'read_private_agent_memory', 'edit_private_agent_memory', 'promote_agent_memory' ), true ) ) {
-			$post_id = isset( $args[0] ) ? (int) $args[0] : 0;
+			$post_id = isset( $args[0] ) && is_scalar( $args[0] ) ? (int) $args[0] : 0;
 			if ( $post_id <= 0 || ! _wp_guidelines_is_private_memory( $post_id ) ) {
 				return array( 'do_not_allow' );
 			}
@@ -168,7 +168,8 @@ if ( ! function_exists( '_wp_guidelines_private_memory_owner_id' ) ) {
 	 * @return int Owning user ID.
 	 */
 	function _wp_guidelines_private_memory_owner_id( int $post_id ): int {
-		return (int) get_post_meta( $post_id, WP_Guidelines_Substrate::META_USER_ID, true );
+		$owner_id = get_post_meta( $post_id, WP_Guidelines_Substrate::META_USER_ID, true );
+		return is_scalar( $owner_id ) ? (int) $owner_id : 0;
 	}
 }
 
@@ -222,8 +223,9 @@ if ( ! function_exists( '_wp_guidelines_maybe_map_term_label' ) ) {
 		}
 
 		$types = wp_guideline_types();
-		if ( isset( $types[ $data['slug'] ] ) ) {
-			$data['name'] = $types[ $data['slug'] ]['title'];
+		$slug = $data['slug'];
+		if ( is_string( $slug ) && isset( $types[ $slug ] ) ) {
+			$data['name'] = $types[ $slug ]['title'];
 		}
 
 		return $data;

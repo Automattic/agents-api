@@ -45,8 +45,9 @@ if ( ! class_exists( 'WP_Agent_Composable_Context' ) ) {
 
 				$output = call_user_func( $section['callback'], $context, $section );
 				if ( is_string( $output ) && '' !== trim( $output ) ) {
-					$parts[]    = trim( $output );
-					$included[] = is_string( $slug ) ? $slug : (string) ( $section['slug'] ?? '' );
+					$section_slug = $section['slug'] ?? '';
+					$parts[]      = trim( $output );
+					$included[]   = is_string( $slug ) ? $slug : ( is_string( $section_slug ) ? $section_slug : '' );
 				}
 			}
 
