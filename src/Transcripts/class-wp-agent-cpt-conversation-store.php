@@ -132,7 +132,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 				// wp_update_post unslashes post_content; wp_slash preserves the
 				// JSON's escaped quotes (notably tool_result payloads that nest
 				// JSON in their content field).
-				'post_content' => wp_slash( wp_json_encode( array_values( $messages ) ) ),
+				'post_content' => wp_slash( (string) wp_json_encode( array_values( $messages ) ) ),
 			),
 			true
 		);
@@ -195,7 +195,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 				'post_title'   => '',
 				// wp_insert_post unslashes post_content; wp_slash compensates so
 				// JSON-escaped characters survive the round-trip.
-				'post_content' => wp_slash( wp_json_encode( array() ) ),
+				'post_content' => wp_slash( (string) wp_json_encode( array() ) ),
 			),
 			true
 		);
@@ -328,6 +328,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 
 	public function acquire_session_lock( string $session_id, int $ttl_seconds = 300 ): ?string {
 		global $wpdb;
+		/** @var \wpdb $wpdb */
 
 		$post = $this->find_post_by_session_id( $session_id );
 		if ( null === $post ) {
