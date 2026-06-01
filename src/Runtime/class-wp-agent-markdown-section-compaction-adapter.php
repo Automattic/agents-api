@@ -137,7 +137,7 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 
 		$item = self::replacement_item( $section_item, self::TYPE_SECTION_POINTER, '[Archived section: ' . $destination . ']' . "\n" );
 
-		$item['metadata']                         = self::item_metadata( $item );
+		$item['metadata']                        = self::item_metadata( $item );
 		$item['metadata']['pointer_destination'] = $destination;
 		return $item;
 	}

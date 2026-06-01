@@ -292,7 +292,7 @@ class WP_Agent_Workflow_Runner {
 		$nested = $step['steps'] ?? array();
 		unset( $step['steps'] );
 
-		$expanded          = WP_Agent_Workflow_Bindings::expand( $step, $context );
+		$expanded = WP_Agent_Workflow_Bindings::expand( $step, $context );
 		if ( ! is_array( $expanded ) ) {
 			$expanded = array();
 		}
@@ -440,7 +440,7 @@ class WP_Agent_Workflow_Runner {
 		$iterations        = array();
 
 		foreach ( array_values( $items ) as $index => $item ) {
-			$iteration_context         = $context;
+			$iteration_context = $context;
 			if ( ! isset( $iteration_context['steps'] ) || ! is_array( $iteration_context['steps'] ) ) {
 				$iteration_context['steps'] = array();
 			}

@@ -253,7 +253,7 @@ class WP_Agent_Message {
 				continue;
 			}
 
-			$tail_key   = array_key_last( $coalesced );
+			$tail_key = array_key_last( $coalesced );
 			if ( null === $tail_key ) {
 				$coalesced[] = $envelope;
 				continue;
