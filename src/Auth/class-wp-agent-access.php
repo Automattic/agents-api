@@ -54,20 +54,20 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 				return AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
 					self::PUBLIC_AUDIENCE_ID,
 					self::PUBLIC_AUDIENCE_ID,
-					isset( $context['request_context'] ) ? (string) $context['request_context'] : AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+					self::string_field( $context, 'request_context', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST ),
 					isset( $context['request_metadata'] ) && is_array( $context['request_metadata'] ) ? $context['request_metadata'] : array(),
-					array_key_exists( 'workspace_id', $context ) && null !== $context['workspace_id'] ? (string) $context['workspace_id'] : null,
-					array_key_exists( 'client_id', $context ) && null !== $context['client_id'] ? (string) $context['client_id'] : null
+					self::nullable_string_field( $context, 'workspace_id' ),
+					self::nullable_string_field( $context, 'client_id' )
 				);
 			}
 
 			return AgentsAPI\AI\WP_Agent_Execution_Principal::user_session(
 				$user_id,
 				self::CURRENT_USER_EFFECTIVE_AGENT_ID,
-				isset( $context['request_context'] ) ? (string) $context['request_context'] : AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+				self::string_field( $context, 'request_context', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST ),
 				isset( $context['request_metadata'] ) && is_array( $context['request_metadata'] ) ? $context['request_metadata'] : array(),
-				array_key_exists( 'workspace_id', $context ) && null !== $context['workspace_id'] ? (string) $context['workspace_id'] : null,
-				array_key_exists( 'client_id', $context ) && null !== $context['client_id'] ? (string) $context['client_id'] : null
+				self::nullable_string_field( $context, 'workspace_id' ),
+				self::nullable_string_field( $context, 'client_id' )
 			);
 		}
 
@@ -203,7 +203,14 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 			$filtered_audiences = function_exists( 'apply_filters' ) ? apply_filters( 'agents_api_access_audiences_for_principal', $audiences, $principal, $context ) : $audiences;
 			$audiences          = is_array( $filtered_audiences ) ? $filtered_audiences : array();
 
-			foreach ( array_values( array_unique( array_filter( array_map( 'strval', $audiences ) ) ) ) as $audience_id ) {
+			$audience_ids = array();
+			foreach ( $audiences as $audience ) {
+				if ( is_scalar( $audience ) ) {
+					$audience_ids[] = (string) $audience;
+				}
+			}
+
+			foreach ( array_values( array_unique( array_filter( $audience_ids ) ) ) as $audience_id ) {
 				$principals[] = AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
 					$audience_id,
 					$principal->effective_agent_id,
@@ -227,6 +234,25 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 			}
 
 			return 0;
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 */
+		private static function string_field( array $source, string $key, string $fallback = '' ): string {
+			$value = $source[ $key ] ?? null;
+			return is_scalar( $value ) ? (string) $value : $fallback;
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 */
+		private static function nullable_string_field( array $source, string $key ): ?string {
+			if ( ! array_key_exists( $key, $source ) || null === $source[ $key ] ) {
+				return null;
+			}
+
+			return self::string_field( $source, $key );
 		}
 	}
 }

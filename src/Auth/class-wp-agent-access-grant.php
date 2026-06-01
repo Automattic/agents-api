@@ -97,15 +97,15 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 		 */
 		public static function from_array( array $grant ): self {
 			return new self(
-				isset( $grant['agent_id'] ) ? (string) $grant['agent_id'] : '',
-				isset( $grant['user_id'] ) ? (int) $grant['user_id'] : 0,
-				isset( $grant['role'] ) ? (string) $grant['role'] : self::ROLE_VIEWER,
-				array_key_exists( 'workspace_id', $grant ) && null !== $grant['workspace_id'] ? (string) $grant['workspace_id'] : null,
-				isset( $grant['grant_id'] ) ? (int) $grant['grant_id'] : null,
-				isset( $grant['granted_by_user_id'] ) ? (int) $grant['granted_by_user_id'] : null,
-				array_key_exists( 'granted_at', $grant ) && null !== $grant['granted_at'] ? (string) $grant['granted_at'] : null,
-				isset( $grant['metadata'] ) && is_array( $grant['metadata'] ) ? $grant['metadata'] : array(),
-				array_key_exists( 'audience_id', $grant ) && null !== $grant['audience_id'] ? (string) $grant['audience_id'] : null
+				self::string_field( $grant, 'agent_id' ),
+				self::int_field( $grant, 'user_id' ) ?? 0,
+				self::string_field( $grant, 'role', self::ROLE_VIEWER ),
+				self::nullable_string_field( $grant, 'workspace_id' ),
+				self::int_field( $grant, 'grant_id' ),
+				self::int_field( $grant, 'granted_by_user_id' ),
+				self::nullable_string_field( $grant, 'granted_at' ),
+				self::metadata_field( $grant, 'metadata' ),
+				self::nullable_string_field( $grant, 'audience_id' )
 			);
 		}
 
@@ -152,6 +152,61 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 			} catch ( JsonException $e ) {
 				return false;
 			}
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 */
+		private static function string_field( array $source, string $key, string $fallback = '' ): string {
+			$value = $source[ $key ] ?? null;
+			return is_scalar( $value ) ? (string) $value : $fallback;
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 */
+		private static function nullable_string_field( array $source, string $key ): ?string {
+			if ( ! array_key_exists( $key, $source ) || null === $source[ $key ] ) {
+				return null;
+			}
+
+			return self::string_field( $source, $key );
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 */
+		private static function int_field( array $source, string $key ): ?int {
+			$value = $source[ $key ] ?? null;
+			if ( is_int( $value ) ) {
+				return $value;
+			}
+
+			if ( is_float( $value ) || is_string( $value ) ) {
+				return (int) $value;
+			}
+
+			return null;
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 * @return array<string,mixed>
+		 */
+		private static function metadata_field( array $source, string $key ): array {
+			$value = $source[ $key ] ?? null;
+			if ( ! is_array( $value ) ) {
+				return array();
+			}
+
+			$metadata = array();
+			foreach ( $value as $metadata_key => $metadata_value ) {
+				if ( is_string( $metadata_key ) ) {
+					$metadata[ $metadata_key ] = $metadata_value;
+				}
+			}
+
+			return $metadata;
 		}
 
 		/**

@@ -95,9 +95,9 @@ function agents_get_chat_run( array $input ) {
 		return agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_run_invalid_status' );
 	}
 
-	$run                  = WP_Agent_Chat_Run_Control::get_run( (string) ( $input['run_id'] ?? '' ) );
-	$requested_session_id = (string) ( $input['session_id'] ?? '' );
-	if ( null !== $run && $requested_session_id !== (string) $run['session_id'] ) {
+	$run                  = WP_Agent_Chat_Run_Control::get_run( agents_chat_run_control_string( $input['run_id'] ?? '' ) );
+	$requested_session_id = agents_chat_run_control_string( $input['session_id'] ?? '' );
+	if ( null !== $run && agents_chat_run_control_string( $run['session_id'] ?? '' ) !== $requested_session_id ) {
 		return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested session_id and run_id.' );
 	}
 	if ( null !== $run ) {
@@ -130,16 +130,16 @@ function agents_cancel_chat_run( array $input ) {
 	if ( is_callable( $handler ) ) {
 		$result = agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_run_invalid_cancel_result' );
 	} else {
-		$run                  = WP_Agent_Chat_Run_Control::get_run( (string) ( $input['run_id'] ?? '' ) );
-		$requested_session_id = (string) ( $input['session_id'] ?? '' );
+		$run                  = WP_Agent_Chat_Run_Control::get_run( agents_chat_run_control_string( $input['run_id'] ?? '' ) );
+		$requested_session_id = agents_chat_run_control_string( $input['session_id'] ?? '' );
 		if ( null === $run ) {
 			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
 		}
-		if ( $requested_session_id !== (string) $run['session_id'] ) {
+		if ( agents_chat_run_control_string( $run['session_id'] ?? '' ) !== $requested_session_id ) {
 			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested session_id and run_id.' );
 		}
 
-		$result = WP_Agent_Chat_Run_Control::request_cancel( (string) ( $input['run_id'] ?? '' ) );
+		$result = WP_Agent_Chat_Run_Control::request_cancel( agents_chat_run_control_string( $input['run_id'] ?? '' ) );
 		if ( null === $result ) {
 			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
 		}
@@ -149,8 +149,10 @@ function agents_cancel_chat_run( array $input ) {
 		return $result;
 	}
 
+	$status              = WP_Agent_Chat_Run_Control::normalize_status( $result['status'] ?? WP_Agent_Chat_Run_Control::STATUS_RUNNING );
+	$result['status']    = $status;
 	$result['cancelled'] = (bool) ( $result['cancelled'] ?? in_array(
-		$result['status'],
+		$status,
 		array(
 			WP_Agent_Chat_Run_Control::STATUS_CANCELLING,
 			WP_Agent_Chat_Run_Control::STATUS_CANCELLED,
@@ -185,14 +187,18 @@ function agents_queue_chat_message( array $input ) {
 		return new \WP_Error( 'agents_chat_message_queue_invalid_result', 'Queued message results must include queued_message_id.' );
 	}
 
-	$result['queued_message_id'] = (string) $result['queued_message_id'];
-	$result['position']          = max( 0, (int) ( $result['position'] ?? 0 ) );
+	$result['queued_message_id'] = agents_chat_run_control_string( $result['queued_message_id'] );
+	$result['position']          = max( 0, agents_chat_run_control_int( $result['position'] ?? 0 ) );
 
 	return $result;
 }
 
+
+/**
+ * @param array<string, mixed> $input Ability input.
+ */
 function agents_chat_run_control_permission( array $input ): bool {
-	$agent = sanitize_title( (string) ( $input['agent'] ?? '' ) );
+	$agent = sanitize_title( agents_chat_run_control_string( $input['agent'] ?? '' ) );
 	if ( '' !== $agent && class_exists( '\WP_Agent_Access' ) && class_exists( '\WP_Agent_Access_Grant' ) ) {
 		$allowed = \WP_Agent_Access::can_current_principal_access_agent(
 			$agent,
@@ -224,7 +230,8 @@ function agents_chat_run_control_request_scope( array $input ): array {
 }
 
 /**
- * @param array<string, mixed> $input Ability input.
+ * @param mixed  $result     Handler result.
+ * @param string $error_code Error code for invalid results.
  * @return array<string, mixed>|\WP_Error
  */
 function agents_chat_run_control_normalize_result( $result, string $error_code ) {
@@ -237,14 +244,14 @@ function agents_chat_run_control_normalize_result( $result, string $error_code )
 	}
 
 	try {
-		return WP_Agent_Chat_Run_Control::normalize_run( $result );
+		return WP_Agent_Chat_Run_Control::normalize_run( agents_chat_run_control_string_keyed_array( $result ) );
 	} catch ( \InvalidArgumentException $error ) {
 		return new \WP_Error( $error_code, $error->getMessage() );
 	}
 }
 
 /**
- * @param array<string, mixed> $input Ability input.
+ * @param mixed $result Handler result.
  * @return array<string, mixed>|\WP_Error
  */
 function agents_chat_run_events_normalize_result( $result ) {
@@ -256,12 +263,48 @@ function agents_chat_run_events_normalize_result( $result ) {
 		return new \WP_Error( 'agents_chat_run_invalid_events_result', 'Chat run event handlers must return an array or WP_Error.' );
 	}
 
-	$result['run_id']     = (string) ( $result['run_id'] ?? '' );
-	$result['session_id'] = (string) ( $result['session_id'] ?? '' );
+	$result               = agents_chat_run_control_string_keyed_array( $result );
+	$result['run_id']     = agents_chat_run_control_string( $result['run_id'] ?? '' );
+	$result['session_id'] = agents_chat_run_control_string( $result['session_id'] ?? '' );
 	$result['status']     = WP_Agent_Chat_Run_Control::normalize_status( $result['status'] ?? WP_Agent_Chat_Run_Control::STATUS_RUNNING );
 	$result['events']     = is_array( $result['events'] ?? null ) ? array_values( $result['events'] ) : array();
-	$result['cursor']     = (string) ( $result['cursor'] ?? '' );
+	$result['cursor']     = agents_chat_run_control_string( $result['cursor'] ?? '' );
 	$result['has_more']   = (bool) ( $result['has_more'] ?? false );
+
+	return $result;
+}
+
+function agents_chat_run_control_string( mixed $value ): string {
+	if ( is_scalar( $value ) ) {
+		return (string) $value;
+	}
+
+	return '';
+}
+
+function agents_chat_run_control_int( mixed $value ): int {
+	if ( is_int( $value ) ) {
+		return $value;
+	}
+
+	if ( is_float( $value ) || is_string( $value ) ) {
+		return (int) $value;
+	}
+
+	return 0;
+}
+
+/**
+ * @param array<array-key, mixed> $value Input array.
+ * @return array<string, mixed>
+ */
+function agents_chat_run_control_string_keyed_array( array $value ): array {
+	$result = array();
+	foreach ( $value as $key => $item ) {
+		if ( is_string( $key ) ) {
+			$result[ $key ] = $item;
+		}
+	}
 
 	return $result;
 }
@@ -270,6 +313,9 @@ function agents_chat_run_control_no_handler( string $code, string $message ): \W
 	return new \WP_Error( $code, $message );
 }
 
+/**
+ * @return array<string, mixed>
+ */
 function agents_chat_run_id_input_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -282,17 +328,27 @@ function agents_chat_run_id_input_schema(): array {
 	);
 }
 
+/**
+ * @return array<string, mixed>
+ */
 function agents_chat_run_events_input_schema(): array {
-	$schema                         = agents_chat_run_id_input_schema();
-	$schema['properties']['cursor'] = array( 'type' => 'string' );
-	$schema['properties']['limit']  = array(
+	$schema     = agents_chat_run_id_input_schema();
+	$properties = is_array( $schema['properties'] ?? null ) ? agents_chat_run_control_string_keyed_array( $schema['properties'] ) : array();
+
+	$properties['cursor'] = array( 'type' => 'string' );
+	$properties['limit']  = array(
 		'type'    => 'integer',
 		'minimum' => 1,
 		'maximum' => 1000,
 	);
+	$schema['properties'] = $properties;
+
 	return $schema;
 }
 
+/**
+ * @return array<string, mixed>
+ */
 function agents_chat_run_output_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -311,6 +367,9 @@ function agents_chat_run_output_schema(): array {
 	);
 }
 
+/**
+ * @return array<string, mixed>
+ */
 function agents_chat_run_events_output_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -342,23 +401,47 @@ function agents_chat_run_events_output_schema(): array {
 	);
 }
 
+/**
+ * @return array<string, mixed>
+ */
 function agents_cancel_chat_run_output_schema(): array {
-	$schema                            = agents_chat_run_output_schema();
-	$schema['required'][]              = 'cancelled';
-	$schema['properties']['cancelled'] = array( 'type' => 'boolean' );
+	$schema     = agents_chat_run_output_schema();
+	$required   = is_array( $schema['required'] ?? null ) ? array_values( $schema['required'] ) : array();
+	$properties = is_array( $schema['properties'] ?? null ) ? agents_chat_run_control_string_keyed_array( $schema['properties'] ) : array();
+
+	$required[]              = 'cancelled';
+	$properties['cancelled'] = array( 'type' => 'boolean' );
+	$schema['required']      = $required;
+	$schema['properties']    = $properties;
+
 	return $schema;
 }
 
+/**
+ * @return array<string, mixed>
+ */
 function agents_queue_chat_message_input_schema(): array {
-	$schema               = agents_chat_input_schema();
-	$schema['required'][] = 'session_id';
+	$schema             = agents_chat_input_schema();
+	$required           = is_array( $schema['required'] ?? null ) ? array_values( $schema['required'] ) : array();
+	$required[]         = 'session_id';
+	$schema['required'] = $required;
+
 	return $schema;
 }
 
+/**
+ * @return array<string, mixed>
+ */
 function agents_queue_chat_message_output_schema(): array {
-	$schema                                    = agents_chat_run_output_schema();
-	$schema['required'][]                      = 'queued_message_id';
-	$schema['properties']['queued_message_id'] = array( 'type' => 'string' );
-	$schema['properties']['position']          = array( 'type' => 'integer' );
+	$schema     = agents_chat_run_output_schema();
+	$required   = is_array( $schema['required'] ?? null ) ? array_values( $schema['required'] ) : array();
+	$properties = is_array( $schema['properties'] ?? null ) ? agents_chat_run_control_string_keyed_array( $schema['properties'] ) : array();
+
+	$required[]                      = 'queued_message_id';
+	$properties['queued_message_id'] = array( 'type' => 'string' );
+	$properties['position']          = array( 'type' => 'integer' );
+	$schema['required']              = $required;
+	$schema['properties']            = $properties;
+
 	return $schema;
 }
