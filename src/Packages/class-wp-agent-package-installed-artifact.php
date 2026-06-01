@@ -142,7 +142,7 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 			return $this->status;
 		}
 
-		public function get_installed_payload() {
+		public function get_installed_payload(): mixed {
 			return $this->installed_payload;
 		}
 
@@ -172,8 +172,8 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 			return $row;
 		}
 
-		private function prepare_slug( $value, string $field ): string {
-			$value = sanitize_title( (string) $value );
+		private function prepare_slug( mixed $value, string $field ): string {
+			$value = sanitize_title( $this->string_value( $value ) );
 			if ( '' === $value ) {
 				throw new InvalidArgumentException( sprintf( 'Agent package installed artifact %s cannot be empty.', esc_html( $field ) ) );
 			}
@@ -181,8 +181,8 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 			return $value;
 		}
 
-		private function prepare_id( $value ): string {
-			$value = trim( str_replace( '\\', '/', (string) $value ) );
+		private function prepare_id( mixed $value ): string {
+			$value = trim( str_replace( '\\', '/', $this->string_value( $value ) ) );
 			if ( '' === $value || str_starts_with( $value, '/' ) || str_contains( $value, '..' ) ) {
 				throw new InvalidArgumentException( 'Agent package installed artifact artifact_id must be a non-empty package-local identifier.' );
 			}
@@ -190,8 +190,8 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 			return $value;
 		}
 
-		private function prepare_string( $value, string $field ): string {
-			$value = trim( (string) $value );
+		private function prepare_string( mixed $value, string $field ): string {
+			$value = trim( $this->string_value( $value ) );
 			if ( '' === $value ) {
 				throw new InvalidArgumentException( sprintf( 'Agent package installed artifact %s cannot be empty.', esc_html( $field ) ) );
 			}
@@ -199,12 +199,12 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 			return $value;
 		}
 
-		private function prepare_optional_string( $value ): ?string {
-			$value = null === $value ? '' : trim( (string) $value );
+		private function prepare_optional_string( mixed $value ): ?string {
+			$value = null === $value ? '' : trim( $this->string_value( $value ) );
 			return '' === $value ? null : $value;
 		}
 
-		private function prepare_source( $source ): string {
+		private function prepare_source( mixed $source ): string {
 			$artifact = new WP_Agent_Package_Artifact(
 				array(
 					'type'   => $this->artifact_type,
@@ -214,6 +214,16 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 			);
 
 			return $artifact->get_source();
+		}
+
+		/**
+		 * Convert scalar/Stringable input to a string.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return string String value, or empty string for non-stringable input.
+		 */
+		private function string_value( mixed $value ): string {
+			return is_scalar( $value ) || $value instanceof Stringable ? (string) $value : '';
 		}
 	}
 }

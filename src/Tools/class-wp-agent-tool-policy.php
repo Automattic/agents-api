@@ -49,14 +49,18 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		 * @return array<string, array<mixed>> Visible tools keyed by tool name.
 		 */
 		public function resolve( array $tools, array $context = array() ): array {
-			$mode            = (string) ( $context['mode'] ?? self::RUNTIME_CHAT );
+			$tools           = $this->normalize_tools( $tools );
+			$mode            = $this->string_value( $context['mode'] ?? self::RUNTIME_CHAT );
 			$policies        = $this->collect_policies( $context );
 			$mandatory_tools = $this->collect_policy_list( $policies, 'mandatory_tools' );
 			$mandatory_cats  = $this->collect_policy_list( $policies, 'mandatory_categories' );
+			/**
+			 * @param array<string,mixed> $tool Tool definition.
+			 */
 			$preserve_tool   = function ( array $tool, string $name ) use ( $mandatory_tools, $mandatory_cats ): bool {
 				return in_array( $name, $mandatory_tools, true )
 					|| true === ( $tool['mandatory'] ?? false )
-					|| $this->filter->tool_matches_categories( $tool, $mandatory_cats );
+					|| $this->filter->tool_matches_categories( $this->string_keyed_array( $tool ), $mandatory_cats );
 			};
 
 			$tools = $this->filter->filter_by_mode( $tools, $mode );
@@ -93,7 +97,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 
 			if ( function_exists( 'apply_filters' ) ) {
 				$filtered = apply_filters( 'agents_api_resolved_tools', $tools, $mode, $context, $this );
-				$tools    = is_array( $filtered ) ? $filtered : $tools;
+				$tools    = is_array( $filtered ) ? $this->normalize_tools( $filtered ) : $tools;
 			}
 
 			return $tools;
@@ -110,17 +114,17 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 
 			$agent_config = $this->agent_config_from_context( $context );
 			if ( is_array( $agent_config['tool_policy'] ?? null ) ) {
-				$policies[] = $agent_config['tool_policy'];
+				$policies[] = $this->string_keyed_array( $agent_config['tool_policy'] );
 			}
 
 			if ( is_array( $context['tool_policy'] ?? null ) ) {
-				$policies[] = $context['tool_policy'];
+				$policies[] = $this->string_keyed_array( $context['tool_policy'] );
 			}
 
 			foreach ( $this->get_policy_providers( $context ) as $provider ) {
 				$policy = $provider->get_tool_policy( $context );
 				if ( is_array( $policy ) ) {
-					$policies[] = $policy;
+					$policies[] = $this->string_keyed_array( $policy );
 				}
 			}
 
@@ -159,7 +163,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		 */
 		private function agent_config_from_context( array $context ): array {
 			if ( is_array( $context['agent_config'] ?? null ) ) {
-				return $context['agent_config'];
+				return $this->string_keyed_array( $context['agent_config'] );
 			}
 
 			$agent = $context['agent'] ?? null;
@@ -167,7 +171,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 				return $agent->get_default_config();
 			}
 
-			$agent_slug = (string) ( $context['agent_slug'] ?? ( $context['agent_id'] ?? '' ) );
+			$agent_slug = $this->string_value( $context['agent_slug'] ?? ( $context['agent_id'] ?? '' ) );
 			if ( '' !== $agent_slug && function_exists( 'wp_get_agent' ) ) {
 				$registered = wp_get_agent( $agent_slug );
 				if ( $registered instanceof WP_Agent ) {
@@ -185,7 +189,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		 * @return array<string, mixed>|null Normalized policy.
 		 */
 		private function normalize_named_policy( array $policy ): ?array {
-			$mode = (string) ( $policy['mode'] ?? self::MODE_DENY );
+			$mode = $this->string_value( $policy['mode'] ?? self::MODE_DENY );
 			if ( ! in_array( $mode, array( self::MODE_ALLOW, self::MODE_DENY ), true ) ) {
 				return null;
 			}
@@ -211,6 +215,50 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 			}
 
 			return array_values( array_unique( $values ) );
+		}
+
+		/**
+		 * Convert scalar/Stringable input to a string.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return string String value, or empty string for non-stringable input.
+		 */
+		private function string_value( $value ): string {
+			return is_scalar( $value ) || $value instanceof Stringable ? (string) $value : '';
+		}
+
+		/**
+		 * Keep only string-keyed entries from a policy map.
+		 *
+		 * @param array<mixed,mixed> $values Raw map.
+		 * @return array<string,mixed>
+		 */
+		private function string_keyed_array( array $values ): array {
+			$prepared = array();
+			foreach ( $values as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+
+			return $prepared;
+		}
+
+		/**
+		 * Keep only valid string-keyed tool definitions.
+		 *
+		 * @param array<mixed,mixed> $tools Raw tool map.
+		 * @return array<string,array<string,mixed>> Normalized tool map.
+		 */
+		private function normalize_tools( array $tools ): array {
+			$prepared = array();
+			foreach ( $tools as $name => $tool ) {
+				if ( is_string( $name ) && is_array( $tool ) ) {
+					$prepared[ $name ] = $this->string_keyed_array( $tool );
+				}
+			}
+
+			return $prepared;
 		}
 	}
 }
