@@ -483,30 +483,30 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			$metadata = array();
 		}
 
-		$owner_type = (string) get_post_meta( $post->ID, self::META_OWNER_TYPE, true );
+		$owner_type = $this->meta_string( $post->ID, self::META_OWNER_TYPE );
 		if ( '' === $owner_type ) {
 			$owner_type = self::OWNER_TYPE_USER;
 		}
-		$owner_key = (string) get_post_meta( $post->ID, self::META_OWNER_KEY, true );
+		$owner_key = $this->meta_string( $post->ID, self::META_OWNER_KEY );
 
-		$context = (string) get_post_meta( $post->ID, self::META_CONTEXT, true );
+		$context = $this->meta_string( $post->ID, self::META_CONTEXT );
 		if ( '' === $context ) {
 			$context = 'chat';
 		}
 
 		return array(
-			'session_id'           => (string) get_post_meta( $post->ID, self::META_SESSION_ID, true ),
-			'workspace_type'       => (string) get_post_meta( $post->ID, self::META_WORKSPACE_TYPE, true ),
-			'workspace_id'         => (string) get_post_meta( $post->ID, self::META_WORKSPACE_ID, true ),
+			'session_id'           => $this->meta_string( $post->ID, self::META_SESSION_ID ),
+			'workspace_type'       => $this->meta_string( $post->ID, self::META_WORKSPACE_TYPE ),
+			'workspace_id'         => $this->meta_string( $post->ID, self::META_WORKSPACE_ID ),
 			'owner_type'           => $owner_type,
 			'owner_key'            => $owner_key,
 			'user_id'              => self::OWNER_TYPE_USER === $owner_type ? (int) $owner_key : 0,
-			'agent_slug'           => (string) get_post_meta( $post->ID, self::META_AGENT_SLUG, true ),
+			'agent_slug'           => $this->meta_string( $post->ID, self::META_AGENT_SLUG ),
 			'title'                => (string) $post->post_title,
-			'messages'             => $this->decode_messages( $post->post_content ),
+			'messages'             => $this->decode_messages( (string) $post->post_content ),
 			'metadata'             => $metadata,
-			'provider'             => (string) get_post_meta( $post->ID, self::META_PROVIDER, true ),
-			'model'                => (string) get_post_meta( $post->ID, self::META_MODEL, true ),
+			'provider'             => $this->meta_string( $post->ID, self::META_PROVIDER ),
+			'model'                => $this->meta_string( $post->ID, self::META_MODEL ),
 			'provider_response_id' => $this->nullable_meta_string( $post->ID, self::META_PROVIDER_RESPONSE_ID ),
 			'context'              => $context,
 			'mode'                 => $context,
@@ -515,6 +515,18 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			'last_read_at'         => $this->nullable_meta_string( $post->ID, self::META_LAST_READ_AT ),
 			'expires_at'           => $this->nullable_meta_string( $post->ID, self::META_EXPIRES_AT ),
 		);
+	}
+
+	/**
+	 * Read a post meta value coerced to a string.
+	 *
+	 * @param int    $post_id Post ID.
+	 * @param string $key     Meta key.
+	 * @return string
+	 */
+	private function meta_string( int $post_id, string $key ): string {
+		$value = get_post_meta( $post_id, $key, true );
+		return is_scalar( $value ) ? (string) $value : '';
 	}
 
 	private function decode_messages( string $raw ): array {
@@ -527,7 +539,10 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 
 	private function nullable_meta_string( int $post_id, string $key ): ?string {
 		$value = get_post_meta( $post_id, $key, true );
-		return ( '' === $value || null === $value ) ? null : (string) $value;
+		if ( '' === $value || null === $value || ! is_scalar( $value ) ) {
+			return null;
+		}
+		return (string) $value;
 	}
 
 	private function read_lock( int $post_id ): ?array {
