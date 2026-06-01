@@ -79,12 +79,24 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 			$args = array( 'workflow_id' => $spec->get_id() );
 
 			// Unschedule prior occurrences for idempotency.
-			self::unschedule_all_actions( $args );
+			as_unschedule_all_actions( self::SCHEDULED_HOOK, $args, self::GROUP );
 
 			if ( ! empty( $trigger['expression'] ) && is_scalar( $trigger['expression'] ) ) {
-				self::schedule_cron_action( (string) $trigger['expression'], $args );
+				as_schedule_cron_action(
+					time(),
+					(string) $trigger['expression'],
+					self::SCHEDULED_HOOK,
+					$args,
+					self::GROUP
+				);
 			} elseif ( ! empty( $trigger['interval'] ) && is_numeric( $trigger['interval'] ) ) {
-				self::schedule_recurring_action( (int) $trigger['interval'], $args );
+				as_schedule_recurring_action(
+					time(),
+					(int) $trigger['interval'],
+					self::SCHEDULED_HOOK,
+					$args,
+					self::GROUP
+				);
 			}
 
 			++$count;
@@ -123,30 +135,10 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 		if ( ! self::is_available() ) {
 			return;
 		}
-		self::unschedule_all_actions( array( 'workflow_id' => $workflow_id ) );
-	}
-
-	/**
-	 * @param array<string, string> $args
-	 */
-	private static function unschedule_all_actions( array $args ): void {
-		$function = new \ReflectionFunction( 'as_unschedule_all_actions' );
-		$function->invokeArgs( array( self::SCHEDULED_HOOK, $args, self::GROUP ) );
-	}
-
-	/**
-	 * @param array<string, string> $args
-	 */
-	private static function schedule_cron_action( string $expression, array $args ): void {
-		$function = new \ReflectionFunction( 'as_schedule_cron_action' );
-		$function->invokeArgs( array( time(), $expression, self::SCHEDULED_HOOK, $args, self::GROUP ) );
-	}
-
-	/**
-	 * @param array<string, string> $args
-	 */
-	private static function schedule_recurring_action( int $interval, array $args ): void {
-		$function = new \ReflectionFunction( 'as_schedule_recurring_action' );
-		$function->invokeArgs( array( time(), $interval, self::SCHEDULED_HOOK, $args, self::GROUP ) );
+		as_unschedule_all_actions(
+			self::SCHEDULED_HOOK,
+			array( 'workflow_id' => $workflow_id ),
+			self::GROUP
+		);
 	}
 }
