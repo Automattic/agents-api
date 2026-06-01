@@ -34,7 +34,7 @@ jobs:
           private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
 
       - name: Run Homeboy ${{ matrix.command }}
-        uses: Extra-Chill/homeboy-action@v2
+        uses: Extra-Chill/homeboy-action@ecf759622ccf5bfac9612f6039494812a734f532 # v2.7.6
         with:
           commands: ${{ matrix.command }}
           expected-commands: lint,test
