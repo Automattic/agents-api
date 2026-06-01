@@ -151,7 +151,7 @@ add_action(
  * @since  0.103.0
  *
  * @param  array<mixed> $input Canonical run-workflow input.
- * @return array|\WP_Error Canonical output, or WP_Error if no runtime is registered.
+ * @return array<mixed>|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_run_workflow_dispatch( array $input ) {
 	/**
@@ -234,7 +234,7 @@ function agents_validate_workflow( array $input ): array {
  * @return array<mixed>
  */
 function agents_describe_workflow( array $input ): array {
-	$workflow_id = (string) ( $input['workflow_id'] ?? '' );
+	$workflow_id = is_string( $input['workflow_id'] ?? null ) ? $input['workflow_id'] : '';
 	$spec        = WP_Agent_Workflow_Registry::find( $workflow_id );
 	if ( null === $spec ) {
 		return array(

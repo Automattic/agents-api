@@ -72,18 +72,18 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact_Type' ) ) {
 		/**
 		 * Constructor.
 		 *
-		 * @param string $type Artifact type slug.
-		 * @param array<mixed>  $args Registration arguments.
+		 * @param string              $type Artifact type slug.
+		 * @param array<string,mixed> $args Registration arguments.
 		 */
 		public function __construct( string $type, array $args = array() ) {
 			$this->type  = WP_Agent_Package_Artifact::prepare_type( $type );
-			$this->label = isset( $args['label'] ) ? trim( (string) $args['label'] ) : $this->type;
+			$this->label = is_scalar( $args['label'] ?? null ) ? trim( (string) $args['label'] ) : $this->type;
 
 			if ( '' === $this->label ) {
 				$this->label = $this->type;
 			}
 
-			$this->description = isset( $args['description'] ) ? trim( (string) $args['description'] ) : '';
+			$this->description = is_scalar( $args['description'] ?? null ) ? trim( (string) $args['description'] ) : '';
 
 			foreach ( array( 'validate_callback', 'diff_callback', 'import_callback', 'delete_callback' ) as $property ) {
 				if ( ! array_key_exists( $property, $args ) ) {
@@ -102,8 +102,23 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact_Type' ) ) {
 					throw new InvalidArgumentException( 'Agent package artifact type meta property must be an array.' );
 				}
 
-				$this->meta = $args['meta'];
+				$this->meta = self::prepare_meta( $args['meta'] );
 			}
+		}
+
+		/**
+		 * @param array<mixed> $meta Raw metadata.
+		 * @return array<string,mixed>
+		 */
+		private static function prepare_meta( array $meta ): array {
+			$prepared = array();
+			foreach ( $meta as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+
+			return $prepared;
 		}
 
 		/**

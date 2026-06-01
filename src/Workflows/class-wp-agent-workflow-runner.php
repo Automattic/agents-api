@@ -311,7 +311,7 @@ class WP_Agent_Workflow_Runner {
 	 */
 	private static function validate_inputs( WP_Agent_Workflow_Spec $spec, array $inputs ): ?array {
 		foreach ( $spec->get_inputs() as $name => $schema ) {
-			$required = ! empty( $schema['required'] );
+			$required = is_array( $schema ) && ! empty( $schema['required'] );
 			$present  = array_key_exists( $name, $inputs );
 
 			if ( $required && ! $present ) {

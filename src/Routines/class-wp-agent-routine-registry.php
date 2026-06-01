@@ -29,7 +29,7 @@ final class WP_Agent_Routine_Registry {
 	private static array $routines = array();
 
 	/**
-	 * @param array<mixed> $args See {@see WP_Agent_Routine::__construct()}.
+	 * @param array<string,mixed> $args See {@see WP_Agent_Routine::__construct()}.
 	 * @return WP_Agent_Routine|WP_Error
 	 */
 	public static function register( string $id, array $args ) {

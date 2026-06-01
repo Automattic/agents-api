@@ -52,13 +52,14 @@ class WP_Agent_Tool_Declaration {
 			);
 		}
 
-		$name   = (string) $declaration['name'];
+		$name   = is_string( $declaration['name'] ?? null ) ? $declaration['name'] : '';
 		$source = self::sourceFromName( $name );
+		$description = $declaration['description'] ?? '';
 
 		$normalized = array(
 			'name'        => $name,
 			'source'      => $source,
-			'description' => trim( (string) $declaration['description'] ),
+			'description' => is_string( $description ) ? trim( $description ) : '',
 			'parameters'  => $declaration['parameters'] ?? array(),
 			'executor'    => self::EXECUTOR_CLIENT,
 			'scope'       => self::SCOPE_RUN,

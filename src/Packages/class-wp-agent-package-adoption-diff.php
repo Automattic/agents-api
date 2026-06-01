@@ -136,8 +136,19 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Diff' ) ) {
 		private function prepare_changes( array $changes ): array {
 			$prepared = array();
 			foreach ( $changes as $change ) {
-				if ( is_array( $change ) ) {
-					$prepared[] = $change;
+				if ( ! is_array( $change ) ) {
+					continue;
+				}
+
+				$entry = array();
+				foreach ( $change as $key => $value ) {
+					if ( is_string( $key ) ) {
+						$entry[ $key ] = $value;
+					}
+				}
+
+				if ( ! empty( $entry ) ) {
+					$prepared[] = $entry;
 				}
 			}
 
@@ -173,7 +184,18 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Diff' ) ) {
 				return $artifact_plan->to_array();
 			}
 
-			return is_array( $artifact_plan ) ? $artifact_plan : array();
+			if ( ! is_array( $artifact_plan ) ) {
+				return array();
+			}
+
+			$prepared = array();
+			foreach ( $artifact_plan as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+
+			return $prepared;
 		}
 	}
 }

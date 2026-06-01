@@ -56,7 +56,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 			return false;
 		}
 
-		$args = array( 'routine_id' => $routine->get_id() );
+		$args = array( $routine->get_id() );
 
 		// Unschedule prior occurrences for idempotency.
 		as_unschedule_all_actions( self::SCHEDULED_HOOK, $args, self::GROUP );
@@ -93,7 +93,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 		}
 		as_unschedule_all_actions(
 			self::SCHEDULED_HOOK,
-			array( 'routine_id' => $routine_id ),
+			array( $routine_id ),
 			self::GROUP
 		);
 	}
@@ -137,7 +137,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 
 		as_enqueue_async_action(
 			self::SCHEDULED_HOOK,
-			array( 'routine_id' => $routine->get_id() ),
+			array( $routine->get_id() ),
 			self::GROUP
 		);
 		return true;

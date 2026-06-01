@@ -71,7 +71,18 @@ class WP_Agent_Tool_Source_Registry {
 			$sources = apply_filters( 'agents_api_tool_sources', $sources, $context, $this );
 		}
 
-		return is_array( $sources ) ? array_filter( $sources, 'is_callable' ) : array();
+		if ( ! is_array( $sources ) ) {
+			return array();
+		}
+
+		$callbacks = array();
+		foreach ( $sources as $source_slug => $source ) {
+			if ( is_string( $source_slug ) && is_callable( $source ) ) {
+				$callbacks[ $source_slug ] = $source;
+			}
+		}
+
+		return $callbacks;
 	}
 
 	/**
@@ -189,6 +200,13 @@ class WP_Agent_Tool_Source_Registry {
 			$tool_definition['parameters'] = array();
 		}
 
-		return $tool_definition;
+		$normalized = array();
+		foreach ( $tool_definition as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $value;
+			}
+		}
+
+		return $normalized;
 	}
 }

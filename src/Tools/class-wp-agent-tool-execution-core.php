@@ -87,8 +87,9 @@ class WP_Agent_Tool_Execution_Core {
 		try {
 			$result = $executor->executeWP_Agent_Tool_Call( $tool_call, $tool_definition, $context );
 		} catch ( \Throwable $throwable ) {
+			$tool_name = is_string( $tool_call['tool_name'] ?? null ) ? $tool_call['tool_name'] : '';
 			return WP_Agent_Tool_Result::error(
-				$tool_call['tool_name'],
+				$tool_name,
 				$throwable->getMessage(),
 				array( 'error_type' => 'executor_exception' ),
 				WP_Agent_Tool_Declaration::normalizeRuntimeMetadata( $tool_definition['runtime'] ?? array() )
@@ -103,12 +104,12 @@ class WP_Agent_Tool_Execution_Core {
 		if ( ! array_key_exists( 'success', $result ) ) {
 			$result = array(
 				'success'   => true,
-				'tool_name' => $tool_call['tool_name'],
+				'tool_name' => is_string( $tool_call['tool_name'] ?? null ) ? $tool_call['tool_name'] : '',
 				'result'    => $result,
 			);
 		}
 
-		$result['tool_name'] = is_string( $result['tool_name'] ?? null ) ? $result['tool_name'] : $tool_call['tool_name'];
+		$result['tool_name'] = is_string( $result['tool_name'] ?? null ) ? $result['tool_name'] : ( is_string( $tool_call['tool_name'] ?? null ) ? $tool_call['tool_name'] : '' );
 		if ( ! empty( $runtime ) ) {
 			$result['runtime'] = $runtime;
 		}
@@ -133,6 +134,12 @@ class WP_Agent_Tool_Execution_Core {
 			return $prepared;
 		}
 
-		return $this->executePreparedTool( $prepared['tool_call'], $prepared['tool_def'], $executor, $context );
+		$tool_call = $prepared['tool_call'] ?? null;
+		$tool_def  = $prepared['tool_def'] ?? null;
+		if ( ! is_array( $tool_call ) || ! is_array( $tool_def ) ) {
+			return WP_Agent_Tool_Result::error( $tool_name, 'Prepared tool call is invalid.', array( 'error_type' => 'invalid_prepared_tool_call' ) );
+		}
+
+		return $this->executePreparedTool( $tool_call, $tool_def, $executor, $context );
 	}
 }

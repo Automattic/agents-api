@@ -75,7 +75,8 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 				return $tools;
 			}
 
-			$mode       = (string) ( $policy['mode'] ?? WP_Agent_Tool_Policy::MODE_DENY );
+			$mode_value = $policy['mode'] ?? WP_Agent_Tool_Policy::MODE_DENY;
+			$mode       = is_scalar( $mode_value ) ? (string) $mode_value : WP_Agent_Tool_Policy::MODE_DENY;
 			$tool_names = $this->string_list( $policy['tools'] ?? array() );
 			$categories = $this->string_list( $policy['categories'] ?? array() );
 			$split      = $this->split_preserved_tools( $tools, $preserve_tool );
@@ -86,7 +87,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 
 			$filtered = array();
 			foreach ( $split['optional'] as $name => $tool ) {
-				$matches = in_array( $name, $tool_names, true ) || $this->tool_matches_categories( $tool, $categories );
+				$matches = in_array( $name, $tool_names, true ) || $this->tool_matches_categories( $this->string_keyed_array( $tool ), $categories );
 
 				if ( WP_Agent_Tool_Policy::MODE_ALLOW === $mode && $matches ) {
 					$filtered[ $name ] = $tool;
@@ -119,7 +120,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 					continue;
 				}
 
-				if ( $this->tool_matches_categories( $tool, $categories ) ) {
+				if ( $this->tool_matches_categories( $this->string_keyed_array( $tool ), $categories ) ) {
 					$filtered[ $name ] = $tool;
 				}
 			}
@@ -260,6 +261,21 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 			);
 
 			return array_values( array_unique( $values ) );
+		}
+
+		/**
+		 * @param array<mixed> $values Raw values.
+		 * @return array<string,mixed>
+		 */
+		private function string_keyed_array( array $values ): array {
+			$prepared = array();
+			foreach ( $values as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+
+			return $prepared;
 		}
 	}
 }
