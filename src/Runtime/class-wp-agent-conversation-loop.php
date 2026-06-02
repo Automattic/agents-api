@@ -716,6 +716,14 @@ class WP_Agent_Conversation_Loop {
 					);
 					break;
 				}
+
+				$continuation = self::completion_policy_continuation( $decision, $tool_name, $turn );
+				if ( null !== $continuation ) {
+					$messages[]     = $continuation['message'];
+					$events[]       = $continuation['event'];
+					$event_metadata = is_array( $continuation['event']['metadata'] ?? null ) ? $continuation['event']['metadata'] : array();
+					self::emit_event( $on_event, 'completion_policy_continue', $event_metadata );
+				}
 			}
 		}
 
@@ -860,6 +868,43 @@ class WP_Agent_Conversation_Loop {
 			'result'    => $truncated['result'],
 			'truncated' => $truncated['truncated'],
 			'metadata'  => $truncated['metadata'],
+		);
+	}
+
+	/**
+	 * Build a continuation message/event for non-empty incomplete policy decisions.
+	 *
+	 * @param WP_Agent_Conversation_Completion_Decision $decision  Completion policy decision.
+	 * @param string                                    $tool_name Tool name that produced the decision.
+	 * @param int                                       $turn      Current turn number.
+	 * @return array{message: array<string, mixed>, event: array<string, mixed>}|null Continuation payload or null.
+	 */
+	private static function completion_policy_continuation( WP_Agent_Conversation_Completion_Decision $decision, string $tool_name, int $turn ): ?array {
+		$message = trim( $decision->message() );
+		if ( '' === $message ) {
+			return null;
+		}
+
+		$metadata = array(
+			'tool_name' => $tool_name,
+			'turn'      => $turn,
+			'message'   => $message,
+			'context'   => $decision->context(),
+		);
+
+		return array(
+			'message' => WP_Agent_Message::text(
+				'user',
+				$message,
+				array(
+					'type'                      => 'completion_policy_continue',
+					'completion_policy_context' => $metadata,
+				)
+			),
+			'event'   => array(
+				'type'     => 'completion_policy_continue',
+				'metadata' => $metadata,
+			),
 		);
 	}
 
