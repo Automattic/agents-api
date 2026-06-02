@@ -96,11 +96,21 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec;
 class Capture_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	public array $writes = array();
 	public function start( WP_Agent_Workflow_Run_Result $result ) {
-		$this->writes[] = array( 'op' => 'start', 'status' => $result->get_status(), 'steps' => count( $result->get_steps() ) );
+		$this->writes[] = array(
+			'op'     => 'start',
+			'status' => $result->get_status(),
+			'steps'  => count( $result->get_steps() ),
+			'result' => $result->to_array(),
+		);
 		return $result->get_run_id();
 	}
 	public function update( WP_Agent_Workflow_Run_Result $result ) {
-		$this->writes[] = array( 'op' => 'update', 'status' => $result->get_status(), 'steps' => count( $result->get_steps() ) );
+		$this->writes[] = array(
+			'op'     => 'update',
+			'status' => $result->get_status(),
+			'steps'  => count( $result->get_steps() ),
+			'result' => $result->to_array(),
+		);
 		return true;
 	}
 	public function find( string $run_id ): ?WP_Agent_Workflow_Run_Result { return null; }
@@ -160,6 +170,42 @@ smoke_assert( '<<HELLO>>', $result->get_steps()[1]['output']['wrapped'], 'step 2
 smoke_assert( '<<HELLO>>', $result->get_output()['last']['wrapped'], 'final output exposes last step', $failures, $passes );
 smoke_assert( true, count( $recorder->writes ) >= 3, 'recorder hit at least 3 times (start + per-step updates + final)', $failures, $passes );
 smoke_assert( 'start', $recorder->writes[0]['op'], 'recorder start fires first', $failures, $passes );
+
+// ─── Evidence refs stay first-class through results and recorders ─────
+
+$evidence_refs     = array(
+	'artifact_refs' => array(
+		array(
+			'type'  => 'wp_guideline_artifact',
+			'id'    => 'guideline-artifact:123',
+			'url'   => 'https://example.com/artifacts/123',
+			'label' => 'Generated guideline artifact',
+		),
+	),
+	'log_refs'      => array(
+		array(
+			'type' => 'wpai_request_log',
+			'id'   => 'wpai_request_logs:42',
+			'url'  => 'https://example.com/logs/42',
+		),
+	),
+);
+$evidence_recorder = new Capture_Recorder();
+$evidence_result   = ( new WP_Agent_Workflow_Runner( $evidence_recorder ) )->run(
+	$spec,
+	array( 'text' => 'evidence' ),
+	array(
+		'run_id'        => 'evidence-run-1',
+		'evidence_refs' => $evidence_refs,
+	)
+);
+$roundtrip         = WP_Agent_Workflow_Run_Result::from_array( $evidence_result->to_array() );
+$last_write        = end( $evidence_recorder->writes );
+
+smoke_assert( $evidence_refs, $evidence_result->get_evidence_refs(), 'result exposes first-class evidence refs', $failures, $passes );
+smoke_assert( $evidence_result->to_array(), $roundtrip->to_array(), 'run result round-trips through to_array/from_array', $failures, $passes );
+smoke_assert( $evidence_refs, $last_write['result']['evidence_refs'] ?? array(), 'recorder update preserves evidence refs', $failures, $passes );
+smoke_assert( true, is_string( json_encode( $evidence_result->get_evidence_refs() ) ), 'evidence refs are JSON-serializable', $failures, $passes );
 
 // ─── Failed step short-circuits ───────────────────────────────────────
 

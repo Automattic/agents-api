@@ -81,8 +81,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 			// Unschedule prior occurrences for idempotency.
 			as_unschedule_all_actions( self::SCHEDULED_HOOK, $args, self::GROUP );
 
+			$scheduled = null;
 			if ( ! empty( $trigger['expression'] ) && is_scalar( $trigger['expression'] ) ) {
-				as_schedule_cron_action(
+				$scheduled = as_schedule_cron_action(
 					time(),
 					(string) $trigger['expression'],
 					self::SCHEDULED_HOOK,
@@ -90,7 +91,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 					self::GROUP
 				);
 			} elseif ( ! empty( $trigger['interval'] ) && is_numeric( $trigger['interval'] ) ) {
-				as_schedule_recurring_action(
+				$scheduled = as_schedule_recurring_action(
 					time(),
 					(int) $trigger['interval'],
 					self::SCHEDULED_HOOK,
@@ -99,7 +100,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 				);
 			}
 
-			++$count;
+			if ( ! empty( $scheduled ) ) {
+				++$count;
+			}
 		}
 
 		return $count;

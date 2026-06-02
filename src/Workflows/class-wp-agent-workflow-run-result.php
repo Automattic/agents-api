@@ -2,9 +2,9 @@
 /**
  * Immutable execution outcome of a single workflow run.
  *
- * Captures the per-step record (status, output, error) plus the overall
- * status and the final output map. Run recorders persist this; callers
- * inspect it to act on the result.
+ * Captures the per-step record (status, output, error), the overall
+ * status, the final output map, and neutral evidence references. Run
+ * recorders persist this; callers inspect it to act on the result.
  *
  * Statuses:
  *   `pending`   — recorded but not yet executed (used by recorders that
@@ -47,7 +47,8 @@ final class WP_Agent_Workflow_Run_Result {
 	 * @param array<mixed>  $error       Top-level error info (`code`, `message`, `data`) when status === failed.
 	 * @param int    $started_at  Unix timestamp.
 	 * @param int    $ended_at    Unix timestamp; 0 while running.
-	 * @param array<mixed>  $metadata    Free-form metadata for recorders / tracers (Langfuse trace ids, etc.).
+	 * @param array<mixed>  $metadata      Free-form metadata for recorders / tracers (Langfuse trace ids, etc.).
+	 * @param array<mixed>  $evidence_refs Neutral JSON-serializable artifact/log references owned by the host.
 	 */
 	public function __construct(
 		private string $run_id,
@@ -59,14 +60,39 @@ final class WP_Agent_Workflow_Run_Result {
 		private array $error,
 		private int $started_at,
 		private int $ended_at,
-		private array $metadata
+		private array $metadata,
+		private array $evidence_refs = array()
 	) {}
 
 	/**
 	 * @param array<mixed> $inputs
 	 */
 	public static function pending( string $run_id, string $workflow_id, array $inputs, int $started_at ): self {
-		return new self( $run_id, $workflow_id, self::STATUS_PENDING, $inputs, array(), array(), array(), $started_at, 0, array() );
+		return new self( $run_id, $workflow_id, self::STATUS_PENDING, $inputs, array(), array(), array(), $started_at, 0, array(), array() );
+	}
+
+	/**
+	 * Rebuild a run result from its serialized array shape.
+	 *
+	 * @since 0.108.0
+	 *
+	 * @param array<string, mixed> $value Serialized run result.
+	 * @return self
+	 */
+	public static function from_array( array $value ): self {
+		return new self(
+			self::string_value( $value['run_id'] ?? '' ),
+			self::string_value( $value['workflow_id'] ?? '' ),
+			self::string_value( $value['status'] ?? self::STATUS_PENDING ),
+			self::array_value( $value['inputs'] ?? array() ),
+			self::array_value( $value['output'] ?? array() ),
+			self::array_value( $value['steps'] ?? array() ),
+			self::array_value( $value['error'] ?? array() ),
+			self::int_value( $value['started_at'] ?? 0 ),
+			self::int_value( $value['ended_at'] ?? 0 ),
+			self::array_value( $value['metadata'] ?? array() ),
+			self::array_value( $value['evidence_refs'] ?? array() )
+		);
 	}
 
 	public function get_run_id(): string {
@@ -124,6 +150,13 @@ final class WP_Agent_Workflow_Run_Result {
 		return $this->metadata;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
+	public function get_evidence_refs(): array {
+		return $this->evidence_refs;
+	}
+
 	public function is_succeeded(): bool {
 		return self::STATUS_SUCCEEDED === $this->status;
 	}
@@ -153,6 +186,7 @@ final class WP_Agent_Workflow_Run_Result {
 			self::int_patch_value( $patch, 'started_at', $this->started_at ),
 			self::int_patch_value( $patch, 'ended_at', $this->ended_at ),
 			self::array_patch_value( $patch, 'metadata', $this->metadata ),
+			self::array_patch_value( $patch, 'evidence_refs', $this->evidence_refs ),
 		);
 	}
 
@@ -179,6 +213,21 @@ final class WP_Agent_Workflow_Run_Result {
 		return isset( $patch[ $key ] ) && is_array( $patch[ $key ] ) ? $patch[ $key ] : $fallback;
 	}
 
+	private static function string_value( mixed $value ): string {
+		return is_scalar( $value ) ? (string) $value : '';
+	}
+
+	private static function int_value( mixed $value ): int {
+		return is_numeric( $value ) ? (int) $value : 0;
+	}
+
+	/**
+	 * @return array<mixed>
+	 */
+	private static function array_value( mixed $value ): array {
+		return is_array( $value ) ? $value : array();
+	}
+
 	/**
 	 * Render to a plain array. Useful for recorders that want to serialise
 	 * the run record verbatim (CPT meta, JSON column, REST response).
@@ -189,16 +238,17 @@ final class WP_Agent_Workflow_Run_Result {
 	 */
 	public function to_array(): array {
 		return array(
-			'run_id'      => $this->run_id,
-			'workflow_id' => $this->workflow_id,
-			'status'      => $this->status,
-			'inputs'      => $this->inputs,
-			'output'      => $this->output,
-			'steps'       => $this->steps,
-			'error'       => $this->error,
-			'started_at'  => $this->started_at,
-			'ended_at'    => $this->ended_at,
-			'metadata'    => $this->metadata,
+			'run_id'        => $this->run_id,
+			'workflow_id'   => $this->workflow_id,
+			'status'        => $this->status,
+			'inputs'        => $this->inputs,
+			'output'        => $this->output,
+			'steps'         => $this->steps,
+			'error'         => $this->error,
+			'started_at'    => $this->started_at,
+			'ended_at'      => $this->ended_at,
+			'metadata'      => $this->metadata,
+			'evidence_refs' => $this->evidence_refs,
 		);
 	}
 }

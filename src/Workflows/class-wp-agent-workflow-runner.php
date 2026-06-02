@@ -96,12 +96,14 @@ class WP_Agent_Workflow_Runner {
 	 *                                        - `run_id` (string, optional): caller-suggested run id.
 	 *                                        - `continue_on_error` (bool): keep running after a failed step. Default false.
 	 *                                        - `metadata` (array): forwarded to the run result.
+	 *                                        - `evidence_refs` (array): neutral artifact/log references forwarded to the run result.
 	 * @return WP_Agent_Workflow_Run_Result
 	 */
 	public function run( WP_Agent_Workflow_Spec $spec, array $inputs = array(), array $options = array() ): WP_Agent_Workflow_Run_Result {
-		$started_at = time();
-		$run_id     = self::string_value( $options['run_id'] ?? self::generate_run_id() );
-		$metadata   = (array) ( $options['metadata'] ?? array() );
+		$started_at    = time();
+		$run_id        = self::string_value( $options['run_id'] ?? self::generate_run_id() );
+		$metadata      = (array) ( $options['metadata'] ?? array() );
+		$evidence_refs = (array) ( $options['evidence_refs'] ?? array() );
 
 		// Build the initial RUNNING result and persist via recorder->start()
 		// before doing anything else. Even if input validation fails on the
@@ -117,7 +119,8 @@ class WP_Agent_Workflow_Runner {
 			array(),
 			$started_at,
 			0,
-			$metadata
+			$metadata,
+			$evidence_refs
 		);
 
 		if ( $this->recorder ) {
