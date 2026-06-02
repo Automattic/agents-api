@@ -719,9 +719,9 @@ class WP_Agent_Conversation_Loop {
 
 				$continuation = self::completion_policy_continuation( $decision, $tool_name, $turn );
 				if ( null !== $continuation ) {
-					$messages[]       = $continuation['message'];
-					$events[]         = $continuation['event'];
-					$event_metadata   = is_array( $continuation['event']['metadata'] ?? null ) ? $continuation['event']['metadata'] : array();
+					$messages[]     = $continuation['message'];
+					$events[]       = $continuation['event'];
+					$event_metadata = is_array( $continuation['event']['metadata'] ?? null ) ? $continuation['event']['metadata'] : array();
 					self::emit_event( $on_event, 'completion_policy_continue', $event_metadata );
 				}
 			}
