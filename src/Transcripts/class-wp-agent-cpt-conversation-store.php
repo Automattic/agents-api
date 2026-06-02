@@ -125,6 +125,10 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		if ( null === $post ) {
 			return false;
 		}
+		$messages_json = wp_json_encode( array_values( $messages ) );
+		if ( false === $messages_json ) {
+			$messages_json = '[]';
+		}
 
 		$updated = wp_update_post(
 			array(
@@ -132,12 +136,12 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 				// wp_update_post unslashes post_content; wp_slash preserves the
 				// JSON's escaped quotes (notably tool_result payloads that nest
 				// JSON in their content field).
-				'post_content' => wp_slash( wp_json_encode( array_values( $messages ) ) ),
+				'post_content' => (string) wp_slash( $messages_json ),
 			),
 			true
 		);
 
-		if ( is_wp_error( $updated ) || ! $updated ) {
+		if ( is_wp_error( $updated ) ) {
 			return false;
 		}
 
@@ -178,7 +182,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			true
 		);
 
-		return ! is_wp_error( $updated ) && (bool) $updated;
+		return ! is_wp_error( $updated );
 	}
 
 	/* ---------------- Principal conversation store contract --------------- */
@@ -186,6 +190,10 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 	public function create_session_for_owner( WP_Agent_Workspace_Scope $workspace, array $owner, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ): string {
 		$owner      = $this->normalize_owner( $owner );
 		$session_id = self::uuid4();
+		$empty_json = wp_json_encode( array() );
+		if ( false === $empty_json ) {
+			$empty_json = '[]';
+		}
 
 		$post_id = wp_insert_post(
 			array(
@@ -195,12 +203,12 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 				'post_title'   => '',
 				// wp_insert_post unslashes post_content; wp_slash compensates so
 				// JSON-escaped characters survive the round-trip.
-				'post_content' => wp_slash( wp_json_encode( array() ) ),
+				'post_content' => (string) wp_slash( $empty_json ),
 			),
 			true
 		);
 
-		if ( is_wp_error( $post_id ) || ! $post_id ) {
+		if ( is_wp_error( $post_id ) ) {
 			return '';
 		}
 
@@ -259,6 +267,9 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 
 		$sessions = array();
 		foreach ( $query->posts as $post ) {
+			if ( ! $post instanceof \WP_Post ) {
+				continue;
+			}
 			$session = $this->session_array( $post );
 			if ( ! $include_messages ) {
 				unset( $session['messages'] );
@@ -313,7 +324,11 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			return null;
 		}
 
-		$post     = $query->posts[0];
+		$post = $query->posts[0];
+		if ( ! $post instanceof \WP_Post ) {
+			return null;
+		}
+
 		$messages = $this->decode_messages( $post->post_content );
 
 		// "Pending" = empty transcript or actively-locked session.
@@ -342,9 +357,12 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 				'expires' => $expires,
 			)
 		);
+		if ( false === $value ) {
+			$value = '{}';
+		}
 
 		// Fast path: no lock present. add_post_meta with $unique=true is atomic.
-		$added = add_post_meta( $post->ID, self::META_LOCK, $value, true );
+		$added = $this->add_unique_post_meta( $post->ID, self::META_LOCK, $value );
 		if ( $added ) {
 			return $token;
 		}
@@ -353,8 +371,7 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		$existing_raw = get_post_meta( $post->ID, self::META_LOCK, true );
 		if ( ! is_string( $existing_raw ) || '' === $existing_raw ) {
 			// Race: meta disappeared between calls. Retry once.
-			$retry = add_post_meta( $post->ID, self::META_LOCK, $value, true );
-			return $retry ? $token : null;
+			return $this->add_unique_post_meta( $post->ID, self::META_LOCK, $value ) ? $token : null;
 		}
 
 		$existing = json_decode( $existing_raw, true );
@@ -442,11 +459,12 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 	/**
 	 * Coerce a caller-supplied owner into the canonical shape.
 	 *
-	 * @param array{type?:string,key?:string} $owner Raw owner.
+	 * @param array<string,mixed> $owner Raw owner.
 	 * @return array{type:string,key:string}
 	 */
 	private function normalize_owner( array $owner ): array {
-		$type = isset( $owner['type'] ) && is_string( $owner['type'] ) && '' !== $owner['type'] ? $owner['type'] : self::OWNER_TYPE_USER;
+		$type = isset( $owner['type'] ) ? (string) $owner['type'] : '';
+		$type = '' !== $type ? $type : self::OWNER_TYPE_USER;
 		$key  = isset( $owner['key'] ) ? (string) $owner['key'] : '0';
 		return array(
 			'type' => $type,
@@ -472,7 +490,11 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			)
 		);
 
-		return ! empty( $query->posts ) ? $query->posts[0] : null;
+		if ( empty( $query->posts ) || ! $query->posts[0] instanceof \WP_Post ) {
+			return null;
+		}
+
+		return $query->posts[0];
 	}
 
 	private function session_array( \WP_Post $post ): array {
@@ -536,6 +558,10 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 		}
 		$decoded = json_decode( $raw, true );
 		return is_array( $decoded ) ? $decoded : null;
+	}
+
+	private function add_unique_post_meta( int $post_id, string $key, string $value ): bool {
+		return (bool) add_post_meta( $post_id, $key, $value, true );
 	}
 
 	private function lock_active( int $post_id ): bool {
