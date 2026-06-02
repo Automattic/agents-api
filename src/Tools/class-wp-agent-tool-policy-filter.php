@@ -143,6 +143,60 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		}
 
 		/**
+		 * Exclude caller-provided runtime tools unless policy explicitly opts them in.
+		 *
+		 * Non-runtime tools are never affected by this guard. Runtime tools match neutral
+		 * declaration metadata (`runtime_tool`, `executor=client`, or `scope=run`) and
+		 * must be explicitly named, category-matched, or preserved by host policy.
+		 *
+		 * @param array<string, array> $tools              Tool definitions keyed by tool name.
+		 * @param string[]            $allowed_tools      Runtime tool names explicitly allowed.
+		 * @param string[]            $allowed_categories Runtime tool categories explicitly allowed.
+		 * @param callable|null       $preserve_tool      Optional callback for mandatory tools.
+		 * @return array<string, array> Filtered tools.
+		 */
+		public function filter_runtime_tools_by_policy_opt_in( array $tools, array $allowed_tools, array $allowed_categories = array(), ?callable $preserve_tool = null ): array {
+			$allowed_tools      = $this->string_list( $allowed_tools );
+			$allowed_categories = $this->string_list( $allowed_categories );
+			$filtered           = array();
+
+			foreach ( $tools as $name => $tool ) {
+				if ( ! $this->is_runtime_tool( $tool ) ) {
+					$filtered[ $name ] = $tool;
+					continue;
+				}
+
+				if ( in_array( $name, $allowed_tools, true ) ) {
+					$filtered[ $name ] = $tool;
+					continue;
+				}
+
+				if ( $this->tool_matches_categories( $tool, $allowed_categories ) ) {
+					$filtered[ $name ] = $tool;
+					continue;
+				}
+
+				if ( $preserve_tool && $preserve_tool( $tool, $name ) ) {
+					$filtered[ $name ] = $tool;
+				}
+			}
+
+			return $filtered;
+		}
+
+		/**
+		 * Whether a declaration represents a caller-provided runtime tool.
+		 *
+		 * @param array<string, mixed> $tool Tool definition.
+		 * @return bool Whether the tool is a runtime/client tool.
+		 */
+		public function is_runtime_tool( array $tool ): bool {
+			return true === ( $tool['runtime_tool'] ?? false )
+				|| 'client' === ( $tool['executor'] ?? null )
+				|| 'run' === ( $tool['scope'] ?? null );
+		}
+
+		/**
 		 * Whether a tool matches any category in a policy.
 		 *
 		 * @param array<string, mixed> $tool       Tool definition.

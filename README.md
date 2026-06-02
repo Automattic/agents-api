@@ -357,8 +357,11 @@ Tool visibility is resolved by `WP_Agent_Tool_Policy` over an already-gathered t
 - Registered agent or runtime `tool_policy` config with `allow` / `deny`, `tools`, and `categories`.
 - Host-provided `WP_Agent_Tool_Access_Policy` policy fragments.
 - Runtime `categories`, `allow_only`, and explicit `deny` lists.
+- Caller-provided runtime tool opt-in via `runtime_tools`, `runtime_categories`, allow-mode `tools` / `categories`, `allow_only`, or mandatory policy.
 
-Mandatory tools are not hardcoded by Agents API. A consumer that needs mandatory runtime plumbing can return `mandatory_tools` or `mandatory_categories` from a policy provider, and explicit deny still wins.
+Caller-provided runtime tools are declarations with neutral metadata such as `runtime_tool: true`, `executor: client`, or `scope: run`. They are excluded by default so transport-provided tools are not exposed to the model ambiently. A caller, agent config, or policy provider must opt them in explicitly by name or category. Mandatory tools are not hardcoded by Agents API; a consumer that needs mandatory runtime plumbing can return `mandatory_tools` or `mandatory_categories` from a policy provider, and explicit deny still wins.
+
+This visibility policy is separate from parameter sourcing. Required tool parameters are filled from model/caller parameters first, then from `client_context_bindings` only when the tool declaration explicitly maps a context key. Ambient runtime context keys, including sensitive names such as `api_key`, `token`, and `authorization`, do not satisfy required parameters just because their names match.
 
 ```php
 $visible_tools = ( new WP_Agent_Tool_Policy() )->resolve(
@@ -369,6 +372,7 @@ $visible_tools = ( new WP_Agent_Tool_Policy() )->resolve(
 			'tool_policy' => array(
 				'mode'       => 'allow',
 				'categories' => array( 'read' ),
+				'runtime_tools' => array( 'client/choose_post' ),
 			),
 		),
 		'tool_policy_providers' => array( $consumer_policy_provider ),
