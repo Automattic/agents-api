@@ -79,16 +79,16 @@ final class WP_Agent_Memory_Metadata {
 		}
 
 		return new self(
-			isset( $metadata['source_type'] ) ? (string) $metadata['source_type'] : null,
-			isset( $metadata['source_ref'] ) ? (string) $metadata['source_ref'] : null,
-			isset( $metadata['created_by_user_id'] ) ? (int) $metadata['created_by_user_id'] : null,
-			isset( $metadata['created_by_agent_id'] ) ? (int) $metadata['created_by_agent_id'] : null,
+			self::optional_string( $metadata['source_type'] ?? null ),
+			self::optional_string( $metadata['source_ref'] ?? null ),
+			self::optional_int( $metadata['created_by_user_id'] ?? null ),
+			self::optional_int( $metadata['created_by_agent_id'] ?? null ),
 			$workspace,
-			isset( $metadata['confidence'] ) ? self::normalize_confidence( (float) $metadata['confidence'] ) : null,
-			isset( $metadata['validator'] ) ? (string) $metadata['validator'] : null,
-			isset( $metadata['authority_tier'] ) ? (string) $metadata['authority_tier'] : null,
-			isset( $metadata['created_at'] ) ? (int) $metadata['created_at'] : null,
-			isset( $metadata['updated_at'] ) ? (int) $metadata['updated_at'] : null,
+			self::optional_confidence( $metadata['confidence'] ?? null ),
+			self::optional_string( $metadata['validator'] ?? null ),
+			self::optional_string( $metadata['authority_tier'] ?? null ),
+			self::optional_int( $metadata['created_at'] ?? null ),
+			self::optional_int( $metadata['updated_at'] ?? null ),
 		);
 	}
 
@@ -176,5 +176,29 @@ final class WP_Agent_Memory_Metadata {
 
 	private static function normalize_confidence( float $confidence ): float {
 		return max( 0.0, min( 1.0, $confidence ) );
+	}
+
+	/**
+	 * @param mixed $value Raw value.
+	 * @return string|null
+	 */
+	private static function optional_string( $value ): ?string {
+		return is_scalar( $value ) ? (string) $value : null;
+	}
+
+	/**
+	 * @param mixed $value Raw value.
+	 * @return int|null
+	 */
+	private static function optional_int( $value ): ?int {
+		return is_scalar( $value ) ? (int) $value : null;
+	}
+
+	/**
+	 * @param mixed $value Raw value.
+	 * @return float|null
+	 */
+	private static function optional_confidence( $value ): ?float {
+		return is_scalar( $value ) ? self::normalize_confidence( (float) $value ) : null;
 	}
 }

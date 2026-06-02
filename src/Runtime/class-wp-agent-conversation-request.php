@@ -48,8 +48,8 @@ class WP_Agent_Conversation_Request {
 	private \WP_Agent_Runtime_Overrides $runtime_overrides;
 
 	/**
-	 * @param array                         $messages        Initial conversation messages.
-	 * @param array                         $tools           Runtime tool declarations available to the run.
+	 * @param array<mixed>                         $messages        Initial conversation messages.
+	 * @param array<mixed>                         $tools           Runtime tool declarations available to the run.
 	 * @param WP_Agent_Execution_Principal|null  $principal       Execution principal for the run.
 	 * @param array<string, mixed>          $runtime_context Caller-owned runtime context.
 	 * @param array<string, mixed>          $metadata        Caller-owned metadata.
@@ -165,7 +165,7 @@ class WP_Agent_Conversation_Request {
 	/**
 	 * Normalize runtime tool declarations.
 	 *
-	 * @param array $tools Runtime tool declarations.
+	 * @param array<mixed> $tools Runtime tool declarations.
 	 * @return array<int, array<string, mixed>>
 	 */
 	private static function normalize_tools( array $tools ): array {
@@ -176,7 +176,7 @@ class WP_Agent_Conversation_Request {
 			}
 
 			try {
-				$normalized[] = WP_Agent_Tool_Declaration::normalize( $tool );
+				$normalized[] = self::string_keyed_array( WP_Agent_Tool_Declaration::normalize( self::string_keyed_array( $tool ) ) );
 			} catch ( \InvalidArgumentException $error ) {
 				throw self::invalid( 'tools[' . $index . ']', $error->getMessage() );
 			}
@@ -188,7 +188,7 @@ class WP_Agent_Conversation_Request {
 	/**
 	 * Validate that a caller-owned array is JSON-serializable.
 	 *
-	 * @param array  $value Raw array.
+	 * @param array<mixed>  $value Raw array.
 	 * @param string $path  Field path.
 	 * @return array<string, mixed>
 	 */
@@ -197,7 +197,24 @@ class WP_Agent_Conversation_Request {
 			throw self::invalid( $path, 'must be JSON serializable' );
 		}
 
-		return $value;
+		return self::string_keyed_array( $value );
+	}
+
+	/**
+	 * Normalize an associative array to string keys.
+	 *
+	 * @param array<mixed> $value Raw array.
+	 * @return array<string, mixed>
+	 */
+	private static function string_keyed_array( array $value ): array {
+		$normalized = array();
+		foreach ( $value as $key => $item ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $item;
+			}
+		}
+
+		return $normalized;
 	}
 
 	/**

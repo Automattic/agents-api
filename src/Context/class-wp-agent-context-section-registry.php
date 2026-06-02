@@ -34,7 +34,7 @@ if ( ! class_exists( 'WP_Agent_Context_Section_Registry' ) ) {
 		 * @param string   $section_slug Section identifier.
 		 * @param int      $priority     Sort priority. Lower numbers compose first.
 		 * @param callable $callback     Receives `(array $context, array $section)` and returns content.
-		 * @param array    $args         Section metadata.
+		 * @param array<mixed>    $args         Section metadata.
 		 * @return array<string, mixed>|null Normalized section metadata, or null on invalid input.
 		 */
 		public static function register( string $context_slug, string $section_slug, int $priority, callable $callback, array $args = array() ): ?array {
@@ -81,7 +81,7 @@ if ( ! class_exists( 'WP_Agent_Context_Section_Registry' ) ) {
 		 * Return sections for a context in priority order.
 		 *
 		 * @param string $context_slug Context identifier.
-		 * @param array  $context      Runtime context, optionally including `mode`.
+		 * @param array<mixed>  $context      Runtime context, optionally including `mode`.
 		 * @return array<string, array<string, mixed>>
 		 */
 		public static function get_sections( string $context_slug, array $context = array() ): array {
@@ -94,7 +94,7 @@ if ( ! class_exists( 'WP_Agent_Context_Section_Registry' ) ) {
 			$sections = array_filter(
 				$sections,
 				static function ( array $section ) use ( $mode ): bool {
-					$modes = $section['modes'] ?? array( WP_Agent_Memory_Registry::MODE_ALL );
+					$modes = self::normalize_modes( $section['modes'] ?? array( WP_Agent_Memory_Registry::MODE_ALL ) );
 					return '' === $mode || in_array( WP_Agent_Memory_Registry::MODE_ALL, $modes, true ) || in_array( $mode, $modes, true );
 				}
 			);
@@ -103,7 +103,9 @@ if ( ! class_exists( 'WP_Agent_Context_Section_Registry' ) ) {
 				$sections,
 				static function ( array $a, array $b ): int {
 					$priority_order = $a['priority'] <=> $b['priority'];
-					return 0 !== $priority_order ? $priority_order : strcmp( $a['slug'], $b['slug'] );
+					$a_slug         = is_string( $a['slug'] ?? null ) ? $a['slug'] : '';
+					$b_slug         = is_string( $b['slug'] ?? null ) ? $b['slug'] : '';
+					return 0 !== $priority_order ? $priority_order : strcmp( $a_slug, $b_slug );
 				}
 			);
 
@@ -114,7 +116,7 @@ if ( ! class_exists( 'WP_Agent_Context_Section_Registry' ) ) {
 		 * Compose a context from registered sections.
 		 *
 		 * @param string $context_slug Context identifier.
-		 * @param array  $context      Runtime context passed to callbacks.
+		 * @param array<mixed>  $context      Runtime context passed to callbacks.
 		 * @return WP_Agent_Composable_Context
 		 */
 		public static function compose( string $context_slug, array $context = array() ): WP_Agent_Composable_Context {
@@ -167,7 +169,19 @@ if ( ! class_exists( 'WP_Agent_Context_Section_Registry' ) ) {
 				return array( WP_Agent_Memory_Registry::MODE_ALL );
 			}
 
-			$normalized = array_values( array_unique( array_filter( array_map( array( self::class, 'sanitize_slug' ), $modes ) ) ) );
+			$normalized = array();
+			foreach ( $modes as $mode ) {
+				if ( ! is_string( $mode ) ) {
+					continue;
+				}
+
+				$mode = self::sanitize_slug( $mode );
+				if ( '' !== $mode ) {
+					$normalized[] = $mode;
+				}
+			}
+
+			$normalized = array_values( array_unique( $normalized ) );
 			return empty( $normalized ) ? array( WP_Agent_Memory_Registry::MODE_ALL ) : $normalized;
 		}
 

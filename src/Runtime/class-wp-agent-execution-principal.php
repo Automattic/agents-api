@@ -49,7 +49,7 @@ final class WP_Agent_Execution_Principal {
 	 * @param string      $auth_source       Authentication source identifier.
 	 * @param string      $request_context   Request context such as rest, cli, cron, or chat.
 	 * @param int|null    $token_id          Optional caller-owned token identifier. Agents API does not load or store the token.
-	 * @param array       $request_metadata  JSON-serializable request metadata supplied by the caller.
+	 * @param array<string,mixed>       $request_metadata  JSON-serializable request metadata supplied by the caller.
 	 * @param string|null $workspace_id      Optional host workspace/scope identifier.
 	 * @param string|null $client_id         Optional client/login identifier.
 	 * @param \WP_Agent_Capability_Ceiling|null $capability_ceiling Optional capability ceiling for this execution.
@@ -152,7 +152,7 @@ final class WP_Agent_Execution_Principal {
 		}
 
 		if ( is_array( $principal ) ) {
-			return self::from_array( $principal );
+			return self::from_array( self::assoc_array( $principal ) );
 		}
 
 		throw self::invalid( 'principal', 'resolver must return null, an array, or an WP_Agent_Execution_Principal' );
@@ -180,7 +180,7 @@ final class WP_Agent_Execution_Principal {
 	 * @param int    $acting_user_id    WordPress user ID.
 	 * @param string $effective_agent_id Registered agent ID/slug.
 	 * @param string $request_context   Request context.
-	 * @param array  $request_metadata  Request metadata.
+	 * @param array<string,mixed>  $request_metadata  Request metadata.
 	 * @return self
 	 */
 	public static function user_session( int $acting_user_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, ?\WP_Agent_Capability_Ceiling $capability_ceiling = null, ?\WP_Agent_Caller_Context $caller_context = null ): self {
@@ -194,7 +194,7 @@ final class WP_Agent_Execution_Principal {
 	 * @param string $effective_agent_id Registered agent ID/slug.
 	 * @param int    $token_id          Caller-owned token identifier.
 	 * @param string $request_context   Request context.
-	 * @param array  $request_metadata  Request metadata.
+	 * @param array<string,mixed>  $request_metadata  Request metadata.
 	 * @return self
 	 */
 	public static function agent_token( int $acting_user_id, string $effective_agent_id, int $token_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, ?\WP_Agent_Capability_Ceiling $capability_ceiling = null, ?\WP_Agent_Caller_Context $caller_context = null ): self {
@@ -207,10 +207,10 @@ final class WP_Agent_Execution_Principal {
 	 * @param string $audience_id        Host-owned audience identifier.
 	 * @param string $effective_agent_id Registered agent ID/slug effective for the run.
 	 * @param string $request_context    Request context.
-	 * @param array  $request_metadata   Request metadata.
+	 * @param array<string,mixed>  $request_metadata   Request metadata.
 	 * @param string|null $workspace_id  Optional host workspace/scope identifier.
 	 * @param string|null $client_id     Optional client/login identifier.
-	 * @param array  $audience_claims    Host-owned audience claims.
+	 * @param array<string,mixed>  $audience_claims    Host-owned audience claims.
 	 * @return self
 	 */
 	public static function audience( string $audience_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, array $audience_claims = array(), ?string $owner_key = null ): self {
@@ -220,7 +220,7 @@ final class WP_Agent_Execution_Principal {
 	/**
 	 * Build a principal from a request/context array.
 	 *
-	 * @param array $principal Raw principal fields.
+	 * @param array<string,mixed> $principal Raw principal fields.
 	 * @return self
 	 */
 	public static function from_array( array $principal ): self {
@@ -229,7 +229,7 @@ final class WP_Agent_Execution_Principal {
 			if ( $principal['capability_ceiling'] instanceof \WP_Agent_Capability_Ceiling ) {
 				$capability_ceiling = $principal['capability_ceiling'];
 			} elseif ( is_array( $principal['capability_ceiling'] ) && class_exists( '\WP_Agent_Capability_Ceiling' ) ) {
-				$capability_ceiling = \WP_Agent_Capability_Ceiling::from_array( $principal['capability_ceiling'] );
+				$capability_ceiling = \WP_Agent_Capability_Ceiling::from_array( self::assoc_array( $principal['capability_ceiling'] ) );
 			}
 		}
 
@@ -238,26 +238,26 @@ final class WP_Agent_Execution_Principal {
 			if ( $principal['caller_context'] instanceof \WP_Agent_Caller_Context ) {
 				$caller_context = $principal['caller_context'];
 			} elseif ( is_array( $principal['caller_context'] ) && class_exists( '\WP_Agent_Caller_Context' ) ) {
-				$caller_context = \WP_Agent_Caller_Context::from_array( $principal['caller_context'] );
+				$caller_context = \WP_Agent_Caller_Context::from_array( self::assoc_array( $principal['caller_context'] ) );
 			}
 		}
 
 		return new self(
-			isset( $principal['acting_user_id'] ) ? (int) $principal['acting_user_id'] : 0,
-			isset( $principal['effective_agent_id'] ) ? (string) $principal['effective_agent_id'] : '',
-			isset( $principal['auth_source'] ) ? (string) $principal['auth_source'] : '',
-			isset( $principal['request_context'] ) ? (string) $principal['request_context'] : '',
-			isset( $principal['token_id'] ) ? (int) $principal['token_id'] : null,
-			isset( $principal['request_metadata'] ) && is_array( $principal['request_metadata'] ) ? $principal['request_metadata'] : array(),
-			array_key_exists( 'workspace_id', $principal ) && null !== $principal['workspace_id'] ? (string) $principal['workspace_id'] : null,
-			array_key_exists( 'client_id', $principal ) && null !== $principal['client_id'] ? (string) $principal['client_id'] : null,
+			self::int_field( $principal, 'acting_user_id' ),
+			self::string_field( $principal, 'effective_agent_id' ),
+			self::string_field( $principal, 'auth_source' ),
+			self::string_field( $principal, 'request_context' ),
+			array_key_exists( 'token_id', $principal ) && null !== $principal['token_id'] ? self::int_field( $principal, 'token_id' ) : null,
+			self::assoc_array_field( $principal, 'request_metadata' ),
+			self::nullable_string_field( $principal, 'workspace_id' ),
+			self::nullable_string_field( $principal, 'client_id' ),
 			$capability_ceiling,
 			$caller_context,
-			array_key_exists( 'audience_id', $principal ) && null !== $principal['audience_id'] ? (string) $principal['audience_id'] : null,
-			isset( $principal['audience_claims'] ) && is_array( $principal['audience_claims'] ) ? $principal['audience_claims'] : array(),
-			array_key_exists( 'owner_type', $principal ) && null !== $principal['owner_type'] ? (string) $principal['owner_type'] : null,
-			array_key_exists( 'owner_key', $principal ) && null !== $principal['owner_key'] ? (string) $principal['owner_key'] : null,
-			isset( $principal['binding'] ) && is_array( $principal['binding'] ) ? $principal['binding'] : null
+			self::nullable_string_field( $principal, 'audience_id' ),
+			self::assoc_array_field( $principal, 'audience_claims' ),
+			self::nullable_string_field( $principal, 'owner_type' ),
+			self::nullable_string_field( $principal, 'owner_key' ),
+			isset( $principal['binding'] ) && is_array( $principal['binding'] ) ? self::assoc_array( $principal['binding'] ) : null
 		);
 	}
 
@@ -340,7 +340,7 @@ final class WP_Agent_Execution_Principal {
 	/**
 	 * Return a copy with additional request metadata.
 	 *
-	 * @param array $request_metadata Replacement request metadata.
+	 * @param array<string,mixed> $request_metadata Replacement request metadata.
 	 * @return self
 	 */
 	public function with_request_metadata( array $request_metadata ): self {
@@ -376,6 +376,57 @@ final class WP_Agent_Execution_Principal {
 		} catch ( \JsonException $e ) {
 			return false;
 		}
+	}
+
+	/**
+	 * @param array<string,mixed> $source Source fields.
+	 */
+	private static function int_field( array $source, string $key ): int {
+		$value = $source[ $key ] ?? null;
+		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (int) $value : 0;
+	}
+
+	/**
+	 * @param array<string,mixed> $source Source fields.
+	 */
+	private static function string_field( array $source, string $key ): string {
+		$value = $source[ $key ] ?? null;
+		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (string) $value : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $source Source fields.
+	 */
+	private static function nullable_string_field( array $source, string $key ): ?string {
+		if ( ! array_key_exists( $key, $source ) || null === $source[ $key ] ) {
+			return null;
+		}
+
+		return self::string_field( $source, $key );
+	}
+
+	/**
+	 * @param array<string,mixed> $source Source fields.
+	 * @return array<string,mixed>
+	 */
+	private static function assoc_array_field( array $source, string $key ): array {
+		$value = $source[ $key ] ?? null;
+		return is_array( $value ) ? self::assoc_array( $value ) : array();
+	}
+
+	/**
+	 * @param array<mixed> $value Raw array.
+	 * @return array<string,mixed>
+	 */
+	private static function assoc_array( array $value ): array {
+		$assoc = array();
+		foreach ( $value as $field => $field_value ) {
+			if ( is_string( $field ) ) {
+				$assoc[ $field ] = $field_value;
+			}
+		}
+
+		return $assoc;
 	}
 
 	/**

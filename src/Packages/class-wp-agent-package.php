@@ -55,7 +55,7 @@ if ( ! class_exists( 'WP_Agent_Package' ) ) {
 		/**
 		 * Optional package metadata.
 		 *
-		 * @var array<string, mixed>
+		 * @var array<mixed, mixed>
 		 */
 		private array $meta = array();
 
@@ -69,7 +69,7 @@ if ( ! class_exists( 'WP_Agent_Package' ) ) {
 			$manifest = is_array( $slug_or_manifest ) ? $slug_or_manifest : array_merge( $args, array( 'slug' => (string) $slug_or_manifest ) );
 
 			$this->slug         = $this->prepare_slug( $manifest['slug'] ?? '' );
-			$this->version      = isset( $manifest['version'] ) ? trim( (string) $manifest['version'] ) : '1.0.0';
+			$this->version      = isset( $manifest['version'] ) ? trim( self::string_value( $manifest['version'] ) ) : '1.0.0';
 			$this->agent        = $this->prepare_agent( $manifest['agent'] ?? null );
 			$this->capabilities = $this->prepare_string_list( $manifest['capabilities'] ?? array(), 'capabilities' );
 			$this->artifacts    = $this->prepare_artifacts( $manifest['artifacts'] ?? array() );
@@ -145,7 +145,7 @@ if ( ! class_exists( 'WP_Agent_Package' ) ) {
 		/**
 		 * Retrieves package metadata.
 		 *
-		 * @return array<string, mixed>
+		 * @return array<mixed, mixed>
 		 */
 		public function get_meta(): array {
 			return $this->meta;
@@ -179,7 +179,7 @@ if ( ! class_exists( 'WP_Agent_Package' ) ) {
 		 * @return string
 		 */
 		private function prepare_slug( $slug ): string {
-			$slug = sanitize_title( (string) $slug );
+			$slug = sanitize_title( self::string_value( $slug ) );
 			if ( '' === $slug ) {
 				throw new InvalidArgumentException( 'Agent package slug cannot be empty.' );
 			}
@@ -202,15 +202,15 @@ if ( ! class_exists( 'WP_Agent_Package' ) ) {
 				throw new InvalidArgumentException( 'Agent package requires an agent definition.' );
 			}
 
-			$slug = $agent['slug'] ?? '';
-			if ( '' === sanitize_title( (string) $slug ) ) {
+			$slug = self::string_value( $agent['slug'] ?? '' );
+			if ( '' === sanitize_title( $slug ) ) {
 				throw new InvalidArgumentException( 'Agent package agent slug cannot be empty.' );
 			}
 
 			$args = $agent;
 			unset( $args['slug'] );
 
-			return new WP_Agent( (string) $slug, $args );
+			return new WP_Agent( $slug, $args );
 		}
 
 		/**
@@ -227,7 +227,7 @@ if ( ! class_exists( 'WP_Agent_Package' ) ) {
 
 			$prepared = array();
 			foreach ( $values as $value ) {
-				$value = trim( strtolower( (string) $value ) );
+				$value = trim( strtolower( self::string_value( $value ) ) );
 				if ( '' !== $value && preg_match( '/^[a-z0-9:_\.\/-]+$/', $value ) ) {
 					$prepared[] = $value;
 				}
@@ -261,7 +261,7 @@ if ( ! class_exists( 'WP_Agent_Package' ) ) {
 					throw new InvalidArgumentException( 'Agent package artifacts must be objects.' );
 				}
 
-				$prepared[] = new WP_Agent_Package_Artifact( $artifact );
+				$prepared[] = new WP_Agent_Package_Artifact( $this->string_keyed_array( $artifact ) );
 			}
 
 			usort(
@@ -270,6 +270,33 @@ if ( ! class_exists( 'WP_Agent_Package' ) ) {
 					return array( $a->get_type(), $a->get_slug() ) <=> array( $b->get_type(), $b->get_slug() );
 				}
 			);
+
+			return $prepared;
+		}
+
+		/**
+		 * Convert scalar/Stringable input to a string.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return string String value, or empty string for non-stringable input.
+		 */
+		private static function string_value( $value ): string {
+			return is_scalar( $value ) || $value instanceof Stringable ? (string) $value : '';
+		}
+
+		/**
+		 * Keep only string-keyed entries from an associative declaration.
+		 *
+		 * @param array<mixed,mixed> $values Raw declaration.
+		 * @return array<string,mixed>
+		 */
+		private function string_keyed_array( array $values ): array {
+			$prepared = array();
+			foreach ( $values as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
 
 			return $prepared;
 		}

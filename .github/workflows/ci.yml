@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - command: lint
-            label: lint
+            label: lint (PHPCS + PHPStan)
           - command: test
             label: tests (PHPUnit + smoke tests)
 

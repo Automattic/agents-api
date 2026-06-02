@@ -68,8 +68,8 @@ add_action(
  *
  * @since 0.107.0
  *
- * @param array $input Canonical dispatch-message input.
- * @return array|\WP_Error Canonical output, or WP_Error if no runtime is registered.
+ * @param array<mixed> $input Canonical dispatch-message input.
+ * @return array<mixed>|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_dispatch_message_dispatch( array $input ) {
 	/**
@@ -81,7 +81,7 @@ function agents_dispatch_message_dispatch( array $input ) {
 	 * @since 0.107.0
 	 *
 	 * @param callable|null $handler Currently registered handler.
-	 * @param array         $input   Canonical dispatch-message input.
+	 * @param array<mixed>         $input   Canonical dispatch-message input.
 	 */
 	$handler = apply_filters( 'wp_agent_dispatch_message_handler', null, $input );
 
@@ -117,7 +117,7 @@ function agents_dispatch_message_dispatch( array $input ) {
  *
  * @since 0.107.0
  *
- * @param array $input Canonical dispatch-message input.
+ * @param array<mixed> $input Canonical dispatch-message input.
  */
 function agents_dispatch_message_permission( array $input ): bool {
 	return (bool) apply_filters(
@@ -131,6 +131,7 @@ function agents_dispatch_message_permission( array $input ): bool {
  * Canonical input schema.
  *
  * @since 0.107.0
+ * @return array<string, mixed>
  */
 function agents_dispatch_message_input_schema(): array {
 	return array(
@@ -175,6 +176,7 @@ function agents_dispatch_message_input_schema(): array {
  * Canonical output schema.
  *
  * @since 0.107.0
+ * @return array<string, mixed>
  */
 function agents_dispatch_message_output_schema(): array {
 	return array(

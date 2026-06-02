@@ -106,12 +106,14 @@ add_action(
  *
  * @since  0.103.0
  *
- * @param  array $input Canonical chat-ability input.
- * @return array|\WP_Error Canonical output, or WP_Error if no runtime is registered.
+ * @param  array<mixed> $input Canonical chat-ability input.
+ * @return array<string,mixed>|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_chat_dispatch( array $input ) {
-	if ( ! isset( $input['run_id'] ) || '' === trim( (string) $input['run_id'] ) ) {
+	$run_id = agents_chat_optional_string( $input['run_id'] ?? null );
+	if ( null === $run_id ) {
 		$input['run_id'] = WP_Agent_Chat_Run_Control::generate_run_id();
+		$run_id          = $input['run_id'];
 	}
 
 	/**
@@ -124,7 +126,7 @@ function agents_chat_dispatch( array $input ) {
 	 *
 	 * @param callable|null $handler Currently registered handler. Null when
 	 *                               no runtime has registered.
-	 * @param array         $input   The canonical input being dispatched. Use
+	 * @param array<mixed>         $input   The canonical input being dispatched. Use
 	 *                               $input['agent'] to route per agent slug.
 	 */
 	$handler = apply_filters( 'wp_agent_chat_handler', null, $input );
@@ -137,7 +139,7 @@ function agents_chat_dispatch( array $input ) {
 		 * @since 0.103.0
 		 *
 		 * @param string $reason Dispatch failure reason. Always `'no_handler'`.
-		 * @param array  $input  The canonical input that was rejected.
+		 * @param array<mixed>  $input  The canonical input that was rejected.
 		 */
 		do_action( 'agents_chat_dispatch_failed', 'no_handler', $input );
 
@@ -147,16 +149,16 @@ function agents_chat_dispatch( array $input ) {
 		);
 	}
 
-	$run_id     = (string) $input['run_id'];
-	$session_id = trim( (string) ( $input['session_id'] ?? '' ) );
-	if ( '' !== $session_id ) {
-		WP_Agent_Chat_Run_Control::start_run( $run_id, $session_id, array( 'agent' => (string) ( $input['agent'] ?? '' ) ) );
+	$session_id = agents_chat_optional_string( $input['session_id'] ?? null );
+	$agent      = agents_chat_optional_string( $input['agent'] ?? null ) ?? '';
+	if ( null !== $session_id ) {
+		WP_Agent_Chat_Run_Control::start_run( $run_id, $session_id, array( 'agent' => $agent ) );
 	}
 
 	$result = call_user_func( $handler, $input );
 
 	if ( is_wp_error( $result ) ) {
-		if ( '' !== $session_id ) {
+		if ( null !== $session_id ) {
 			WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED );
 		}
 
@@ -167,7 +169,7 @@ function agents_chat_dispatch( array $input ) {
 	}
 
 	if ( ! is_array( $result ) ) {
-		if ( '' !== $session_id ) {
+		if ( null !== $session_id ) {
 			WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED );
 		}
 
@@ -180,22 +182,47 @@ function agents_chat_dispatch( array $input ) {
 		);
 	}
 
-	if ( ! isset( $result['run_id'] ) || '' === trim( (string) $result['run_id'] ) ) {
+	$result = agents_chat_string_keyed_array( $result );
+	if ( null === agents_chat_optional_string( $result['run_id'] ?? null ) ) {
 		$result['run_id'] = $input['run_id'];
 	}
 
-	$resolved_session_id = trim( (string) ( $result['session_id'] ?? $session_id ) );
-	if ( '' !== $resolved_session_id ) {
-		if ( '' === $session_id ) {
-			WP_Agent_Chat_Run_Control::start_run( (string) $result['run_id'], $resolved_session_id, array( 'agent' => (string) ( $input['agent'] ?? '' ) ) );
+	$result_run_id       = agents_chat_optional_string( $result['run_id'] ?? null ) ?? $run_id;
+	$resolved_session_id = agents_chat_optional_string( $result['session_id'] ?? null ) ?? $session_id;
+	if ( null !== $resolved_session_id ) {
+		if ( null === $session_id ) {
+			WP_Agent_Chat_Run_Control::start_run( $result_run_id, $resolved_session_id, array( 'agent' => $agent ) );
 		}
 
 		$status = ! empty( $result['completed'] ) || ! array_key_exists( 'completed', $result )
 			? WP_Agent_Chat_Run_Control::STATUS_COMPLETED
 			: WP_Agent_Chat_Run_Control::STATUS_RUNNING;
-		WP_Agent_Chat_Run_Control::finish_run( (string) $result['run_id'], $status );
+		WP_Agent_Chat_Run_Control::finish_run( $result_run_id, $status );
 	}
 
+	return $result;
+}
+
+function agents_chat_optional_string( mixed $value ): ?string {
+	if ( ! is_scalar( $value ) && ! $value instanceof \Stringable ) {
+		return null;
+	}
+
+	$value = trim( (string) $value );
+	return '' === $value ? null : $value;
+}
+
+/**
+ * @param array<mixed> $data
+ * @return array<string,mixed>
+ */
+function agents_chat_string_keyed_array( array $data ): array {
+	$result = array();
+	foreach ( $data as $key => $value ) {
+		if ( is_string( $key ) ) {
+			$result[ $key ] = $value;
+		}
+	}
 	return $result;
 }
 
@@ -206,7 +233,7 @@ function agents_chat_dispatch( array $input ) {
  *
  * @since 0.103.0
  *
- * @param array $input Canonical input.
+ * @param array<mixed> $input Canonical input.
  * @return bool
  */
 function agents_chat_permission( array $input ): bool {
@@ -214,7 +241,7 @@ function agents_chat_permission( array $input ): bool {
 	 * Filter the permission decision for the canonical chat ability.
 	 *
 	 * @param bool  $allowed Default: current_user_can( 'manage_options' ).
-	 * @param array $input   The canonical input being authorized.
+	 * @param array<mixed> $input   The canonical input being authorized.
 	 */
 	return (bool) apply_filters(
 		'agents_chat_permission',
@@ -228,7 +255,8 @@ function agents_chat_permission( array $input ): bool {
  *
  * @since  0.103.0
  *
- * @return array
+ * @return array<mixed>
+ * @return array<string, mixed>
  */
 function agents_chat_input_schema(): array {
 	return array(
@@ -324,7 +352,8 @@ function agents_chat_input_schema(): array {
  *
  * @since 0.103.0
  *
- * @return array
+ * @return array<mixed>
+ * @return array<string, mixed>
  */
 function agents_chat_session_owner_schema(): array {
 	return array(
@@ -352,7 +381,8 @@ function agents_chat_session_owner_schema(): array {
  *
  * @since  0.103.0
  *
- * @return array
+ * @return array<mixed>
+ * @return array<string, mixed>
  */
 function agents_chat_output_schema(): array {
 	return array(

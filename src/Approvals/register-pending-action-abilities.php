@@ -164,7 +164,7 @@ function agents_summary_pending_actions( array $input ) {
  * @return array<string,mixed>|\WP_Error
  */
 function agents_get_pending_action( array $input ) {
-	$action_id = trim( (string) ( $input['action_id'] ?? '' ) );
+	$action_id = agents_pending_action_string_input( $input, 'action_id' );
 	if ( '' === $action_id ) {
 		return new \WP_Error( 'agents_pending_action_missing_action_id', 'action_id is required.' );
 	}
@@ -186,8 +186,8 @@ function agents_get_pending_action( array $input ) {
  * @return array<string,mixed>|\WP_Error
  */
 function agents_resolve_pending_action( array $input ) {
-	$action_id   = trim( (string) ( $input['action_id'] ?? '' ) );
-	$resolver_id = trim( (string) ( $input['resolver'] ?? '' ) );
+	$action_id   = agents_pending_action_string_input( $input, 'action_id' );
+	$resolver_id = agents_pending_action_string_input( $input, 'resolver' );
 	if ( '' === $action_id ) {
 		return new \WP_Error( 'agents_pending_action_missing_action_id', 'action_id is required.' );
 	}
@@ -196,7 +196,7 @@ function agents_resolve_pending_action( array $input ) {
 	}
 
 	try {
-		$decision = WP_Agent_Approval_Decision::from_string( (string) ( $input['decision'] ?? '' ) );
+		$decision = WP_Agent_Approval_Decision::from_string( agents_pending_action_string_input( $input, 'decision' ) );
 	} catch ( \InvalidArgumentException $error ) {
 		return new \WP_Error( 'agents_pending_action_invalid_decision', $error->getMessage() );
 	}
@@ -213,8 +213,8 @@ function agents_resolve_pending_action( array $input ) {
 		$action_id,
 		$decision,
 		$resolver_id,
-		(array) ( $input['payload'] ?? array() ),
-		(array) ( $input['context'] ?? array() )
+		agents_pending_action_array_input( $input, 'payload' ),
+		agents_pending_action_array_input( $input, 'context' )
 	);
 
 	if ( is_wp_error( $result ) ) {
@@ -249,7 +249,40 @@ function agents_pending_action_permission( array $input ): bool {
  * @return array<string,mixed>
  */
 function agents_pending_action_filters( array $input ): array {
-	return (array) ( $input['filters'] ?? array() );
+	return agents_pending_action_array_input( $input, 'filters' );
+}
+
+/**
+ * Read a trimmed scalar string from ability input.
+ *
+ * @param array<string,mixed> $input Ability input.
+ */
+function agents_pending_action_string_input( array $input, string $key ): string {
+	$value = $input[ $key ] ?? '';
+
+	return is_scalar( $value ) ? trim( (string) $value ) : '';
+}
+
+/**
+ * Read a string-keyed array from ability input.
+ *
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed>
+ */
+function agents_pending_action_array_input( array $input, string $key ): array {
+	$value = $input[ $key ] ?? array();
+	if ( ! is_array( $value ) ) {
+		return array();
+	}
+
+	$result = array();
+	foreach ( $value as $item_key => $item ) {
+		if ( is_string( $item_key ) ) {
+			$result[ $item_key ] = $item;
+		}
+	}
+
+	return $result;
 }
 
 /**
@@ -264,7 +297,8 @@ function agents_pending_action_no_store_error(): \WP_Error {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_pending_action_filters_input_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -278,7 +312,8 @@ function agents_pending_action_filters_input_schema(): array {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_get_pending_action_input_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -294,7 +329,8 @@ function agents_get_pending_action_input_schema(): array {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_resolve_pending_action_input_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -323,7 +359,8 @@ function agents_resolve_pending_action_input_schema(): array {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_list_pending_actions_output_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -337,7 +374,8 @@ function agents_list_pending_actions_output_schema(): array {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_get_pending_action_output_schema(): array {
 	return array(
 		'type'       => 'object',
@@ -348,7 +386,8 @@ function agents_get_pending_action_output_schema(): array {
 	);
 }
 
-/** @return array<string,mixed> */
+/** @return array<string,mixed> * @return array<string, mixed>
+ */
 function agents_resolve_pending_action_output_schema(): array {
 	return array(
 		'type'       => 'object',

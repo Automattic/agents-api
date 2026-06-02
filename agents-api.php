@@ -17,6 +17,14 @@
  * @package AgentsAPI
  */
 
+// Under static analysis the bootstrap is not executed: PHPStan loads this file
+// through the Composer files-autoloader while analysing, and the runtime
+// requires below would fatal without WordPress. PHPStan reads src/ directly, so
+// returning early here is safe and avoids killing its analysis workers.
+if ( defined( '__PHPSTAN_RUNNING__' ) ) {
+	return;
+}
+
 defined( 'ABSPATH' ) || exit;
 
 if ( defined( 'AGENTS_API_LOADED' ) ) {
@@ -209,6 +217,12 @@ require_once AGENTS_API_PATH . 'src/Triggers/class-wp-agent-event-trigger-regist
 require_once AGENTS_API_PATH . 'src/Triggers/register-event-triggers.php';
 require_once AGENTS_API_PATH . 'src/Triggers/register-event-trigger-handler.php';
 
-add_action( 'init', array( 'WP_Agents_Registry', 'init' ), 10 );
+add_action(
+	'init',
+	static function (): void {
+		WP_Agents_Registry::init();
+	},
+	10
+);
 add_action( 'init', array( 'WP_Guidelines_Substrate', 'register' ), 9 );
 add_action( 'init', array( 'AgentsAPI\\AI\\Abilities\\WP_Agent_Ability_Lifecycle_Bridge', 'register' ), 5 );

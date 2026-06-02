@@ -23,14 +23,14 @@ final class WP_Agent_Consent_Decision {
 	/** @var string */
 	private $reason;
 
-	/** @var array */
+	/** @var array<mixed> */
 	private $audit_metadata;
 
 	/**
 	 * @param bool   $allowed        Whether the operation is allowed.
 	 * @param string $operation      Consent operation value.
 	 * @param string $reason         Stable reason code.
-	 * @param array  $audit_metadata JSON-friendly audit metadata.
+	 * @param array<mixed>  $audit_metadata JSON-friendly audit metadata.
 	 */
 	private function __construct( bool $allowed, string $operation, string $reason, array $audit_metadata = array() ) {
 		$normalized_operation = WP_Agent_Consent_Operation::normalize( $operation );
@@ -46,7 +46,7 @@ final class WP_Agent_Consent_Decision {
 	 *
 	 * @param string $operation      Consent operation value.
 	 * @param string $reason         Stable reason code.
-	 * @param array  $audit_metadata JSON-friendly audit metadata.
+	 * @param array<mixed>  $audit_metadata JSON-friendly audit metadata.
 	 * @return self
 	 */
 	public static function allowed( string $operation, string $reason = 'allowed', array $audit_metadata = array() ): self {
@@ -58,7 +58,7 @@ final class WP_Agent_Consent_Decision {
 	 *
 	 * @param string $operation      Consent operation value.
 	 * @param string $reason         Stable reason code.
-	 * @param array  $audit_metadata JSON-friendly audit metadata.
+	 * @param array<mixed>  $audit_metadata JSON-friendly audit metadata.
 	 * @return self
 	 */
 	public static function denied( string $operation, string $reason = 'denied', array $audit_metadata = array() ): self {
@@ -95,7 +95,7 @@ final class WP_Agent_Consent_Decision {
 	/**
 	 * JSON-friendly audit metadata.
 	 *
-	 * @return array
+	 * @return array<mixed>
 	 */
 	public function audit_metadata(): array {
 		return $this->audit_metadata;
@@ -104,7 +104,7 @@ final class WP_Agent_Consent_Decision {
 	/**
 	 * Return JSON-friendly shape.
 	 *
-	 * @return array
+	 * @return array<mixed>
 	 */
 	public function to_array(): array {
 		return array(
@@ -118,8 +118,8 @@ final class WP_Agent_Consent_Decision {
 	/**
 	 * Normalize arbitrary metadata to JSON-friendly scalar/array values.
 	 *
-	 * @param array $metadata Raw metadata.
-	 * @return array
+	 * @param array<mixed> $metadata Raw metadata.
+	 * @return array<mixed>
 	 */
 	private static function normalize_metadata( array $metadata ): array {
 		$normalized = array();

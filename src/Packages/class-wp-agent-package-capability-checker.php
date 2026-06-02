@@ -70,7 +70,7 @@ if ( ! class_exists( 'WP_Agent_Package_Capability_Checker' ) ) {
 		 */
 		private static function known_artifact_types( array $args ): array {
 			if ( isset( $args['known_artifact_types'] ) ) {
-				return self::normalize_string_list( is_array( $args['known_artifact_types'] ) ? $args['known_artifact_types'] : array() );
+				return self::normalize_string_list( is_array( $args['known_artifact_types'] ) ? array_values( $args['known_artifact_types'] ) : array() );
 			}
 
 			return self::normalize_string_list( array_keys( wp_get_agent_package_artifact_types() ) );
@@ -79,13 +79,13 @@ if ( ! class_exists( 'WP_Agent_Package_Capability_Checker' ) ) {
 		/**
 		 * Normalizes a capability or type list.
 		 *
-		 * @param array<int,string> $values Raw strings.
+		 * @param array<int,mixed> $values Raw values.
 		 * @return array<int,string>
 		 */
 		private static function normalize_string_list( array $values ): array {
 			$prepared = array();
 			foreach ( $values as $value ) {
-				$value = trim( strtolower( (string) $value ) );
+				$value = is_scalar( $value ) ? trim( strtolower( (string) $value ) ) : '';
 				if ( '' !== $value ) {
 					$prepared[] = $value;
 				}

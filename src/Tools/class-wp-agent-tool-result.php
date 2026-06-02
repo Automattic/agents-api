@@ -19,7 +19,8 @@ class WP_Agent_Tool_Result {
 	 *
 	 * @param string $tool_name  Tool identifier.
 	 * @param mixed  $result     Executor result payload.
-	 * @param array  $metadata   Optional result metadata.
+	 * @param array<mixed>        $metadata Optional result metadata.
+	 * @param array<string,mixed> $runtime  Optional runtime metadata.
 	 * @return array<string, mixed>
 	 */
 	public static function success( string $tool_name, $result, array $metadata = array(), array $runtime = array() ): array {
@@ -39,7 +40,8 @@ class WP_Agent_Tool_Result {
 	 *
 	 * @param string $tool_name Tool identifier.
 	 * @param string $error     Human-readable error.
-	 * @param array  $metadata  Optional result metadata.
+	 * @param array<mixed>        $metadata Optional result metadata.
+	 * @param array<string,mixed> $runtime  Optional runtime metadata.
 	 * @return array<string, mixed>
 	 */
 	public static function error( string $tool_name, string $error, array $metadata = array(), array $runtime = array() ): array {
@@ -57,7 +59,7 @@ class WP_Agent_Tool_Result {
 	/**
 	 * Normalize arbitrary executor output.
 	 *
-	 * @param array $result Raw result.
+	 * @param array<mixed> $result Raw result.
 	 * @return array<string, mixed>
 	 */
 	public static function normalize( array $result ): array {

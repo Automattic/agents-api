@@ -35,15 +35,15 @@ if ( ! class_exists( 'WP_Agent_Installed_Agent' ) ) {
 		public function __construct( array $args ) {
 			$this->id              = self::prepare_required_string( $args['id'] ?? '', 'Installed agent id cannot be empty.' );
 			$this->agent_slug      = self::prepare_slug( $args['agent_slug'] ?? '', 'Installed agent slug cannot be empty.' );
-			$this->owner_user_id   = array_key_exists( 'owner_user_id', $args ) && null !== $args['owner_user_id'] ? max( 0, (int) $args['owner_user_id'] ) : null;
+			$this->owner_user_id   = array_key_exists( 'owner_user_id', $args ) && null !== $args['owner_user_id'] ? max( 0, self::int_value( $args['owner_user_id'] ) ) : null;
 			$this->instance_key    = self::prepare_instance_key( $args['instance_key'] ?? 'default' );
-			$this->config          = is_array( $args['config'] ?? null ) ? $args['config'] : array();
-			$this->meta            = is_array( $args['meta'] ?? null ) ? $args['meta'] : array();
+			$this->config          = self::string_keyed_array( $args['config'] ?? array() );
+			$this->meta            = self::string_keyed_array( $args['meta'] ?? array() );
 			$this->status          = self::prepare_status( $args['status'] ?? 'installed' );
-			$this->package_slug    = isset( $args['package_slug'] ) && '' !== trim( (string) $args['package_slug'] ) ? self::prepare_slug( $args['package_slug'], 'Installed agent package slug cannot be empty.' ) : null;
-			$this->package_version = isset( $args['package_version'] ) && '' !== trim( (string) $args['package_version'] ) ? trim( (string) $args['package_version'] ) : null;
-			$this->created_at      = isset( $args['created_at'] ) && '' !== trim( (string) $args['created_at'] ) ? trim( (string) $args['created_at'] ) : null;
-			$this->updated_at      = isset( $args['updated_at'] ) && '' !== trim( (string) $args['updated_at'] ) ? trim( (string) $args['updated_at'] ) : null;
+			$this->package_slug    = self::optional_slug( $args['package_slug'] ?? null, 'Installed agent package slug cannot be empty.' );
+			$this->package_version = self::optional_string( $args['package_version'] ?? null );
+			$this->created_at      = self::optional_string( $args['created_at'] ?? null );
+			$this->updated_at      = self::optional_string( $args['updated_at'] ?? null );
 		}
 
 		public function get_id(): string {
@@ -114,8 +114,8 @@ if ( ! class_exists( 'WP_Agent_Installed_Agent' ) ) {
 			);
 		}
 
-		private static function prepare_required_string( $value, string $message ): string {
-			$value = trim( (string) $value );
+		private static function prepare_required_string( mixed $value, string $message ): string {
+			$value = trim( self::string_value( $value ) );
 			if ( '' === $value ) {
 				throw new InvalidArgumentException( esc_html( $message ) );
 			}
@@ -123,8 +123,8 @@ if ( ! class_exists( 'WP_Agent_Installed_Agent' ) ) {
 			return $value;
 		}
 
-		private static function prepare_slug( $value, string $message ): string {
-			$value = sanitize_title( (string) $value );
+		private static function prepare_slug( mixed $value, string $message ): string {
+			$value = sanitize_title( self::string_value( $value ) );
 			if ( '' === $value ) {
 				throw new InvalidArgumentException( esc_html( $message ) );
 			}
@@ -132,21 +132,56 @@ if ( ! class_exists( 'WP_Agent_Installed_Agent' ) ) {
 			return $value;
 		}
 
-		private static function prepare_instance_key( $value ): string {
-			$value = trim( strtolower( str_replace( '\\', '/', (string) $value ) ) );
+		private static function prepare_instance_key( mixed $value ): string {
+			$value = trim( strtolower( str_replace( '\\', '/', self::string_value( $value ) ) ) );
 			$value = preg_replace( '#\s*/\s*#', '/', $value );
+			$value = is_string( $value ) ? $value : '';
 			$value = preg_replace( '#/+#', '/', $value );
-			return '' === $value ? 'default' : $value;
+			return ! is_string( $value ) || '' === $value ? 'default' : $value;
 		}
 
-		private static function prepare_status( $status ): string {
-			$status  = sanitize_title( (string) $status );
+		private static function prepare_status( mixed $status ): string {
+			$status  = sanitize_title( self::string_value( $status ) );
 			$allowed = array( 'installed', 'updated', 'disabled', 'removed', 'projected' );
 			if ( ! in_array( $status, $allowed, true ) ) {
 				throw new InvalidArgumentException( 'Installed agent status is invalid.' );
 			}
 
 			return $status;
+		}
+
+		private static function optional_string( mixed $value ): ?string {
+			$value = trim( self::string_value( $value ) );
+			return '' === $value ? null : $value;
+		}
+
+		private static function optional_slug( mixed $value, string $message ): ?string {
+			$value = trim( self::string_value( $value ) );
+			return '' === $value ? null : self::prepare_slug( $value, $message );
+		}
+
+		private static function string_value( mixed $value ): string {
+			return is_scalar( $value ) ? (string) $value : '';
+		}
+
+		private static function int_value( mixed $value ): int {
+			return is_numeric( $value ) ? (int) $value : 0;
+		}
+
+		/** @return array<string,mixed> */
+		private static function string_keyed_array( mixed $values ): array {
+			if ( ! is_array( $values ) ) {
+				return array();
+			}
+
+			$prepared = array();
+			foreach ( $values as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+
+			return $prepared;
 		}
 	}
 }

@@ -21,10 +21,10 @@ interface WP_Agent_Tool_Executor {
 	 * declaration maps to abilities, callbacks, remote tools, approvals, or any
 	 * other product-specific execution path.
 	 *
-	 * @param array $tool_call       Normalized prepared tool call.
-	 * @param array $tool_definition Tool declaration selected for the call.
-	 * @param array $context         Host runtime context for this invocation.
-	 * @return array Raw or normalized tool execution result.
+	 * @param array<mixed> $tool_call       Normalized prepared tool call.
+	 * @param array<mixed> $tool_definition Tool declaration selected for the call.
+	 * @param array<mixed> $context         Host runtime context for this invocation.
+	 * @return array<mixed> Raw or normalized tool execution result.
 	 */
 	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array;
 }

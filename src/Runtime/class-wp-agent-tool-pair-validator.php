@@ -149,7 +149,9 @@ class WP_Agent_Tool_Pair_Validator {
 
 		$drop_indices = array();
 		foreach ( $orphans as $orphan ) {
-			$drop_indices[ (int) $orphan['index'] ] = true;
+			if ( is_int( $orphan['index'] ?? null ) ) {
+				$drop_indices[ $orphan['index'] ] = true;
+			}
 		}
 
 		$retained = array();
@@ -213,7 +215,8 @@ class WP_Agent_Tool_Pair_Validator {
 	 * @return string
 	 */
 	private static function tool_name( array $envelope ): string {
-		$name = $envelope['payload']['tool_name'] ?? '';
+		$payload = $envelope['payload'] ?? array();
+		$name    = is_array( $payload ) ? ( $payload['tool_name'] ?? '' ) : '';
 		return is_string( $name ) ? $name : '';
 	}
 
@@ -224,7 +227,8 @@ class WP_Agent_Tool_Pair_Validator {
 	 * @return string
 	 */
 	private static function tool_call_id( array $envelope ): string {
-		$id = $envelope['metadata']['tool_call_id'] ?? '';
+		$metadata = $envelope['metadata'] ?? array();
+		$id       = is_array( $metadata ) ? ( $metadata['tool_call_id'] ?? '' ) : '';
 		return is_string( $id ) ? $id : '';
 	}
 

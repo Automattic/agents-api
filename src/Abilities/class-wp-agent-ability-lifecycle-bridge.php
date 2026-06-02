@@ -153,7 +153,7 @@ class WP_Agent_Ability_Lifecycle_Bridge {
 
 		$pending = $decision instanceof WP_Agent_Pending_Action
 			? $decision
-			: WP_Agent_Pending_Action::from_array( (array) $decision );
+			: WP_Agent_Pending_Action::from_array( self::string_keyed_array( $decision ) );
 
 		$store = apply_filters( self::FILTER_PENDING_ACTION_STORE, null );
 		if ( $store instanceof WP_Agent_Pending_Action_Store ) {
@@ -161,9 +161,10 @@ class WP_Agent_Ability_Lifecycle_Bridge {
 		}
 
 		$pending_data = $pending->to_array();
+		$summary      = $pending->get_summary();
 
 		return WP_Agent_Message::approvalRequired(
-			$pending_data['summary'],
+			$summary,
 			array(
 				'action_id'  => $pending_data['action_id'],
 				'kind'       => $pending_data['kind'],
@@ -175,5 +176,26 @@ class WP_Agent_Ability_Lifecycle_Bridge {
 				'ability_name' => $ability_name,
 			)
 		);
+	}
+
+	/**
+	 * Normalize a filter-provided decision payload to string-keyed array input.
+	 *
+	 * @param mixed $value Raw filter value.
+	 * @return array<string,mixed>
+	 */
+	private static function string_keyed_array( $value ): array {
+		if ( ! is_array( $value ) ) {
+			return array();
+		}
+
+		$result = array();
+		foreach ( $value as $key => $item ) {
+			if ( is_string( $key ) ) {
+				$result[ $key ] = $item;
+			}
+		}
+
+		return $result;
 	}
 }

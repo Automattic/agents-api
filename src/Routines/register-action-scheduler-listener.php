@@ -33,16 +33,16 @@ add_action(
  *
  * @since 0.105.0
  *
- * @param string|array $args Either the bare routine_id string (when AS
- *                           passes a single positional) or the full args
- *                           array.
+ * @param string|array<mixed> $args Either the bare routine_id string (when AS
+ *                                  passes a single positional) or the full args
+ *                                  array.
  */
 function dispatch_scheduled_routine_run( $args ): void {
 	$routine_id = '';
 	if ( is_string( $args ) ) {
 		$routine_id = $args;
 	} elseif ( is_array( $args ) ) {
-		$routine_id = (string) ( $args['routine_id'] ?? '' );
+		$routine_id = self_extract_scheduled_routine_id( $args );
 	}
 
 	if ( '' === $routine_id ) {
@@ -115,7 +115,15 @@ function dispatch_scheduled_routine_run( $args ): void {
 	 * @since 0.105.0
 	 *
 	 * @param WP_Agent_Routine $routine
-	 * @param array            $result Canonical chat output.
+	 * @param mixed                   $result Canonical chat output.
 	 */
 	do_action( 'wp_agent_routine_run_completed', $routine, $result );
+}
+
+/**
+ * @param array<mixed> $args Scheduled action args.
+ */
+function self_extract_scheduled_routine_id( array $args ): string {
+	$value = $args['routine_id'] ?? ( $args[0] ?? '' );
+	return is_string( $value ) ? $value : '';
 }

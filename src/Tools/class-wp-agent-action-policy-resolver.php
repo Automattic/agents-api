@@ -53,9 +53,9 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		 * @return string One of direct, preview, forbidden.
 		 */
 		public function resolve_for_tool( array $context ): string {
-			$tool_name = (string) ( $context['tool_name'] ?? '' );
-			$mode      = (string) ( $context['mode'] ?? WP_Agent_Tool_Policy::RUNTIME_CHAT );
-			$tool_def  = is_array( $context['tool_def'] ?? null ) ? $context['tool_def'] : array();
+			$tool_name = $this->string_value( $context['tool_name'] ?? '' );
+			$mode      = $this->string_value( $context['mode'] ?? WP_Agent_Tool_Policy::RUNTIME_CHAT );
+			$tool_def  = is_array( $context['tool_def'] ?? null ) ? $this->string_keyed_array( $context['tool_def'] ) : array();
 
 			if ( '' === $tool_name ) {
 				return WP_Agent_Action_Policy::DIRECT;
@@ -150,8 +150,8 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		 */
 		private function remembered_action_policy( array $context, string $tool_name ): ?string {
 			$workspace = $this->workspace_from_context( $context );
-			$user_id   = (int) ( $context['user_id'] ?? ( $context['acting_user_id'] ?? 0 ) );
-			$agent_id  = (string) ( $context['agent_id'] ?? ( $context['agent_slug'] ?? '' ) );
+			$user_id   = $this->int_value( $context['user_id'] ?? ( $context['acting_user_id'] ?? 0 ) );
+			$agent_id  = $this->string_value( $context['agent_id'] ?? ( $context['agent_slug'] ?? '' ) );
 
 			if ( null === $workspace || $user_id <= 0 || '' === $agent_id ) {
 				return null;
@@ -193,7 +193,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		 */
 		private function agent_action_policy_from_context( array $context ): array {
 			if ( is_array( $context['action_policy'] ?? null ) ) {
-				return $context['action_policy'];
+				return $this->string_keyed_array( $context['action_policy'] );
 			}
 
 			$agent_config = array();
@@ -202,7 +202,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 			} elseif ( ( $context['agent'] ?? null ) instanceof WP_Agent ) {
 				$agent_config = $context['agent']->get_default_config();
 			} else {
-				$agent_slug = (string) ( $context['agent_slug'] ?? ( $context['agent_id'] ?? '' ) );
+				$agent_slug = $this->string_value( $context['agent_slug'] ?? ( $context['agent_id'] ?? '' ) );
 				if ( '' !== $agent_slug && function_exists( 'wp_get_agent' ) ) {
 					$agent = wp_get_agent( $agent_slug );
 					if ( $agent instanceof WP_Agent ) {
@@ -211,7 +211,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 				}
 			}
 
-			return is_array( $agent_config['action_policy'] ?? null ) ? $agent_config['action_policy'] : array();
+			return is_array( $agent_config['action_policy'] ?? null ) ? $this->string_keyed_array( $agent_config['action_policy'] ) : array();
 		}
 
 		/**
@@ -305,6 +305,59 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 			);
 
 			return array_values( array_unique( $values ) );
+		}
+
+		/**
+		 * Convert scalar/Stringable input to a string.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return string String value, or empty string for non-stringable input.
+		 */
+		private function string_value( $value ): string {
+			return is_scalar( $value ) || $value instanceof Stringable ? (string) $value : '';
+		}
+
+		/**
+		 * Convert scalar/Stringable input to an integer.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return int Integer value, or zero for non-stringable input.
+		 */
+		private function int_value( $value ): int {
+			if ( is_int( $value ) ) {
+				return $value;
+			}
+
+			if ( is_bool( $value ) ) {
+				return $value ? 1 : 0;
+			}
+
+			if ( is_float( $value ) ) {
+				return (int) $value;
+			}
+
+			if ( is_string( $value ) || $value instanceof Stringable ) {
+				return (int) (string) $value;
+			}
+
+			return 0;
+		}
+
+		/**
+		 * Keep only string-keyed entries from a policy map.
+		 *
+		 * @param array<mixed,mixed> $values Raw map.
+		 * @return array<string,mixed>
+		 */
+		private function string_keyed_array( array $values ): array {
+			$prepared = array();
+			foreach ( $values as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+
+			return $prepared;
 		}
 	}
 }

@@ -35,7 +35,7 @@ if ( ! class_exists( 'WP_Agent_Materialization_Result' ) ) {
 			$this->installed_agent = $installed_agent;
 			$this->projected_agent = $projected_agent;
 			$this->messages        = self::prepare_messages( $messages );
-			$this->meta            = $meta;
+			$this->meta            = self::string_keyed_array( $meta );
 		}
 
 		public function get_status(): string {
@@ -81,13 +81,31 @@ if ( ! class_exists( 'WP_Agent_Materialization_Result' ) ) {
 			return $status;
 		}
 
-		/** @param array<int,string> $messages */
+		/**
+		 * @param array<int,string> $messages
+		 * @return array<int,string>
+		 */
 		private static function prepare_messages( array $messages ): array {
 			$prepared = array();
 			foreach ( $messages as $message ) {
-				$message = trim( (string) $message );
+				$message = trim( $message );
 				if ( '' !== $message ) {
 					$prepared[] = $message;
+				}
+			}
+
+			return $prepared;
+		}
+
+		/**
+		 * @param array<mixed> $values Raw values.
+		 * @return array<string,mixed>
+		 */
+		private static function string_keyed_array( array $values ): array {
+			$prepared = array();
+			foreach ( $values as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
 				}
 			}
 

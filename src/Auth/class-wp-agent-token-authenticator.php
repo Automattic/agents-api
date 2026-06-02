@@ -28,8 +28,9 @@ if ( ! class_exists( 'WP_Agent_Token_Authenticator' ) ) {
 		 * @param string              $raw_token       Raw bearer token from a request header.
 		 * @param string              $request_context Request context such as rest, cli, cron, or chat.
 		 * @param array<string,mixed> $metadata        Additional request metadata.
+		 * @param array<mixed,mixed>|object|null $caller_context_source Request-like caller-context header source.
 		 */
-		public function authenticate_bearer_token( string $raw_token, string $request_context = AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, array $metadata = array(), $caller_context_source = null, int $max_chain_depth = WP_Agent_Caller_Context::DEFAULT_MAX_CHAIN_DEPTH ): ?AgentsAPI\AI\WP_Agent_Execution_Principal {
+		public function authenticate_bearer_token( string $raw_token, string $request_context = AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, array $metadata = array(), array|object|null $caller_context_source = null, int $max_chain_depth = WP_Agent_Caller_Context::DEFAULT_MAX_CHAIN_DEPTH ): ?AgentsAPI\AI\WP_Agent_Execution_Principal {
 			$raw_token = trim( $raw_token );
 			if ( '' === $raw_token ) {
 				return null;

@@ -34,7 +34,7 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Request' ) ) {
 			$this->dry_run                = (bool) ( $args['dry_run'] ?? false );
 			$this->auto_apply             = (bool) ( $args['auto_apply'] ?? true );
 			$this->approved_artifact_keys = self::prepare_string_list( $args['approved_artifact_keys'] ?? array() );
-			$this->context                = is_array( $args['context'] ?? null ) ? $args['context'] : array();
+			$this->context                = self::prepare_string_keyed_array( $args['context'] ?? array() );
 		}
 
 		public function get_package(): WP_Agent_Package {
@@ -75,8 +75,8 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Request' ) ) {
 			);
 		}
 
-		private static function prepare_operation( $operation ): string {
-			$operation = sanitize_title( (string) $operation );
+		private static function prepare_operation( mixed $operation ): string {
+			$operation = is_scalar( $operation ) ? sanitize_title( (string) $operation ) : '';
 			$allowed   = array( 'install', 'upgrade', 'reconcile', 'uninstall', 'dry-run' );
 			if ( ! in_array( $operation, $allowed, true ) ) {
 				throw new InvalidArgumentException( 'Package adoption operation must be install, upgrade, reconcile, uninstall, or dry-run.' );
@@ -91,14 +91,34 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Request' ) ) {
 		 */
 		private static function prepare_string_list( $values ): array {
 			$prepared = array();
-			foreach ( (array) $values as $value ) {
-				$value = trim( (string) $value );
+			$values   = is_array( $values ) ? $values : array( $values );
+			foreach ( $values as $value ) {
+				$value = is_scalar( $value ) ? trim( (string) $value ) : '';
 				if ( '' !== $value ) {
 					$prepared[] = $value;
 				}
 			}
 
 			return array_values( array_unique( $prepared ) );
+		}
+
+		/**
+		 * @param mixed $values Raw values.
+		 * @return array<string,mixed>
+		 */
+		private static function prepare_string_keyed_array( mixed $values ): array {
+			if ( ! is_array( $values ) ) {
+				return array();
+			}
+
+			$prepared = array();
+			foreach ( $values as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+
+			return $prepared;
 		}
 	}
 }

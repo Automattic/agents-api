@@ -72,7 +72,7 @@ interface WP_Agent_Workflow_Run_Recorder {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $args
+	 * @param array<mixed> $args
 	 * @return WP_Agent_Workflow_Run_Result[]
 	 */
 	public function recent( array $args = array() ): array;

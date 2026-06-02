@@ -68,7 +68,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 			 * @since 0.103.0
 			 *
 			 * @param WP_Agent_Workflow_Spec $spec
-			 * @param array                  $trigger
+			 * @param array<mixed>                  $trigger
 			 */
 			do_action( 'wp_agent_workflow_schedule_requested', $spec, $trigger );
 
@@ -81,16 +81,17 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 			// Unschedule prior occurrences for idempotency.
 			as_unschedule_all_actions( self::SCHEDULED_HOOK, $args, self::GROUP );
 
-			if ( ! empty( $trigger['expression'] ) ) {
-				as_schedule_cron_action(
+			$scheduled = null;
+			if ( ! empty( $trigger['expression'] ) && is_scalar( $trigger['expression'] ) ) {
+				$scheduled = as_schedule_cron_action(
 					time(),
 					(string) $trigger['expression'],
 					self::SCHEDULED_HOOK,
 					$args,
 					self::GROUP
 				);
-			} elseif ( ! empty( $trigger['interval'] ) ) {
-				as_schedule_recurring_action(
+			} elseif ( ! empty( $trigger['interval'] ) && is_numeric( $trigger['interval'] ) ) {
+				$scheduled = as_schedule_recurring_action(
 					time(),
 					(int) $trigger['interval'],
 					self::SCHEDULED_HOOK,
@@ -99,7 +100,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 				);
 			}
 
-			++$count;
+			if ( ! empty( $scheduled ) ) {
+				++$count;
+			}
 		}
 
 		return $count;

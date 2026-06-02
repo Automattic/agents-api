@@ -16,12 +16,12 @@ final class WP_Agent_Context_Item {
 
 	/**
 	 * @param string      $content        Retrieved context content.
-	 * @param array       $scope          Product-defined scope metadata.
+	 * @param array<mixed>       $scope          Product-defined scope metadata.
 	 * @param string      $authority_tier Generic authority tier.
-	 * @param array       $provenance     Source/provenance metadata.
+	 * @param array<mixed>       $provenance     Source/provenance metadata.
 	 * @param string      $conflict_kind  Conflict behavior vocabulary.
 	 * @param string|null $conflict_key   Shared key for mutually conflicting items.
-	 * @param array       $metadata       Additional JSON-friendly metadata.
+	 * @param array<mixed>       $metadata       Additional JSON-friendly metadata.
 	 */
 	public function __construct(
 		public readonly string $content,
@@ -39,7 +39,7 @@ final class WP_Agent_Context_Item {
 	/**
 	 * Export as a JSON-friendly array.
 	 *
-	 * @return array
+	 * @return array<mixed>
 	 */
 	public function to_array(): array {
 		return array(

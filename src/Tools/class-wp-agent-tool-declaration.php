@@ -36,8 +36,8 @@ class WP_Agent_Tool_Declaration {
 	/**
 	 * Normalize a runtime tool declaration or throw a field-scoped error.
 	 *
-	 * @param array $declaration Raw runtime tool declaration.
-	 * @return array Normalized declaration.
+	 * @param array<mixed> $declaration Raw runtime tool declaration.
+	 * @return array<mixed> Normalized declaration.
 	 */
 	public static function normalize( array $declaration ): array {
 		$errors = self::validate( $declaration );
@@ -52,13 +52,14 @@ class WP_Agent_Tool_Declaration {
 			);
 		}
 
-		$name   = (string) $declaration['name'];
+		$name   = is_string( $declaration['name'] ?? null ) ? $declaration['name'] : '';
 		$source = self::sourceFromName( $name );
+		$description = $declaration['description'] ?? '';
 
 		$normalized = array(
 			'name'        => $name,
 			'source'      => $source,
-			'description' => trim( (string) $declaration['description'] ),
+			'description' => is_string( $description ) ? trim( $description ) : '',
 			'parameters'  => $declaration['parameters'] ?? array(),
 			'executor'    => self::EXECUTOR_CLIENT,
 			'scope'       => self::SCOPE_RUN,
@@ -75,7 +76,7 @@ class WP_Agent_Tool_Declaration {
 	/**
 	 * Validate a runtime tool declaration without throwing.
 	 *
-	 * @param array $declaration Raw runtime tool declaration.
+	 * @param array<mixed> $declaration Raw runtime tool declaration.
 	 * @return string[] Machine-readable invalid field names.
 	 */
 	public static function validate( array $declaration ): array {

@@ -68,7 +68,7 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact' ) ) {
 		/**
 		 * Optional artifact metadata.
 		 *
-		 * @var array<string, mixed>
+		 * @var array<mixed, mixed>
 		 */
 		private array $meta = array();
 
@@ -80,10 +80,10 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact' ) ) {
 		public function __construct( array $artifact ) {
 			$this->type        = self::prepare_type( $artifact['type'] ?? '' );
 			$this->slug        = $this->prepare_slug( $artifact['slug'] ?? '' );
-			$this->label       = isset( $artifact['label'] ) ? trim( (string) $artifact['label'] ) : $this->slug;
-			$this->description = isset( $artifact['description'] ) ? trim( (string) $artifact['description'] ) : '';
+			$this->label       = isset( $artifact['label'] ) ? trim( self::string_value( $artifact['label'] ) ) : $this->slug;
+			$this->description = isset( $artifact['description'] ) ? trim( self::string_value( $artifact['description'] ) ) : '';
 			$this->source      = $this->prepare_source( $artifact['source'] ?? '' );
-			$this->checksum    = isset( $artifact['checksum'] ) ? trim( (string) $artifact['checksum'] ) : '';
+			$this->checksum    = isset( $artifact['checksum'] ) ? trim( self::string_value( $artifact['checksum'] ) ) : '';
 
 			if ( isset( $artifact['requires'] ) ) {
 				$this->requires = $this->prepare_string_list( $artifact['requires'], 'requires' );
@@ -119,7 +119,7 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact' ) ) {
 		 * @return string
 		 */
 		public static function prepare_type( $type ): string {
-			$type = strtolower( trim( (string) $type ) );
+			$type = strtolower( trim( self::string_value( $type ) ) );
 			if ( ! preg_match( '/^[a-z0-9][a-z0-9_.-]*\/[a-z0-9][a-z0-9_.\/-]*$/', $type ) ) {
 				throw new InvalidArgumentException( 'Agent package artifact type must be a namespaced slug.' );
 			}
@@ -193,7 +193,7 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact' ) ) {
 		/**
 		 * Retrieves metadata.
 		 *
-		 * @return array<string, mixed>
+		 * @return array<mixed, mixed>
 		 */
 		public function get_meta(): array {
 			return $this->meta;
@@ -224,7 +224,7 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact' ) ) {
 		 * @return string
 		 */
 		private function prepare_slug( $slug ): string {
-			$slug = sanitize_title( (string) $slug );
+			$slug = sanitize_title( self::string_value( $slug ) );
 			if ( '' === $slug ) {
 				throw new InvalidArgumentException( 'Agent package artifact slug cannot be empty.' );
 			}
@@ -239,7 +239,7 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact' ) ) {
 		 * @return string
 		 */
 		private function prepare_source( $source ): string {
-			$source = trim( str_replace( '\\', '/', (string) $source ) );
+			$source = trim( str_replace( '\\', '/', self::string_value( $source ) ) );
 			if ( '' === $source ) {
 				return '';
 			}
@@ -275,7 +275,7 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact' ) ) {
 
 			$prepared = array();
 			foreach ( $values as $value ) {
-				$value = strtolower( trim( (string) $value ) );
+				$value = strtolower( trim( self::string_value( $value ) ) );
 				if ( '' !== $value && preg_match( '/^[a-z0-9:_\.\/-]+$/', $value ) ) {
 					$prepared[] = $value;
 				}
@@ -285,6 +285,16 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact' ) ) {
 			sort( $prepared );
 
 			return $prepared;
+		}
+
+		/**
+		 * Convert scalar/Stringable input to a string.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return string String value, or empty string for non-stringable input.
+		 */
+		private static function string_value( $value ): string {
+			return is_scalar( $value ) || $value instanceof Stringable ? (string) $value : '';
 		}
 	}
 }

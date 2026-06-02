@@ -54,8 +54,8 @@ class WP_Agent_Message {
 	 * Build a canonical text envelope.
 	 *
 	 * @param string       $role     Message role.
-	 * @param string|array $content  Message content.
-	 * @param array        $metadata Extension metadata.
+	 * @param string|array<mixed> $content  Message content.
+	 * @param array<mixed>        $metadata Extension metadata.
 	 * @return array<string, mixed>
 	 */
 	public static function text( string $role, $content, array $metadata = array() ): array {
@@ -67,9 +67,9 @@ class WP_Agent_Message {
 	 *
 	 * @param string $content    Human-readable tool-call content.
 	 * @param string $tool_name  Tool identifier.
-	 * @param array  $parameters Tool parameters.
+	 * @param array<mixed>  $parameters Tool parameters.
 	 * @param int    $turn       Conversation turn.
-	 * @param array  $metadata   Extension metadata.
+	 * @param array<mixed>  $metadata   Extension metadata.
 	 * @return array<string, mixed>
 	 */
 	public static function toolCall( string $content, string $tool_name, array $parameters, int $turn, array $metadata = array() ): array {
@@ -92,8 +92,8 @@ class WP_Agent_Message {
 	 *
 	 * @param string $content  Human-readable tool-result content.
 	 * @param string $tool_name Tool identifier.
-	 * @param array  $payload  Type-specific result payload.
-	 * @param array  $metadata Extension metadata.
+	 * @param array<mixed>  $payload  Type-specific result payload.
+	 * @param array<mixed>  $metadata Extension metadata.
 	 * @return array<string, mixed>
 	 */
 	public static function toolResult( string $content, string $tool_name, array $payload, array $metadata = array() ): array {
@@ -109,8 +109,8 @@ class WP_Agent_Message {
 	 * action without coupling the envelope contract to a specific runtime.
 	 *
 	 * @param string $content  Human-readable approval request content.
-	 * @param array  $payload  Approval payload, for example action_id, kind, summary, preview, resolve, expires_at.
-	 * @param array  $metadata Extension metadata.
+	 * @param array<mixed>  $payload  Approval payload, for example action_id, kind, summary, preview, resolve, expires_at.
+	 * @param array<mixed>  $metadata Extension metadata.
 	 * @return array<string, mixed>
 	 */
 	public static function approvalRequired( string $content, array $payload, array $metadata = array() ): array {
@@ -120,7 +120,7 @@ class WP_Agent_Message {
 	/**
 	 * Normalize a plain role/content message or typed envelope to the canonical envelope.
 	 *
-	 * @param array $message Message array.
+	 * @param array<mixed> $message Message array.
 	 * @return array<string, mixed> Normalized envelope.
 	 * @throws \InvalidArgumentException When the message is invalid.
 	 */
@@ -139,7 +139,7 @@ class WP_Agent_Message {
 	/**
 	 * Normalize a list of messages to envelopes.
 	 *
-	 * @param array $messages Message arrays.
+	 * @param array<mixed> $messages Message arrays.
 	 * @return array<int, array<string, mixed>>
 	 */
 	public static function normalize_many( array $messages ): array {
@@ -156,17 +156,19 @@ class WP_Agent_Message {
 	/**
 	 * Project an envelope to a provider request message shape.
 	 *
-	 * @param array $message Typed envelope or plain role/content message.
+	 * @param array<mixed> $message Typed envelope or plain role/content message.
 	 * @return array<string, mixed> Provider-facing message.
 	 */
 	public static function to_provider_message( array $message ): array {
 		$envelope = self::normalize( $message );
-		$metadata = $envelope['metadata'];
+		$metadata = is_array( $envelope['metadata'] ?? null ) ? $envelope['metadata'] : array();
+		$type     = self::string_value( $envelope['type'] ?? self::TYPE_TEXT );
+		$payload  = is_array( $envelope['payload'] ?? null ) ? $envelope['payload'] : array();
 
-		if ( self::TYPE_TEXT !== $envelope['type'] || ! empty( $envelope['payload'] ) || ! empty( $metadata ) ) {
-			$metadata['type'] = $envelope['type'];
+		if ( self::TYPE_TEXT !== $type || ! empty( $payload ) || ! empty( $metadata ) ) {
+			$metadata['type'] = $type;
 		}
-		foreach ( $envelope['payload'] as $key => $value ) {
+		foreach ( $payload as $key => $value ) {
 			if ( ! array_key_exists( $key, $metadata ) ) {
 				$metadata[ $key ] = $value;
 			}
@@ -187,7 +189,7 @@ class WP_Agent_Message {
 	/**
 	 * Project envelopes to a provider request message shape.
 	 *
-	 * @param array $messages Typed envelopes or plain role/content messages.
+	 * @param array<mixed> $messages Typed envelopes or plain role/content messages.
 	 * @return array<int, array<string, mixed>> Provider-facing messages.
 	 */
 	public static function to_provider_messages( array $messages ): array {
@@ -204,12 +206,12 @@ class WP_Agent_Message {
 	/**
 	 * Extract the canonical type from a message.
 	 *
-	 * @param array $message Typed envelope or plain role/content message.
+	 * @param array<mixed> $message Typed envelope or plain role/content message.
 	 * @return string Message type.
 	 */
 	public static function type( array $message ): string {
 		$envelope = self::normalize( $message );
-		return $envelope['type'];
+		return self::string_value( $envelope['type'] ?? self::TYPE_TEXT );
 	}
 
 	/**
@@ -251,7 +253,12 @@ class WP_Agent_Message {
 				continue;
 			}
 
-			$tail_key   = array_key_last( $coalesced );
+			$tail_key = array_key_last( $coalesced );
+			if ( null === $tail_key ) {
+				$coalesced[] = $envelope;
+				continue;
+			}
+
 			$tail_parts = self::extract_parts( $tail );
 			$new_parts  = self::extract_parts( $envelope );
 
@@ -262,12 +269,12 @@ class WP_Agent_Message {
 				array(
 					'parts' => array_merge( $tail_parts, $new_parts ),
 				),
-				$tail['metadata'] ?? array(),
+				is_array( $tail['metadata'] ?? null ) ? $tail['metadata'] : array(),
 				array()
 			);
 		}
 
-		return array_values( $coalesced );
+		return $coalesced;
 	}
 
 	/**
@@ -281,8 +288,16 @@ class WP_Agent_Message {
 	 * @return array<int, array<string, mixed>>
 	 */
 	private static function extract_parts( array $envelope ): array {
-		if ( self::TYPE_MULTIMODAL_PART === ( $envelope['type'] ?? '' ) && isset( $envelope['payload']['parts'] ) && is_array( $envelope['payload']['parts'] ) ) {
-			return array_values( $envelope['payload']['parts'] );
+		$payload = is_array( $envelope['payload'] ?? null ) ? $envelope['payload'] : array();
+		if ( self::TYPE_MULTIMODAL_PART === ( $envelope['type'] ?? '' ) && isset( $payload['parts'] ) && is_array( $payload['parts'] ) ) {
+			$parts = array();
+			foreach ( $payload['parts'] as $part ) {
+				if ( is_array( $part ) ) {
+					$parts[] = self::assoc_array( $part );
+				}
+			}
+
+			return $parts;
 		}
 
 		return array( $envelope );
@@ -314,7 +329,7 @@ class WP_Agent_Message {
 	/**
 	 * Detect whether an array already uses the envelope shape.
 	 *
-	 * @param array $message Message array.
+	 * @param array<mixed> $message Message array.
 	 * @return bool
 	 */
 	private static function isEnvelope( array $message ): bool {
@@ -325,11 +340,16 @@ class WP_Agent_Message {
 	/**
 	 * Normalize an already-typed envelope.
 	 *
-	 * @param array $message Raw envelope.
+	 * @param array<mixed> $message Raw envelope.
 	 * @return array<string, mixed> Canonical envelope.
 	 */
 	private static function normalizeEnvelope( array $message ): array {
-		if ( self::VERSION !== (int) $message['version'] ) {
+		$version = $message['version'] ?? null;
+		if ( ! is_int( $version ) && ! is_string( $version ) ) {
+			throw new \InvalidArgumentException( 'invalid_ai_message_envelope: unsupported version' );
+		}
+
+		if ( self::VERSION !== (int) $version ) {
 			throw new \InvalidArgumentException( 'invalid_ai_message_envelope: unsupported version' );
 		}
 
@@ -353,7 +373,7 @@ class WP_Agent_Message {
 	/**
 	 * Normalize the plain role/content/metadata message shape.
 	 *
-	 * @param array $message Plain role/content message.
+	 * @param array<mixed> $message Plain role/content message.
 	 * @return array<string, mixed> Canonical envelope.
 	 */
 	private static function fromPlainMessage( array $message ): array {
@@ -376,9 +396,9 @@ class WP_Agent_Message {
 	 * @param mixed  $role     Raw role.
 	 * @param mixed  $content  Raw content.
 	 * @param string $type     Envelope type.
-	 * @param array  $payload  Type-specific payload.
-	 * @param array  $metadata Extension metadata.
-	 * @param array  $source   Source message.
+	 * @param array<mixed>  $payload  Type-specific payload.
+	 * @param array<mixed>  $metadata Extension metadata.
+	 * @param array<mixed>  $source   Source message.
 	 * @return array<string, mixed> Canonical envelope.
 	 */
 	private static function buildEnvelope( $role, $content, string $type, array $payload, array $metadata, array $source ): array {
@@ -412,8 +432,8 @@ class WP_Agent_Message {
 	/**
 	 * Infer the typed envelope event from plain message fields.
 	 *
-	 * @param array $message  Plain role/content message.
-	 * @param array $metadata Plain message metadata.
+	 * @param array<mixed> $message  Plain role/content message.
+	 * @param array<mixed> $metadata Plain message metadata.
 	 * @return string Envelope type.
 	 */
 	private static function inferType( array $message, array $metadata ): string {
@@ -437,7 +457,7 @@ class WP_Agent_Message {
 	 * Infer the type for newly built messages.
 	 *
 	 * @param mixed $content  Message content.
-	 * @param array $metadata Message metadata.
+	 * @param array<mixed> $metadata Message metadata.
 	 * @return string Envelope type.
 	 */
 	private static function inferContentType( $content, array $metadata ): string {
@@ -448,7 +468,7 @@ class WP_Agent_Message {
 	 * Pull common plain-message metadata fields into type-specific envelope payload.
 	 *
 	 * @param string $type     Envelope type.
-	 * @param array  $metadata Plain message metadata.
+	 * @param array<mixed>  $metadata Plain message metadata.
 	 * @return array<string, mixed> Type-specific payload.
 	 */
 	private static function payloadFromPlainMetadata( string $type, array $metadata ): array {
@@ -484,6 +504,25 @@ class WP_Agent_Message {
 			throw new \InvalidArgumentException( 'invalid_ai_message_envelope: unsupported type' );
 		}
 		return $type;
+	}
+
+	private static function string_value( mixed $value ): string {
+		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (string) $value : '';
+	}
+
+	/**
+	 * @param array<mixed> $value Raw array.
+	 * @return array<string,mixed>
+	 */
+	private static function assoc_array( array $value ): array {
+		$assoc = array();
+		foreach ( $value as $field => $field_value ) {
+			if ( is_string( $field ) ) {
+				$assoc[ $field ] = $field_value;
+			}
+		}
+
+		return $assoc;
 	}
 
 	/**

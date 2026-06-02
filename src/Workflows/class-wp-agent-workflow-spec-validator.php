@@ -45,7 +45,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $spec Raw spec.
+	 * @param array<mixed> $spec Raw spec.
 	 * @return array<int,array{path:string,code:string,message:string}> Empty when valid.
 	 */
 	public static function validate( array $spec ): array {
@@ -77,7 +77,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 				'message' => 'workflow spec must declare at least one step',
 			);
 		} else {
-			$step_errors = self::validate_steps( $spec['steps'] );
+			$step_errors = self::validate_steps( array_values( $spec['steps'] ) );
 			$errors      = array_merge( $errors, $step_errors );
 		}
 
@@ -100,7 +100,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 		// exists earlier in the list. Catches typos and re-orderings that
 		// would otherwise resolve to null silently at runtime.
 		if ( isset( $spec['steps'] ) && is_array( $spec['steps'] ) ) {
-			$binding_errors = self::validate_step_binding_references( $spec['steps'] );
+			$binding_errors = self::validate_step_binding_references( array_values( $spec['steps'] ) );
 			$errors         = array_merge( $errors, $binding_errors );
 		}
 
@@ -250,7 +250,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 				continue;
 			}
 
-			$step_id = isset( $step['id'] ) ? (string) $step['id'] : '';
+			$step_id = is_string( $step['id'] ?? null ) ? $step['id'] : '';
 			$tokens  = self::extract_top_level_step_binding_ids( $step );
 
 			foreach ( $tokens as $referenced_id ) {
@@ -280,7 +280,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 	 * Pull step references from a top-level step without validating nested
 	 * foreach step bodies against the outer step order.
 	 *
-	 * @param array $step
+	 * @param array<mixed> $step
 	 * @return array<int,string>
 	 */
 	private static function extract_top_level_step_binding_ids( array $step ): array {
@@ -352,7 +352,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 				continue;
 			}
 
-			$known = (array) apply_filters( 'wp_agent_workflow_known_trigger_types', self::KNOWN_TRIGGER_TYPES );
+			$known = self::string_list( apply_filters( 'wp_agent_workflow_known_trigger_types', self::KNOWN_TRIGGER_TYPES ) );
 			if ( ! in_array( $trigger['type'], $known, true ) ) {
 				$errors[] = array(
 					'path'    => "{$path}.type",
@@ -384,5 +384,21 @@ final class WP_Agent_Workflow_Spec_Validator {
 		}
 
 		return $errors;
+	}
+
+	/**
+	 * @param mixed $values Raw values.
+	 * @return array<int,string>
+	 */
+	private static function string_list( $values ): array {
+		$values   = is_array( $values ) ? $values : array();
+		$prepared = array();
+		foreach ( $values as $value ) {
+			if ( is_string( $value ) && '' !== $value ) {
+				$prepared[] = $value;
+			}
+		}
+
+		return array_values( array_unique( $prepared ) );
 	}
 }

@@ -91,9 +91,10 @@ if ( ! class_exists( 'WP_Agent_Default_Tool_Tier_Resolver' ) ) {
 		private function manifest( array $tools ): array {
 			$manifest = array();
 			foreach ( $tools as $name => $tool ) {
+				$description = $tool['description'] ?? '';
 				$manifest[] = array(
 					'name'            => $name,
-					'summary'         => trim( (string) ( $tool['description'] ?? '' ) ),
+					'summary'         => is_scalar( $description ) ? trim( (string) $description ) : '',
 					'required_fields' => $this->required_fields( $tool ),
 				);
 			}
@@ -105,12 +106,18 @@ if ( ! class_exists( 'WP_Agent_Default_Tool_Tier_Resolver' ) ) {
 		 * @return string[] Required parameter names.
 		 */
 		private function required_fields( array $tool ): array {
-			return $this->string_list( $tool['parameters']['required'] ?? array() );
+			$parameters = $tool['parameters'] ?? array();
+			if ( ! is_array( $parameters ) ) {
+				return array();
+			}
+
+			return $this->string_list( $parameters['required'] ?? array() );
 		}
 
 		/** @param array<string, mixed> $context Runtime context. */
 		private function hard_cap( array $context ): int {
-			return max( 1, (int) ( $context['tool_tier_hard_cap'] ?? $this->hard_cap ) );
+			$cap = $context['tool_tier_hard_cap'] ?? $this->hard_cap;
+			return max( 1, is_numeric( $cap ) ? (int) $cap : $this->hard_cap );
 		}
 
 		/** @param array<string, mixed> $context Runtime context. */
@@ -127,7 +134,7 @@ if ( ! class_exists( 'WP_Agent_Default_Tool_Tier_Resolver' ) ) {
 			$values = is_array( $values ) ? $values : array( $values );
 			$values = array_filter(
 				array_map(
-					static fn( $value ): string => trim( (string) $value ),
+					static fn( $value ): string => is_scalar( $value ) ? trim( (string) $value ) : '',
 					$values
 				),
 				static fn( string $value ): bool => '' !== $value

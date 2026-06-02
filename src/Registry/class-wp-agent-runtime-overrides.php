@@ -108,6 +108,10 @@ if ( ! class_exists( 'WP_Agent_Runtime_Overrides' ) ) {
 				return null;
 			}
 
+			if ( ! is_scalar( $value ) ) {
+				return null;
+			}
+
 			$value = trim( (string) $value );
 			return '' === $value ? null : $value;
 		}
@@ -117,7 +121,7 @@ if ( ! class_exists( 'WP_Agent_Runtime_Overrides' ) ) {
 		 * @return float|null Normalized float or null.
 		 */
 		private static function optional_float( $value ): ?float {
-			return null === $value || '' === $value ? null : (float) $value;
+			return is_scalar( $value ) && '' !== $value ? (float) $value : null;
 		}
 
 		/**
@@ -125,6 +129,10 @@ if ( ! class_exists( 'WP_Agent_Runtime_Overrides' ) ) {
 		 * @return int|null Positive int or null.
 		 */
 		private static function optional_positive_int( $value ): ?int {
+			if ( ! is_scalar( $value ) ) {
+				return null;
+			}
+
 			$value = (int) $value;
 			return $value > 0 ? $value : null;
 		}
@@ -137,7 +145,7 @@ if ( ! class_exists( 'WP_Agent_Runtime_Overrides' ) ) {
 			$values = is_array( $values ) ? $values : array( $values );
 			$values = array_filter(
 				array_map(
-					static fn( $value ): string => trim( (string) $value ),
+					static fn( $value ): string => is_scalar( $value ) ? trim( (string) $value ) : '',
 					$values
 				),
 				static fn( string $value ): bool => '' !== $value
