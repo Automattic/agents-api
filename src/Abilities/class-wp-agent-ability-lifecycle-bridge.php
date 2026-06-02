@@ -26,21 +26,27 @@ if ( ! defined( 'ABSPATH' ) ) {
  * adopts them slice by slice (see #94).
  *
  * Wired today:
+ * - `wp_ability_invoked` -> `agents_api_ability_invoked` action. Fires at the
+ *   top of `execute()` for every call, before any processing, so observers see
+ *   invocations that never reach a result (validation failure, permission
+ *   denial, pre-execute short-circuit).
  * - `wp_ability_execute_result` -> `agents_api_ability_executed` action.
  *   Telemetry without each ability author opting in.
  * - `wp_pre_execute_ability` -> decision-driven approval gate. Hosts decide
  *   via {@see self::FILTER_PRE_EXECUTE_DECISION}; the bridge handles the
  *   sentinel, minting, staging, and `approval_required` envelope.
  *
- * The execute-result observer returns the filter input unchanged. The
- * pre-execute gate short-circuits with an `approval_required` envelope when
- * the host signals approval is needed, and passes through otherwise.
+ * The invoked and execute-result observers return the filter/value input
+ * unchanged. The pre-execute gate short-circuits with an `approval_required`
+ * envelope when the host signals approval is needed, and passes through
+ * otherwise.
  *
  * On WordPress < 7.1 the underlying filters are never applied, so registered
  * handlers stay idle.
  */
 class WP_Agent_Ability_Lifecycle_Bridge {
 
+	public const ACTION_ABILITY_INVOKED      = 'agents_api_ability_invoked';
 	public const ACTION_ABILITY_EXECUTED     = 'agents_api_ability_executed';
 	public const FILTER_PRE_EXECUTE_DECISION = 'agents_api_ability_pre_execute_decision';
 	public const FILTER_PENDING_ACTION_STORE = 'wp_agent_pending_action_store';
@@ -57,8 +63,30 @@ class WP_Agent_Ability_Lifecycle_Bridge {
 			return;
 		}
 
+		add_action( 'wp_ability_invoked', array( __CLASS__, 'observe_invoked' ), 10, 3 );
 		add_filter( 'wp_ability_execute_result', array( __CLASS__, 'observe_execute_result' ), 10, 4 );
 		add_filter( 'wp_pre_execute_ability', array( __CLASS__, 'gate_pre_execute' ), 10, 4 );
+	}
+
+	/**
+	 * Observer for the `wp_ability_invoked` action.
+	 *
+	 * Re-emits `agents_api_ability_invoked` at the entry point of every ability
+	 * call. Unlike {@see self::ACTION_ABILITY_EXECUTED}, which only fires on the
+	 * registered execute_callback's success path, this fires for every call
+	 * regardless of outcome, so observers can record invocations that fail input
+	 * validation, fail the permission check, or get short-circuited before the
+	 * callback runs. The input is the raw value passed to `execute()`, before
+	 * normalization.
+	 *
+	 * @param string $ability_name Ability name.
+	 * @param mixed  $input        Raw input passed to execute(), before normalization.
+	 * @param object $ability      `WP_Ability` instance.
+	 */
+	public static function observe_invoked( string $ability_name, $input, $ability ): void {
+		if ( function_exists( 'do_action' ) ) {
+			do_action( self::ACTION_ABILITY_INVOKED, $ability_name, $input, $ability );
+		}
 	}
 
 	/**

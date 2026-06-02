@@ -86,6 +86,14 @@ class WP_Agent_Tool_Result {
 			$normalized['runtime'] = $runtime;
 		}
 
+		if ( isset( $result['status'] ) && is_string( $result['status'] ) && '' !== trim( $result['status'] ) ) {
+			$normalized['status'] = trim( $result['status'] );
+		}
+
+		if ( isset( $result['runtime_tool_request'] ) && is_array( $result['runtime_tool_request'] ) ) {
+			$normalized['runtime_tool_request'] = $result['runtime_tool_request'];
+		}
+
 		if ( $success ) {
 			$normalized['result'] = $result['result'] ?? array();
 			return $normalized;

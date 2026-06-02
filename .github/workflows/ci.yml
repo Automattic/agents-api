@@ -13,16 +13,16 @@ concurrency:
 
 jobs:
   homeboy:
-    name: ${{ matrix.check_name }}
+    name: Homeboy ${{ matrix.label }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - command: lint
-            check_name: Homeboy lint (PHPCS + PHPStan)
+            label: lint (PHPCS + PHPStan)
           - command: test
-            check_name: Homeboy tests (PHP smoke tests)
+            label: tests (PHPUnit + smoke tests)
 
     steps:
       - uses: actions/checkout@v4
@@ -45,3 +45,7 @@ jobs:
           app-token: ${{ steps.app-token.outputs.token || '' }}
           autofix: 'true'
           autofix-commands: 'lint --fix'
+
+      - name: Run PHP smoke tests
+        if: matrix.command == 'test'
+        run: composer smoke

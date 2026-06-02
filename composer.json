@@ -21,7 +21,7 @@
   },
   "scripts": {
     "phpstan": "phpstan analyse --no-progress --memory-limit=2G",
-    "test": [
+    "smoke": [
       "php tests/bootstrap-smoke.php",
       "php tests/message-envelope-smoke.php",
       "php tests/message-coalesce-smoke.php",
@@ -90,6 +90,9 @@
       "php tests/event-trigger-smoke.php",
       "php tests/subagents-smoke.php",
       "php tests/no-product-imports-smoke.php"
+    ],
+    "test": [
+      "@smoke"
     ]
   },
   "require-dev": {
