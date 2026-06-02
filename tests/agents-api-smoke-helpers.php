@@ -186,12 +186,12 @@ function is_wp_error( $value ): bool {
 function agents_api_smoke_assert_equals( $expected, $actual, string $name, array &$failures, int &$passes ): void {
 	if ( $expected === $actual ) {
 		++$passes;
-		echo "  PASS {$name}\n";
+		echo '  PASS ' . esc_html( $name ) . "\n";
 		return;
 	}
 
 	$failures[] = $name;
-	echo "  FAIL {$name}\n";
+	echo '  FAIL ' . esc_html( $name ) . "\n";
 	echo '    expected: ' . var_export( $expected, true ) . "\n";
 	echo '    actual:   ' . var_export( $actual, true ) . "\n";
 }
