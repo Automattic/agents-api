@@ -10,6 +10,11 @@
  * recorder. Consumers wire one against whatever storage they already
  * use for jobs / runs — a custom post type, a custom table, an external
  * observability system. Persistence detail stays a consumer concern.
+ * When results include evidence references, recorders should preserve the
+ * first-class `evidence_refs` array as-is instead of burying artifact or log
+ * pointers under implementation metadata. The referenced storage remains
+ * host-owned and may point at CPTs, feature-flagged request logs, external
+ * artifacts, or any other JSON-serializable reference envelope.
  *
  * Implementations should be best-effort safe — losing a run record
  * must not break a workflow's user-facing outcome. The runner tolerates
