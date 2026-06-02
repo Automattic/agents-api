@@ -76,6 +76,37 @@ Duplicate registration returns `null` and emits an invalid-usage notice that inc
 
 `WP_Agent_Package` models a portable package containing one agent definition plus generic artifacts. It is storage-neutral and runtime-neutral.
 
+## Durable installed agents
+
+Agents API defines the durable installed-agent contract without choosing a storage backend. Hosts that need plugin-shipped or user-installed agents to survive requests implement the state store and decide whether the backing store is tables, options, custom files, an external service, or something else. Agents API does not create installed-agent rows, directories, logs, memory files, access grants, tokens, admin UI, CLI commands, or REST routes for this contract.
+
+Core classes:
+
+| Class | Purpose |
+| --- | --- |
+| `WP_Agent_Installed_Agent` | Immutable installed-state value for a logical `(agent_slug, owner_user_id, instance_key)` instance. |
+| `WP_Agent_Materialization_Request` | Normalized install, upgrade, reconcile, project, uninstall, or dry-run request. It adopts `WP_Agent::get_default_config()` unless the caller opts out. |
+| `WP_Agent_Materialization_Result` | Result status plus optional installed state and projected request-local `WP_Agent`. |
+| `WP_Agent_Installed_Agent_State_Store` | Storage-neutral interface for resolving, materializing, and deleting installed state. |
+| `WP_Agent_Installed_Agent_Projector` | Helper for projecting durable installed state back into a request-local `WP_Agent` definition. |
+
+The intended lifecycle is:
+
+```text
+request-local WP_Agent or WP_Agent_Package agent
+  -> host resolves owner_user_id and instance_key
+  -> host materializes durable installed state through its store
+  -> package adoption may reconcile artifacts through package contracts
+  -> projector turns durable state back into a request-local WP_Agent
+  -> host registers/projected agents during its normal request bootstrap
+```
+
+Owner resolution remains host-owned. `WP_Agent` can declare an `owner_resolver` callback and default config, but Agents API does not call that resolver automatically or grant access. A host materializer should resolve an owner explicitly, pass it into `WP_Agent_Materialization_Request`, and persist only the host-approved installed state. This keeps sensitive owner/access semantics auditable instead of inferred from ambient runtime context.
+
+The installed-agent contract composes with package adoption but does not replace it. `WP_Agent_Package_Adoption_Orchestrator` handles artifact planning/application through artifact callbacks; the installed-agent state store handles the durable agent instance row or equivalent host record. Products such as Data Machine can implement both surfaces against their own storage and then project persisted agents into the request-local registry.
+
+This is the durable boundary decision for installed agents: Agents API owns neutral shapes and projection; products own persistence, feature flags, materializers, memory scaffolding, access grants, tokens, logs, and user-facing approval UX.
+
 Normalized package fields:
 
 | Field | Purpose |

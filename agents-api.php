@@ -29,6 +29,11 @@ define( 'AGENTS_API_PLUGIN_FILE', __FILE__ );
 
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-runtime-overrides.php';
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent.php';
+require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-installed-agent.php';
+require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-materialization-request.php';
+require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-materialization-result.php';
+require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-installed-agent-state-store.php';
+require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-installed-agent-projector.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-type.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifacts-registry.php';
