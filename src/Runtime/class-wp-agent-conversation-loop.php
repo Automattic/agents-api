@@ -51,17 +51,17 @@ class WP_Agent_Conversation_Loop {
 	 *   and otherwise keeps going until `completion_policy` fires, `max_turns` is
 	 *   reached, or a budget is exceeded. Callers can pass `'__return_true'` to
 	 *   opt into the historical continue-always behavior.
-     * - `compaction_policy` (array|null): Optional compaction policy.
-     * - `summarizer` (callable|null): Optional compaction summarizer.
-     * - `tool_executor` (WP_Agent_Tool_Executor|null): Tool execution adapter.
-     * - `tool_declarations` (array|null): Tool declarations keyed by name.
-     * - `pre_tool_mediator` (callable|null): Optional synchronous decision callback
-     *   invoked after a mediated tool call is prepared and before execution. Receives
-     *   one array context with transcript messages, raw/prepared tool call data,
-     *   declaration, turn context, and prior mediated results. Return
-     *   `{ action: 'proceed'|'reject'|'replace_result', ... }`.
-     * - `completion_policy` (WP_Agent_Conversation_Completion_Policy|null): Typed completion policy.
-     * - `spin_detector` (WP_Agent_Spin_Detector|null): Optional repeated tool-call detector.
+	 * - `compaction_policy` (array|null): Optional compaction policy.
+	 * - `summarizer` (callable|null): Optional compaction summarizer.
+	 * - `tool_executor` (WP_Agent_Tool_Executor|null): Tool execution adapter.
+	 * - `tool_declarations` (array|null): Tool declarations keyed by name.
+	 * - `pre_tool_mediator` (callable|null): Optional synchronous decision callback
+	 *   invoked after a mediated tool call is prepared and before execution. Receives
+	 *   one array context with transcript messages, raw/prepared tool call data,
+	 *   declaration, turn context, and prior mediated results. Return
+	 *   `{ action: 'proceed'|'reject'|'replace_result', ... }`.
+	 * - `completion_policy` (WP_Agent_Conversation_Completion_Policy|null): Typed completion policy.
+	 * - `spin_detector` (WP_Agent_Spin_Detector|null): Optional repeated tool-call detector.
 	 * - `identical_failure_tracker` (WP_Agent_Identical_Failure_Tracker|null): Optional repeated failure nudger.
 	 * - `tool_result_truncator` (WP_Agent_Tool_Result_Truncator|null): Optional mediated tool result truncator.
 	 * - `interrupt_source` (callable|null): Optional source checked between turns. Returns a message array or null.
