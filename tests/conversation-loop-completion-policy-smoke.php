@@ -147,7 +147,125 @@ $result2 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 1, count( $policy_log ), 'policy was called once', $failures, $passes );
 agents_api_smoke_assert_equals( 0, $continue_called, 'should_continue was not called when policy stopped the loop', $failures, $passes );
 
-echo "\n[3] Completion policy works in caller-managed path (turn runner handles tool execution):\n";
+echo "\n[3] Non-empty incomplete decisions append continuation messages and events:\n";
+
+$continue_events = array();
+$seen_messages   = array();
+$nudge_policy    = new class() implements AgentsAPI\AI\WP_Agent_Conversation_Completion_Policy {
+	public function recordToolResult( string $tool_name, ?array $tool_def, array $tool_result, array $runtime_context, int $turn_count ): AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision {
+		return AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision::incomplete(
+			'Please keep going: the required artifact is still missing.',
+			array( 'missing' => 'artifact' )
+		);
+	}
+};
+
+$nudge_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'start' ) ),
+	static function ( array $messages, array $context ) use ( &$seen_messages ): array {
+		$seen_messages[ $context['turn'] ] = $messages;
+
+		if ( 1 === $context['turn'] ) {
+			return array(
+				'messages'   => $messages,
+				'tool_calls' => array(
+					array( 'name' => 'client/work', 'parameters' => array() ),
+				),
+			);
+		}
+
+		return array(
+			'messages'   => $messages,
+			'content'    => 'continued',
+			'tool_calls' => array(),
+		);
+	},
+	array(
+		'max_turns'         => 3,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+		'completion_policy' => $nudge_policy,
+		'on_event'          => static function ( string $event, array $payload ) use ( &$continue_events ): void {
+			if ( 'completion_policy_continue' === $event ) {
+				$continue_events[] = $payload;
+			}
+		},
+	)
+);
+
+$nudge_messages = array_values(
+	array_filter(
+		$nudge_result['messages'],
+		static function ( array $message ): bool {
+			return 'completion_policy_continue' === ( $message['metadata']['type'] ?? '' );
+		}
+	)
+);
+$nudge_events = array_values(
+	array_filter(
+		$nudge_result['events'],
+		static function ( array $event ): bool {
+			return 'completion_policy_continue' === ( $event['type'] ?? '' );
+		}
+	)
+);
+
+agents_api_smoke_assert_equals( 1, count( $nudge_messages ), 'non-empty incomplete decision appends one continuation message', $failures, $passes );
+agents_api_smoke_assert_equals( 'user', $nudge_messages[0]['role'] ?? '', 'continuation message uses provider-safe user role', $failures, $passes );
+agents_api_smoke_assert_equals( 'Please keep going: the required artifact is still missing.', $nudge_messages[0]['content'] ?? '', 'continuation message carries decision text', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'missing' => 'artifact' ), $nudge_events[0]['metadata']['context'] ?? array(), 'continuation event carries decision context', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $continue_events ), 'continuation lifecycle event is emitted', $failures, $passes );
+$turn_two_messages = $seen_messages[2] ?? array();
+$turn_two_tail     = ! empty( $turn_two_messages ) ? $turn_two_messages[ array_key_last( $turn_two_messages ) ] : array();
+agents_api_smoke_assert_equals( 'Please keep going: the required artifact is still missing.', $turn_two_tail['content'] ?? '', 'next turn receives appended continuation message', $failures, $passes );
+
+echo "\n[4] Empty incomplete decisions preserve existing no-op behavior:\n";
+
+$empty_policy = new class() implements AgentsAPI\AI\WP_Agent_Conversation_Completion_Policy {
+	public function recordToolResult( string $tool_name, ?array $tool_def, array $tool_result, array $runtime_context, int $turn_count ): AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision {
+		return AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision::incomplete();
+	}
+};
+
+$empty_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'start' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array( 'name' => 'client/work', 'parameters' => array() ),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 1,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+		'completion_policy' => $empty_policy,
+	)
+);
+
+$empty_nudge_messages = array_values(
+	array_filter(
+		$empty_result['messages'],
+		static function ( array $message ): bool {
+			return 'completion_policy_continue' === ( $message['metadata']['type'] ?? '' );
+		}
+	)
+);
+$empty_nudge_events = array_values(
+	array_filter(
+		$empty_result['events'],
+		static function ( array $event ): bool {
+			return 'completion_policy_continue' === ( $event['type'] ?? '' );
+		}
+	)
+);
+
+agents_api_smoke_assert_equals( 0, count( $empty_nudge_messages ), 'empty incomplete decision does not append a continuation message', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $empty_nudge_events ), 'empty incomplete decision does not append a continuation event', $failures, $passes );
+
+echo "\n[5] Completion policy works in caller-managed path (turn runner handles tool execution):\n";
 $policy_log = array();
 
 // Build a policy that completes on any tool.
