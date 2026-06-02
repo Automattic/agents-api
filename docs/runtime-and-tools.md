@@ -276,6 +276,20 @@ The tool policy layer resolves which tools are visible and how each tool may exe
 - `WP_Agent_Action_Policy_Provider`
 - `AgentsAPI\AI\Tools\WP_Agent_Action_Policy`
 
+Caller-provided runtime tools are opt-in. Declarations marked with neutral
+runtime metadata such as `runtime_tool: true`, `executor: client`, or
+`scope: run` are excluded from the visible tool set unless policy explicitly
+allows them by name or category. Explicit opt-in can come from `runtime_tools`,
+`runtime_categories`, allow-mode `tools` / `categories`, `allow_only`, or
+mandatory policy returned by a `WP_Agent_Tool_Access_Policy` provider. The final
+explicit `deny` list still wins after opt-in.
+
+This policy only decides model visibility. Required argument sourcing remains
+auditable through each tool declaration: runtime context keys fill required
+parameters only when listed in `client_context_bindings`. Sensitive ambient keys
+such as `api_key`, `token`, or `authorization` never satisfy required
+parameters by name alone.
+
 Canonical action-policy values are `direct`, `preview`, and `forbidden`. Resolution considers explicit runtime denies, agent/runtime tool and category policy, host providers, tool defaults, mode-specific tool defaults, and the final `agents_api_tool_action_policy` filter.
 
 ## Ability lifecycle bridge

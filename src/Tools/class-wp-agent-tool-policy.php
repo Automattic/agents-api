@@ -83,6 +83,14 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 				$tools = $this->filter->filter_by_allow_only( $tools, array_values( array_unique( $allow_only ) ), $preserve_tool );
 			}
 
+			$runtime_opt_in = $this->collect_runtime_tool_opt_in( $policies, $context, $allow_only, $mandatory_tools, $mandatory_cats );
+			$tools          = $this->filter->filter_runtime_tools_by_policy_opt_in(
+				$tools,
+				$runtime_opt_in['tools'],
+				$runtime_opt_in['categories'],
+				$preserve_tool
+			);
+
 			$deny = $this->filter->string_list( $context['deny'] ?? array() );
 			foreach ( $policies as $policy ) {
 				$deny = array_merge( $deny, $this->filter->string_list( $policy['deny'] ?? array() ) );
@@ -211,6 +219,45 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 			}
 
 			return array_values( array_unique( $values ) );
+		}
+
+		/**
+		 * Collect explicit opt-ins for caller-provided runtime tools.
+		 *
+		 * @param array<int, array<string, mixed>> $policies        Policy fragments.
+		 * @param array<string, mixed>             $context         Runtime context.
+		 * @param string[]                         $allow_only      Effective allow-only names.
+		 * @param string[]                         $mandatory_tools Mandatory tool names.
+		 * @param string[]                         $mandatory_cats  Mandatory category slugs.
+		 * @return array{tools: string[], categories: string[]} Runtime opt-in names/categories.
+		 */
+		private function collect_runtime_tool_opt_in( array $policies, array $context, array $allow_only, array $mandatory_tools, array $mandatory_cats ): array {
+			$allowed_tools      = array_merge(
+				$allow_only,
+				$mandatory_tools,
+				$this->filter->string_list( $context['runtime_tools'] ?? array() )
+			);
+			$allowed_categories = array_merge(
+				$mandatory_cats,
+				$this->filter->string_list( $context['runtime_categories'] ?? array() )
+			);
+
+			foreach ( $policies as $policy ) {
+				$allowed_tools      = array_merge( $allowed_tools, $this->filter->string_list( $policy['runtime_tools'] ?? array() ) );
+				$allowed_categories = array_merge( $allowed_categories, $this->filter->string_list( $policy['runtime_categories'] ?? array() ) );
+
+				if ( self::MODE_ALLOW !== (string) ( $policy['mode'] ?? self::MODE_DENY ) ) {
+					continue;
+				}
+
+				$allowed_tools      = array_merge( $allowed_tools, $this->filter->string_list( $policy['tools'] ?? array() ) );
+				$allowed_categories = array_merge( $allowed_categories, $this->filter->string_list( $policy['categories'] ?? array() ) );
+			}
+
+			return array(
+				'tools'      => array_values( array_unique( $allowed_tools ) ),
+				'categories' => array_values( array_unique( $allowed_categories ) ),
+			);
 		}
 	}
 }
