@@ -88,6 +88,7 @@ Important options:
 | `compaction_policy` / `summarizer` | Optional caller-supplied compaction behavior. |
 | `tool_executor` | `WP_Agent_Tool_Executor` adapter for concrete execution. |
 | `tool_declarations` | Runtime tools keyed by name. |
+| `pre_tool_mediator` | Optional synchronous callback for product-owned pre-execution decisions. |
 | `completion_policy` | `WP_Agent_Conversation_Completion_Policy` implementation. |
 | `transcript_lock` / `transcript_lock_store` | Optional `WP_Agent_Conversation_Lock`. |
 | `transcript_session_id` / `session_id` / `transcript_id` | Session id used for lock acquisition. |
@@ -136,6 +137,47 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	)
 );
 ```
+
+### Pre-tool mediation decisions
+
+`pre_tool_mediator` lets a host make a synchronous product-owned decision after the loop has appended the canonical tool-call message and prepared the call, but before concrete execution. Agents API does not persist mediation decisions; hosts can observe the resulting canonical messages, `tool_execution_results`, `tool_events`, `tool_audit_events`, and loop events through existing surfaces.
+
+The callback receives one array context:
+
+| Key | Meaning |
+| --- | --- |
+| `messages` | Current normalized transcript, including the just-appended tool-call message. |
+| `raw_tool_call` | Raw tool call returned by the turn runner. |
+| `prepared_tool_call` | Normalized tool call that would be sent to the executor, or `null` if preparation failed. |
+| `tool_declaration` | Declaration for the tool name, or `null` when missing. |
+| `tool_name` / `parameters` / `tool_call_id` | Resolved execution identifiers and parameters. |
+| `turn_context` / `turn` | Current loop context and turn number. |
+| `prior_tool_results` | Tool execution results accumulated before this call. |
+| `prior_mediated_results` | Tool execution results already produced earlier in this mediated turn. |
+
+Supported decisions:
+
+```php
+array( 'action' => 'proceed' )
+
+array(
+	'action'   => 'reject',
+	'error'    => 'Duplicate tool call rejected.',
+	'metadata' => array( 'error_type' => 'duplicate_tool_call' ),
+	'complete' => false,
+)
+
+array(
+	'action' => 'replace_result',
+	'result' => array(
+		'success' => true,
+		'result'  => array( 'summary' => 'supplied by host policy' ),
+	),
+	'complete' => false,
+)
+```
+
+`proceed` preserves normal execution. `reject` creates a normalized failed tool result without calling the executor. `replace_result` appends the supplied normalized result without calling the executor. Setting `complete` truthy stops the mediated turn after the canonical tool-result message and result/event/audit entries have been appended.
 
 ## Runtime tool declarations
 

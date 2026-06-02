@@ -51,12 +51,17 @@ class WP_Agent_Conversation_Loop {
 	 *   and otherwise keeps going until `completion_policy` fires, `max_turns` is
 	 *   reached, or a budget is exceeded. Callers can pass `'__return_true'` to
 	 *   opt into the historical continue-always behavior.
-	 * - `compaction_policy` (array|null): Optional compaction policy.
-	 * - `summarizer` (callable|null): Optional compaction summarizer.
-	 * - `tool_executor` (WP_Agent_Tool_Executor|null): Tool execution adapter.
-	 * - `tool_declarations` (array|null): Tool declarations keyed by name.
-	 * - `completion_policy` (WP_Agent_Conversation_Completion_Policy|null): Typed completion policy.
-	 * - `spin_detector` (WP_Agent_Spin_Detector|null): Optional repeated tool-call detector.
+     * - `compaction_policy` (array|null): Optional compaction policy.
+     * - `summarizer` (callable|null): Optional compaction summarizer.
+     * - `tool_executor` (WP_Agent_Tool_Executor|null): Tool execution adapter.
+     * - `tool_declarations` (array|null): Tool declarations keyed by name.
+     * - `pre_tool_mediator` (callable|null): Optional synchronous decision callback
+     *   invoked after a mediated tool call is prepared and before execution. Receives
+     *   one array context with transcript messages, raw/prepared tool call data,
+     *   declaration, turn context, and prior mediated results. Return
+     *   `{ action: 'proceed'|'reject'|'replace_result', ... }`.
+     * - `completion_policy` (WP_Agent_Conversation_Completion_Policy|null): Typed completion policy.
+     * - `spin_detector` (WP_Agent_Spin_Detector|null): Optional repeated tool-call detector.
 	 * - `identical_failure_tracker` (WP_Agent_Identical_Failure_Tracker|null): Optional repeated failure nudger.
 	 * - `tool_result_truncator` (WP_Agent_Tool_Result_Truncator|null): Optional mediated tool result truncator.
 	 * - `interrupt_source` (callable|null): Optional source checked between turns. Returns a message array or null.
@@ -86,6 +91,7 @@ class WP_Agent_Conversation_Loop {
 		$spin_detector         = self::resolve_spin_detector( $options );
 		$failure_tracker       = self::resolve_identical_failure_tracker( $options );
 		$result_truncator      = self::resolve_tool_result_truncator( $options );
+		$pre_tool_mediator     = self::resolve_pre_tool_mediator( $options );
 		$interrupt_source      = self::resolve_interrupt_source( $options );
 		$request               = self::resolve_request( $messages, $options );
 		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
@@ -237,7 +243,9 @@ class WP_Agent_Conversation_Loop {
 						$budgets,
 						$failure_tracker,
 						$result_truncator,
-						$messages
+						$messages,
+						$pre_tool_mediator,
+						$tool_results
 					);
 
 					$messages              = $mediation_result['messages'];
@@ -442,7 +450,9 @@ class WP_Agent_Conversation_Loop {
 		array $budgets = array(),
 		?WP_Agent_Identical_Failure_Tracker $failure_tracker = null,
 		?WP_Agent_Tool_Result_Truncator $truncator = null,
-		array $prior_messages = array()
+		array $prior_messages = array(),
+		?callable $pre_tool_mediator = null,
+		array $prior_tool_results = array()
 	): array {
 		$core = new WP_Agent_Tool_Execution_Core();
 
@@ -506,16 +516,52 @@ class WP_Agent_Conversation_Loop {
 				array( 'tool_call_id' => $tool_call_id )
 			);
 
-			// Execute through WP_Agent_Tool_Execution_Core.
+			// Prepare through WP_Agent_Tool_Execution_Core so callers can mediate
+			// with the same normalized tool-call shape the executor would receive.
 			$tool_context                 = $turn_context;
 			$tool_context['tool_call_id'] = $tool_call_id;
-			$exec_result                  = $core->executeTool(
+			$prepared                     = $core->prepareWP_Agent_Tool_Call(
 				$tool_name,
 				is_array( $parameters ) ? $parameters : array(),
 				$declarations,
-				$executor,
 				$tool_context
 			);
+			$tool_def                     = $prepared['tool_def'] ?? ( $declarations[ $tool_name ] ?? null );
+			$mediator_complete            = false;
+			$mediator_decision            = self::pre_tool_mediation_decision(
+				$pre_tool_mediator,
+				array(
+					'messages'               => $messages,
+					'raw_tool_call'          => is_array( $raw_call ) ? $raw_call : array(),
+					'prepared_tool_call'     => ! empty( $prepared['ready'] ) && is_array( $prepared['tool_call'] ?? null ) ? $prepared['tool_call'] : null,
+					'tool_declaration'       => is_array( $tool_def ) ? $tool_def : null,
+					'tool_name'              => $tool_name,
+					'parameters'             => is_array( $parameters ) ? $parameters : array(),
+					'tool_call_id'           => $tool_call_id,
+					'turn_context'           => $turn_context,
+					'turn'                   => $turn,
+					'prior_tool_results'     => array_merge( $prior_tool_results, $tool_execution_results ),
+					'prior_mediated_results' => $tool_execution_results,
+				)
+			);
+
+			if ( 'reject' === $mediator_decision['action'] ) {
+				$exec_result       = $mediator_decision['result'];
+				$mediator_complete = $mediator_decision['complete'];
+			} elseif ( 'replace_result' === $mediator_decision['action'] ) {
+				$exec_result       = $mediator_decision['result'];
+				$mediator_complete = $mediator_decision['complete'];
+			} elseif ( empty( $prepared['ready'] ) ) {
+				unset( $prepared['ready'] );
+				$exec_result = $prepared;
+			} else {
+				$exec_result = $core->executePreparedTool(
+					$prepared['tool_call'],
+					$prepared['tool_def'],
+					$executor,
+					$tool_context
+				);
+			}
 
 			$pending_request = self::runtime_tool_pending_request( $exec_result, $tool_name, $tool_call_id, is_array( $parameters ) ? $parameters : array(), $turn_context );
 			if ( null !== $pending_request ) {
@@ -570,7 +616,6 @@ class WP_Agent_Conversation_Loop {
 				break;
 			}
 
-			$tool_def             = $declarations[ $tool_name ] ?? null;
 			$original_exec_result = $exec_result;
 			$truncation           = self::maybe_truncate_tool_result( $truncator, $exec_result, $tool_name, $tool_context );
 			$exec_result          = $truncation['result'];
@@ -677,6 +722,11 @@ class WP_Agent_Conversation_Loop {
 			}
 
 			if ( null !== $exceeded_budget ) {
+				$complete = true;
+				break;
+			}
+
+			if ( $mediator_complete ) {
 				$complete = true;
 				break;
 			}
@@ -850,6 +900,87 @@ class WP_Agent_Conversation_Loop {
 			'result'    => $truncated['result'],
 			'truncated' => $truncated['truncated'],
 			'metadata'  => $truncated['metadata'],
+		);
+	}
+
+	/**
+	 * Invoke and normalize the optional pre-tool mediation decision callback.
+	 *
+	 * The mediator is a synchronous, storage-free product policy seam. Invalid or
+	 * throwing callbacks fall back to `proceed` so the default execution path is
+	 * preserved unless the mediator explicitly returns a supported decision.
+	 *
+	 * @param callable|null       $mediator Optional pre-tool mediator.
+	 * @param array<string,mixed> $context  Tool mediation context.
+	 * @return array{action: string, result: array<string,mixed>, complete: bool}
+	 */
+	private static function pre_tool_mediation_decision( ?callable $mediator, array $context ): array {
+		$proceed = array(
+			'action'   => 'proceed',
+			'result'   => array(),
+			'complete' => false,
+		);
+
+		if ( null === $mediator ) {
+			return $proceed;
+		}
+
+		try {
+			$decision = call_user_func( $mediator, $context );
+		} catch ( \Throwable $error ) {
+			unset( $error );
+			return $proceed;
+		}
+
+		if ( ! is_array( $decision ) ) {
+			return $proceed;
+		}
+
+		$action = $decision['action'] ?? 'proceed';
+		$action = is_string( $action ) ? strtolower( trim( $action ) ) : 'proceed';
+		if ( ! in_array( $action, array( 'proceed', 'reject', 'replace_result' ), true ) ) {
+			return $proceed;
+		}
+
+		if ( 'proceed' === $action ) {
+			return $proceed;
+		}
+
+		$tool_name = $context['tool_name'] ?? '';
+		if ( ! is_string( $tool_name ) || '' === $tool_name ) {
+			return $proceed;
+		}
+
+		if ( 'reject' === $action ) {
+			$metadata = isset( $decision['metadata'] ) && is_array( $decision['metadata'] ) ? $decision['metadata'] : array();
+			if ( ! isset( $metadata['error_type'] ) ) {
+				$metadata['error_type'] = 'pre_tool_mediation_rejected';
+			}
+			$error  = is_string( $decision['error'] ?? null ) && '' !== trim( $decision['error'] ) ? trim( $decision['error'] ) : 'Tool call rejected by pre-tool mediator.';
+			$result = WP_Agent_Tool_Result::error(
+				$tool_name,
+				$error,
+				$metadata,
+				isset( $decision['runtime'] ) && is_array( $decision['runtime'] ) ? $decision['runtime'] : array()
+			);
+		} else {
+			$raw_result = $decision['result'] ?? null;
+			if ( ! is_array( $raw_result ) ) {
+				return $proceed;
+			}
+			$raw_result['tool_name'] = is_string( $raw_result['tool_name'] ?? null ) && '' !== $raw_result['tool_name'] ? $raw_result['tool_name'] : $tool_name;
+			try {
+				$result = WP_Agent_Tool_Result::normalize( $raw_result );
+			} catch ( \Throwable $error ) {
+				unset( $error );
+				return $proceed;
+			}
+		}
+
+		return array(
+			'action'   => $action,
+			'result'   => $result,
+			'complete' => ! empty( $decision['complete'] ),
 		);
 	}
 
@@ -1469,6 +1600,17 @@ class WP_Agent_Conversation_Loop {
 	private static function resolve_tool_result_truncator( array $options ): ?WP_Agent_Tool_Result_Truncator {
 		$truncator = $options['tool_result_truncator'] ?? null;
 		return $truncator instanceof WP_Agent_Tool_Result_Truncator ? $truncator : null;
+	}
+
+	/**
+	 * Resolve the pre-tool mediator from options.
+	 *
+	 * @param array $options Loop options.
+	 * @return callable|null
+	 */
+	private static function resolve_pre_tool_mediator( array $options ): ?callable {
+		$mediator = $options['pre_tool_mediator'] ?? null;
+		return is_callable( $mediator ) ? $mediator : null;
 	}
 
 	/**
