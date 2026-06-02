@@ -72,4 +72,36 @@ agents_api_smoke_assert_equals( 3, count( $observed ), 'three executions emit th
 agents_api_smoke_assert_equals( 'test/one', $observed[0]['ability_name'] ?? null, 'first observation carries ability name', $failures, $passes );
 agents_api_smoke_assert_equals( 'test/three', $observed[2]['ability_name'] ?? null, 'third observation carries ability name', $failures, $passes );
 
+echo "\n[4] Invoked observer re-emits the entry-point action with raw input:\n";
+$invoked = array();
+add_action(
+	WP_Agent_Ability_Lifecycle_Bridge::ACTION_ABILITY_INVOKED,
+	static function ( string $ability_name, $input, $ability ) use ( &$invoked ): void {
+		$invoked[] = array(
+			'ability_name' => $ability_name,
+			'input'        => $input,
+			'ability'      => $ability,
+		);
+	},
+	10,
+	3
+);
+
+$raw_input = array( 'q' => 'raw' );
+do_action( 'wp_ability_invoked', 'test/echo', $raw_input, $ability_stub );
+
+agents_api_smoke_assert_equals( 1, count( $invoked ), 'invoked observer fired once', $failures, $passes );
+agents_api_smoke_assert_equals( 'test/echo', $invoked[0]['ability_name'] ?? null, 'invoked observer received ability name', $failures, $passes );
+agents_api_smoke_assert_equals( $raw_input, $invoked[0]['input'] ?? null, 'invoked observer received raw input', $failures, $passes );
+agents_api_smoke_assert_equals( true, ( $invoked[0]['ability'] ?? null ) === $ability_stub, 'invoked observer received the ability instance', $failures, $passes );
+
+echo "\n[5] Invoked fires for calls that never reach a result:\n";
+$invoked = array();
+// An invocation that fails validation/permission still fires wp_ability_invoked
+// at the top of execute(), but never reaches wp_ability_execute_result.
+do_action( 'wp_ability_invoked', 'test/denied', array(), $ability_stub );
+
+agents_api_smoke_assert_equals( 1, count( $invoked ), 'invoked observer fires even when no result follows', $failures, $passes );
+agents_api_smoke_assert_equals( 'test/denied', $invoked[0]['ability_name'] ?? null, 'invoked observer records the short-circuited ability', $failures, $passes );
+
 agents_api_smoke_finish( 'ability lifecycle bridge', $failures, $passes );
