@@ -427,16 +427,19 @@ class WP_Agent_Conversation_Loop {
 	 *
 	 * Handles the tool-call → validate → execute → message assembly cycle.
 	 *
-	 * @param array                                             $result          Turn runner result with tool_calls.
-	 * @param WP_Agent_Tool_Executor                             $executor        Tool executor adapter.
-	 * @param array                                             $declarations    Tool declarations keyed by name.
-	 * @param WP_Agent_Conversation_Completion_Policy|null   $policy          Completion policy.
-	 * @param array                                             $turn_context    Turn context.
-	 * @param int                                               $turn            Current turn number.
-	 * @param callable|null                                     $on_event        Event sink.
-	 * @param array<string, WP_Agent_Iteration_Budget>                    $budgets         Named iteration budgets.
-	 * @param WP_Agent_Identical_Failure_Tracker|null                     $failure_tracker Optional identical-failure tracker.
-	 * @param WP_Agent_Tool_Result_Truncator|null                         $truncator       Optional tool result truncator.
+	 * @param array                                             $result             Turn runner result with tool_calls.
+	 * @param WP_Agent_Tool_Executor                            $executor           Tool executor adapter.
+	 * @param array                                             $declarations       Tool declarations keyed by name.
+	 * @param WP_Agent_Conversation_Completion_Policy|null      $policy             Completion policy.
+	 * @param array                                             $turn_context       Turn context.
+	 * @param int                                               $turn               Current turn number.
+	 * @param callable|null                                     $on_event           Event sink.
+	 * @param array<string, WP_Agent_Iteration_Budget>          $budgets            Named iteration budgets.
+	 * @param WP_Agent_Identical_Failure_Tracker|null           $failure_tracker    Optional identical-failure tracker.
+	 * @param WP_Agent_Tool_Result_Truncator|null               $truncator          Optional tool result truncator.
+	 * @param array<int, array<string, mixed>>                  $prior_messages     Prior transcript messages.
+	 * @param callable|null                                     $pre_tool_mediator  Optional pre-tool mediator.
+	 * @param array<int, array<string, mixed>>                  $prior_tool_results Prior mediated tool results.
 	 * @return array{messages: array, tool_execution_results: array, tool_events: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, runtime_tool_pending: array<string, mixed>|null, spin_signatures: WP_Agent_Spin_Signature[]}
 	 */
 	private static function mediate_tool_calls(
@@ -462,7 +465,7 @@ class WP_Agent_Conversation_Loop {
 		$messages               = isset( $result['messages'] ) && is_array( $result['messages'] )
 			? WP_Agent_Message::normalize_many( $result['messages'] )
 			: $prior_messages;
-		$tool_calls             = $result['tool_calls'];
+		$tool_calls             = isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ? $result['tool_calls'] : array();
 		$tool_execution_results = array();
 		$tool_events            = array();
 		$tool_audit_events      = array();
@@ -479,9 +482,13 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		foreach ( $tool_calls as $index => $raw_call ) {
+			if ( ! is_array( $raw_call ) ) {
+				continue;
+			}
+
 			$tool_name    = $raw_call['name'] ?? $raw_call['tool_name'] ?? '';
 			$parameters   = $raw_call['parameters'] ?? array();
-			$tool_call_id = self::resolve_tool_call_id( is_array( $raw_call ) ? $raw_call : array(), $turn, (int) $index + 1 );
+			$tool_call_id = self::resolve_tool_call_id( $raw_call, $turn, (int) $index + 1 );
 
 			if ( ! is_string( $tool_name ) || '' === $tool_name ) {
 				continue;
@@ -526,15 +533,17 @@ class WP_Agent_Conversation_Loop {
 				$declarations,
 				$tool_context
 			);
-			$tool_def                     = $prepared['tool_def'] ?? ( $declarations[ $tool_name ] ?? null );
+			$prepared_tool_call           = isset( $prepared['tool_call'] ) && is_array( $prepared['tool_call'] ) ? $prepared['tool_call'] : array();
+			$prepared_tool_def            = isset( $prepared['tool_def'] ) && is_array( $prepared['tool_def'] ) ? $prepared['tool_def'] : array();
+			$tool_definition              = self::associative_array_or_null( $prepared['tool_def'] ?? ( $declarations[ $tool_name ] ?? null ) );
 			$mediator_complete            = false;
 			$mediator_decision            = self::pre_tool_mediation_decision(
 				$pre_tool_mediator,
 				array(
 					'messages'               => $messages,
-					'raw_tool_call'          => is_array( $raw_call ) ? $raw_call : array(),
-					'prepared_tool_call'     => ! empty( $prepared['ready'] ) && is_array( $prepared['tool_call'] ?? null ) ? $prepared['tool_call'] : null,
-					'tool_declaration'       => is_array( $tool_def ) ? $tool_def : null,
+					'raw_tool_call'          => $raw_call,
+					'prepared_tool_call'     => ! empty( $prepared['ready'] ) ? $prepared_tool_call : null,
+					'tool_declaration'       => $tool_definition,
 					'tool_name'              => $tool_name,
 					'parameters'             => is_array( $parameters ) ? $parameters : array(),
 					'tool_call_id'           => $tool_call_id,
@@ -556,8 +565,8 @@ class WP_Agent_Conversation_Loop {
 				$exec_result = $prepared;
 			} else {
 				$exec_result = $core->executePreparedTool(
-					$prepared['tool_call'],
-					$prepared['tool_def'],
+					$prepared_tool_call,
+					$prepared_tool_def,
 					$executor,
 					$tool_context
 				);
@@ -679,7 +688,7 @@ class WP_Agent_Conversation_Loop {
 				$tool_call_id,
 				is_array( $parameters ) ? $parameters : array(),
 				$exec_result,
-				is_array( $tool_def ) ? $tool_def : null,
+				$tool_definition,
 				$turn_context,
 				$turn
 			);
@@ -735,7 +744,7 @@ class WP_Agent_Conversation_Loop {
 			if ( null !== $policy ) {
 				$decision = $policy->recordToolResult(
 					$tool_name,
-					is_array( $tool_def ) ? $tool_def : null,
+					$tool_definition,
 					$exec_result,
 					$turn_context,
 					$turn
@@ -952,16 +961,17 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		if ( 'reject' === $action ) {
-			$metadata = isset( $decision['metadata'] ) && is_array( $decision['metadata'] ) ? $decision['metadata'] : array();
+			$metadata = self::associative_array_or_null( $decision['metadata'] ?? null ) ?? array();
 			if ( ! isset( $metadata['error_type'] ) ) {
 				$metadata['error_type'] = 'pre_tool_mediation_rejected';
 			}
-			$error  = is_string( $decision['error'] ?? null ) && '' !== trim( $decision['error'] ) ? trim( $decision['error'] ) : 'Tool call rejected by pre-tool mediator.';
-			$result = WP_Agent_Tool_Result::error(
+			$error   = is_string( $decision['error'] ?? null ) && '' !== trim( $decision['error'] ) ? trim( $decision['error'] ) : 'Tool call rejected by pre-tool mediator.';
+			$runtime = self::associative_array_or_null( $decision['runtime'] ?? null ) ?? array();
+			$result  = WP_Agent_Tool_Result::error(
 				$tool_name,
 				$error,
 				$metadata,
-				isset( $decision['runtime'] ) && is_array( $decision['runtime'] ) ? $decision['runtime'] : array()
+				$runtime
 			);
 		} else {
 			$raw_result = $decision['result'] ?? null;
@@ -1603,9 +1613,29 @@ class WP_Agent_Conversation_Loop {
 	}
 
 	/**
+	 * Return an array only when every key is string-addressable metadata.
+	 *
+	 * @param mixed $value Candidate value.
+	 * @return array<string, mixed>|null
+	 */
+	private static function associative_array_or_null( $value ): ?array {
+		if ( ! is_array( $value ) ) {
+			return null;
+		}
+
+		foreach ( array_keys( $value ) as $key ) {
+			if ( ! is_string( $key ) ) {
+				return null;
+			}
+		}
+
+		return $value;
+	}
+
+	/**
 	 * Resolve the pre-tool mediator from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return callable|null
 	 */
 	private static function resolve_pre_tool_mediator( array $options ): ?callable {
