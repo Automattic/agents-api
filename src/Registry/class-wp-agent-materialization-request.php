@@ -31,22 +31,25 @@ if ( ! class_exists( 'WP_Agent_Materialization_Request' ) ) {
 		 * @param array<string,mixed> $args  Request args.
 		 */
 		public function __construct( WP_Agent $agent, array $args = array() ) {
-			$this->agent          = $agent;
-			$this->operation      = self::prepare_operation( $args['operation'] ?? 'install' );
-			$this->owner_user_id  = isset( $args['owner_user_id'] ) && null !== $args['owner_user_id'] ? max( 0, (int) $args['owner_user_id'] ) : null;
-			$this->instance_key   = self::prepare_instance_key( $args['instance_key'] ?? 'default' );
-			$this->config         = self::prepare_config( $agent, $args['config'] ?? array(), (bool) ( $args['adopt_default_config'] ?? true ) );
-			$this->context        = is_array( $args['context'] ?? null ) ? $args['context'] : array();
-			$this->package        = $args['package'] ?? null;
-			$this->package_result = $args['package_result'] ?? null;
+			$this->agent         = $agent;
+			$this->operation     = self::prepare_operation( $args['operation'] ?? 'install' );
+			$this->owner_user_id = array_key_exists( 'owner_user_id', $args ) && null !== $args['owner_user_id'] ? max( 0, (int) $args['owner_user_id'] ) : null;
+			$this->instance_key  = self::prepare_instance_key( $args['instance_key'] ?? 'default' );
+			$this->config        = self::prepare_config( $agent, $args['config'] ?? array(), (bool) ( $args['adopt_default_config'] ?? true ) );
+			$this->context       = is_array( $args['context'] ?? null ) ? $args['context'] : array();
+			$package             = $args['package'] ?? null;
+			$package_result      = $args['package_result'] ?? null;
 
-			if ( null !== $this->package && ! $this->package instanceof WP_Agent_Package ) {
+			if ( null !== $package && ! $package instanceof WP_Agent_Package ) {
 				throw new InvalidArgumentException( 'Materialization package must be a WP_Agent_Package.' );
 			}
 
-			if ( null !== $this->package_result && ! $this->package_result instanceof WP_Agent_Package_Adoption_Result ) {
+			if ( null !== $package_result && ! $package_result instanceof WP_Agent_Package_Adoption_Result ) {
 				throw new InvalidArgumentException( 'Materialization package_result must be a WP_Agent_Package_Adoption_Result.' );
 			}
+
+			$this->package        = $package;
+			$this->package_result = $package_result;
 		}
 
 		public function get_agent(): WP_Agent {

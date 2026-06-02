@@ -35,7 +35,7 @@ if ( ! class_exists( 'WP_Agent_Installed_Agent' ) ) {
 		public function __construct( array $args ) {
 			$this->id              = self::prepare_required_string( $args['id'] ?? '', 'Installed agent id cannot be empty.' );
 			$this->agent_slug      = self::prepare_slug( $args['agent_slug'] ?? '', 'Installed agent slug cannot be empty.' );
-			$this->owner_user_id   = isset( $args['owner_user_id'] ) && null !== $args['owner_user_id'] ? max( 0, (int) $args['owner_user_id'] ) : null;
+			$this->owner_user_id   = array_key_exists( 'owner_user_id', $args ) && null !== $args['owner_user_id'] ? max( 0, (int) $args['owner_user_id'] ) : null;
 			$this->instance_key    = self::prepare_instance_key( $args['instance_key'] ?? 'default' );
 			$this->config          = is_array( $args['config'] ?? null ) ? $args['config'] : array();
 			$this->meta            = is_array( $args['meta'] ?? null ) ? $args['meta'] : array();
@@ -117,7 +117,7 @@ if ( ! class_exists( 'WP_Agent_Installed_Agent' ) ) {
 		private static function prepare_required_string( $value, string $message ): string {
 			$value = trim( (string) $value );
 			if ( '' === $value ) {
-				throw new InvalidArgumentException( $message );
+				throw new InvalidArgumentException( esc_html( $message ) );
 			}
 
 			return $value;
@@ -126,7 +126,7 @@ if ( ! class_exists( 'WP_Agent_Installed_Agent' ) ) {
 		private static function prepare_slug( $value, string $message ): string {
 			$value = sanitize_title( (string) $value );
 			if ( '' === $value ) {
-				throw new InvalidArgumentException( $message );
+				throw new InvalidArgumentException( esc_html( $message ) );
 			}
 
 			return $value;
