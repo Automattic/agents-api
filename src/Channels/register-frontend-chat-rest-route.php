@@ -211,8 +211,8 @@ function agents_frontend_chat_rest_string_key_array( array $value ): array {
  */
 function agents_frontend_chat_rest_scope( \WP_REST_Request $request ): array {
 	$client_context  = $request->get_param( 'client_context' );
-	$knowledge_scope = is_array( $client_context )
-		? agents_frontend_chat_rest_knowledge_context( agents_frontend_chat_rest_string_key_array( $client_context ) )
+	$context_binding = is_array( $client_context )
+		? agents_frontend_chat_rest_context_binding( agents_frontend_chat_rest_string_key_array( $client_context ) )
 		: array();
 	$scope                     = \AgentsAPI\AI\Auth\agents_access_request_scope(
 		array(
@@ -221,34 +221,27 @@ function agents_frontend_chat_rest_scope( \WP_REST_Request $request ): array {
 		)
 	);
 	$scope['request_metadata'] = array(
-		'rest_route'        => AGENTS_FRONTEND_CHAT_REST_NAMESPACE . AGENTS_FRONTEND_CHAT_REST_ROUTE,
-		'knowledge_context' => $knowledge_scope,
+		'rest_route'      => AGENTS_FRONTEND_CHAT_REST_NAMESPACE . AGENTS_FRONTEND_CHAT_REST_ROUTE,
+		'context_binding' => $context_binding,
 	);
-	$scope['knowledge_context'] = $knowledge_scope;
+	$scope['context_binding']  = $context_binding;
 
 	return $scope;
 }
 
 /**
- * Extract the optional generic corpus/retrieval context subset.
+ * Extract the optional generic context-binding subset.
  *
  * @param array<string,mixed> $client_context Canonical client context.
  * @return array<string,mixed>
  */
-function agents_frontend_chat_rest_knowledge_context( array $client_context ): array {
-	$knowledge_context = array();
-	foreach ( array( 'corpus_id', 'knowledge_base_id', 'retrieval_policy', 'current_document_id' ) as $key ) {
-		if ( array_key_exists( $key, $client_context ) ) {
-			$value = $client_context[ $key ];
-			if ( is_scalar( $value ) || null === $value || is_array( $value ) ) {
-				$knowledge_context[ $key ] = is_array( $value )
-					? agents_frontend_chat_rest_string_key_array( $value )
-					: $value;
-			}
-		}
+function agents_frontend_chat_rest_context_binding( array $client_context ): array {
+	$context_binding = $client_context['context_binding'] ?? array();
+	if ( ! is_array( $context_binding ) ) {
+		return array();
 	}
 
-	return $knowledge_context;
+	return agents_frontend_chat_rest_string_key_array( $context_binding );
 }
 
 /**

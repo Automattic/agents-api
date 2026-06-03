@@ -382,7 +382,7 @@ function agents_chat_input_schema(): array {
 			'client_context'        => array(
 				'type'        => 'object',
 				'description' => 'Optional transport-level context describing where this turn originated. '
-					. 'Hosts may also use the generic corpus/retrieval keys to bind a turn to a knowledge context without making retrieval product-specific.',
+					. 'Hosts may also use context_binding to bind a turn to generic retrieved or selected material without making the substrate product-specific.',
 				'properties'  => array(
 					'source'                   => array(
 						'type'        => 'string',
@@ -430,23 +430,17 @@ function agents_chat_input_schema(): array {
 						'type'        => 'boolean',
 						'description' => 'Whether this turn is an explicit agent-to-agent delegation call.',
 					),
-					'corpus_id'                => array(
-						'type'        => array( 'string', 'null' ),
-						'description' => 'Optional opaque corpus identifier selected by the client or host. '
-							. 'Agents API preserves it; hosts decide authorization and retrieval behavior.',
-					),
-					'knowledge_base_id'        => array(
-						'type'        => array( 'string', 'null' ),
-						'description' => 'Optional opaque knowledge-base identifier selected by the client or host. '
-							. 'This is a convention, not a required storage model.',
-					),
-					'retrieval_policy'         => array(
-						'type'        => array( 'string', 'object', 'null' ),
-						'description' => 'Optional opaque retrieval policy name or object. Runtimes and hosts own the concrete policy semantics.',
-					),
-					'current_document_id'      => array(
-						'type'        => array( 'string', 'null' ),
-						'description' => 'Optional opaque document identifier for clients that want retrieval scoped around the currently viewed document.',
+					'context_binding'          => array(
+						'type'        => 'object',
+						'description' => 'Optional opaque context selection metadata, such as a selected source, item, scope, policy, or provenance pointer. '
+							. 'Hosts own authorization and retrieval behavior.',
+						'properties'  => array(
+							'source_type'     => array( 'type' => array( 'string', 'null' ) ),
+							'source_id'       => array( 'type' => array( 'string', 'null' ) ),
+							'scope_id'        => array( 'type' => array( 'string', 'null' ) ),
+							'policy'          => array( 'type' => array( 'string', 'object', 'null' ) ),
+							'current_item_id' => array( 'type' => array( 'string', 'null' ) ),
+						),
 					),
 				),
 			),

@@ -291,10 +291,13 @@ array(
 		'external_conversation_id'     => 'opaque-channel-or-thread-id',
 		'external_message_id'          => 'opaque-message-id',
 		'room_kind'                    => 'dm',
-		'corpus_id'                    => 'optional-opaque-corpus-id',
-		'knowledge_base_id'            => 'optional-opaque-knowledge-base-id',
-		'retrieval_policy'             => 'optional-policy-name-or-object',
-		'current_document_id'          => 'optional-opaque-document-id',
+		'context_binding'              => array(
+			'source_type'     => 'optional-opaque-source-type',
+			'source_id'       => 'optional-opaque-source-id',
+			'scope_id'        => 'optional-opaque-scope-id',
+			'policy'          => 'optional-policy-name-or-object',
+			'current_item_id' => 'optional-opaque-item-id',
+		),
 	),
 )
 ```
@@ -302,13 +305,14 @@ array(
 Runtime adapters can decide which metadata affects prompt policy, routing,
 storage, or observability.
 
-The corpus/retrieval fields are optional conventions for clients that need a
-turn bound to a selected knowledge context. Agents API preserves these values
-and forwards them through the same `client_context` envelope; it does not define
-the storage model, retrieval algorithm, corpus authorization policy, or prompt
-assembly rules. Hosts that support corpus-bound chat should validate the opaque
-ids and policy values against their own workspace/access model before using them
-for retrieval.
+`context_binding` is an optional convention for clients that need a turn bound
+to selected material, whether that material is docs, memory, tool output, search
+results, files, CRM records, support articles, or another host-defined source.
+Agents API preserves these values and forwards them through the same
+`client_context` envelope; it does not define the source model, lookup algorithm,
+authorization policy, or prompt assembly rules. Hosts that support scoped context
+selection should validate the opaque ids and policy values against their own
+workspace/access model before using them.
 
 ### Normalized External Message
 
