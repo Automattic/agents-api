@@ -603,4 +603,176 @@ agents_api_smoke_assert_equals( 'client/summarize', $pending_result['runtime_too
 agents_api_smoke_assert_equals( 'client-call-1', $pending_result['runtime_tool_pending']['tool_call_id'] ?? '', 'pending request carries tool call id', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'tool_call', AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING ), array_column( $pending_result['tool_events'], 'type' ), 'pending request is recorded in canonical tool events', $failures, $passes );
 
+echo "\n[Pre-tool filter hook allows, rejects, or pauses external runtime tools (#259):\n";
+
+$filter_contexts = array();
+add_filter(
+	'agents_api_pre_tool_call_decision',
+	static function ( array $decision, array $context ) use ( &$filter_contexts ): array {
+		$tool_call_id = (string) ( $context['tool_call_id'] ?? '' );
+		$filter_contexts[ $tool_call_id ] = $context;
+
+		if ( 'call_filter_allow' === $tool_call_id ) {
+			return array( 'action' => 'proceed' );
+		}
+
+		if ( 'call_filter_reject' === $tool_call_id ) {
+			return array(
+				'action'   => 'reject',
+				'error'    => 'Rejected by host preflight.',
+				'metadata' => array( 'error_type' => 'runtime_rule_rejected' ),
+			);
+		}
+
+		if ( 'call_filter_pending' === $tool_call_id ) {
+			return array(
+				'action'  => 'pending',
+				'request' => array(
+					'metadata' => array( 'transport' => 'browser' ),
+					'runtime'  => array( 'completion_signal' => 'external_result' ),
+				),
+			);
+		}
+
+		return $decision;
+	},
+	10,
+	2
+);
+
+$executor->executed = array();
+$filter_allow_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'allow via hook' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'id'         => 'call_filter_allow',
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'filter allow' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 1,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+	)
+);
+
+agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'pre-tool filter proceed keeps default executor path', $failures, $passes );
+agents_api_smoke_assert_equals( 'FILTER ALLOW', $filter_allow_result['tool_execution_results'][0]['result']['result']['summary'] ?? '', 'pre-tool filter allow result carries executor payload', $failures, $passes );
+agents_api_smoke_assert_equals( 'client/summarize', $filter_contexts['call_filter_allow']['prepared_tool_call']['tool_name'] ?? '', 'pre-tool filter receives prepared tool call context', $failures, $passes );
+
+$executor->executed = array();
+$filter_reject_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'reject via hook' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'id'         => 'call_filter_reject',
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'blocked' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 1,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+	)
+);
+
+agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'pre-tool filter reject prevents executor call', $failures, $passes );
+agents_api_smoke_assert_equals( false, $filter_reject_result['tool_execution_results'][0]['result']['success'] ?? true, 'pre-tool filter reject records failed tool result', $failures, $passes );
+agents_api_smoke_assert_equals( 'runtime_rule_rejected', $filter_reject_result['tool_audit_events'][0]['error_type'] ?? '', 'pre-tool filter reject preserves error type for audit', $failures, $passes );
+
+$executor->executed = array();
+$filter_pending_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'pending via hook' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'id'         => 'call_filter_pending',
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'needs browser hook' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 3,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+		'context'           => array(
+			'run_id'                  => 'run-filter-pending',
+			'runtime_tool_timeout_at' => '2026-06-01T00:00:00Z',
+		),
+	)
+);
+
+agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'pre-tool filter pending prevents executor call', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING, $filter_pending_result['status'] ?? '', 'pre-tool filter pending sets canonical loop status', $failures, $passes );
+agents_api_smoke_assert_equals( 'call_filter_pending', $filter_pending_result['runtime_tool_pending']['tool_call_id'] ?? '', 'pre-tool filter pending request carries tool call id', $failures, $passes );
+agents_api_smoke_assert_equals( 'browser', $filter_pending_result['runtime_tool_pending']['metadata']['transport'] ?? '', 'pre-tool filter pending request preserves host metadata', $failures, $passes );
+
+echo "\n[Post-tool diagnostics option and filter attach audit metadata (#259):\n";
+
+add_filter(
+	'agents_api_mediated_tool_result_diagnostics',
+	static function ( array $diagnostics, array $context ): array {
+		if ( 'call_diag' !== ( $context['tool_call_id'] ?? '' ) ) {
+			return $diagnostics;
+		}
+
+		$diagnostics['filter_trace_id'] = 'trace-filter-1';
+		$diagnostics['saw_parameter_hash'] = str_starts_with( (string) ( $context['parameters_sha256'] ?? '' ), 'sha256:' );
+		return $diagnostics;
+	},
+	10,
+	2
+);
+
+$executor->executed = array();
+$diagnostics_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'diagnose result' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'id'         => 'call_diag',
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'secret diagnostic text' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'                    => 1,
+		'tool_executor'                => $executor,
+		'tool_declarations'            => $tools,
+		'post_tool_result_diagnostics' => static function ( array $context ): array {
+			return array(
+				'option_trace_id' => 'trace-option-1',
+				'tool_call_id'    => $context['tool_call_id'] ?? '',
+			);
+		},
+	)
+);
+
+$diagnostics = $diagnostics_result['tool_execution_results'][0]['diagnostics'] ?? array();
+agents_api_smoke_assert_equals( 'trace-option-1', $diagnostics['option_trace_id'] ?? '', 'post-tool diagnostics option attaches metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'trace-filter-1', $diagnostics['filter_trace_id'] ?? '', 'post-tool diagnostics filter can refine metadata', $failures, $passes );
+agents_api_smoke_assert_equals( true, $diagnostics['saw_parameter_hash'] ?? false, 'post-tool diagnostics filter receives parameter hash', $failures, $passes );
+agents_api_smoke_assert_equals( true, ! str_contains( wp_json_encode( $diagnostics ), 'secret diagnostic text' ), 'stored diagnostics omit raw tool parameters', $failures, $passes );
+agents_api_smoke_assert_equals( 'tool_result_diagnostics', $diagnostics_result['events'][0]['type'] ?? '', 'post-tool diagnostics adds canonical event', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API conversation loop tool execution', $failures, $passes );
