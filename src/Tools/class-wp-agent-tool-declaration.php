@@ -21,6 +21,7 @@ class WP_Agent_Tool_Declaration {
 
 	public const SOURCE_CLIENT   = 'client';
 	public const EXECUTOR_CLIENT = 'client';
+	public const EXECUTOR_HOST   = 'host';
 	public const SCOPE_RUN       = 'run';
 
 	/**
@@ -62,6 +63,56 @@ class WP_Agent_Tool_Declaration {
 			'description' => is_string( $description ) ? trim( $description ) : '',
 			'parameters'  => $declaration['parameters'] ?? array(),
 			'executor'    => self::EXECUTOR_CLIENT,
+			'scope'       => self::SCOPE_RUN,
+		);
+
+		$runtime = self::normalizeRuntimeMetadata( $declaration['runtime'] ?? array() );
+		if ( ! empty( $runtime ) ) {
+			$normalized['runtime'] = $runtime;
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize a conversation-request tool declaration.
+	 *
+	 * Client runtime tools keep the strict `normalize()` contract. Host-owned
+	 * declarations are request/replay catalog entries for tools executed by the
+	 * host runtime rather than the client transport.
+	 *
+	 * @param array<mixed> $declaration Raw request tool declaration.
+	 * @return array<mixed> Normalized declaration.
+	 */
+	public static function normalizeForConversationRequest( array $declaration ): array {
+		$name     = is_string( $declaration['name'] ?? null ) ? $declaration['name'] : '';
+		$executor = $declaration['executor'] ?? null;
+
+		if ( self::EXECUTOR_CLIENT === $executor || self::SOURCE_CLIENT === self::sourceFromName( $name ) ) {
+			return self::normalize( $declaration );
+		}
+
+		$errors = self::validateHostDeclaration( $declaration );
+		if ( ! empty( $errors ) ) {
+			$message = sprintf(
+				'invalid_conversation_tool_declaration: %s',
+				implode( ', ', self::sanitizeErrorKeys( $errors ) )
+			);
+
+			throw new \InvalidArgumentException(
+				$message
+			);
+		}
+
+		$source      = self::sourceFromName( $name );
+		$description = $declaration['description'] ?? '';
+
+		$normalized = array(
+			'name'        => $name,
+			'source'      => $source,
+			'description' => is_string( $description ) ? trim( $description ) : '',
+			'parameters'  => $declaration['parameters'] ?? array(),
+			'executor'    => self::EXECUTOR_HOST,
 			'scope'       => self::SCOPE_RUN,
 		);
 
@@ -116,6 +167,63 @@ class WP_Agent_Tool_Declaration {
 		}
 
 		if ( ( $declaration['executor'] ?? null ) !== self::EXECUTOR_CLIENT ) {
+			$errors[] = 'executor';
+		}
+
+		if ( ( $declaration['scope'] ?? null ) !== self::SCOPE_RUN ) {
+			$errors[] = 'scope';
+		}
+
+		if ( isset( $declaration['runtime'] ) && ! is_array( $declaration['runtime'] ) ) {
+			$errors[] = 'runtime';
+		}
+
+		return array_values( array_unique( $errors ) );
+	}
+
+	/**
+	 * Validate a host-owned request/replay tool declaration without throwing.
+	 *
+	 * @param array<mixed> $declaration Raw host declaration.
+	 * @return string[] Machine-readable invalid field names.
+	 */
+	private static function validateHostDeclaration( array $declaration ): array {
+		$errors = array();
+
+		$name = $declaration['name'] ?? null;
+		if (
+			! is_string( $name )
+			|| '' === $name
+			|| ! preg_match( '/^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/', $name )
+		) {
+			$errors[] = 'name';
+		}
+
+		$source = is_string( $name ) ? self::sourceFromName( $name ) : '';
+		if ( '' === $source || self::SOURCE_CLIENT === $source ) {
+			$errors[] = 'source';
+		}
+
+		if (
+			isset( $declaration['source'] )
+			&& $declaration['source'] !== $source
+		) {
+			$errors[] = 'source';
+		}
+
+		$description = $declaration['description'] ?? null;
+		if ( ! is_string( $description ) || '' === trim( $description ) ) {
+			$errors[] = 'description';
+		}
+
+		if (
+			isset( $declaration['parameters'] )
+			&& ! is_array( $declaration['parameters'] )
+		) {
+			$errors[] = 'parameters';
+		}
+
+		if ( ( $declaration['executor'] ?? null ) !== self::EXECUTOR_HOST ) {
 			$errors[] = 'executor';
 		}
 

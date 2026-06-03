@@ -47,6 +47,65 @@ agents_api_smoke_assert_equals( 'repeatable', $declaration['runtime']['duplicate
 agents_api_smoke_assert_equals( 'progress', $declaration['runtime']['completion_signal'] ?? '', 'runtime declaration preserves completion signal metadata', $failures, $passes );
 agents_api_smoke_assert_equals( false, array_key_exists( 'unsupported', $declaration['runtime'] ?? array() ), 'runtime declaration drops unsupported metadata values', $failures, $passes );
 
+$host_declaration = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(
+	array(
+		'name'        => 'ability/search_posts',
+		'source'      => 'ability',
+		'description' => 'Search host-owned posts.',
+		'parameters'  => array(
+			'type'       => 'object',
+			'required'   => array( 'query' ),
+			'properties' => array(
+				'query' => array( 'type' => 'string' ),
+			),
+		),
+		'executor'    => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::EXECUTOR_HOST,
+		'scope'       => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::SCOPE_RUN,
+		'runtime'     => array(
+			'duplicate_policy' => 'repeatable',
+			'unsupported'      => new stdClass(),
+		),
+	)
+);
+agents_api_smoke_assert_equals( 'ability/search_posts', $host_declaration['name'], 'request declaration accepts host-owned namespaced tools', $failures, $passes );
+agents_api_smoke_assert_equals( 'ability', $host_declaration['source'], 'request declaration records host-owned source', $failures, $passes );
+agents_api_smoke_assert_equals( 'host', $host_declaration['executor'], 'request declaration records host executor', $failures, $passes );
+agents_api_smoke_assert_equals( 'run', $host_declaration['scope'], 'request declaration records run scope for host tools', $failures, $passes );
+agents_api_smoke_assert_equals( 'repeatable', $host_declaration['runtime']['duplicate_policy'] ?? '', 'request declaration preserves host runtime metadata', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'unsupported', $host_declaration['runtime'] ?? array() ), 'request declaration drops unsupported host metadata values', $failures, $passes );
+
+$strict_rejected_host = false;
+try {
+	AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalize(
+		array(
+			'name'        => 'ability/search_posts',
+			'description' => 'Search host-owned posts.',
+			'executor'    => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::EXECUTOR_HOST,
+			'scope'       => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::SCOPE_RUN,
+		)
+	);
+} catch ( InvalidArgumentException $error ) {
+	$strict_rejected_host = str_starts_with( $error->getMessage(), 'invalid_runtime_tool_declaration:' );
+}
+agents_api_smoke_assert_equals( true, $strict_rejected_host, 'strict runtime declaration still rejects host-owned tools', $failures, $passes );
+
+$invalid_host = false;
+try {
+	AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(
+		array(
+			'name'        => 'ability/search_posts',
+			'source'      => 'wrong',
+			'description' => 'Search host-owned posts.',
+			'parameters'  => 'bad-parameters',
+			'executor'    => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::EXECUTOR_HOST,
+			'scope'       => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::SCOPE_RUN,
+		)
+	);
+} catch ( InvalidArgumentException $error ) {
+	$invalid_host = str_starts_with( $error->getMessage(), 'invalid_conversation_tool_declaration:' );
+}
+agents_api_smoke_assert_equals( true, $invalid_host, 'request declaration rejects invalid host-owned tool shapes', $failures, $passes );
+
 $registry = new AgentsAPI\AI\Tools\WP_Agent_Tool_Source_Registry();
 $registry->registerSource(
 	'local',
