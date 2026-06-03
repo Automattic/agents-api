@@ -51,6 +51,35 @@ agents_api_smoke_assert_equals( 'runtime_local', $declaration['runtime']['capabi
 agents_api_smoke_assert_equals( 'runtime_local', $declaration['runtime']['environment'] ?? '', 'runtime declaration preserves runtime-local environment metadata', $failures, $passes );
 agents_api_smoke_assert_equals( false, array_key_exists( 'unsupported', $declaration['runtime'] ?? array() ), 'runtime declaration drops unsupported metadata values', $failures, $passes );
 
+$legacy_client_declaration = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(
+	array(
+		'name' => 'client/search',
+	)
+);
+agents_api_smoke_assert_equals( 'client', $legacy_client_declaration['source'], 'request declaration defaults legacy client source', $failures, $passes );
+agents_api_smoke_assert_equals( 'client', $legacy_client_declaration['executor'], 'request declaration defaults legacy client executor', $failures, $passes );
+agents_api_smoke_assert_equals( 'run', $legacy_client_declaration['scope'], 'request declaration defaults legacy client scope', $failures, $passes );
+agents_api_smoke_assert_equals( array(), $legacy_client_declaration['parameters'], 'request declaration defaults legacy client parameters', $failures, $passes );
+
+$server_declaration = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForServer(
+	array(
+		'name'                    => 'ability/search_posts',
+		'source'                  => 'abilities',
+		'description'             => 'Search host-owned posts.',
+		'client_context_bindings' => array( 'query' => 'search_query' ),
+		'runtime'                 => array(
+			AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::RUNTIME_CAPABILITY_SCOPE => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::CAPABILITY_SCOPE_CONTROL_PLANE,
+		),
+	)
+);
+agents_api_smoke_assert_equals( 'ability/search_posts', $server_declaration['name'], 'server declaration keeps namespaced name', $failures, $passes );
+agents_api_smoke_assert_equals( 'abilities', $server_declaration['source'], 'server declaration accepts host source slugs independent from name namespace', $failures, $passes );
+agents_api_smoke_assert_equals( 'host', $server_declaration['executor'], 'server declaration defaults to host executor', $failures, $passes );
+agents_api_smoke_assert_equals( 'run', $server_declaration['scope'], 'server declaration defaults to run scope', $failures, $passes );
+agents_api_smoke_assert_equals( array(), $server_declaration['parameters'], 'server declaration defaults missing parameters to an array', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'query' => 'search_query' ), $server_declaration['client_context_bindings'] ?? null, 'server declaration preserves generic execution extension fields', $failures, $passes );
+agents_api_smoke_assert_equals( 'control_plane', $server_declaration['runtime']['capability_scope'] ?? '', 'server declaration preserves product-neutral runtime metadata', $failures, $passes );
+
 $host_declaration = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(
 	array(
 		'name'        => 'ability/search_posts',
@@ -109,6 +138,25 @@ try {
 	$invalid_host = str_starts_with( $error->getMessage(), 'invalid_conversation_tool_declaration:' );
 }
 agents_api_smoke_assert_equals( true, $invalid_host, 'request declaration rejects invalid host-owned tool shapes', $failures, $passes );
+
+$turn_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+	array(
+		array(
+			'role'    => 'user',
+			'content' => 'Search posts.',
+		),
+	),
+	array(
+		'ability/search_posts' => array(
+			'source'      => 'abilities',
+			'description' => 'Search host-owned posts.',
+		)
+	)
+);
+$turn_tools = $turn_request->toolDeclarations();
+agents_api_smoke_assert_equals( 'host', $turn_tools['ability/search_posts']['executor'] ?? null, 'provider turn request canonicalizes server tool executor', $failures, $passes );
+agents_api_smoke_assert_equals( 'run', $turn_tools['ability/search_posts']['scope'] ?? null, 'provider turn request canonicalizes server tool scope', $failures, $passes );
+agents_api_smoke_assert_equals( array(), $turn_tools['ability/search_posts']['parameters'] ?? null, 'provider turn request canonicalizes server tool parameters', $failures, $passes );
 
 $registry = new AgentsAPI\AI\Tools\WP_Agent_Tool_Source_Registry();
 $registry->registerSource(

@@ -232,6 +232,20 @@ agents_api_smoke_assert_equals(
 	$passes
 );
 agents_api_smoke_assert_equals(
+	'host',
+	$tools['static/only']['executor'] ?? null,
+	'registry normalizes gathered tools to host executor declarations',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
+	'run',
+	$tools['static/only']['scope'] ?? null,
+	'registry normalizes gathered tools to run scope declarations',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
 	array( 'pipeline' ),
 	$seen_contexts['static']['modes'] ?? null,
 	'source callbacks receive runtime context including modes',

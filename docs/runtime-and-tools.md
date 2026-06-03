@@ -212,22 +212,36 @@ $tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalize(
 
 Invalid declarations produce machine-readable invalid field names through `validate()` or an `InvalidArgumentException` from `normalize()`.
 
-Conversation requests use `normalizeForConversationRequest()` so replay/audit records can carry the full model-facing tool catalog without weakening the client runtime contract. Client tools still pass through strict `normalize()`. Host-owned tools use `executor => 'host'`, `scope => 'run'`, a namespaced stable name, matching source metadata, description, parameters schema, and optional runtime metadata:
+Conversation requests use `normalizeForConversationRequest()` so replay/audit records can carry the full model-facing tool catalog without weakening the client runtime contract. Client tools still pass through strict `normalize()`.
+
+Server-mediated tools use `normalizeForServer()` directly, or indirectly through conversation requests, source registry gathering, conversation-loop `tool_declarations`, and provider-turn request construction. The canonical server declaration is product-neutral:
+
+| Field | Contract |
+| --- | --- |
+| `name` | Required stable namespaced tool name such as `ability/search_posts`. The namespace identifies the model-facing tool family, not the concrete executor. |
+| `source` | Required host/source slug such as `abilities`, `static`, or `runtime`. It may differ from the tool-name namespace when a registry source contributes tools from another family. |
+| `description` | Required non-empty model-facing description. |
+| `parameters` | Optional array schema. Missing parameters normalize to an empty array. |
+| `executor` | Defaults to `host`; legacy non-client executor labels also canonicalize to `host`. Explicit `client` executors remain valid only for strict `client/*` declarations. Concrete execution remains owned by the caller-supplied `WP_Agent_Tool_Executor`. |
+| `scope` | Defaults to `run`; explicit values must be `run`. |
+| `runtime` | Optional product-neutral metadata, sanitized with `normalizeRuntimeMetadata()`. |
+
+JSON-friendly extension fields outside the canonical envelope are preserved for generic mediation policy, for example `client_context_bindings` and action-policy fields. Agents API validates and carries those fields; hosts own authorization and concrete execution mapping.
 
 ```php
-$tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(
+$tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForServer(
 	array(
 		'name'        => 'ability/search_posts',
-		'source'      => 'ability',
+		'source'      => 'abilities',
 		'description' => 'Search host-owned posts.',
 		'parameters'  => array(
 			'required' => array( 'query' ),
 		),
-		'executor'    => 'host',
-		'scope'       => 'run',
 	)
 );
 ```
+
+`normalizeForConversationRequest()` preserves the legacy request-level error prefix (`invalid_conversation_tool_declaration`) while delegating server tool validation to the canonical server normalizer. Strict client runtime validation through `normalize()` continues to reject non-`client/*` tools and host executors. Request/catalog ingestion also supplies compatibility defaults for older `client/*` tool entries that omitted fields already implied by the loop context: `source => 'client'`, `executor => 'client'`, `scope => 'run'`, empty `parameters`, and a fallback description from the tool name.
 
 ### Tool runtime metadata
 

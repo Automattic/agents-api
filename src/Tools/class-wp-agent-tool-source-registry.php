@@ -123,7 +123,10 @@ class WP_Agent_Tool_Source_Registry {
 					continue;
 				}
 
-				$tools[ $tool_name ] = $this->normalizeGatheredTool( $tool_name, $source_slug, $tool_definition );
+				$normalized = $this->normalizeGatheredTool( $tool_name, $source_slug, $tool_definition );
+				if ( ! empty( $normalized ) ) {
+					$tools[ $tool_name ] = $normalized;
+				}
 			}
 		}
 
@@ -196,17 +199,18 @@ class WP_Agent_Tool_Source_Registry {
 		$tool_definition['name']   = is_string( $tool_definition['name'] ?? null ) && '' !== $tool_definition['name'] ? $tool_definition['name'] : $tool_name;
 		$tool_definition['source'] = is_string( $tool_definition['source'] ?? null ) && '' !== $tool_definition['source'] ? $tool_definition['source'] : $source_slug;
 
-		if ( ! isset( $tool_definition['parameters'] ) || ! is_array( $tool_definition['parameters'] ) ) {
-			$tool_definition['parameters'] = array();
-		}
-
-		$normalized = array();
-		foreach ( $tool_definition as $key => $value ) {
-			if ( is_string( $key ) ) {
-				$normalized[ $key ] = $value;
+		try {
+			$normalized = array();
+			foreach ( WP_Agent_Tool_Declaration::normalizeForServer( $tool_definition ) as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$normalized[ $key ] = $value;
+				}
 			}
-		}
 
-		return $normalized;
+			return $normalized;
+		} catch ( \InvalidArgumentException $error ) {
+			unset( $error );
+			return array();
+		}
 	}
 }

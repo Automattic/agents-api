@@ -7,6 +7,8 @@
 
 namespace AgentsAPI\AI;
 
+use AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -142,12 +144,23 @@ class WP_Agent_Provider_Turn_Request {
 				throw self::invalid( 'tool_declarations.' . (string) $key, 'must be an array' );
 			}
 
-			$name = is_string( $key ) ? $key : ( $declaration['name'] ?? '' );
-			if ( ! is_string( $name ) || '' === $name ) {
+			$declaration = self::string_keyed_array( $declaration );
+			if ( is_string( $key ) && '' !== $key && ! isset( $declaration['name'] ) ) {
+				$declaration['name'] = $key;
+			}
+
+			try {
+				$tool = self::string_keyed_array( WP_Agent_Tool_Declaration::normalizeForConversationRequest( $declaration ) );
+			} catch ( \InvalidArgumentException $error ) {
+				throw self::invalid( 'tool_declarations.' . (string) $key, $error->getMessage() );
+			}
+
+			$name = is_string( $tool['name'] ?? null ) ? $tool['name'] : '';
+			if ( '' === $name ) {
 				throw self::invalid( 'tool_declarations.' . (string) $key . '.name', 'must be a non-empty string' );
 			}
 
-			$normalized[ $name ] = self::string_keyed_array( $declaration );
+			$normalized[ $name ] = $tool;
 		}
 
 		return $normalized;
