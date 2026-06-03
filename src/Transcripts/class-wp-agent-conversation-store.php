@@ -25,9 +25,9 @@
  * - `created_at`, `updated_at`, `last_read_at`, `expires_at` (string|null):
  *   timestamps in an implementation-documented format, preferably ISO-8601.
  *
- * Product-specific metadata belongs in `metadata` under a namespaced key (for
- * example `metadata['data_machine']`). Generic clients must treat unknown
- * metadata and extra top-level fields as optional extensions.
+ * Product-specific metadata belongs in `metadata` under a namespaced key. Generic
+ * clients must treat unknown metadata and extra top-level fields as optional
+ * extensions.
  *
  * @package AgentsAPI
  */

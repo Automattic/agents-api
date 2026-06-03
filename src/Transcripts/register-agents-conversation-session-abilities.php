@@ -588,7 +588,7 @@ function agents_conversation_sessions_create_input_schema(): array {
 	if ( isset( $schema['properties'] ) && is_array( $schema['properties'] ) ) {
 		$schema['properties']['metadata'] = array(
 			'type'                 => 'object',
-			'description'          => 'Optional JSON-serializable session metadata. Product-specific fields should live under namespaced keys, e.g. metadata.data_machine, so the generic session schema remains runtime-neutral.',
+			'description'          => 'Optional JSON-serializable session metadata. Product-specific fields should live under namespaced keys so the generic session schema remains runtime-neutral.',
 			'additionalProperties' => true,
 		);
 	}

@@ -177,8 +177,8 @@ $store = new class() implements WP_Agent_Principal_Conversation_Session_Reader {
 
 $workspace = WP_Agent_Workspace_Scope::from_parts( 'site', '42' );
 $metadata  = array(
-	'run_id'       => 'run_123',
-	'data_machine' => array(
+	'run_id'          => 'run_123',
+	'example_product' => array(
 		'last_read_at' => '2026-06-03T00:00:30Z',
 	),
 );
@@ -194,7 +194,7 @@ smoke_assert( '7', $session['owner_key'] ?? null, 'user create stores canonical 
 smoke_assert( 7, $session['user_id'] ?? null, 'user_id mirrors user owner', $failures, $passes );
 smoke_assert( 'demo-agent', $session['agent_slug'] ?? null, 'agent slug is stored', $failures, $passes );
 smoke_assert( 'run_123', $session['metadata']['run_id'] ?? null, 'metadata can link caller run id', $failures, $passes );
-smoke_assert( '2026-06-03T00:00:30Z', $session['metadata']['data_machine']['last_read_at'] ?? null, 'product metadata remains namespaced', $failures, $passes );
+smoke_assert( '2026-06-03T00:00:30Z', $session['metadata']['example_product']['last_read_at'] ?? null, 'product metadata remains namespaced', $failures, $passes );
 
 $store->update_session(
 	$session_id,
