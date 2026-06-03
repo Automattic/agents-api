@@ -17,9 +17,10 @@ echo "agents-chat-ability-smoke\n";
 // ─── Minimal WP stubs ──────────────────────────────────────────────
 
 class WP_Error {
-	public function __construct( private string $code = '', private string $message = '' ) {}
+	public function __construct( private string $code = '', private string $message = '', private mixed $data = null ) {}
 	public function get_error_code(): string { return $this->code; }
 	public function get_error_message(): string { return $this->message; }
+	public function get_error_data(): mixed { return $this->data; }
 }
 
 function is_wp_error( $value ): bool {
@@ -75,6 +76,7 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 	echo '    actual:   ' . var_export( $actual, true ) . "\n";
 }
 
+require_once __DIR__ . '/../src/Runtime/class-wp-agent-execution-principal.php';
 require_once __DIR__ . '/../src/Channels/register-agents-chat-ability.php';
 
 use function AgentsAPI\AI\Channels\agents_chat_dispatch;
@@ -179,9 +181,42 @@ smoke_assert( true, isset( $in['properties']['client_context']['properties']['ca
 smoke_assert( true, isset( $in['properties']['client_context']['properties']['caller_session_id'] ), 'client_context_schema_has_caller_session_id', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context']['properties']['peer_agent_call'] ), 'client_context_schema_has_peer_agent_call', $failures, $passes );
 smoke_assert( false, isset( $in['properties']['client_context']['properties']['agent_chat_depth'] ), 'client_context_schema_omits_tool_specific_depth', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['principal'] ), 'input_schema_has_principal', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['principal']['properties']['auth_source'] ), 'principal_schema_has_auth_source', $failures, $passes );
 
 $out_schema = agents_chat_output_schema();
 smoke_assert( array( 'session_id', 'reply' ), $out_schema['required'] ?? array(), 'output_schema_required_fields', $failures, $passes );
+
+// 9. Runtime principal input is normalized before dispatch and has a scoped permission filter.
+$GLOBALS['__smoke_filters'] = array();
+$runtime_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::runtime(
+	'runtime-session-1',
+	'sandbox-agent',
+	array( 'source' => 'wp-codebox' ),
+	'workspace:demo',
+	'wp-codebox-cli',
+	array( AgentsAPI\AI\WP_Agent_Execution_Principal::AUDIENCE_CLAIM_RUNTIME_TYPE => 'wordpress-playground' )
+)->to_array();
+$captured_principal = array();
+register_chat_handler( static function ( array $input ) use ( &$captured_principal ) {
+	$captured_principal = is_array( $input['principal'] ?? null ) ? $input['principal'] : array();
+	return array( 'session_id' => 'runtime-s-1', 'reply' => 'runtime ok', 'completed' => true );
+} );
+$runtime_result = agents_chat_dispatch( array( 'agent' => 'sandbox-agent', 'message' => 'go', 'principal' => $runtime_principal ) );
+smoke_assert( 'runtime ok', $runtime_result['reply'] ?? null, 'runtime_principal_dispatch_succeeds', $failures, $passes );
+smoke_assert( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_RUNTIME, $captured_principal['auth_source'] ?? null, 'runtime_principal_normalized_for_handler', $failures, $passes );
+smoke_assert( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_RUNTIME, 'key' => 'runtime-session-1' ), AgentsAPI\AI\WP_Agent_Execution_Principal::from_array( $captured_principal )->conversation_owner(), 'runtime_principal_preserves_owner', $failures, $passes );
+
+$GLOBALS['__smoke_can'] = false;
+smoke_assert( false, agents_chat_permission( array( 'principal' => $runtime_principal ) ), 'runtime_principal_permission_denied_by_default', $failures, $passes );
+add_filter( 'agents_chat_runtime_principal_permission', static function ( bool $allowed, AgentsAPI\AI\WP_Agent_Execution_Principal $principal ): bool {
+	return $allowed || AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_RUNTIME === $principal->auth_source;
+}, 10, 2 );
+smoke_assert( true, agents_chat_permission( array( 'principal' => $runtime_principal ) ), 'runtime_principal_permission_filter_allows', $failures, $passes );
+
+$invalid_principal_result = agents_chat_dispatch( array( 'agent' => 'sandbox-agent', 'message' => 'go', 'principal' => 'not-object' ) );
+smoke_assert( true, $invalid_principal_result instanceof WP_Error, 'invalid_principal_returns_wp_error', $failures, $passes );
+smoke_assert( 'agents_chat_invalid_principal', $invalid_principal_result->get_error_code(), 'invalid_principal_error_code', $failures, $passes );
 
 // ─── Done ───────────────────────────────────────────────────────────
 
