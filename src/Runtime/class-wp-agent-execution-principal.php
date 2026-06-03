@@ -45,10 +45,9 @@ final class WP_Agent_Execution_Principal {
 	public const REQUEST_CONTEXT_CLI     = 'cli';
 	public const REQUEST_CONTEXT_CRON    = 'cron';
 	public const REQUEST_CONTEXT_CHAT    = 'chat';
-	public const REQUEST_CONTEXT_SANDBOX = 'sandbox';
+	public const REQUEST_CONTEXT_RUNTIME = 'runtime';
 
 	public const AUDIENCE_CLAIM_RUNTIME_TYPE     = 'runtime_type';
-	public const RUNTIME_TYPE_DISPOSABLE_SANDBOX = 'disposable_sandbox';
 
 	/**
 	 * @param int         $acting_user_id    WordPress user ID on whose behalf the run executes. 0 = system/anonymous context.
@@ -225,42 +224,37 @@ final class WP_Agent_Execution_Principal {
 	}
 
 	/**
-	 * Build a principal for a host-attested disposable runtime sandbox.
+	 * Build a principal for a host-attested delegated runtime.
 	 *
-	 * Disposable sandbox principals are non-user principals with an opaque runtime
+	 * Delegated runtime principals are non-user principals with an opaque runtime
 	 * owner key so transcripts and policy decisions do not bleed into the parent
-	 * control plane or another sandbox session.
+	 * control plane or another runtime session.
 	 *
-	 * @param string              $sandbox_id        Host-owned sandbox/session identifier.
+	 * @param string              $runtime_id        Host-owned runtime/session identifier.
 	 * @param string              $effective_agent_id Registered agent ID/slug effective for the run.
 	 * @param array<string,mixed> $request_metadata  Request metadata.
 	 * @param string|null         $workspace_id      Optional host workspace/scope identifier.
 	 * @param string|null         $client_id         Optional client/runtime identifier.
-	 * @param array<string,mixed> $audience_claims   Additional host-owned sandbox claims.
-	 * @param string|null         $owner_key         Optional opaque transcript owner key. Defaults to the sandbox id.
+	 * @param array<string,mixed> $audience_claims   Additional host-owned runtime claims.
+	 * @param string|null         $owner_key         Optional opaque transcript owner key. Defaults to the runtime id.
 	 * @return self
 	 */
-	public static function disposable_sandbox( string $sandbox_id, string $effective_agent_id, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, array $audience_claims = array(), ?string $owner_key = null ): self {
-		$audience_claims = array_merge(
-			array( self::AUDIENCE_CLAIM_RUNTIME_TYPE => self::RUNTIME_TYPE_DISPOSABLE_SANDBOX ),
-			$audience_claims
-		);
-
+	public static function runtime( string $runtime_id, string $effective_agent_id, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, array $audience_claims = array(), ?string $owner_key = null ): self {
 		return new self(
 			0,
 			$effective_agent_id,
 			self::AUTH_SOURCE_RUNTIME,
-			self::REQUEST_CONTEXT_SANDBOX,
+			self::REQUEST_CONTEXT_RUNTIME,
 			null,
 			$request_metadata,
 			$workspace_id,
 			$client_id,
 			null,
 			null,
-			$sandbox_id,
+			$runtime_id,
 			$audience_claims,
 			self::OWNER_TYPE_RUNTIME,
-			$owner_key ?? $sandbox_id
+			$owner_key ?? $runtime_id
 		);
 	}
 

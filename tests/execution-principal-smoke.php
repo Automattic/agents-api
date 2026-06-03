@@ -184,20 +184,20 @@ agents_api_smoke_assert_equals( 'audience:docs-readers', $audience_from_array->a
 agents_api_smoke_assert_equals( array( 'tier' => 'viewer' ), $audience_from_array->audience_claims, 'from_array restores audience claims', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_AUDIENCE, 'key' => 'browser-session:opaque-456' ), $audience_from_array->conversation_owner(), 'from_array restores explicit conversation owner', $failures, $passes );
 
-$sandbox_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::disposable_sandbox(
-	'codebox-browser-session-123',
-	'wp-codebox-sandbox',
-	array( 'route' => '/wp-codebox/browser-runner' ),
+$runtime_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::runtime(
+	'runtime-session-123',
+	'delegated-runtime-agent',
+	array( 'route' => '/agents/runtime' ),
 	'workspace:demo',
-	'wp-codebox',
-	array( 'wp' => 'trunk' )
+	'example-runtime',
+	array( AgentsAPI\AI\WP_Agent_Execution_Principal::AUDIENCE_CLAIM_RUNTIME_TYPE => 'ephemeral' )
 );
-agents_api_smoke_assert_equals( 0, $sandbox_principal->acting_user_id, 'disposable sandbox principal has no WordPress user', $failures, $passes );
-agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_RUNTIME, $sandbox_principal->auth_source, 'disposable sandbox principal records runtime auth source', $failures, $passes );
-agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_SANDBOX, $sandbox_principal->request_context, 'disposable sandbox principal records sandbox request context', $failures, $passes );
-agents_api_smoke_assert_equals( 'codebox-browser-session-123', $sandbox_principal->audience_id, 'disposable sandbox principal records sandbox id as audience id', $failures, $passes );
-agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::RUNTIME_TYPE_DISPOSABLE_SANDBOX, $sandbox_principal->audience_claims[ AgentsAPI\AI\WP_Agent_Execution_Principal::AUDIENCE_CLAIM_RUNTIME_TYPE ] ?? null, 'disposable sandbox principal stamps runtime type claim', $failures, $passes );
-agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_RUNTIME, 'key' => 'codebox-browser-session-123' ), $sandbox_principal->conversation_owner(), 'disposable sandbox principal derives isolated runtime conversation owner', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $runtime_principal->acting_user_id, 'runtime principal has no WordPress user', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_RUNTIME, $runtime_principal->auth_source, 'runtime principal records runtime auth source', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_RUNTIME, $runtime_principal->request_context, 'runtime principal records runtime request context', $failures, $passes );
+agents_api_smoke_assert_equals( 'runtime-session-123', $runtime_principal->audience_id, 'runtime principal records runtime id as audience id', $failures, $passes );
+agents_api_smoke_assert_equals( 'ephemeral', $runtime_principal->audience_claims[ AgentsAPI\AI\WP_Agent_Execution_Principal::AUDIENCE_CLAIM_RUNTIME_TYPE ] ?? null, 'runtime principal preserves host-supplied runtime type claim', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_RUNTIME, 'key' => 'runtime-session-123' ), $runtime_principal->conversation_owner(), 'runtime principal derives isolated runtime conversation owner', $failures, $passes );
 
 try {
 	new AgentsAPI\AI\WP_Agent_Execution_Principal( -1, 'agent', AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER, AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );

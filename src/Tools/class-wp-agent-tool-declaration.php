@@ -40,14 +40,14 @@ class WP_Agent_Tool_Declaration {
 	public const RUNTIME_CAPABILITY_SCOPE = 'capability_scope';
 
 	/**
-	 * Tool may be exposed inside a disposable runtime sandbox.
+	 * Tool may be exposed inside a delegated runtime.
 	 */
-	public const CAPABILITY_SCOPE_SANDBOX_SAFE = 'sandbox_safe';
+	public const CAPABILITY_SCOPE_RUNTIME_LOCAL = 'runtime_local';
 
 	/**
-	 * Tool belongs to the parent/control-plane runtime and should stay out of sandboxes.
+	 * Tool belongs to the parent/control-plane runtime.
 	 */
-	public const CAPABILITY_SCOPE_PARENT_ONLY = 'parent_only';
+	public const CAPABILITY_SCOPE_CONTROL_PLANE = 'control_plane';
 
 	/**
 	 * Generic runtime metadata key for the target execution environment.
@@ -55,14 +55,14 @@ class WP_Agent_Tool_Declaration {
 	public const RUNTIME_ENVIRONMENT = 'environment';
 
 	/**
-	 * Tool declaration targets a disposable sandbox runtime.
+	 * Tool declaration targets a delegated runtime.
 	 */
-	public const ENVIRONMENT_DISPOSABLE_SANDBOX = 'disposable_sandbox';
+	public const ENVIRONMENT_RUNTIME_LOCAL = 'runtime_local';
 
 	/**
 	 * Tool declaration targets a parent/control-plane runtime.
 	 */
-	public const ENVIRONMENT_PARENT_CONTROL = 'parent_control';
+	public const ENVIRONMENT_CONTROL_PLANE = 'control_plane';
 
 	/**
 	 * Normalize a runtime tool declaration or throw a field-scoped error.
