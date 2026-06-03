@@ -51,6 +51,30 @@ agents_api_smoke_assert_equals( array( 1, 2 ), $turns, 'loop runs until caller p
 agents_api_smoke_assert_equals( 3, count( $result['messages'] ), 'loop returns the final normalized transcript', $failures, $passes );
 agents_api_smoke_assert_equals( 2, count( $result['events'] ), 'loop preserves caller lifecycle events', $failures, $passes );
 
+$metadata_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'cite this' ) ),
+	static function ( array $messages ): array {
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'cited answer' );
+
+		return array(
+			'messages'               => $messages,
+			'tool_execution_results' => array(),
+			'metadata'               => array(
+				'citations'         => array( array( 'url' => 'https://example.test/source' ) ),
+				'retrieved_context' => array( array( 'id' => 'ctx-1', 'title' => 'Source' ) ),
+			),
+			'request_metadata'       => array(
+				'provider_request_id' => 'req-citations-1',
+			),
+		);
+	},
+	array( 'max_turns' => 1 )
+);
+
+agents_api_smoke_assert_equals( 'https://example.test/source', $metadata_result['metadata']['citations'][0]['url'] ?? '', 'loop preserves generic result citation metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'ctx-1', $metadata_result['metadata']['retrieved_context'][0]['id'] ?? '', 'loop preserves generic retrieved-context metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'req-citations-1', $metadata_result['request_metadata']['provider_request_id'] ?? '', 'caller-managed loop preserves request metadata', $failures, $passes );
+
 echo "\n[2] Loop can apply caller-supplied compaction without owning model dispatch:\n";
 $summarized_messages = array();
 $compacted_result    = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(

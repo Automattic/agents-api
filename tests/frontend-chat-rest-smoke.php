@@ -111,7 +111,14 @@ $ability  = new class( $captured ) {
 
 	public function execute( array $input ): array {
 		$this->captured = $input;
-		return array( 'session_id' => 's-1', 'reply' => 'hello from adapter' );
+		return array(
+			'session_id' => 's-1',
+			'reply'      => 'hello from adapter',
+			'metadata'   => array(
+				'citations'         => array( array( 'url' => 'https://example.test/rest-source' ) ),
+				'retrieved_context' => array( array( 'id' => 'rest-context-1' ) ),
+			),
+		);
 	}
 };
 
@@ -135,6 +142,8 @@ agents_api_smoke_assert_equals( true, $permission, 'permission allows operator g
 $response = AgentsAPI\AI\Channels\agents_frontend_chat_rest_dispatch( $request );
 agents_api_smoke_assert_equals( true, $response instanceof WP_REST_Response, 'dispatch returns REST response', $failures, $passes );
 agents_api_smoke_assert_equals( 'hello from adapter', $response->data['reply'] ?? null, 'dispatch returns ability reply', $failures, $passes );
+agents_api_smoke_assert_equals( 'https://example.test/rest-source', $response->data['metadata']['citations'][0]['url'] ?? null, 'dispatch preserves citation metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'rest-context-1', $response->data['metadata']['retrieved_context'][0]['id'] ?? null, 'dispatch preserves retrieved-context metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'support-agent', $captured['agent'] ?? null, 'dispatch sanitizes agent slug', $failures, $passes );
 agents_api_smoke_assert_equals( 'Hi there', $captured['message'] ?? null, 'dispatch forwards message', $failures, $passes );
 agents_api_smoke_assert_equals( 'rest', $captured['client_context']['source'] ?? null, 'dispatch marks REST source', $failures, $passes );

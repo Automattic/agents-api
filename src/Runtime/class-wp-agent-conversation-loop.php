@@ -141,6 +141,7 @@ class WP_Agent_Conversation_Loop {
 			'completion_tokens' => 0,
 			'total_tokens'      => 0,
 		);
+		$result_metadata     = array();
 		$request_metadata     = array();
 		$provider_diagnostics = array();
 
@@ -275,6 +276,9 @@ class WP_Agent_Conversation_Loop {
 				if ( isset( $result['request_metadata'] ) && is_array( $result['request_metadata'] ) ) {
 					$request_metadata = self::normalize_assoc_array( $result['request_metadata'] );
 				}
+				if ( isset( $result['metadata'] ) && is_array( $result['metadata'] ) ) {
+					$result_metadata = array_merge( $result_metadata, self::normalize_assoc_array( $result['metadata'] ) );
+				}
 
 				// When mediation is enabled, the turn runner returns tool_calls
 				// and the loop handles execution. Otherwise, the caller-managed path applies.
@@ -319,7 +323,7 @@ class WP_Agent_Conversation_Loop {
 					}
 					$events = array_merge( $events, self::normalize_events( $result['events'] ?? array() ) );
 					if ( isset( $result['request_metadata'] ) && is_array( $result['request_metadata'] ) ) {
-						$last_request_metadata = self::normalize_assoc_array( $result['request_metadata'] );
+						$request_metadata = self::normalize_assoc_array( $result['request_metadata'] );
 					}
 
 					// Apply completion policy to tool results from the turn runner
@@ -408,6 +412,7 @@ class WP_Agent_Conversation_Loop {
 				'events'                 => $events,
 				'turn_count'             => $turns_run,
 				'final_content'          => self::extract_final_content( $messages ),
+				'metadata'               => $result_metadata,
 				'usage'                  => $total_usage,
 				'request_metadata'       => $request_metadata,
 				'provider_diagnostics'   => $provider_diagnostics,
