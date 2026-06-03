@@ -62,24 +62,22 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 		as_unschedule_all_actions( self::SCHEDULED_HOOK, $args, self::GROUP );
 
 		if ( WP_Agent_Routine::TRIGGER_EXPRESSION === $routine->get_trigger_type() ) {
-			as_schedule_cron_action(
+			return ! empty( as_schedule_cron_action(
 				time(),
 				$routine->get_expression(),
 				self::SCHEDULED_HOOK,
 				$args,
 				self::GROUP
-			);
-			return true;
+			) );
 		}
 
-		as_schedule_recurring_action(
+		return ! empty( as_schedule_recurring_action(
 			time(),
 			$routine->get_interval_seconds(),
 			self::SCHEDULED_HOOK,
 			$args,
 			self::GROUP
-		);
-		return true;
+		) );
 	}
 
 	/**

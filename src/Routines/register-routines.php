@@ -31,12 +31,28 @@ if ( ! function_exists( 'wp_register_routine' ) ) {
 	 * @since 0.105.0
 	 *
 	 * @param string $id   Unique routine slug.
-	 * @param array  $args Routine arguments. See {@see WP_Agent_Routine::__construct()}.
+	 * @param array<mixed> $args Routine arguments. See {@see WP_Agent_Routine::__construct()}.
 	 *
 	 * @return AgentsAPI\AI\Routines\WP_Agent_Routine|WP_Error
 	 */
 	function wp_register_routine( string $id, array $args ) {
-		return AgentsAPI\AI\Routines\WP_Agent_Routine_Registry::register( $id, $args );
+		return AgentsAPI\AI\Routines\WP_Agent_Routine_Registry::register( $id, wp_agent_string_keyed_routine_args( $args ) );
+	}
+}
+
+if ( ! function_exists( 'wp_agent_string_keyed_routine_args' ) ) {
+	/**
+	 * @param array<mixed> $args
+	 * @return array<string,mixed>
+	 */
+	function wp_agent_string_keyed_routine_args( array $args ): array {
+		$prepared = array();
+		foreach ( $args as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$prepared[ $key ] = $value;
+			}
+		}
+		return $prepared;
 	}
 }
 

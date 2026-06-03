@@ -40,15 +40,15 @@ final class WP_Agent_Workflow_Run_Result {
 	 * @param string $run_id      Caller-stable id (UUID, post id, custom-table row id).
 	 * @param string $workflow_id Spec id this run belongs to.
 	 * @param string $status      One of the STATUS_* constants.
-	 * @param array  $inputs      Resolved inputs the run was started with.
-	 * @param array  $output      Final aggregated output map (or partial if failed).
-	 * @param array  $steps       List of step records, each shaped as
+	 * @param array<mixed>  $inputs      Resolved inputs the run was started with.
+	 * @param array<mixed>  $output      Final aggregated output map (or partial if failed).
+	 * @param array<mixed>  $steps       List of step records, each shaped as
 	 *                            `[ id, type, status, output, error?, started_at, ended_at ]`.
-	 * @param array  $error       Top-level error info (`code`, `message`, `data`) when status === failed.
+	 * @param array<mixed>  $error       Top-level error info (`code`, `message`, `data`) when status === failed.
 	 * @param int    $started_at  Unix timestamp.
 	 * @param int    $ended_at    Unix timestamp; 0 while running.
-	 * @param array  $metadata    Free-form metadata for recorders / tracers (Langfuse trace ids, etc.).
-	 * @param array  $evidence_refs Neutral JSON-serializable artifact/log references owned by the host.
+	 * @param array<mixed>  $metadata      Free-form metadata for recorders / tracers (Langfuse trace ids, etc.).
+	 * @param array<mixed>  $evidence_refs Neutral JSON-serializable artifact/log references owned by the host.
 	 */
 	public function __construct(
 		private string $run_id,
@@ -64,6 +64,9 @@ final class WP_Agent_Workflow_Run_Result {
 		private array $evidence_refs = array()
 	) {}
 
+	/**
+	 * @param array<mixed> $inputs
+	 */
 	public static function pending( string $run_id, string $workflow_id, array $inputs, int $started_at ): self {
 		return new self( $run_id, $workflow_id, self::STATUS_PENDING, $inputs, array(), array(), array(), $started_at, 0, array(), array() );
 	}
@@ -73,22 +76,22 @@ final class WP_Agent_Workflow_Run_Result {
 	 *
 	 * @since 0.108.0
 	 *
-	 * @param array $value Serialized run result.
+	 * @param array<string, mixed> $value Serialized run result.
 	 * @return self
 	 */
 	public static function from_array( array $value ): self {
 		return new self(
-			(string) ( $value['run_id'] ?? '' ),
-			(string) ( $value['workflow_id'] ?? '' ),
-			(string) ( $value['status'] ?? self::STATUS_PENDING ),
-			(array) ( $value['inputs'] ?? array() ),
-			(array) ( $value['output'] ?? array() ),
-			(array) ( $value['steps'] ?? array() ),
-			(array) ( $value['error'] ?? array() ),
-			(int) ( $value['started_at'] ?? 0 ),
-			(int) ( $value['ended_at'] ?? 0 ),
-			(array) ( $value['metadata'] ?? array() ),
-			(array) ( $value['evidence_refs'] ?? array() )
+			self::string_value( $value['run_id'] ?? '' ),
+			self::string_value( $value['workflow_id'] ?? '' ),
+			self::string_value( $value['status'] ?? self::STATUS_PENDING ),
+			self::array_value( $value['inputs'] ?? array() ),
+			self::array_value( $value['output'] ?? array() ),
+			self::array_value( $value['steps'] ?? array() ),
+			self::array_value( $value['error'] ?? array() ),
+			self::int_value( $value['started_at'] ?? 0 ),
+			self::int_value( $value['ended_at'] ?? 0 ),
+			self::array_value( $value['metadata'] ?? array() ),
+			self::array_value( $value['evidence_refs'] ?? array() )
 		);
 	}
 
@@ -104,18 +107,30 @@ final class WP_Agent_Workflow_Run_Result {
 		return $this->status;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_inputs(): array {
 		return $this->inputs;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_output(): array {
 		return $this->output;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_steps(): array {
 		return $this->steps;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_error(): array {
 		return $this->error;
 	}
@@ -128,10 +143,16 @@ final class WP_Agent_Workflow_Run_Result {
 		return $this->ended_at;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_metadata(): array {
 		return $this->metadata;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_evidence_refs(): array {
 		return $this->evidence_refs;
 	}
@@ -150,23 +171,61 @@ final class WP_Agent_Workflow_Run_Result {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $patch Field => new value. Unknown keys are ignored.
+	 * @param array<mixed> $patch Field => new value. Unknown keys are ignored.
 	 * @return self
 	 */
 	public function with( array $patch ): self {
 		return new self(
-			(string) ( $patch['run_id'] ?? $this->run_id ),
-			(string) ( $patch['workflow_id'] ?? $this->workflow_id ),
-			(string) ( $patch['status'] ?? $this->status ),
-			(array) ( $patch['inputs'] ?? $this->inputs ),
-			(array) ( $patch['output'] ?? $this->output ),
-			(array) ( $patch['steps'] ?? $this->steps ),
-			(array) ( $patch['error'] ?? $this->error ),
-			(int) ( $patch['started_at'] ?? $this->started_at ),
-			(int) ( $patch['ended_at'] ?? $this->ended_at ),
-			(array) ( $patch['metadata'] ?? $this->metadata ),
-			(array) ( $patch['evidence_refs'] ?? $this->evidence_refs ),
+			self::string_patch_value( $patch, 'run_id', $this->run_id ),
+			self::string_patch_value( $patch, 'workflow_id', $this->workflow_id ),
+			self::string_patch_value( $patch, 'status', $this->status ),
+			self::array_patch_value( $patch, 'inputs', $this->inputs ),
+			self::array_patch_value( $patch, 'output', $this->output ),
+			self::array_patch_value( $patch, 'steps', $this->steps ),
+			self::array_patch_value( $patch, 'error', $this->error ),
+			self::int_patch_value( $patch, 'started_at', $this->started_at ),
+			self::int_patch_value( $patch, 'ended_at', $this->ended_at ),
+			self::array_patch_value( $patch, 'metadata', $this->metadata ),
+			self::array_patch_value( $patch, 'evidence_refs', $this->evidence_refs ),
 		);
+	}
+
+	/**
+	 * @param array<mixed> $patch
+	 */
+	private static function string_patch_value( array $patch, string $key, string $fallback ): string {
+		return isset( $patch[ $key ] ) && is_scalar( $patch[ $key ] ) ? (string) $patch[ $key ] : $fallback;
+	}
+
+	/**
+	 * @param array<mixed> $patch
+	 */
+	private static function int_patch_value( array $patch, string $key, int $fallback ): int {
+		return isset( $patch[ $key ] ) && is_numeric( $patch[ $key ] ) ? (int) $patch[ $key ] : $fallback;
+	}
+
+	/**
+	 * @param array<mixed> $patch
+	 * @param array<mixed> $fallback
+	 * @return array<mixed>
+	 */
+	private static function array_patch_value( array $patch, string $key, array $fallback ): array {
+		return isset( $patch[ $key ] ) && is_array( $patch[ $key ] ) ? $patch[ $key ] : $fallback;
+	}
+
+	private static function string_value( mixed $value ): string {
+		return is_scalar( $value ) ? (string) $value : '';
+	}
+
+	private static function int_value( mixed $value ): int {
+		return is_numeric( $value ) ? (int) $value : 0;
+	}
+
+	/**
+	 * @return array<mixed>
+	 */
+	private static function array_value( mixed $value ): array {
+		return is_array( $value ) ? $value : array();
 	}
 
 	/**
@@ -175,7 +234,7 @@ final class WP_Agent_Workflow_Run_Result {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @return array
+	 * @return array<string, mixed>
 	 */
 	public function to_array(): array {
 		return array(

@@ -8,6 +8,27 @@
  * to a transcript row. It deliberately does not include chat UI listing,
  * read-state, retention scheduling, or reporting/metrics responsibilities.
  *
+ * The canonical session row is storage-neutral and runtime-neutral. Stores can
+ * back it with posts, custom tables, external services, files, or memory, but
+ * callers should be able to rely on these generic keys when available:
+ *
+ * - `session_id` (string): stable opaque session identifier.
+ * - `workspace_type` / `workspace_id` (string): workspace scope.
+ * - `owner_type` / `owner_key` (string): canonical principal owner. Legacy
+ *   user-only stores may expose only `user_id`; principal-aware stores should
+ *   expose owner keys or implement `WP_Agent_Principal_Conversation_Session_Reader`.
+ * - `user_id` (int): WordPress user id for user-owned sessions, otherwise 0.
+ * - `agent_slug` (string): registered agent slug, not a product storage id.
+ * - `title` (string), `messages` (array), `metadata` (array), `context` (string).
+ * - `provider`, `model`, `provider_response_id` (string|null): provider
+ *   continuity for transcript/run resumption.
+ * - `created_at`, `updated_at`, `last_read_at`, `expires_at` (string|null):
+ *   timestamps in an implementation-documented format, preferably ISO-8601.
+ *
+ * Product-specific metadata belongs in `metadata` under a namespaced key. Generic
+ * clients must treat unknown metadata and extra top-level fields as optional
+ * extensions.
+ *
  * @package AgentsAPI
  */
 
@@ -27,10 +48,15 @@ interface WP_Agent_Conversation_Store {
 	 * agents as posts may store post IDs in their concrete backend, but the generic
 	 * transcript contract keys runtime agent identity by slug.
 	 *
+	 * `$metadata` is caller/runtime metadata for the session row. Store adapters
+	 * should preserve JSON-serializable values and keep product-specific fields
+	 * namespaced inside the array rather than promoting them into the generic row
+	 * schema.
+	 *
 	 * @param WP_Agent_Workspace_Scope $workspace Workspace owning the session.
 	 * @param int                      $user_id   WordPress user ID owning the session.
 	 * @param string                   $agent_slug Registered agent slug, or empty string for agent-less sessions.
-	 * @param array                    $metadata  Arbitrary session metadata (JSON-serializable).
+	 * @param array<mixed>                    $metadata  Arbitrary session metadata (JSON-serializable).
 	 * @param string                   $context   Execution mode ('chat', 'pipeline', 'system').
 	 * @return string Session ID (UUIDv4), or empty string on failure.
 	 */
@@ -47,7 +73,7 @@ interface WP_Agent_Conversation_Store {
 	 *
 	 * @param WP_Agent_Workspace_Scope $workspace Workspace owning the sessions.
 	 * @param int                      $user_id   WordPress user ID owning the sessions.
-	 * @param array                    $args      Optional host-supported filters/pagination.
+	 * @param array<mixed>                    $args      Optional host-supported filters/pagination.
 	 * @return array<int,array<string,mixed>> Session rows.
 	 */
 	public function list_sessions( WP_Agent_Workspace_Scope $workspace, int $user_id, array $args = array() ): array;
@@ -61,16 +87,23 @@ interface WP_Agent_Conversation_Store {
 	 * updated_at, last_read_at, expires_at.
 	 *
 	 * @param string $session_id Session UUID.
-	 * @return array|null Session data or null if not found.
+	 * @return array<string,mixed>|null Session data or null if not found.
 	 */
 	public function get_session( string $session_id ): ?array;
 
 	/**
 	 * Replace a session's messages + metadata.
 	 *
+	 * The message array is the complete transcript, not a delta. `$provider`,
+	 * `$model`, and `$provider_response_id` link the transcript to the most recent
+	 * provider-side run/response state without requiring this store to own chat run
+	 * status. Active run status is handled by the runtime-neutral chat run-control
+	 * contract; adapters may also mirror run ids in namespaced metadata when their
+	 * product needs that linkage for listing or reporting.
+	 *
 	 * @param string      $session_id           Session UUID.
-	 * @param array       $messages             Complete messages array (not a delta).
-	 * @param array       $metadata             Updated metadata.
+	 * @param array<mixed>       $messages             Complete messages array (not a delta).
+	 * @param array<mixed>       $metadata             Updated metadata.
 	 * @param string      $provider             Optional AI provider identifier.
 	 * @param string      $model                Optional AI model identifier.
 	 * @param string|null $provider_response_id Opaque provider-side response/state ID, or null when none.
@@ -99,7 +132,7 @@ interface WP_Agent_Conversation_Store {
 	 * @param int                 $seconds   Lookback window (default 600 = 10 minutes).
 	 * @param string              $context   Context filter.
 	 * @param int|null            $token_id  Optional token ID for login-scoped dedup.
-	 * @return array|null Session data or null if none.
+	 * @return array<string,mixed>|null Session data or null if none.
 	 */
 	public function get_recent_pending_session( WP_Agent_Workspace_Scope $workspace, int $user_id, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array;
 

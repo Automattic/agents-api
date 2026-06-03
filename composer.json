@@ -20,12 +20,14 @@
     "woocommerce/action-scheduler": "Required to actually run cron-triggered workflows. The substrate detects Action Scheduler at runtime and no-ops cleanly when absent; install this package (or any plugin that ships it, like WooCommerce) to enable scheduled workflow runs."
   },
   "scripts": {
+    "phpstan": "phpstan analyse --no-progress --memory-limit=2G",
     "smoke": [
       "php tests/bootstrap-smoke.php",
       "php tests/message-envelope-smoke.php",
       "php tests/message-coalesce-smoke.php",
       "php tests/registry-smoke.php",
       "php tests/installed-agent-materialization-smoke.php",
+      "php tests/registered-agent-materialization-adapter-smoke.php",
       "php tests/package-lifecycle-smoke.php",
       "php tests/package-capability-contract-smoke.php",
       "php tests/package-adoption-orchestration-smoke.php",
@@ -35,6 +37,7 @@
       "php tests/authorization-smoke.php",
       "php tests/agents-access-ability-smoke.php",
       "php tests/agents-conversation-session-abilities-smoke.php",
+      "php tests/conversation-session-store-contract-smoke.php",
       "php tests/action-policy-values-smoke.php",
       "php tests/consent-policy-smoke.php",
       "php tests/tool-policy-contracts-smoke.php",
@@ -66,6 +69,7 @@
       "php tests/tool-result-truncator-smoke.php",
       "php tests/context-registry-smoke.php",
       "php tests/conversation-loop-smoke.php",
+      "php tests/provider-turn-adapter-smoke.php",
       "php tests/conversation-loop-tool-execution-smoke.php",
       "php tests/conversation-loop-completion-policy-smoke.php",
       "php tests/conversation-loop-transcript-persister-smoke.php",
@@ -94,5 +98,9 @@
     "test": [
       "@smoke"
     ]
+  },
+  "require-dev": {
+    "phpstan/phpstan": "^2.0",
+    "szepeviktor/phpstan-wordpress": "^2.0"
   }
 }

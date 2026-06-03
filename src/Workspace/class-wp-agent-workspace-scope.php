@@ -41,13 +41,15 @@ final class WP_Agent_Workspace_Scope {
 	/**
 	 * Create a scope from a JSON-friendly array.
 	 *
-	 * @param array<string, mixed> $value Raw workspace scope.
+	 * @param array<array-key, mixed> $value Raw workspace scope.
 	 * @return self
 	 */
 	public static function from_array( array $value ): self {
+		$type = $value['workspace_type'] ?? '';
+		$id   = $value['workspace_id'] ?? '';
 		return self::from_parts(
-			(string) ( $value['workspace_type'] ?? '' ),
-			(string) ( $value['workspace_id'] ?? '' )
+			is_scalar( $type ) ? (string) $type : '',
+			is_scalar( $id ) ? (string) $id : ''
 		);
 	}
 

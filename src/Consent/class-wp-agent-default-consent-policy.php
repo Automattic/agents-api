@@ -54,7 +54,7 @@ class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy {
 	 * Make a conservative explicit-consent decision for one operation.
 	 *
 	 * @param string $operation Consent operation value.
-	 * @param array  $context   JSON-friendly policy context.
+	 * @param array<mixed>  $context   JSON-friendly policy context.
 	 * @return WP_Agent_Consent_Decision
 	 */
 	private function decide( string $operation, array $context ): WP_Agent_Consent_Decision {
@@ -74,7 +74,7 @@ class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy {
 	/**
 	 * Whether the policy context represents an interactive user flow.
 	 *
-	 * @param array $context JSON-friendly policy context.
+	 * @param array<mixed> $context JSON-friendly policy context.
 	 * @return bool
 	 */
 	private function is_interactive( array $context ): bool {
@@ -82,7 +82,7 @@ class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy {
 			return true;
 		}
 
-		$mode = (string) ( $context['mode'] ?? $context['context'] ?? $context['request_kind'] ?? $context['request_context'] ?? '' );
+		$mode = $this->first_scalar_string( $context, array( 'mode', 'context', 'request_kind', 'request_context' ) );
 
 		return in_array( strtolower( $mode ), array( 'chat', 'interactive', 'rest' ), true );
 	}
@@ -91,7 +91,7 @@ class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy {
 	 * Resolve explicit consent for an operation.
 	 *
 	 * @param string $operation Consent operation value.
-	 * @param array  $context   JSON-friendly policy context.
+	 * @param array<mixed>  $context   JSON-friendly policy context.
 	 * @return bool|null
 	 */
 	private function explicit_consent( string $operation, array $context ): ?bool {
@@ -111,17 +111,51 @@ class WP_Agent_Default_Consent_Policy implements WP_Agent_Consent_Policy {
 	 * Build audit metadata common to all decisions.
 	 *
 	 * @param string $operation Consent operation value.
-	 * @param array  $context   JSON-friendly policy context.
-	 * @return array
+	 * @param array<mixed>  $context   JSON-friendly policy context.
+	 * @return array<mixed>
 	 */
 	private function audit_metadata( string $operation, array $context ): array {
 		return array(
 			'policy'      => 'default',
 			'operation'   => $operation,
 			'interactive' => $this->is_interactive( $context ),
-			'mode'        => (string) ( $context['mode'] ?? $context['context'] ?? $context['request_kind'] ?? $context['request_context'] ?? '' ),
-			'agent_id'    => (string) ( $context['agent_id'] ?? '' ),
-			'user_id'     => isset( $context['user_id'] ) ? (int) $context['user_id'] : 0,
+			'mode'        => $this->first_scalar_string( $context, array( 'mode', 'context', 'request_kind', 'request_context' ) ),
+			'agent_id'    => $this->scalar_string( $context['agent_id'] ?? null ),
+			'user_id'     => $this->scalar_int( $context['user_id'] ?? null ),
 		);
+	}
+
+	/**
+	 * @param array<mixed> $context Context values.
+	 * @param string[]     $keys    Candidate keys in priority order.
+	 * @return string
+	 */
+	private function first_scalar_string( array $context, array $keys ): string {
+		foreach ( $keys as $key ) {
+			if ( array_key_exists( $key, $context ) ) {
+				$value = $this->scalar_string( $context[ $key ] );
+				if ( '' !== $value ) {
+					return $value;
+				}
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @param mixed $value Raw value.
+	 * @return string
+	 */
+	private function scalar_string( $value ): string {
+		return is_scalar( $value ) ? (string) $value : '';
+	}
+
+	/**
+	 * @param mixed $value Raw value.
+	 * @return int
+	 */
+	private function scalar_int( $value ): int {
+		return is_scalar( $value ) ? (int) $value : 0;
 	}
 }

@@ -17,6 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class WP_Agent_Spin_Signature {
 
 	private string $tool_name;
+	/** @var array<mixed> */
 	private array $parameters;
 	private string $parameters_hash;
 	private string $signature_hash;
@@ -27,7 +28,7 @@ final class WP_Agent_Spin_Signature {
 	 */
 	public function __construct( string $tool_name, array $parameters = array() ) {
 		$this->tool_name       = trim( $tool_name );
-		$this->parameters      = self::sort_for_hash( $parameters );
+		$this->parameters      = self::sort_for_hash_array( $parameters );
 		$this->parameters_hash = self::stable_sha256( $this->parameters );
 		$this->signature_hash  = self::stable_sha256(
 			array(
@@ -68,6 +69,15 @@ final class WP_Agent_Spin_Signature {
 		}
 
 		return 'sha256:' . hash( 'sha256', (string) $encoded );
+	}
+
+	/**
+	 * @param array<mixed> $value Value to normalize.
+	 * @return array<mixed> Normalized value.
+	 */
+	private static function sort_for_hash_array( array $value ): array {
+		$normalized = self::sort_for_hash( $value );
+		return is_array( $normalized ) ? $normalized : array();
 	}
 
 	/**

@@ -32,10 +32,14 @@ class WP_Agent_Conversation_Loop {
 	 * Run a conversation loop.
 	 *
 	 * The turn runner receives `(array $messages, array $context)` and must return
-	 * an array. When tool mediation is enabled (`tool_executor` + `tool_declarations`),
-	 * the turn runner can return a `tool_calls` key (array of `{name, parameters}`)
-	 * and the loop handles execution internally. Otherwise the turn runner must
-	 * return an `WP_Agent_Conversation_Result`-compatible array as before.
+	 * an array. Callers may also pass `provider_turn_adapter` in options; that
+	 * adapter receives `WP_Agent_Provider_Turn_Request` and returns a normalized
+	 * `WP_Agent_Provider_Turn_Result` shape while the loop keeps ownership of
+	 * continuation and mediated tool execution. When tool mediation is enabled
+	 * (`tool_executor` + `tool_declarations`), the turn runner or provider-turn
+	 * adapter can return a `tool_calls` key (array of `{name, parameters}`) and
+	 * the loop handles execution internally. Otherwise the turn runner must return
+	 * an `WP_Agent_Conversation_Result`-compatible array as before.
 	 *
 	 * Supported options:
 	 *
@@ -53,6 +57,7 @@ class WP_Agent_Conversation_Loop {
 	 *   opt into the historical continue-always behavior.
 	 * - `compaction_policy` (array|null): Optional compaction policy.
 	 * - `summarizer` (callable|null): Optional compaction summarizer.
+	 * - `provider_turn_adapter` (WP_Agent_Provider_Turn_Adapter|callable|null): Provider dispatch adapter.
 	 * - `tool_executor` (WP_Agent_Tool_Executor|null): Tool execution adapter.
 	 * - `tool_declarations` (array|null): Tool declarations keyed by name.
 	 * - `pre_tool_mediator` (callable|null): Optional synchronous decision callback
@@ -71,16 +76,16 @@ class WP_Agent_Conversation_Loop {
 	 * - `transcript_persister` (WP_Agent_Transcript_Persister|null): Transcript persister.
 	 * - `on_event` (callable|null): Caller-owned lifecycle event sink `fn(string $event, array $payload)`.
 	 *
-	 * @param array    $messages    Initial transcript messages.
-	 * @param callable $turn_runner Caller-owned turn adapter.
-	 * @param array    $options     Loop options.
-	 * @return array Normalized conversation result.
+	 * @param array<int, array<string, mixed>> $messages    Initial transcript messages.
+	 * @param callable|null                    $turn_runner Caller-owned turn adapter.
+	 * @param array<string, mixed>             $options     Loop options.
+	 * @return array<string, mixed> Normalized conversation result.
 	 */
-	public static function run( array $messages, callable $turn_runner, array $options = array() ): array {
+	public static function run( array $messages, ?callable $turn_runner = null, array $options = array() ): array {
 		$runtime_overrides     = self::resolve_runtime_overrides( $options );
 		$options               = self::apply_runtime_overrides_to_options( $options, $runtime_overrides );
 		$max_turns             = self::max_turns( $options['max_turns'] ?? 1 );
-		$context               = isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array();
+		$context               = self::normalize_assoc_array( $options['context'] ?? array() );
 		$tool_executor         = self::resolve_tool_executor( $options );
 		$tool_declarations     = self::resolve_tool_declarations( $options );
 		$should_continue       = self::resolve_should_continue( $options, $tool_executor, $tool_declarations );
@@ -101,16 +106,17 @@ class WP_Agent_Conversation_Loop {
 		$budget_resolution     = self::resolve_budgets( $options, $max_turns );
 		$budgets               = $budget_resolution['budgets'];
 		$has_explicit_turns    = $budget_resolution['has_explicit_turns'];
+		$turn_runner           = self::resolve_turn_runner( $turn_runner, $options, $tool_declarations, $run_id, $lock_session_id, $request, $budgets );
 		$wall_clock_started_at = microtime( true );
 		$wall_clock_initial    = isset( $budgets['wall_clock_seconds'] ) ? $budgets['wall_clock_seconds']->current() : 0;
 		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
-		$messages              = WP_Agent_Message::normalize_many( $messages );
+		$messages              = self::normalize_messages( $messages );
 		if ( '' !== $run_id && '' !== $lock_session_id ) {
 			WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, array( 'source' => 'conversation_loop' ) );
 		}
 		$events                = array();
 		$tool_results          = array();
-		$tool_events           = array();
+		$tool_events           = self::normalize_array_list( array() );
 		$tool_audit_events     = array();
 		$conversation_complete = false;
 		$exceeded_budget       = null;
@@ -124,13 +130,14 @@ class WP_Agent_Conversation_Loop {
 		// descriptor) in their per-turn return value; the loop accumulates
 		// these and exposes them in the final result so consumers don't have
 		// to track them out-of-band via mutable state.
-		$turns_run        = 0;
-		$total_usage      = array(
+		$turns_run            = 0;
+		$total_usage          = array(
 			'prompt_tokens'     => 0,
 			'completion_tokens' => 0,
 			'total_tokens'      => 0,
 		);
-		$request_metadata = array();
+		$request_metadata     = array();
+		$provider_diagnostics = array();
 
 		if ( null !== $transcript_lock && '' !== $lock_session_id ) {
 			$lock_token = $transcript_lock->acquire_session_lock( $lock_session_id, $lock_ttl );
@@ -139,7 +146,7 @@ class WP_Agent_Conversation_Loop {
 					'session_id' => $lock_session_id,
 				) );
 
-				return WP_Agent_Conversation_Result::normalize( array(
+				return self::normalize_conversation_result( array(
 					'messages'               => $messages,
 					'tool_execution_results' => array(),
 					'events'                 => array(),
@@ -217,23 +224,58 @@ class WP_Agent_Conversation_Loop {
 					throw $error;
 				}
 
+				if ( isset( $result['provider_diagnostics'] ) && is_array( $result['provider_diagnostics'] ) ) {
+					$provider_diagnostics[] = self::normalize_assoc_array( $result['provider_diagnostics'] );
+				}
+
+				if ( isset( $result['failure'] ) && is_array( $result['failure'] ) ) {
+					$failure = self::normalize_provider_turn_failure( $result['failure'], $turn );
+					self::emit_event( $on_event, 'failed', array(
+						'turn'  => $turn,
+						'error' => $failure['message'],
+					) );
+
+					$failure_result = self::normalize_conversation_result( array(
+						'messages'               => $messages,
+						'tool_execution_results' => self::normalize_array_list( $tool_results ),
+						'tool_events'            => self::normalize_array_list( $tool_events ),
+						'tool_audit_events'      => self::normalize_array_list( $tool_audit_events ),
+						'events'                 => self::normalize_array_list( $events ),
+						'status'                 => 'failed',
+						'completed'              => false,
+						'turn_count'             => $turn,
+						'final_content'          => self::extract_final_content( $messages ),
+						'usage'                  => $total_usage,
+						'request_metadata'       => $request_metadata,
+						'provider_diagnostics'   => $provider_diagnostics,
+						'failure'                => $failure,
+					) );
+
+					if ( '' !== $run_id && '' !== $lock_session_id ) {
+						WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED );
+					}
+
+					self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
+					return $failure_result;
+				}
+
 				// Accumulate optional observability fields from the turn runner.
 				// `usage` is a per-turn token-count array that gets summed into
 				// `$total_usage`. `request_metadata` is the most recent provider
 				// request descriptor and overwrites on each turn — consumers
 				// typically only care about the last one.
 				if ( isset( $result['usage'] ) && is_array( $result['usage'] ) ) {
-					$total_usage = self::accumulate_usage( $total_usage, $result['usage'] );
+					$total_usage = self::accumulate_usage( $total_usage, self::normalize_assoc_array( $result['usage'] ) );
 				}
 				if ( isset( $result['request_metadata'] ) && is_array( $result['request_metadata'] ) ) {
-					$request_metadata = $result['request_metadata'];
+					$request_metadata = self::normalize_assoc_array( $result['request_metadata'] );
 				}
 
 				// When mediation is enabled, the turn runner returns tool_calls
 				// and the loop handles execution. Otherwise, the caller-managed path applies.
 				if ( $mediation_enabled && isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ) {
 					$mediation_result = self::mediate_tool_calls(
-						$result,
+						self::normalize_assoc_array( $result ),
 						$tool_executor,
 						$tool_declarations,
 						$completion_policy,
@@ -260,30 +302,33 @@ class WP_Agent_Conversation_Loop {
 					$stalled               = self::check_spin_detector( $spin_detector, $mediation_result['spin_signatures'], $turn_context, $on_event );
 				} else {
 					// Caller-managed path: turn runner handles everything internally.
-					$result       = WP_Agent_Conversation_Result::normalize( $result );
-					$messages     = $result['messages'];
-					$tool_results = array_merge( $tool_results, $result['tool_execution_results'] );
+					$result       = self::normalize_conversation_result( $result );
+					$messages     = self::normalize_messages( is_array( $result['messages'] ?? null ) ? $result['messages'] : array() );
+					$tool_results = array_merge( $tool_results, self::normalize_array_list( $result['tool_execution_results'] ) );
 					if ( isset( $result['tool_audit_events'] ) && is_array( $result['tool_audit_events'] ) ) {
-						$tool_audit_events = array_merge( $tool_audit_events, $result['tool_audit_events'] );
+						$tool_audit_events = array_merge( $tool_audit_events, self::normalize_array_list( $result['tool_audit_events'] ) );
 					}
 					if ( isset( $result['tool_events'] ) && is_array( $result['tool_events'] ) ) {
 						$tool_events = array_merge( $tool_events, $result['tool_events'] );
 					}
 					$events = array_merge( $events, self::normalize_events( $result['events'] ?? array() ) );
 					if ( isset( $result['request_metadata'] ) && is_array( $result['request_metadata'] ) ) {
-						$last_request_metadata = $result['request_metadata'];
+						$last_request_metadata = self::normalize_assoc_array( $result['request_metadata'] );
 					}
 
 					// Apply completion policy to tool results from the turn runner
 					// when the loop owns policy but the turn runner handled execution.
-					if ( null !== $completion_policy && ! empty( $result['tool_execution_results'] ) ) {
+					if ( null !== $completion_policy && isset( $result['tool_execution_results'] ) && is_array( $result['tool_execution_results'] ) ) {
 						foreach ( $result['tool_execution_results'] as $tool_exec_result ) {
-							$tool_name = $tool_exec_result['tool_name'] ?? '';
-							$tool_def  = $tool_declarations[ $tool_name ] ?? null;
+							if ( ! is_array( $tool_exec_result ) ) {
+								continue;
+							}
+							$tool_name = is_string( $tool_exec_result['tool_name'] ?? null ) ? $tool_exec_result['tool_name'] : '';
+							$tool_def  = '' !== $tool_name ? ( $tool_declarations[ $tool_name ] ?? null ) : null;
 							$decision  = $completion_policy->recordToolResult(
 								$tool_name,
 								is_array( $tool_def ) ? $tool_def : null,
-								$tool_exec_result,
+								self::normalize_assoc_array( $tool_exec_result ),
 								$turn_context,
 								$turn
 							);
@@ -359,6 +404,7 @@ class WP_Agent_Conversation_Loop {
 				'final_content'          => self::extract_final_content( $messages ),
 				'usage'                  => $total_usage,
 				'request_metadata'       => $request_metadata,
+				'provider_diagnostics'   => $provider_diagnostics,
 				'completed'              => true,
 			);
 
@@ -392,7 +438,7 @@ class WP_Agent_Conversation_Loop {
 				$final_result_data['completed']   = false;
 			}
 
-			$final_result = WP_Agent_Conversation_Result::normalize( $final_result_data );
+			$final_result = self::normalize_conversation_result( $final_result_data );
 
 			if ( '' !== $run_id && '' !== $lock_session_id ) {
 				WP_Agent_Chat_Run_Control::finish_run(
@@ -427,20 +473,20 @@ class WP_Agent_Conversation_Loop {
 	 *
 	 * Handles the tool-call → validate → execute → message assembly cycle.
 	 *
-	 * @param array                                             $result             Turn runner result with tool_calls.
-	 * @param WP_Agent_Tool_Executor                            $executor           Tool executor adapter.
-	 * @param array                                             $declarations       Tool declarations keyed by name.
-	 * @param WP_Agent_Conversation_Completion_Policy|null      $policy             Completion policy.
-	 * @param array                                             $turn_context       Turn context.
-	 * @param int                                               $turn               Current turn number.
-	 * @param callable|null                                     $on_event           Event sink.
-	 * @param array<string, WP_Agent_Iteration_Budget>          $budgets            Named iteration budgets.
-	 * @param WP_Agent_Identical_Failure_Tracker|null           $failure_tracker    Optional identical-failure tracker.
-	 * @param WP_Agent_Tool_Result_Truncator|null               $truncator          Optional tool result truncator.
-	 * @param array<int, array<string, mixed>>                  $prior_messages     Prior transcript messages.
-	 * @param callable|null                                     $pre_tool_mediator  Optional pre-tool mediator.
-	 * @param array<int, array<string, mixed>>                  $prior_tool_results Prior mediated tool results.
-	 * @return array{messages: array, tool_execution_results: array, tool_events: array, tool_audit_events: array, events: array, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, runtime_tool_pending: array<string, mixed>|null, spin_signatures: WP_Agent_Spin_Signature[]}
+	 * @param array<string, mixed>                     $result          Turn runner result with tool_calls.
+	 * @param WP_Agent_Tool_Executor                   $executor        Tool executor adapter.
+	 * @param array<string, array<string, mixed>>      $declarations    Tool declarations keyed by name.
+	 * @param WP_Agent_Conversation_Completion_Policy|null $policy      Completion policy.
+	 * @param array<string, mixed>                     $turn_context    Turn context.
+	 * @param int                                      $turn            Current turn number.
+	 * @param callable|null                            $on_event        Event sink.
+	 * @param array<string, WP_Agent_Iteration_Budget> $budgets         Named iteration budgets.
+	 * @param WP_Agent_Identical_Failure_Tracker|null  $failure_tracker Optional identical-failure tracker.
+	 * @param WP_Agent_Tool_Result_Truncator|null      $truncator       Optional tool result truncator.
+	 * @param array<int, array<string, mixed>>         $prior_messages  Transcript before this mediated turn.
+	 * @param callable|null                            $pre_tool_mediator Optional pre-tool mediator.
+	 * @param array<int, array<string, mixed>>         $prior_tool_results Prior mediated tool results.
+	 * @return array{messages: array<int, array<string, mixed>>, tool_execution_results: array<int, array<string, mixed>>, tool_events: array<int, array<string, mixed>>, tool_audit_events: array<int, array<string, mixed>>, events: array<int, array<string, mixed>>, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, runtime_tool_pending: array<string, mixed>|null, spin_signatures: array<int, WP_Agent_Spin_Signature>}
 	 */
 	private static function mediate_tool_calls(
 		array $result,
@@ -463,7 +509,7 @@ class WP_Agent_Conversation_Loop {
 		// `messages` from its return — without this, mediation starts from an
 		// empty list and silently drops history between rounds.
 		$messages               = isset( $result['messages'] ) && is_array( $result['messages'] )
-			? WP_Agent_Message::normalize_many( $result['messages'] )
+			? self::normalize_messages( $result['messages'] )
 			: $prior_messages;
 		$tool_calls             = isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ? $result['tool_calls'] : array();
 		$tool_execution_results = array();
@@ -486,15 +532,18 @@ class WP_Agent_Conversation_Loop {
 				continue;
 			}
 
-			$tool_name    = $raw_call['name'] ?? $raw_call['tool_name'] ?? '';
-			$parameters   = $raw_call['parameters'] ?? array();
-			$tool_call_id = self::resolve_tool_call_id( $raw_call, $turn, (int) $index + 1 );
+			$raw_call              = self::normalize_assoc_array( $raw_call );
+			$tool_name             = $raw_call['name'] ?? $raw_call['tool_name'] ?? '';
+			$parameters            = is_array( $raw_call['parameters'] ?? null ) ? $raw_call['parameters'] : array();
+			$parameters_for_policy = self::normalize_assoc_array( $parameters );
+			$sequence              = is_int( $index ) ? $index + 1 : count( $spin_signatures ) + 1;
+			$tool_call_id          = self::resolve_tool_call_id( $raw_call, $turn, $sequence );
 
 			if ( ! is_string( $tool_name ) || '' === $tool_name ) {
 				continue;
 			}
 
-			$spin_signatures[] = new WP_Agent_Spin_Signature( $tool_name, is_array( $parameters ) ? $parameters : array() );
+			$spin_signatures[] = new WP_Agent_Spin_Signature( $tool_name, $parameters_for_policy );
 
 			self::emit_event( $on_event, 'tool_call', array(
 				'turn'         => $turn,
@@ -518,7 +567,7 @@ class WP_Agent_Conversation_Loop {
 			$messages[] = WP_Agent_Message::toolCall(
 				'',
 				$tool_name,
-				is_array( $parameters ) ? $parameters : array(),
+				$parameters,
 				$turn,
 				array( 'tool_call_id' => $tool_call_id )
 			);
@@ -529,7 +578,7 @@ class WP_Agent_Conversation_Loop {
 			$tool_context['tool_call_id'] = $tool_call_id;
 			$prepared                     = $core->prepareWP_Agent_Tool_Call(
 				$tool_name,
-				is_array( $parameters ) ? $parameters : array(),
+				$parameters,
 				$declarations,
 				$tool_context
 			);
@@ -572,7 +621,7 @@ class WP_Agent_Conversation_Loop {
 				);
 			}
 
-			$pending_request = self::runtime_tool_pending_request( $exec_result, $tool_name, $tool_call_id, is_array( $parameters ) ? $parameters : array(), $turn_context );
+			$pending_request = self::runtime_tool_pending_request( $exec_result, $tool_name, $tool_call_id, $parameters_for_policy, $turn_context );
 			if ( null !== $pending_request ) {
 				$pending_request_json = self::json_encode_safe( $pending_request );
 				$runtime_tool_pending = $pending_request;
@@ -611,7 +660,7 @@ class WP_Agent_Conversation_Loop {
 			// wp_pre_execute_ability bridge handler. The envelope replaces the
 			// tool_result message and halts mediation so the caller can surface
 			// the pending action and resume after the host records a decision.
-			$ability_envelope = is_array( $exec_result['result'] ?? null ) ? $exec_result['result'] : null;
+			$ability_envelope = is_array( $exec_result['result'] ?? null ) ? self::normalize_assoc_array( $exec_result['result'] ) : null;
 			if ( null !== $ability_envelope && WP_Agent_Message::TYPE_APPROVAL_REQUIRED === ( $ability_envelope['type'] ?? null ) ) {
 				$approval_required = $ability_envelope;
 				$messages[]        = $ability_envelope;
@@ -619,14 +668,14 @@ class WP_Agent_Conversation_Loop {
 					'turn'         => $turn,
 					'tool_name'    => $tool_name,
 					'tool_call_id' => $tool_call_id,
-					'action_id'    => $ability_envelope['payload']['action_id'] ?? null,
+					'action_id'    => isset( $ability_envelope['payload'] ) && is_array( $ability_envelope['payload'] ) ? ( $ability_envelope['payload']['action_id'] ?? null ) : null,
 				) );
 				$complete = true;
 				break;
 			}
 
 			$original_exec_result = $exec_result;
-			$truncation           = self::maybe_truncate_tool_result( $truncator, $exec_result, $tool_name, $tool_context );
+			$truncation           = self::maybe_truncate_tool_result( $truncator, $exec_result, $tool_name, self::normalize_assoc_array( $tool_context ) );
 			$exec_result          = $truncation['result'];
 
 			if ( $truncation['truncated'] ) {
@@ -672,7 +721,7 @@ class WP_Agent_Conversation_Loop {
 				'tool_name'    => $tool_name,
 				'tool_call_id' => $tool_call_id,
 				'result'       => $exec_result,
-				'parameters'   => is_array( $parameters ) ? $parameters : array(),
+				'parameters'   => $parameters,
 				'turn_count'   => $turn,
 			);
 
@@ -686,7 +735,7 @@ class WP_Agent_Conversation_Loop {
 			$tool_audit_events[] = self::tool_audit_event(
 				$tool_name,
 				$tool_call_id,
-				is_array( $parameters ) ? $parameters : array(),
+				$parameters_for_policy,
 				$exec_result,
 				$tool_definition,
 				$turn_context,
@@ -708,15 +757,16 @@ class WP_Agent_Conversation_Loop {
 			$nudge = self::check_identical_failure_tracker(
 				$failure_tracker,
 				$tool_name,
-				is_array( $parameters ) ? $parameters : array(),
+				$parameters_for_policy,
 				$exec_result,
 				$turn_context,
 				$on_event
 			);
 			if ( null !== $nudge ) {
-				$messages[] = WP_Agent_Message::text(
+				$nudge_message = is_string( $nudge['message'] ?? null ) || is_array( $nudge['message'] ?? null ) ? $nudge['message'] : '';
+				$messages[]    = WP_Agent_Message::text(
 					'assistant',
-					$nudge['message'],
+					$nudge_message,
 					array(
 						'type'                        => 'identical_failure_nudge',
 						'identical_failure_signature' => $nudge,
@@ -763,6 +813,14 @@ class WP_Agent_Conversation_Loop {
 					);
 					break;
 				}
+
+				$continuation = self::completion_policy_continuation( $decision, $tool_name, $turn );
+				if ( null !== $continuation ) {
+					$messages[]     = $continuation['message'];
+					$events[]       = $continuation['event'];
+					$event_metadata = is_array( $continuation['event']['metadata'] ?? null ) ? $continuation['event']['metadata'] : array();
+					self::emit_event( $on_event, 'completion_policy_continue', $event_metadata );
+				}
 			}
 		}
 
@@ -788,24 +846,24 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Build a structured runtime failure result without forcing callers to rebuild loop state.
 	 *
-	 * @param array      $messages          Current transcript messages.
-	 * @param array      $tool_results      Accumulated tool execution results.
-	 * @param array      $tool_events       Accumulated canonical tool events.
-	 * @param array      $tool_audit_events Accumulated audit events.
-	 * @param array      $events            Accumulated loop events.
-	 * @param \Throwable $error             Runtime/provider error.
-	 * @param int        $turn              Current turn.
-	 * @param array      $usage             Accumulated usage.
-	 * @param array      $request_metadata  Latest request metadata.
+	 * @param array<int, array<string, mixed>> $messages          Current transcript messages.
+	 * @param array<int, array<string, mixed>> $tool_results      Accumulated tool execution results.
+	 * @param array<mixed>                     $tool_events       Accumulated canonical tool events.
+	 * @param array<int, array<string, mixed>> $tool_audit_events Accumulated audit events.
+	 * @param array<int, array<string, mixed>> $events            Accumulated loop events.
+	 * @param \Throwable                       $error             Runtime/provider error.
+	 * @param int                              $turn              Current turn.
+	 * @param array<string, mixed>             $usage             Accumulated usage.
+	 * @param array<string, mixed>             $request_metadata  Latest request metadata.
 	 * @return array<string, mixed> Normalized conversation result.
 	 */
 	private static function failure_result( array $messages, array $tool_results, array $tool_events, array $tool_audit_events, array $events, \Throwable $error, int $turn, array $usage, array $request_metadata ): array {
-		return WP_Agent_Conversation_Result::normalize( array(
+		return self::normalize_conversation_result( array(
 			'messages'               => $messages,
-			'tool_execution_results' => $tool_results,
-			'tool_events'            => $tool_events,
-			'tool_audit_events'      => $tool_audit_events,
-			'events'                 => $events,
+			'tool_execution_results' => self::normalize_array_list( $tool_results ),
+			'tool_events'            => self::normalize_array_list( $tool_events ),
+			'tool_audit_events'      => self::normalize_array_list( $tool_audit_events ),
+			'events'                 => self::normalize_array_list( $events ),
 			'status'                 => 'failed',
 			'completed'              => false,
 			'turn_count'             => $turn,
@@ -832,20 +890,18 @@ class WP_Agent_Conversation_Loop {
 	 * @return array<string, mixed>|null Pending request or null.
 	 */
 	private static function runtime_tool_pending_request( array $exec_result, string $tool_name, string $tool_call_id, array $parameters, array $context ): ?array {
-		$status = $exec_result['status'] ?? ( $exec_result['metadata']['status'] ?? '' );
+		$metadata = self::normalize_assoc_array( $exec_result['metadata'] ?? array() );
+		$status   = is_string( $exec_result['status'] ?? null )
+			? $exec_result['status']
+			: ( is_string( $metadata['status'] ?? null ) ? $metadata['status'] : '' );
 		if ( WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== $status ) {
 			return null;
 		}
 
-		$request = $exec_result['runtime_tool_request'] ?? ( $exec_result['result'] ?? array() );
-		if ( ! is_array( $request ) ) {
-			$request = array();
-		}
+		$request = self::normalize_assoc_array( $exec_result['runtime_tool_request'] ?? ( $exec_result['result'] ?? array() ) );
+		$runtime = self::normalize_assoc_array( $exec_result['runtime'] ?? array() );
 
-		$runtime  = isset( $exec_result['runtime'] ) && is_array( $exec_result['runtime'] ) ? $exec_result['runtime'] : array();
-		$metadata = isset( $exec_result['metadata'] ) && is_array( $exec_result['metadata'] ) ? $exec_result['metadata'] : array();
-
-		return WP_Agent_Runtime_Tool_Request::normalize( array_merge(
+		return self::normalize_assoc_array( WP_Agent_Runtime_Tool_Request::normalize( array_merge(
 			$request,
 			array(
 				'tool_name'    => $request['tool_name'] ?? $tool_name,
@@ -856,7 +912,7 @@ class WP_Agent_Conversation_Loop {
 				'runtime'      => $request['runtime'] ?? $runtime,
 				'metadata'     => $request['metadata'] ?? $metadata,
 			)
-		) );
+		) ) );
 	}
 
 	/**
@@ -995,10 +1051,47 @@ class WP_Agent_Conversation_Loop {
 	}
 
 	/**
+	 * Build a continuation message/event for non-empty incomplete policy decisions.
+	 *
+	 * @param WP_Agent_Conversation_Completion_Decision $decision  Completion policy decision.
+	 * @param string                                    $tool_name Tool name that produced the decision.
+	 * @param int                                       $turn      Current turn number.
+	 * @return array{message: array<string, mixed>, event: array<string, mixed>}|null Continuation payload or null.
+	 */
+	private static function completion_policy_continuation( WP_Agent_Conversation_Completion_Decision $decision, string $tool_name, int $turn ): ?array {
+		$message = trim( $decision->message() );
+		if ( '' === $message ) {
+			return null;
+		}
+
+		$metadata = array(
+			'tool_name' => $tool_name,
+			'turn'      => $turn,
+			'message'   => $message,
+			'context'   => $decision->context(),
+		);
+
+		return array(
+			'message' => WP_Agent_Message::text(
+				'user',
+				$message,
+				array(
+					'type'                      => 'completion_policy_continue',
+					'completion_policy_context' => $metadata,
+				)
+			),
+			'event'   => array(
+				'type'     => 'completion_policy_continue',
+				'metadata' => $metadata,
+			),
+		);
+	}
+
+	/**
 	 * Check the optional interrupt source for a between-turn message.
 	 *
 	 * @param callable|null        $interrupt_source Optional interrupt source.
-	 * @param array<int, array>    $messages         Current transcript messages.
+	 * @param array<int, array<string, mixed>> $messages         Current transcript messages.
 	 * @param array<string, mixed> $options          Loop options.
 	 * @param array<string, mixed> $context          Current turn context.
 	 * @param callable|null        $on_event         Event sink.
@@ -1019,13 +1112,13 @@ class WP_Agent_Conversation_Loop {
 		if ( ! is_array( $message ) ) {
 			self::emit_event( $on_event, 'interrupt_ignored', array(
 				'reason' => 'invalid_message',
-				'turn'   => (int) ( $context['turn'] ?? 0 ),
+				'turn'   => self::int_value( $context['turn'] ?? 0 ),
 			) );
 
 			return null;
 		}
 
-		return self::normalize_interrupt_message( $message, $context, $on_event );
+		return self::normalize_interrupt_message( self::normalize_assoc_array( $message ), $context, $on_event );
 	}
 
 	/**
@@ -1038,13 +1131,13 @@ class WP_Agent_Conversation_Loop {
 	 */
 	private static function normalize_interrupt_message( array $message, array $context, ?callable $on_event ): array {
 		$normalized         = WP_Agent_Message::normalize( $message );
-		$message_metadata   = isset( $normalized['metadata'] ) && is_array( $normalized['metadata'] ) ? $normalized['metadata'] : array();
+		$message_metadata   = isset( $normalized['metadata'] ) && is_array( $normalized['metadata'] ) ? self::normalize_assoc_array( $normalized['metadata'] ) : array();
 		$action             = self::normalize_interrupt_action( $message_metadata['interrupt_action'] ?? ( $message_metadata['action'] ?? 'message' ) );
 		$interrupt_metadata = $message_metadata;
 		unset( $interrupt_metadata['action'], $interrupt_metadata['interrupt_action'] );
 
 		$metadata = array_merge( $interrupt_metadata, array(
-			'turn'    => (int) ( $context['turn'] ?? 0 ),
+			'turn'    => self::int_value( $context['turn'] ?? 0 ),
 			'action'  => $action,
 			'message' => $normalized,
 		) );
@@ -1061,7 +1154,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Build an interrupt-source request with the current transcript.
 	 *
-	 * @param array<int, array>    $messages Current transcript messages.
+	 * @param array<int, array<string, mixed>> $messages Current transcript messages.
 	 * @param array<string, mixed> $options  Loop options.
 	 * @return WP_Agent_Conversation_Request
 	 */
@@ -1118,7 +1211,7 @@ class WP_Agent_Conversation_Loop {
 				$payload = array_merge(
 					$signature->to_array(),
 					array(
-						'turn'         => (int) ( $context['turn'] ?? 0 ),
+						'turn'         => self::int_value( $context['turn'] ?? 0 ),
 						'repeat_count' => $detector->repeat_count(),
 						'threshold'    => $detector->threshold(),
 					)
@@ -1165,7 +1258,7 @@ class WP_Agent_Conversation_Loop {
 		$payload = array_merge(
 			$signature->to_array(),
 			array(
-				'turn'         => (int) ( $context['turn'] ?? 0 ),
+				'turn'         => self::int_value( $context['turn'] ?? 0 ),
 				'repeat_count' => $tracker->repeat_count(),
 				'threshold'    => $tracker->threshold(),
 				'message'      => $message,
@@ -1180,7 +1273,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve a stable tool-call identifier for transcript pairing.
 	 *
-	 * @param array $raw_call Raw tool call emitted by a turn runner.
+	 * @param array<string, mixed> $raw_call Raw tool call emitted by a turn runner.
 	 * @param int   $turn Current turn number.
 	 * @param int   $sequence Tool-call sequence in this turn.
 	 * @return string
@@ -1198,9 +1291,9 @@ class WP_Agent_Conversation_Loop {
 	 * Persist the transcript through the persister if available.
 	 *
 	 * @param WP_Agent_Transcript_Persister|null $persister Transcript persister.
-	 * @param array                                              $messages  Final messages.
-	 * @param array                                              $options   Loop options.
-	 * @param array                                              $result    Loop result.
+	 * @param array<int, array<string, mixed>>                          $messages  Final messages.
+	 * @param array<string, mixed>                                      $options   Loop options.
+	 * @param array<mixed>                                              $result    Loop result.
 	 */
 	private static function persist_transcript(
 		?WP_Agent_Transcript_Persister $persister,
@@ -1225,8 +1318,8 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the request object from options, or build a minimal one.
 	 *
-	 * @param array $messages Current messages.
-	 * @param array $options  Loop options.
+	 * @param array<int, array<string, mixed>> $messages Current messages.
+	 * @param array<string, mixed> $options  Loop options.
 	 * @return WP_Agent_Conversation_Request
 	 */
 	private static function resolve_request( array $messages, array $options ): WP_Agent_Conversation_Request {
@@ -1241,7 +1334,7 @@ class WP_Agent_Conversation_Loop {
 			$messages,
 			array(),
 			null,
-			isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array(),
+			self::normalize_assoc_array( $options['context'] ?? array() ),
 			array(),
 			self::max_turns( $options['max_turns'] ?? 1 ),
 			false,
@@ -1263,7 +1356,7 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		if ( is_array( $overrides ) ) {
-			return new \WP_Agent_Runtime_Overrides( $overrides );
+			return new \WP_Agent_Runtime_Overrides( self::normalize_assoc_array( $overrides ) );
 		}
 
 		$agent = $options['agent'] ?? ( is_array( $options['context'] ?? null ) ? ( $options['context']['agent'] ?? null ) : null );
@@ -1282,7 +1375,7 @@ class WP_Agent_Conversation_Loop {
 			$options['max_turns'] = min( self::max_turns( $options['max_turns'] ?? $overrides->max_iterations() ), $overrides->max_iterations() );
 		}
 
-		$context = isset( $options['context'] ) && is_array( $options['context'] ) ? $options['context'] : array();
+		$context = self::normalize_assoc_array( $options['context'] ?? array() );
 		foreach ( $overrides->to_array() as $key => $value ) {
 			if ( null !== $value && array() !== $value ) {
 				$context[ $key ] = $value;
@@ -1294,6 +1387,134 @@ class WP_Agent_Conversation_Loop {
 	}
 
 	/**
+	 * Resolve the caller turn runner or wrap a provider-turn adapter.
+	 *
+	 * @param callable|null                         $turn_runner       Caller-owned turn runner.
+	 * @param array<string, mixed>                  $options           Loop options.
+	 * @param array<string, array<string, mixed>>   $tool_declarations Tool declarations keyed by name.
+	 * @param string                                $run_id            Run identifier.
+	 * @param string                                $session_id        Session identifier.
+	 * @param WP_Agent_Conversation_Request         $request           Conversation request.
+	 * @param array<string, WP_Agent_Iteration_Budget> $budgets        Resolved budgets.
+	 * @return callable
+	 */
+	private static function resolve_turn_runner( ?callable $turn_runner, array $options, array $tool_declarations, string $run_id, string $session_id, WP_Agent_Conversation_Request $request, array $budgets ): callable {
+		$provider_turn_adapter = $options['provider_turn_adapter'] ?? null;
+		if ( null === $provider_turn_adapter ) {
+			if ( null === $turn_runner ) {
+				throw new \InvalidArgumentException( 'invalid_agent_conversation_loop: a turn runner or provider_turn_adapter is required' );
+			}
+
+			return $turn_runner;
+		}
+
+		if ( $provider_turn_adapter instanceof WP_Agent_Provider_Turn_Adapter ) {
+			$adapter = array( $provider_turn_adapter, 'run_turn' );
+		} elseif ( is_callable( $provider_turn_adapter ) ) {
+			$adapter = $provider_turn_adapter;
+		} else {
+			throw new \InvalidArgumentException( 'invalid_agent_conversation_loop: provider_turn_adapter must implement WP_Agent_Provider_Turn_Adapter or be callable' );
+		}
+		$mediation_enabled = self::resolve_tool_executor( $options ) instanceof WP_Agent_Tool_Executor && ! empty( $tool_declarations );
+
+		return static function ( array $messages, array $context ) use ( $adapter, $options, $tool_declarations, $run_id, $session_id, $request, $budgets, $mediation_enabled ): array {
+			$context          = self::normalize_assoc_array( $context );
+			$provider_request = new WP_Agent_Provider_Turn_Request(
+				$messages,
+				$tool_declarations,
+				self::provider_turn_model_metadata( $context, $options ),
+				self::provider_turn_runtime_metadata( $context, $options ),
+				$context,
+				self::provider_turn_budget_metadata( $budgets ),
+				$run_id,
+				$session_id,
+				$request->metadata()
+			);
+
+			$raw_result = call_user_func( $adapter, $provider_request );
+			if ( ! is_array( $raw_result ) ) {
+				throw new \InvalidArgumentException( 'invalid_agent_provider_turn_result: adapter must return an array' );
+			}
+
+			$result = WP_Agent_Provider_Turn_Result::normalize( $raw_result );
+			if ( isset( $result['message'] ) && is_array( $result['message'] ) && '' === $result['content'] ) {
+				$result['content'] = is_string( $result['message']['content'] ?? null ) ? $result['message']['content'] : '';
+			}
+
+			if ( ! $mediation_enabled ) {
+				if ( isset( $result['message'] ) && is_array( $result['message'] ) ) {
+					$messages[] = $result['message'];
+				} else {
+					$content = is_string( $result['content'] ?? null ) ? $result['content'] : '';
+					if ( '' !== $content ) {
+						$messages[] = WP_Agent_Message::text( 'assistant', $content );
+					}
+				}
+
+				$result['tool_execution_results'] = array();
+				$result['events']                 = array();
+			}
+
+			$result['messages'] = $messages;
+			return $result;
+		};
+	}
+
+	/**
+	 * Extract provider/model metadata for provider-turn adapters.
+	 *
+	 * @param array<string, mixed> $context Turn context.
+	 * @param array<string, mixed> $options Loop options.
+	 * @return array<string, mixed>
+	 */
+	private static function provider_turn_model_metadata( array $context, array $options ): array {
+		$model = self::normalize_assoc_array( $options['model'] ?? array() );
+		foreach ( array( 'provider_id', 'model_id', 'temperature' ) as $key ) {
+			if ( array_key_exists( $key, $context ) && ! array_key_exists( $key, $model ) ) {
+				$model[ $key ] = $context[ $key ];
+			}
+		}
+
+		return $model;
+	}
+
+	/**
+	 * Extract runtime metadata for provider-turn adapters.
+	 *
+	 * @param array<string, mixed> $context Turn context.
+	 * @param array<string, mixed> $options Loop options.
+	 * @return array<string, mixed>
+	 */
+	private static function provider_turn_runtime_metadata( array $context, array $options ): array {
+		$runtime = self::normalize_assoc_array( $options['runtime'] ?? array() );
+		foreach ( array( 'runtime_id', 'runtime_context', 'request_kind' ) as $key ) {
+			if ( array_key_exists( $key, $context ) && ! array_key_exists( $key, $runtime ) ) {
+				$runtime[ $key ] = $context[ $key ];
+			}
+		}
+
+		return $runtime;
+	}
+
+	/**
+	 * Snapshot budget counters for provider-turn adapters.
+	 *
+	 * @param array<string, WP_Agent_Iteration_Budget> $budgets Resolved budgets.
+	 * @return array<string, mixed>
+	 */
+	private static function provider_turn_budget_metadata( array $budgets ): array {
+		$metadata = array();
+		foreach ( $budgets as $name => $budget ) {
+			$metadata[ $name ] = array(
+				'current' => $budget->current(),
+				'limit'   => $budget->ceiling(),
+			);
+		}
+
+		return $metadata;
+	}
+
+	/**
 	 * Emit a lifecycle event through the caller sink and WordPress observers.
 	 *
 	 * The caller-owned `on_event` sink and the `agents_api_loop_event` action are
@@ -1302,7 +1523,7 @@ class WP_Agent_Conversation_Loop {
 	 *
 	 * @param callable|null $on_event Event sink.
 	 * @param string        $event    Event name.
-	 * @param array         $payload  Event payload.
+	 * @param array<mixed>         $payload  Event payload.
 	 */
 	private static function emit_event( ?callable $on_event, string $event, array $payload = array() ): void {
 		if ( null !== $on_event ) {
@@ -1323,7 +1544,7 @@ class WP_Agent_Conversation_Loop {
 				 * observers are swallowed and cannot change loop results.
 				 *
 				 * @param string $event   Event name.
-				 * @param array  $payload Event payload snapshot.
+				 * @param array<mixed>  $payload Event payload snapshot.
 				 */
 				do_action( 'agents_api_loop_event', $event, $payload );
 			} catch ( \Throwable $error ) {
@@ -1343,10 +1564,10 @@ class WP_Agent_Conversation_Loop {
 	 *
 	 * @param string     $tool_name       Tool identifier.
 	 * @param string     $tool_call_id    Provider or loop-assigned tool-call id.
-	 * @param array      $parameters      Runtime tool-call parameters.
-	 * @param array      $result          Normalized tool execution result.
-	 * @param array|null $tool_definition Tool declaration, when available.
-	 * @param array      $context         Turn context.
+	 * @param array<string, mixed>      $parameters      Runtime tool-call parameters.
+	 * @param array<string, mixed>      $result          Normalized tool execution result.
+	 * @param array<string, mixed>|null $tool_definition Tool declaration, when available.
+	 * @param array<string, mixed>      $context         Turn context.
 	 * @param int        $turn            Turn number.
 	 * @return array<string, mixed> Audit event.
 	 */
@@ -1382,14 +1603,15 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Redact tool parameters before hashing them for audit events.
 	 *
-	 * @param array      $parameters      Raw tool-call parameters.
-	 * @param string     $tool_name       Tool identifier.
-	 * @param array|null $tool_definition Tool declaration, when available.
-	 * @param array      $context         Turn context.
-	 * @return array Redacted parameters.
+	 * @param array<string, mixed>      $parameters      Raw tool-call parameters.
+	 * @param string                    $tool_name       Tool identifier.
+	 * @param array<string, mixed>|null $tool_definition Tool declaration, when available.
+	 * @param array<string, mixed>      $context         Turn context.
+	 * @return array<string, mixed> Redacted parameters.
 	 */
 	private static function redact_tool_audit_parameters( array $parameters, string $tool_name, ?array $tool_definition, array $context ): array {
 		$redacted = self::redact_sensitive_values( $parameters );
+		$redacted = is_array( $redacted ) ? self::normalize_assoc_array( $redacted ) : array();
 
 		if ( function_exists( 'apply_filters' ) ) {
 			try {
@@ -1400,13 +1622,14 @@ class WP_Agent_Conversation_Loop {
 				 * keeping deterministic replay hashes. Returning a non-array falls back to
 				 * the default redacted parameters.
 				 *
-				 * @param array      $redacted        Default redacted parameters.
-				 * @param array      $parameters      Raw tool-call parameters.
-				 * @param string     $tool_name       Tool identifier.
-				 * @param array|null $tool_definition Tool declaration, when available.
-				 * @param array      $context         Turn context.
+				 * @param array<string, mixed>      $redacted        Default redacted parameters.
+				 * @param array<string, mixed>      $parameters      Raw tool-call parameters.
+				 * @param string                    $tool_name       Tool identifier.
+				 * @param array<string, mixed>|null $tool_definition Tool declaration, when available.
+				 * @param array<string, mixed>      $context         Turn context.
 				 */
-				$redacted = apply_filters( 'agents_api_tool_audit_parameters', $redacted, $parameters, $tool_name, $tool_definition, $context );
+				$filtered = apply_filters( 'agents_api_tool_audit_parameters', $redacted, $parameters, $tool_name, $tool_definition, $context );
+				$redacted = self::normalize_filtered_assoc_array( $filtered, $redacted );
 			} catch ( \Throwable $error ) {
 				// Audit redaction filters must not change loop results.
 				unset( $error );
@@ -1442,7 +1665,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Keep the audit result hash focused on normalized status, not raw payloads.
 	 *
-	 * @param array $result Normalized tool result.
+	 * @param array<string, mixed> $result Normalized tool result.
 	 * @return array<string, mixed> Hashable result summary.
 	 */
 	private static function audit_result_summary( array $result ): array {
@@ -1503,7 +1726,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the tool executor from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Tool_Executor|null
 	 */
 	private static function resolve_tool_executor( array $options ): ?WP_Agent_Tool_Executor {
@@ -1521,9 +1744,9 @@ class WP_Agent_Conversation_Loop {
 	 * path (no mediation), preserves the historical break-after-1 behavior unless
 	 * the caller supplies their own continuation policy.
 	 *
-	 * @param array                       $options           Loop options.
+	 * @param array<mixed>                       $options           Loop options.
 	 * @param WP_Agent_Tool_Executor|null $tool_executor     Resolved tool executor.
-	 * @param array                       $tool_declarations Resolved tool declarations.
+	 * @param array<mixed>                       $tool_declarations Resolved tool declarations.
 	 * @return callable|null
 	 */
 	private static function resolve_should_continue(
@@ -1560,18 +1783,18 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve tool declarations from options.
 	 *
-	 * @param array $options Loop options.
-	 * @return array Tool declarations keyed by name.
+	 * @param array<string, mixed> $options Loop options.
+	 * @return array<string, array<string, mixed>> Tool declarations keyed by name.
 	 */
 	private static function resolve_tool_declarations( array $options ): array {
 		$declarations = $options['tool_declarations'] ?? null;
-		return is_array( $declarations ) ? $declarations : array();
+		return is_array( $declarations ) ? self::normalize_tool_declarations( $declarations ) : array();
 	}
 
 	/**
 	 * Resolve the completion policy from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Conversation_Completion_Policy|null
 	 */
 	private static function resolve_completion_policy( array $options ): ?WP_Agent_Conversation_Completion_Policy {
@@ -1582,7 +1805,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the spin detector from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Spin_Detector|null
 	 */
 	private static function resolve_spin_detector( array $options ): ?WP_Agent_Spin_Detector {
@@ -1593,7 +1816,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the identical failure tracker from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Identical_Failure_Tracker|null
 	 */
 	private static function resolve_identical_failure_tracker( array $options ): ?WP_Agent_Identical_Failure_Tracker {
@@ -1604,7 +1827,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the tool result truncator from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Tool_Result_Truncator|null
 	 */
 	private static function resolve_tool_result_truncator( array $options ): ?WP_Agent_Tool_Result_Truncator {
@@ -1646,7 +1869,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the interrupt source from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return callable|null
 	 */
 	private static function resolve_interrupt_source( array $options ): ?callable {
@@ -1657,7 +1880,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the transcript persister from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Transcript_Persister|null
 	 */
 	private static function resolve_transcript_persister( array $options ): ?WP_Agent_Transcript_Persister {
@@ -1668,7 +1891,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the transcript lock primitive from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return WP_Agent_Conversation_Lock|null
 	 */
 	private static function resolve_transcript_lock( array $options ): ?WP_Agent_Conversation_Lock {
@@ -1685,7 +1908,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the transcript session ID to lock.
 	 *
-	 * @param array                    $options Loop options.
+	 * @param array<mixed>                    $options Loop options.
 	 * @param WP_Agent_Conversation_Request $request Request object.
 	 * @return string
 	 */
@@ -1711,7 +1934,7 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve the chat run ID used by generic run-control.
 	 *
-	 * @param array                         $options Loop options.
+	 * @param array<mixed>                         $options Loop options.
 	 * @param WP_Agent_Conversation_Request $request Request object.
 	 * @return string
 	 */
@@ -1737,17 +1960,17 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve transcript lock TTL.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return int TTL in seconds.
 	 */
 	private static function resolve_lock_ttl( array $options ): int {
-		return max( 1, (int) ( $options['transcript_lock_ttl'] ?? 300 ) );
+		return max( 1, self::int_value( $options['transcript_lock_ttl'] ?? 300 ) );
 	}
 
 	/**
 	 * Resolve the event sink from options.
 	 *
-	 * @param array $options Loop options.
+	 * @param array<string, mixed> $options Loop options.
 	 * @return callable|null
 	 */
 	private static function resolve_event_sink( array $options ): ?callable {
@@ -1761,7 +1984,7 @@ class WP_Agent_Conversation_Loop {
 	 * Synthesizes a `turns` budget from `max_turns` when no explicit `turns`
 	 * budget is provided, preserving backwards compatibility.
 	 *
-	 * @param array $options   Loop options.
+	 * @param array<string, mixed> $options   Loop options.
 	 * @param int   $max_turns Resolved max turns value.
 	 * @return array{budgets: array<string, WP_Agent_Iteration_Budget>, has_explicit_turns: bool}
 	 */
@@ -1883,8 +2106,8 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Apply optional transcript compaction through caller-owned summarization.
 	 *
-	 * @param array $messages Current messages.
-	 * @param array $options  Loop options.
+	 * @param array<int, array<string, mixed>> $messages Current messages.
+	 * @param array<string, mixed> $options  Loop options.
 	 * @return array{messages: array<int, array<string, mixed>>, events: array<int, array<string, mixed>>}
 	 */
 	private static function maybe_compact( array $messages, array $options ): array {
@@ -1898,7 +2121,7 @@ class WP_Agent_Conversation_Loop {
 			);
 		}
 
-		$compaction = WP_Agent_Conversation_Compaction::compact( $messages, $policy, $summarizer );
+		$compaction = WP_Agent_Conversation_Compaction::compact( $messages, self::normalize_assoc_array( $policy ), $summarizer );
 		return array(
 			'messages' => $compaction['messages'],
 			'events'   => self::normalize_events( $compaction['events'] ),
@@ -1922,8 +2145,8 @@ class WP_Agent_Conversation_Loop {
 	private static function accumulate_usage( array $running, array $turn ): array {
 		foreach ( $turn as $key => $value ) {
 			if ( is_int( $value ) || is_float( $value ) ) {
-				$running[ $key ] = (float) ( $running[ $key ] ?? 0 ) + (float) $value;
-				if ( is_int( $value ) && (float) (int) $running[ $key ] === (float) $running[ $key ] ) {
+				$running[ $key ] = self::float_value( $running[ $key ] ?? 0 ) + (float) $value;
+				if ( is_int( $value ) && (float) self::int_value( $running[ $key ] ) === self::float_value( $running[ $key ] ) ) {
 					$running[ $key ] = (int) $running[ $key ];
 				}
 				continue;
@@ -1940,15 +2163,12 @@ class WP_Agent_Conversation_Loop {
 	 * latest assistant message has no text content (e.g. tool-call-only
 	 * turns at the tail).
 	 *
-	 * @param array $messages Normalized transcript messages.
+	 * @param array<int, array<string, mixed>> $messages Normalized transcript messages.
 	 * @return string Final assistant text content.
 	 */
 	private static function extract_final_content( array $messages ): string {
 		for ( $i = count( $messages ) - 1; $i >= 0; --$i ) {
 			$message = $messages[ $i ];
-			if ( ! is_array( $message ) ) {
-				continue;
-			}
 			if ( ( $message['role'] ?? '' ) !== 'assistant' ) {
 				continue;
 			}
@@ -1970,7 +2190,7 @@ class WP_Agent_Conversation_Loop {
 	 * @return int
 	 */
 	private static function max_turns( $value ): int {
-		return max( 1, (int) $value );
+		return max( 1, self::int_value( $value ) );
 	}
 
 	/**
@@ -1989,10 +2209,155 @@ class WP_Agent_Conversation_Loop {
 			if ( ! is_array( $event ) ) {
 				throw new \InvalidArgumentException( 'invalid_agent_conversation_loop: event must be an array' );
 			}
-			$normalized[] = $event;
+			$normalized[] = self::normalize_assoc_array( $event );
 		}
 
 		return $normalized;
+	}
+
+	/**
+	 * Normalize messages while preserving the canonical list shape for static analysis.
+	 *
+	 * @param array<mixed> $messages Raw messages.
+	 * @return array<int, array<string, mixed>> Normalized message list.
+	 */
+	private static function normalize_messages( array $messages ): array {
+		return WP_Agent_Message::normalize_many( $messages );
+	}
+
+	/**
+	 * Normalize a conversation result while preserving the public return shape.
+	 *
+	 * @param array<mixed> $result Raw conversation result.
+	 * @return array<string, mixed> Normalized conversation result.
+	 */
+	private static function normalize_conversation_result( array $result ): array {
+		return self::normalize_assoc_array( WP_Agent_Conversation_Result::normalize( $result ) );
+	}
+
+	/**
+	 * Normalize provider-turn typed failure information.
+	 *
+	 * @param array<mixed> $failure Raw failure.
+	 * @param int          $turn    Current turn.
+	 * @return array<string, mixed>
+	 */
+	private static function normalize_provider_turn_failure( array $failure, int $turn ): array {
+		$normalized = self::normalize_assoc_array( $failure );
+		$type       = is_string( $normalized['type'] ?? null ) && '' !== $normalized['type'] ? $normalized['type'] : 'provider_turn_failure';
+		$message    = is_string( $normalized['message'] ?? null ) && '' !== $normalized['message'] ? $normalized['message'] : 'Provider turn failed.';
+
+		$normalized['type']       = $type;
+		$normalized['message']    = $message;
+		$normalized['turn_count'] = isset( $normalized['turn_count'] ) && is_int( $normalized['turn_count'] ) ? $normalized['turn_count'] : $turn;
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize arbitrary associative arrays to string-keyed arrays.
+	 *
+	 * @param mixed $value Raw value.
+	 * @return array<string, mixed> String-keyed array.
+	 */
+	private static function normalize_assoc_array( $value ): array {
+		if ( ! is_array( $value ) ) {
+			return array();
+		}
+
+		$normalized = array();
+		foreach ( $value as $key => $item ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $item;
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize a filter return, preserving the previous value for non-arrays.
+	 *
+	 * @param mixed                $value    Filtered value.
+	 * @param array<string, mixed> $fallback Existing value to keep for invalid returns.
+	 * @return array<string, mixed> String-keyed array.
+	 */
+	private static function normalize_filtered_assoc_array( $value, array $fallback ): array {
+		return is_array( $value ) ? self::normalize_assoc_array( $value ) : $fallback;
+	}
+
+	/**
+	 * Normalize a list of arrays to a typed list shape.
+	 *
+	 * @param mixed $value Raw value.
+	 * @return array<int, array<string, mixed>> List of string-keyed arrays.
+	 */
+	private static function normalize_array_list( $value ): array {
+		if ( ! is_array( $value ) ) {
+			return array();
+		}
+
+		$normalized = array();
+		foreach ( $value as $item ) {
+			if ( is_array( $item ) ) {
+				$normalized[] = self::normalize_assoc_array( $item );
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize tool declarations to declarations keyed by tool name.
+	 *
+	 * @param array<mixed> $declarations Raw declarations.
+	 * @return array<string, array<string, mixed>> Tool declarations.
+	 */
+	private static function normalize_tool_declarations( array $declarations ): array {
+		$normalized = array();
+		foreach ( $declarations as $name => $declaration ) {
+			if ( is_string( $name ) && is_array( $declaration ) ) {
+				$normalized[ $name ] = self::normalize_assoc_array( $declaration );
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Cast scalar-ish values to int without asking PHPStan to accept mixed casts.
+	 *
+	 * @param mixed $value Raw value.
+	 * @return int Integer value.
+	 */
+	private static function int_value( $value ): int {
+		if ( is_int( $value ) ) {
+			return $value;
+		}
+
+		if ( is_float( $value ) || is_string( $value ) || is_bool( $value ) ) {
+			return (int) $value;
+		}
+
+		return 0;
+	}
+
+	/**
+	 * Cast scalar-ish values to float without asking PHPStan to accept mixed casts.
+	 *
+	 * @param mixed $value Raw value.
+	 * @return float Float value.
+	 */
+	private static function float_value( $value ): float {
+		if ( is_float( $value ) || is_int( $value ) ) {
+			return (float) $value;
+		}
+
+		if ( is_string( $value ) || is_bool( $value ) ) {
+			return (float) $value;
+		}
+
+		return 0.0;
 	}
 
 	/**

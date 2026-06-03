@@ -17,7 +17,7 @@ class WP_Agent_Tool_Call {
 	/**
 	 * Normalize a runtime tool call.
 	 *
-	 * @param array $tool_call Raw tool call.
+	 * @param array<mixed> $tool_call Raw tool call.
 	 * @return array<string, mixed>
 	 */
 	public static function normalize( array $tool_call ): array {

@@ -43,7 +43,7 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 		foreach ( $lines as $line ) {
 			$heading = self::parse_heading( $line );
 			if ( null === $heading ) {
-				$current['content'] .= $line;
+				$current['content'] = self::item_content( $current ) . $line;
 				continue;
 			}
 
@@ -83,8 +83,8 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 		$markdown = '';
 
 		foreach ( $items as $item ) {
-			$type     = (string) ( $item['type'] ?? '' );
-			$content  = (string) ( $item['content'] ?? '' );
+			$type     = self::normalize_string( $item['type'] ?? '' );
+			$content  = self::item_content( $item );
 			$metadata = is_array( $item['metadata'] ?? null ) ? $item['metadata'] : array();
 
 			if ( self::TYPE_PREAMBLE === $type ) {
@@ -96,7 +96,7 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 				throw new \InvalidArgumentException( 'invalid_markdown_section_item: unsupported item type' );
 			}
 
-			$heading_line = (string) ( $metadata['heading_line'] ?? '' );
+			$heading_line = self::string_value( $metadata['heading_line'] ?? '' );
 			if ( '' === $heading_line ) {
 				throw new \InvalidArgumentException( 'invalid_markdown_section_item: section item missing heading line' );
 			}
@@ -117,6 +117,7 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 	public static function summary_item( array $section_item, string $summary ): array {
 		$item = self::replacement_item( $section_item, self::TYPE_SECTION_SUMMARY, $summary );
 
+		$item['metadata']                     = self::item_metadata( $item );
 		$item['metadata']['source_item_type'] = $section_item['type'] ?? '';
 		return $item;
 	}
@@ -136,6 +137,7 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 
 		$item = self::replacement_item( $section_item, self::TYPE_SECTION_POINTER, '[Archived section: ' . $destination . ']' . "\n" );
 
+		$item['metadata']                        = self::item_metadata( $item );
 		$item['metadata']['pointer_destination'] = $destination;
 		return $item;
 	}
@@ -153,7 +155,7 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 
 		foreach ( $items as $item ) {
 			$metadata = is_array( $item['metadata'] ?? null ) ? $item['metadata'] : array();
-			$path     = is_array( $metadata['heading_path'] ?? null ) ? array_values( $metadata['heading_path'] ) : array();
+			$path     = self::normalize_string_list( $metadata['heading_path'] ?? array() );
 			$key      = empty( $path ) ? '__preamble' : self::heading_key( array_slice( $path, 0, $level ) );
 
 			$groups[ $key ][] = $item;
@@ -193,7 +195,12 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 
 		$retained      = array();
 		$archive_items = array();
-		$pointer       = self::archive_pointer_item( $policy['pointer_heading'], $policy['pointer_destination'], $policy['pointer_level'], $policy['pointer_content'] );
+		$pointer       = self::archive_pointer_item(
+			self::normalize_string( $policy['pointer_heading'] ?? '' ),
+			self::normalize_string( $policy['pointer_destination'] ?? '' ),
+			self::normalize_non_negative_int( $policy['pointer_level'] ?? 2 ),
+			is_string( $policy['pointer_content'] ?? null ) ? $policy['pointer_content'] : ''
+		);
 		$section_seen  = 0;
 
 		foreach ( $items as $item ) {
@@ -292,13 +299,20 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 	private static function normalize_overflow_policy( array $policy ): array {
 		$policy = WP_Agent_Compaction_Conservation::normalize_policy( $policy );
 
-		$policy['target_bytes']        = max( 0, (int) ( $policy['target_bytes'] ?? $policy['overflow_retained_bytes'] ?? 0 ) );
-		$policy['pointer_destination'] = self::normalize_string( $policy['pointer_destination'] ?? $policy['archive_pointer']['destination'] ?? '' );
+		$archive_pointer               = is_array( $policy['archive_pointer'] ?? null ) ? $policy['archive_pointer'] : array();
+		$policy['target_bytes']        = self::normalize_non_negative_int( $policy['target_bytes'] ?? $policy['overflow_retained_bytes'] ?? 0 );
+		$policy['pointer_destination'] = self::normalize_string( $policy['pointer_destination'] ?? $archive_pointer['destination'] ?? '' );
 		$policy['pointer_heading']     = self::normalize_string( $policy['pointer_heading'] ?? 'Archived Sections' );
-		$policy['pointer_level']       = max( 1, min( 6, (int) ( $policy['pointer_level'] ?? 2 ) ) );
+		$policy['pointer_level']       = max( 1, min( 6, self::normalize_non_negative_int( $policy['pointer_level'] ?? 2 ) ) );
 		$policy['pointer_content']     = is_string( $policy['pointer_content'] ?? null ) ? $policy['pointer_content'] : '';
 
-		return $policy;
+		return array(
+			'target_bytes'        => $policy['target_bytes'],
+			'pointer_destination' => $policy['pointer_destination'],
+			'pointer_heading'     => $policy['pointer_heading'],
+			'pointer_level'       => $policy['pointer_level'],
+			'pointer_content'     => $policy['pointer_content'],
+		) + $policy;
 	}
 
 	/**
@@ -354,6 +368,86 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 	 */
 	private static function normalize_string( $value ): string {
 		return is_string( $value ) ? trim( $value ) : '';
+	}
+
+	/**
+	 * Return a string value without trimming significant markdown whitespace.
+	 *
+	 * @param mixed $value Raw value.
+	 * @return string
+	 */
+	private static function string_value( $value ): string {
+		return is_string( $value ) ? $value : '';
+	}
+
+	/**
+	 * Normalize a non-negative integer policy value.
+	 *
+	 * @param mixed $value Raw value.
+	 * @return int
+	 */
+	private static function normalize_non_negative_int( $value ): int {
+		if ( is_int( $value ) ) {
+			return max( 0, $value );
+		}
+
+		if ( is_float( $value ) || ( is_string( $value ) && is_numeric( $value ) ) ) {
+			return max( 0, intval( $value ) );
+		}
+
+		return 0;
+	}
+
+	/**
+	 * Normalize a list of string values.
+	 *
+	 * @param mixed $values Raw values.
+	 * @return array<int, string>
+	 */
+	private static function normalize_string_list( $values ): array {
+		if ( ! is_array( $values ) ) {
+			return array();
+		}
+
+		$strings = array();
+		foreach ( $values as $value ) {
+			if ( is_string( $value ) ) {
+				$strings[] = $value;
+			}
+		}
+
+		return $strings;
+	}
+
+	/**
+	 * Return item content when it is valid markdown text.
+	 *
+	 * @param array<string, mixed> $item Item.
+	 * @return string
+	 */
+	private static function item_content( array $item ): string {
+		return is_string( $item['content'] ?? null ) ? $item['content'] : '';
+	}
+
+	/**
+	 * Return item metadata when it is an array.
+	 *
+	 * @param array<string, mixed> $item Item.
+	 * @return array<string, mixed>
+	 */
+	private static function item_metadata( array $item ): array {
+		if ( ! is_array( $item['metadata'] ?? null ) ) {
+			return array();
+		}
+
+		$metadata = array();
+		foreach ( $item['metadata'] as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$metadata[ $key ] = $value;
+			}
+		}
+
+		return $metadata;
 	}
 
 	/**
@@ -494,6 +588,7 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 	 * @return array<string, mixed>
 	 */
 	private static function finalize_item( array $item, int $order ): array {
+		$item['metadata']          = self::item_metadata( $item );
 		$item['metadata']['order'] = $order;
 		return $item;
 	}
@@ -512,14 +607,14 @@ class WP_Agent_Markdown_Section_Compaction_Adapter {
 		}
 
 		$metadata = is_array( $section_item['metadata'] ?? null ) ? $section_item['metadata'] : array();
-		if ( '' === (string) ( $metadata['heading_line'] ?? '' ) ) {
+		if ( '' === self::normalize_string( $metadata['heading_line'] ?? '' ) ) {
 			throw new \InvalidArgumentException( 'invalid_markdown_section_item: section item missing heading line' );
 		}
 
 		return array(
 			'schema'   => self::ITEM_SCHEMA,
 			'version'  => self::ITEM_VERSION,
-			'id'       => (string) ( $section_item['id'] ?? 'section' ) . ':' . str_replace( 'markdown_section_', '', $type ),
+			'id'       => self::normalize_string( $section_item['id'] ?? 'section' ) . ':' . str_replace( 'markdown_section_', '', $type ),
 			'type'     => $type,
 			'content'  => $content,
 			'metadata' => array_merge(

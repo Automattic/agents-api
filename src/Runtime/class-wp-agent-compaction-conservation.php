@@ -23,8 +23,13 @@ class WP_Agent_Compaction_Conservation {
 	 * @return array<string, mixed>
 	 */
 	public static function normalize_policy( array $policy ): array {
+		$minimum_conserved_byte_ratio = $policy['minimum_conserved_byte_ratio'] ?? 1.0;
+		if ( ! is_int( $minimum_conserved_byte_ratio ) && ! is_float( $minimum_conserved_byte_ratio ) && ! is_string( $minimum_conserved_byte_ratio ) ) {
+			$minimum_conserved_byte_ratio = 1.0;
+		}
+
 		$policy['conservation_enabled']         = (bool) ( $policy['conservation_enabled'] ?? false );
-		$policy['minimum_conserved_byte_ratio'] = max( 0.0, (float) ( $policy['minimum_conserved_byte_ratio'] ?? 1.0 ) );
+		$policy['minimum_conserved_byte_ratio'] = max( 0.0, (float) $minimum_conserved_byte_ratio );
 		$policy['fail_on_conservation_failure'] = (bool) ( $policy['fail_on_conservation_failure'] ?? true );
 
 		return $policy;
@@ -53,8 +58,11 @@ class WP_Agent_Compaction_Conservation {
 		$archived_stats  = self::normalize_stats( $archived_stats ?? self::item_stats( $archived_items ) );
 
 		$conserved_bytes = $compacted_stats['byte_count'] + $retained_stats['byte_count'] + $archived_stats['byte_count'];
-		$required_bytes  = (int) ceil( $original_stats['byte_count'] * $policy['minimum_conserved_byte_ratio'] );
-		$passed          = ! $policy['conservation_enabled'] || $conserved_bytes >= $required_bytes;
+		$minimum_ratio   = is_float( $policy['minimum_conserved_byte_ratio'] ) ? $policy['minimum_conserved_byte_ratio'] : 1.0;
+		$enabled         = true === $policy['conservation_enabled'];
+		$fail_closed     = true === $policy['fail_on_conservation_failure'];
+		$required_bytes  = (int) ceil( $original_stats['byte_count'] * $minimum_ratio );
+		$passed          = ! $enabled || $conserved_bytes >= $required_bytes;
 
 		return array_merge(
 			$extra,
@@ -71,13 +79,13 @@ class WP_Agent_Compaction_Conservation {
 					'model'    => is_string( $policy['summary_model'] ?? null ) ? $policy['summary_model'] : '',
 				),
 				'conservation' => array(
-					'enabled'                      => $policy['conservation_enabled'],
-					'minimum_conserved_byte_ratio' => $policy['minimum_conserved_byte_ratio'],
+					'enabled'                      => $enabled,
+					'minimum_conserved_byte_ratio' => $minimum_ratio,
 					'required_byte_count'          => $required_bytes,
 					'conserved_byte_count'         => $conserved_bytes,
 					'conserved_byte_ratio'         => 0 === $original_stats['byte_count'] ? 1.0 : $conserved_bytes / $original_stats['byte_count'],
 					'passed'                       => $passed,
-					'failed_closed'                => $policy['conservation_enabled'] && $policy['fail_on_conservation_failure'] && ! $passed,
+					'failed_closed'                => $enabled && $fail_closed && ! $passed,
 				),
 			)
 		);
@@ -91,6 +99,10 @@ class WP_Agent_Compaction_Conservation {
 	 */
 	public static function failed_closed( array $metadata ): bool {
 		$conservation = $metadata['conservation'] ?? array();
+		if ( ! is_array( $conservation ) ) {
+			return false;
+		}
+
 		return true === ( $conservation['failed_closed'] ?? false );
 	}
 

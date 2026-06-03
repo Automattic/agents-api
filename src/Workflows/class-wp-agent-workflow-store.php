@@ -89,7 +89,7 @@ interface WP_Agent_Workflow_Store {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $args
+	 * @param array<mixed> $args
 	 * @return WP_Agent_Workflow_Spec[]
 	 */
 	public function all( array $args = array() ): array;

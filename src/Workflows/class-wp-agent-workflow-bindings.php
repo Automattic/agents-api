@@ -56,7 +56,7 @@ final class WP_Agent_Workflow_Bindings {
 	 * @since 0.103.0
 	 *
 	 * @param mixed $value   Raw spec fragment (string, array, scalar).
-	 * @param array $context Resolution context. Required keys:
+	 * @param array<mixed> $context Resolution context. Required keys:
 	 *                       - `inputs` (array): workflow input values.
 	 *                       - `steps`  (array<string,array>): each entry
 	 *                         shaped `[ 'output' => mixed ]`, keyed by step id.
@@ -97,7 +97,7 @@ final class WP_Agent_Workflow_Bindings {
 				if ( is_bool( $resolved ) ) {
 					return $resolved ? 'true' : 'false';
 				}
-				return (string) $resolved;
+				return is_scalar( $resolved ) ? (string) $resolved : '';
 			},
 			$value
 		);
@@ -112,7 +112,7 @@ final class WP_Agent_Workflow_Bindings {
 	 * @since 0.103.0
 	 *
 	 * @param string $expression Path expression without the surrounding `${}`.
-	 * @param array  $context    Resolution context (see {@see expand()}).
+	 * @param array<mixed>  $context    Resolution context (see {@see expand()}).
 	 * @return mixed|null
 	 */
 	public static function resolve_path( string $expression, array $context ) {
@@ -130,7 +130,7 @@ final class WP_Agent_Workflow_Bindings {
 
 		if ( 'inputs' === $root ) {
 			$source = $context['inputs'] ?? array();
-			return self::walk( $source, $segments );
+			return self::walk( $source, self::string_list( $segments ) );
 		}
 
 		if ( 'steps' === $root ) {
@@ -138,7 +138,11 @@ final class WP_Agent_Workflow_Bindings {
 			if ( null === $step_id ) {
 				return null;
 			}
-			$step = $context['steps'][ $step_id ] ?? null;
+			$steps = $context['steps'] ?? array();
+			if ( ! is_array( $steps ) ) {
+				return null;
+			}
+			$step = $steps[ $step_id ] ?? null;
 			if ( ! is_array( $step ) ) {
 				return null;
 			}
@@ -147,12 +151,12 @@ final class WP_Agent_Workflow_Bindings {
 			if ( 'output' !== $next ) {
 				return null;
 			}
-			return self::walk( $step['output'] ?? null, $segments );
+			return self::walk( $step['output'] ?? null, self::string_list( $segments ) );
 		}
 
 		if ( 'vars' === $root ) {
 			$source = $context['vars'] ?? array();
-			return self::walk( $source, $segments );
+			return self::walk( $source, self::string_list( $segments ) );
 		}
 
 		return null;
@@ -181,5 +185,20 @@ final class WP_Agent_Workflow_Bindings {
 			return null;
 		}
 		return $value;
+	}
+
+	/**
+	 * @param array<mixed> $segments Raw path segments.
+	 * @return array<int,string>
+	 */
+	private static function string_list( array $segments ): array {
+		$prepared = array();
+		foreach ( $segments as $segment ) {
+			if ( is_string( $segment ) && '' !== $segment ) {
+				$prepared[] = $segment;
+			}
+		}
+
+		return $prepared;
 	}
 }

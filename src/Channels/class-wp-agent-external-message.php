@@ -76,16 +76,16 @@ final class WP_Agent_External_Message {
 	 */
 	public static function from_array( array $data ): self {
 		return new self(
-			(string) ( $data['text'] ?? '' ),
-			(string) ( $data['connector_id'] ?? '' ),
-			(string) ( $data['external_provider'] ?? '' ),
-			isset( $data['external_conversation_id'] ) ? (string) $data['external_conversation_id'] : null,
-			isset( $data['external_message_id'] ) ? (string) $data['external_message_id'] : null,
-			isset( $data['sender_id'] ) ? (string) $data['sender_id'] : null,
+			self::string_value( $data['text'] ?? '' ),
+			self::string_value( $data['connector_id'] ?? '' ),
+			self::string_value( $data['external_provider'] ?? '' ),
+			self::nullable_string_value( $data['external_conversation_id'] ?? null ),
+			self::nullable_string_value( $data['external_message_id'] ?? null ),
+			self::nullable_string_value( $data['sender_id'] ?? null ),
 			(bool) ( $data['from_self'] ?? false ),
-			isset( $data['room_kind'] ) ? (string) $data['room_kind'] : null,
-			isset( $data['attachments'] ) && is_array( $data['attachments'] ) ? $data['attachments'] : array(),
-			isset( $data['raw'] ) && is_array( $data['raw'] ) ? $data['raw'] : array()
+			self::nullable_string_value( $data['room_kind'] ?? null ),
+			isset( $data['attachments'] ) && is_array( $data['attachments'] ) ? array_values( $data['attachments'] ) : array(),
+			isset( $data['raw'] ) && is_array( $data['raw'] ) ? self::string_keyed_array( $data['raw'] ) : array()
 		);
 	}
 
@@ -126,6 +126,28 @@ final class WP_Agent_External_Message {
 			'sender_id'                => $this->sender_id,
 			'room_kind'                => $this->room_kind,
 		);
+	}
+
+	private static function string_value( mixed $value ): string {
+		return is_scalar( $value ) || $value instanceof \Stringable ? (string) $value : '';
+	}
+
+	private static function nullable_string_value( mixed $value ): ?string {
+		return null === $value ? null : self::string_value( $value );
+	}
+
+	/**
+	 * @param array<mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private static function string_keyed_array( array $data ): array {
+		$result = array();
+		foreach ( $data as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$result[ $key ] = $value;
+			}
+		}
+		return $result;
 	}
 
 	private static function normalize_required_slug( string $value, string $field ): string {

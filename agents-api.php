@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Agents API
  * Description: WordPress-shaped agent runtime substrate.
- * Version: 0.1.0
+ * Version: 0.2.1
  * Requires at least: 7.0
  * Tested up to: 7.0
  * Requires PHP: 8.1
@@ -16,6 +16,14 @@
  *
  * @package AgentsAPI
  */
+
+// Under static analysis the bootstrap is not executed: PHPStan loads this file
+// through the Composer files-autoloader while analysing, and the runtime
+// requires below would fatal without WordPress. PHPStan reads src/ directly, so
+// returning early here is safe and avoids killing its analysis workers.
+if ( defined( '__PHPSTAN_RUNNING__' ) ) {
+	return;
+}
 
 defined( 'ABSPATH' ) || exit;
 
@@ -34,6 +42,7 @@ require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-materialization-requ
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-materialization-result.php';
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-installed-agent-state-store.php';
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-installed-agent-projector.php';
+require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-registered-agent-materialization-adapter.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-type.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifacts-registry.php';
@@ -118,6 +127,9 @@ require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-default-tool-tier-resol
 require_once AGENTS_API_PATH . 'src/Tools/register-agent-ability-meta-abilities.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-request.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-runner.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-provider-turn-request.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-provider-turn-result.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-provider-turn-adapter.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-completion-decision.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-completion-policy.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-transcript-persister.php';
@@ -209,6 +221,12 @@ require_once AGENTS_API_PATH . 'src/Triggers/class-wp-agent-event-trigger-regist
 require_once AGENTS_API_PATH . 'src/Triggers/register-event-triggers.php';
 require_once AGENTS_API_PATH . 'src/Triggers/register-event-trigger-handler.php';
 
-add_action( 'init', array( 'WP_Agents_Registry', 'init' ), 10 );
+add_action(
+	'init',
+	static function (): void {
+		WP_Agents_Registry::init();
+	},
+	10
+);
 add_action( 'init', array( 'WP_Guidelines_Substrate', 'register' ), 9 );
 add_action( 'init', array( 'AgentsAPI\\AI\\Abilities\\WP_Agent_Ability_Lifecycle_Bridge', 'register' ), 5 );

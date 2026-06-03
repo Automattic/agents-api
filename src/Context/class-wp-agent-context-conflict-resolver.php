@@ -22,7 +22,7 @@ interface WP_Agent_Context_Conflict_Resolver {
 	 * specificity, with authority used only as a tie-breaker.
 	 *
 	 * @param WP_Agent_Context_Item[] $items   Retrieved context items.
-	 * @param array                  $context Optional caller context.
+	 * @param array<mixed>                  $context Optional caller context.
 	 * @return WP_Agent_Context_Conflict_Resolution[] Conflict resolutions keyed by conflict key.
 	 */
 	public function resolve( array $items, array $context = array() ): array;

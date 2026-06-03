@@ -57,8 +57,8 @@ class WP_Agent_Chat_Run_Control {
 	 * @return array<string,mixed>
 	 */
 	public static function normalize_run( array $run ): array {
-		$run_id     = trim( (string) ( $run['run_id'] ?? '' ) );
-		$session_id = trim( (string) ( $run['session_id'] ?? '' ) );
+		$run_id     = trim( self::string_value( $run['run_id'] ?? null ) );
+		$session_id = trim( self::string_value( $run['session_id'] ?? null ) );
 		$status     = self::normalize_status( $run['status'] ?? self::STATUS_RUNNING );
 
 		if ( '' === $run_id ) {
@@ -73,17 +73,17 @@ class WP_Agent_Chat_Run_Control {
 			'run_id'     => $run_id,
 			'session_id' => $session_id,
 			'status'     => $status,
-			'started_at' => isset( $run['started_at'] ) ? (string) $run['started_at'] : '',
-			'updated_at' => isset( $run['updated_at'] ) ? (string) $run['updated_at'] : '',
+			'started_at' => self::string_value( $run['started_at'] ?? null ),
+			'updated_at' => self::string_value( $run['updated_at'] ?? null ),
 			'metadata'   => isset( $run['metadata'] ) && is_array( $run['metadata'] ) ? $run['metadata'] : array(),
 		);
 
 		if ( isset( $run['queued_message_id'] ) ) {
-			$normalized['queued_message_id'] = (string) $run['queued_message_id'];
+			$normalized['queued_message_id'] = self::string_value( $run['queued_message_id'] );
 		}
 
 		if ( isset( $run['position'] ) ) {
-			$normalized['position'] = max( 0, (int) $run['position'] );
+			$normalized['position'] = max( 0, self::int_value( $run['position'] ) );
 		}
 
 		if ( isset( $run['cancelled'] ) ) {
@@ -96,7 +96,7 @@ class WP_Agent_Chat_Run_Control {
 	/**
 	 * Normalize status values while keeping the public vocabulary bounded.
 	 */
-	public static function normalize_status( $status ): string {
+	public static function normalize_status( mixed $status ): string {
 		$status = is_string( $status ) ? strtolower( trim( $status ) ) : '';
 		return in_array( $status, self::statuses(), true ) ? $status : self::STATUS_RUNNING;
 	}
@@ -202,7 +202,7 @@ class WP_Agent_Chat_Run_Control {
 			return null;
 		}
 
-		$resolved_session_id = '' !== $session_id ? $session_id : (string) $run['session_id'];
+		$resolved_session_id = '' !== $session_id ? $session_id : self::string_value( $run['session_id'] ?? null );
 
 		return self::cancellation_interrupt_message( $run_id, $resolved_session_id );
 	}
@@ -214,8 +214,8 @@ class WP_Agent_Chat_Run_Control {
 	 * @return array<string,mixed> Queue result.
 	 */
 	public static function queue_message( array $input ): array {
-		$session_id = trim( (string) ( $input['session_id'] ?? '' ) );
-		$run_id     = trim( (string) ( $input['run_id'] ?? '' ) );
+		$session_id = trim( self::string_value( $input['session_id'] ?? null ) );
+		$run_id     = trim( self::string_value( $input['run_id'] ?? null ) );
 		if ( '' === $session_id ) {
 			throw new \InvalidArgumentException( 'session_id must be a non-empty string' );
 		}
@@ -225,8 +225,8 @@ class WP_Agent_Chat_Run_Control {
 			'queued_message_id' => $queued_id,
 			'session_id'        => $session_id,
 			'run_id'            => $run_id,
-			'agent'             => sanitize_title( (string) ( $input['agent'] ?? '' ) ),
-			'message'           => (string) ( $input['message'] ?? '' ),
+			'agent'             => sanitize_title( self::string_value( $input['agent'] ?? null ) ),
+			'message'           => self::string_value( $input['message'] ?? null ),
 			'attachments'       => is_array( $input['attachments'] ?? null ) ? $input['attachments'] : array(),
 			'client_context'    => is_array( $input['client_context'] ?? null ) ? $input['client_context'] : array(),
 			'created_at'        => self::now(),
@@ -259,7 +259,7 @@ class WP_Agent_Chat_Run_Control {
 		$items = array_values( $state['queues'][ $session_id ] ?? array() );
 		unset( $state['queues'][ $session_id ] );
 		self::save_state( $state );
-		return array_filter( $items, 'is_array' );
+		return $items;
 	}
 
 	/**
@@ -296,10 +296,82 @@ class WP_Agent_Chat_Run_Control {
 	/** @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>} */
 	private static function state(): array {
 		$state = function_exists( 'get_option' ) ? get_option( self::OPTION_KEY, array() ) : array();
+		if ( ! is_array( $state ) ) {
+			$state = array();
+		}
+
 		return array(
-			'runs'   => is_array( $state['runs'] ?? null ) ? $state['runs'] : array(),
-			'queues' => is_array( $state['queues'] ?? null ) ? $state['queues'] : array(),
+			'runs'   => self::stored_runs( $state['runs'] ?? array() ),
+			'queues' => self::stored_queues( $state['queues'] ?? array() ),
 		);
+	}
+
+	private static function string_value( mixed $value ): string {
+		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (string) $value : '';
+	}
+
+	private static function int_value( mixed $value ): int {
+		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (int) $value : 0;
+	}
+
+	/**
+	 * @param mixed $runs Raw stored runs.
+	 * @return array<string,array<string,mixed>>
+	 */
+	private static function stored_runs( mixed $runs ): array {
+		if ( ! is_array( $runs ) ) {
+			return array();
+		}
+
+		$stored = array();
+		foreach ( $runs as $run_id => $run ) {
+			if ( is_string( $run_id ) && is_array( $run ) ) {
+				$stored[ $run_id ] = self::assoc_array( $run );
+			}
+		}
+
+		return $stored;
+	}
+
+	/**
+	 * @param mixed $queues Raw stored queues.
+	 * @return array<string,array<int,array<string,mixed>>>
+	 */
+	private static function stored_queues( mixed $queues ): array {
+		if ( ! is_array( $queues ) ) {
+			return array();
+		}
+
+		$stored = array();
+		foreach ( $queues as $session_id => $items ) {
+			if ( ! is_string( $session_id ) || ! is_array( $items ) ) {
+				continue;
+			}
+
+			$stored[ $session_id ] = array();
+			foreach ( $items as $item ) {
+				if ( is_array( $item ) ) {
+					$stored[ $session_id ][] = self::assoc_array( $item );
+				}
+			}
+		}
+
+		return $stored;
+	}
+
+	/**
+	 * @param array<mixed> $value Raw array.
+	 * @return array<string,mixed>
+	 */
+	private static function assoc_array( array $value ): array {
+		$assoc = array();
+		foreach ( $value as $field => $field_value ) {
+			if ( is_string( $field ) ) {
+				$assoc[ $field ] = $field_value;
+			}
+		}
+
+		return $assoc;
 	}
 
 	/** @param array<string,mixed> $state State to persist. */

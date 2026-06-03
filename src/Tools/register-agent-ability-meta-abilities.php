@@ -86,7 +86,8 @@ add_action(
 function agents_ability_search( array $input ): array {
 	$query    = is_string( $input['query'] ?? null ) ? trim( $input['query'] ) : '';
 	$category = is_string( $input['category'] ?? null ) ? trim( $input['category'] ) : '';
-	$limit    = max( 1, min( 100, (int) ( $input['limit'] ?? 20 ) ) );
+	$limit_value = $input['limit'] ?? 20;
+	$limit       = max( 1, min( 100, is_numeric( $limit_value ) ? (int) $limit_value : 20 ) );
 	$parsed   = agents_parse_ability_search_query( $query );
 	$entries  = array();
 
@@ -207,18 +208,21 @@ function agents_parse_ability_search_query( string $query ): array {
  * Check whether an ability matches a parsed query.
  *
  * @param \WP_Ability $ability Ability object.
- * @param array       $query   Parsed query.
+ * @param array<mixed>       $query   Parsed query.
  * @return bool
  */
 function agents_ability_matches_query( \WP_Ability $ability, array $query ): bool {
 	$name = $ability->get_name();
-	if ( ! empty( $query['selected'] ) ) {
-		return in_array( $name, $query['selected'], true );
+	$selected = agents_string_list( is_array( $query['selected'] ?? null ) ? array_values( $query['selected'] ) : array() );
+	if ( ! empty( $selected ) ) {
+		return in_array( $name, $selected, true );
 	}
 
 	$haystack = strtolower( implode( ' ', array( $name, $ability->get_label(), $ability->get_description(), $ability->get_category() ) ) );
-	foreach ( array_merge( $query['terms'] ?? array(), $query['required'] ?? array() ) as $term ) {
-		if ( '' !== $term && ! str_contains( $haystack, strtolower( (string) $term ) ) ) {
+	$terms    = agents_string_list( is_array( $query['terms'] ?? null ) ? array_values( $query['terms'] ) : array() );
+	$required = agents_string_list( is_array( $query['required'] ?? null ) ? array_values( $query['required'] ) : array() );
+	foreach ( array_merge( $terms, $required ) as $term ) {
+		if ( '' !== $term && ! str_contains( $haystack, strtolower( $term ) ) ) {
 			return false;
 		}
 	}
@@ -263,7 +267,7 @@ function agents_ability_summary( \WP_Ability $ability ): string {
  */
 function agents_ability_required_fields( \WP_Ability $ability ): array {
 	$schema = $ability->get_input_schema();
-	return isset( $schema['required'] ) && is_array( $schema['required'] ) ? agents_string_list( $schema['required'] ) : array();
+	return isset( $schema['required'] ) && is_array( $schema['required'] ) ? agents_string_list( array_values( $schema['required'] ) ) : array();
 }
 
 /**
@@ -286,6 +290,7 @@ function agents_string_list( array $items ): array {
 /**
  * Input schema for ability search.
  *
+ * @return array<string, mixed>
  * @return array<string, mixed>
  */
 function agents_ability_search_input_schema(): array {
@@ -316,6 +321,7 @@ function agents_ability_search_input_schema(): array {
 /**
  * Output schema for ability search.
  *
+ * @return array<string, mixed>
  * @return array<string, mixed>
  */
 function agents_ability_search_output_schema(): array {
@@ -348,6 +354,7 @@ function agents_ability_search_output_schema(): array {
  * Input schema for ability call.
  *
  * @return array<string, mixed>
+ * @return array<string, mixed>
  */
 function agents_ability_call_input_schema(): array {
 	return array(
@@ -370,6 +377,7 @@ function agents_ability_call_input_schema(): array {
 /**
  * Output schema for ability call.
  *
+ * @return array<string, mixed>
  * @return array<string, mixed>
  */
 function agents_ability_call_output_schema(): array {

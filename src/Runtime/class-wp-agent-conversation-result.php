@@ -26,8 +26,8 @@ class WP_Agent_Conversation_Result {
 	 * `tool_execution_results` is optional because a valid no-tool response has
 	 * no tool output; when omitted it normalizes to an empty list.
 	 *
-	 * @param array $result Raw loop result.
-	 * @return array Normalized loop result.
+	 * @param array<mixed> $result Raw loop result.
+	 * @return array<mixed> Normalized loop result.
 	 * @throws \InvalidArgumentException When the result shape is invalid.
 	 */
 	public static function normalize( array $result ): array {
@@ -43,7 +43,7 @@ class WP_Agent_Conversation_Result {
 			throw self::invalid( 'schema', 'must be ' . self::SCHEMA );
 		}
 
-		if ( self::VERSION !== (int) $result['version'] ) {
+		if ( ! is_int( $result['version'] ) || self::VERSION !== $result['version'] ) {
 			throw self::invalid( 'version', 'must be ' . self::VERSION );
 		}
 
@@ -207,6 +207,10 @@ class WP_Agent_Conversation_Result {
 
 		if ( array_key_exists( 'request_metadata', $result ) && ! is_array( $result['request_metadata'] ) ) {
 			throw self::invalid( 'request_metadata', 'must be an array when present' );
+		}
+
+		if ( array_key_exists( 'provider_diagnostics', $result ) && ! is_array( $result['provider_diagnostics'] ) ) {
+			throw self::invalid( 'provider_diagnostics', 'must be an array when present' );
 		}
 
 		if ( array_key_exists( 'completed', $result ) && ! is_bool( $result['completed'] ) ) {

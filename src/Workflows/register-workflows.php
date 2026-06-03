@@ -21,7 +21,7 @@ if ( ! function_exists( 'wp_register_workflow' ) ) {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $spec Raw workflow spec — see WP_Agent_Workflow_Spec_Validator.
+	 * @param array<mixed> $spec Raw workflow spec — see WP_Agent_Workflow_Spec_Validator.
 	 * @return AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec|WP_Error
 	 */
 	function wp_register_workflow( array $spec ) {

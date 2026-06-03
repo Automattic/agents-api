@@ -20,18 +20,18 @@ jobs:
       matrix:
         include:
           - command: lint
-            label: lint
+            label: lint (PHPCS + PHPStan)
           - command: test
             label: tests (PHPUnit + smoke tests)
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Generate app token
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         continue-on-error: true
         with:
           app-id: ${{ secrets.HOMEBOY_APP_ID }}

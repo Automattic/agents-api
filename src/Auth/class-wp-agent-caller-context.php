@@ -31,7 +31,7 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 		 * @param string $caller_host          "self" or an absolute URL for a remote caller host.
 		 * @param int    $chain_depth          0 means top-of-chain.
 		 * @param string $chain_root_request_id Stable identifier for the originating request.
-		 * @param array  $metadata             JSON-serializable host-owned extension payload.
+		 * @param array<mixed>  $metadata             JSON-serializable host-owned extension payload.
 		 */
 		public function __construct(
 			public readonly string $caller_agent_id = '',
@@ -92,7 +92,7 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 		 * Missing headers produce a top-of-chain context. Malformed caller headers
 		 * throw so request-edge authenticators can fail closed.
 		 *
-		 * @param array|object|null $source Header source. Accepts WP_REST_Request-style get_header() or arrays.
+		 * @param array<mixed,mixed>|object|null $source Header source. Accepts WP_REST_Request-style get_header() or arrays.
 		 * @param int              $max_chain_depth Maximum accepted chain depth.
 		 * @return self
 		 */
@@ -196,11 +196,11 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 		 */
 		public static function from_array( array $context ): self {
 			return new self(
-				isset( $context['caller_agent_id'] ) ? (string) $context['caller_agent_id'] : '',
-				isset( $context['caller_user_id'] ) ? (int) $context['caller_user_id'] : 0,
-				isset( $context['caller_host'] ) ? (string) $context['caller_host'] : self::SELF_HOST,
-				isset( $context['chain_depth'] ) ? (int) $context['chain_depth'] : 0,
-				isset( $context['chain_root_request_id'] ) ? (string) $context['chain_root_request_id'] : '',
+				isset( $context['caller_agent_id'] ) ? self::string_value( $context['caller_agent_id'] ) : '',
+				isset( $context['caller_user_id'] ) ? self::int_value( $context['caller_user_id'] ) : 0,
+				isset( $context['caller_host'] ) ? self::string_value( $context['caller_host'] ) : self::SELF_HOST,
+				isset( $context['chain_depth'] ) ? self::int_value( $context['chain_depth'] ) : 0,
+				isset( $context['chain_root_request_id'] ) ? self::string_value( $context['chain_root_request_id'] ) : '',
 				isset( $context['metadata'] ) && is_array( $context['metadata'] ) ? $context['metadata'] : array()
 			);
 		}
@@ -224,21 +224,21 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 		/**
 		 * Build a case-insensitive header accessor.
 		 *
-		 * @param array|object|null $source Header source.
+		 * @param array<mixed,mixed>|object|null $source Header source.
 		 * @return callable(string): string
 		 */
 		private static function header_accessor( $source ): callable {
 			if ( is_object( $source ) && method_exists( $source, 'get_header' ) ) {
 				return static function ( string $name ) use ( $source ): string {
 					$value = $source->get_header( $name );
-					return null === $value ? '' : (string) $value;
+					return self::string_value( $value );
 				};
 			}
 
 			$normalized = array();
 			if ( is_array( $source ) ) {
 				foreach ( $source as $key => $value ) {
-					$normalized[ strtolower( (string) $key ) ] = is_array( $value ) ? (string) reset( $value ) : (string) $value;
+					$normalized[ strtolower( self::string_value( $key ) ) ] = is_array( $value ) ? self::string_value( reset( $value ) ) : self::string_value( $value );
 				}
 			}
 
@@ -265,6 +265,42 @@ if ( ! class_exists( 'WP_Agent_Caller_Context' ) ) {
 			}
 
 			return (int) $value;
+		}
+
+		/**
+		 * Convert scalar/Stringable input using the same request/header coercion rules.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return string String value, or empty string for non-stringable input.
+		 */
+		private static function string_value( $value ): string {
+			return is_scalar( $value ) || $value instanceof Stringable ? (string) $value : '';
+		}
+
+		/**
+		 * Convert scalar/Stringable input to an integer.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return int Integer value, or zero for non-stringable input.
+		 */
+		private static function int_value( $value ): int {
+			if ( is_int( $value ) ) {
+				return $value;
+			}
+
+			if ( is_bool( $value ) ) {
+				return $value ? 1 : 0;
+			}
+
+			if ( is_float( $value ) ) {
+				return (int) $value;
+			}
+
+			if ( is_string( $value ) || $value instanceof Stringable ) {
+				return (int) (string) $value;
+			}
+
+			return 0;
 		}
 
 		/**

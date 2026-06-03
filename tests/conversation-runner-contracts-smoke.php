@@ -40,6 +40,22 @@ $request           = new AgentsAPI\AI\WP_Agent_Conversation_Request(
 			'executor'    => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::EXECUTOR_CLIENT,
 			'scope'       => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::SCOPE_RUN,
 		),
+		array(
+			'name'        => 'ability/search_posts',
+			'description' => 'Search host-owned posts.',
+			'parameters'  => array(
+				'type'       => 'object',
+				'required'   => array( 'query' ),
+				'properties' => array(
+					'query' => array( 'type' => 'string' ),
+				),
+			),
+			'executor'    => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::EXECUTOR_HOST,
+			'scope'       => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::SCOPE_RUN,
+			'runtime'     => array(
+				'duplicate_policy' => 'repeatable',
+			),
+		),
 	),
 	$principal,
 	array( 'request_kind' => 'interactive' ),
@@ -60,6 +76,8 @@ agents_api_smoke_assert_equals( 'gpt-5.5', $request->runtimeContext()['model_id'
 agents_api_smoke_assert_equals( 0.3, $request->runtimeContext()['temperature'], 'request carries temperature override to runtime context', $failures, $passes );
 agents_api_smoke_assert_equals( 'abc123', $request->metadata()['trace_id'], 'request preserves caller metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/lookup', $request->tools()[0]['name'], 'request preserves normalized tool list', $failures, $passes );
+agents_api_smoke_assert_equals( 'ability/search_posts', $request->tools()[1]['name'], 'request preserves host-owned tool declarations', $failures, $passes );
+agents_api_smoke_assert_equals( 'host', $request->to_array()['tools'][1]['executor'], 'request array exposes host tool executor for replay', $failures, $passes );
 agents_api_smoke_assert_equals(
 	array( 'messages', 'tools', 'principal', 'runtime_context', 'metadata', 'max_turns', 'single_turn', 'workspace', 'runtime_overrides' ),
 	array_keys( $request->to_array() ),

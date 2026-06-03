@@ -15,7 +15,7 @@ if ( ! function_exists( 'wp_register_agent' ) ) {
 	 * collects definitions without deciding whether they should be materialized.
 	 *
 	 * @param string|WP_Agent $agent Agent slug or definition object.
-	 * @param array           $args  Registration arguments. Use `meta.source_plugin`,
+	 * @param array<mixed>           $args  Registration arguments. Use `meta.source_plugin`,
 	 *                               `meta.source_type`, `meta.source_package`, and
 	 *                               `meta.source_version` to declare source provenance.
 	 * @return WP_Agent|null Registered agent, or null on invalid arguments.
@@ -108,5 +108,49 @@ if ( ! function_exists( 'wp_unregister_agent' ) ) {
 		}
 
 		return $registry->unregister( $slug );
+	}
+}
+
+if ( ! function_exists( 'wp_materialize_registered_agents' ) ) {
+	/**
+	 * Materializes registered agents through a host-provided adapter.
+	 *
+	 * Agents API collects declarative definitions only. This helper exposes the
+	 * generic lifecycle seam for products that want to reconcile those definitions
+	 * into runtime or persisted agents without making Agents API choose storage.
+	 *
+	 * Callers may pass an adapter directly or provide one with the
+	 * `wp_agent_registered_agent_materialization_adapter` filter. No adapter means
+	 * no materialization and an empty result set.
+	 *
+	 * @param WP_Agent_Registered_Agent_Materialization_Adapter|null $adapter Adapter, or null to use the filter.
+	 * @param array<string,mixed>                                    $args    Host-owned materialization options and context.
+	 * @return array<string,WP_Agent_Materialization_Result> Results keyed by registered slug or adapter-owned removed-state key.
+	 */
+	function wp_materialize_registered_agents( ?WP_Agent_Registered_Agent_Materialization_Adapter $adapter = null, array $args = array() ): array {
+		$registry = WP_Agents_Registry::get_instance();
+		if ( null === $registry ) {
+			return array();
+		}
+
+		/**
+		 * Filters the adapter used to materialize registered agents.
+		 *
+		 * The adapter decides storage, runtime activation, owner resolution,
+		 * duplicate-update behavior for durable identities, and removed-definition
+		 * reconciliation. Agents API passes only the current registered definition
+		 * snapshot plus caller-provided options.
+		 *
+		 * @param WP_Agent_Registered_Agent_Materialization_Adapter|null $adapter Adapter.
+		 * @param WP_Agents_Registry                                      $registry Registry snapshot source.
+		 * @param array<string,mixed>                                     $args     Host-owned materialization options and context.
+		 */
+		$adapter = apply_filters( 'wp_agent_registered_agent_materialization_adapter', $adapter, $registry, $args );
+
+		if ( ! $adapter instanceof WP_Agent_Registered_Agent_Materialization_Adapter ) {
+			return array();
+		}
+
+		return $adapter->materialize_registered_agents( $registry->get_all_registered(), $args );
 	}
 }

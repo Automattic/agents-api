@@ -59,7 +59,7 @@ foreach ( $iterator as $file ) {
 	}
 
 	$relative_path = str_replace( (string) $agents_api_dir . '/', '', $file->getPathname() );
-	if ( str_starts_with( $relative_path, 'tests/' ) ) {
+	if ( str_starts_with( $relative_path, 'tests/' ) || str_starts_with( $relative_path, 'vendor/' ) ) {
 		continue;
 	}
 

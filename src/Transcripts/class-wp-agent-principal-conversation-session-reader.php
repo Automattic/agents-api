@@ -16,7 +16,9 @@ defined( 'ABSPATH' ) || exit;
  *
  * Stores that keep opaque owner keys hashed can implement this to verify a
  * session ID belongs to a principal without exposing the raw owner key in
- * generic session rows.
+ * generic session rows. Stores that expose `owner_type` and `owner_key` in their
+ * generic rows can skip this interface; the canonical abilities will verify
+ * ownership from those row fields.
  */
 interface WP_Agent_Principal_Conversation_Session_Reader extends WP_Agent_Principal_Conversation_Store {
 

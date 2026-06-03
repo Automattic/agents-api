@@ -92,20 +92,86 @@ if ( ! class_exists( 'WP_Agent_Token' ) ) {
 		 */
 		public static function from_array( array $token ): self {
 			return new self(
-				isset( $token['token_id'] ) ? (int) $token['token_id'] : 0,
-				isset( $token['agent_id'] ) ? (string) $token['agent_id'] : '',
-				isset( $token['owner_user_id'] ) ? (int) $token['owner_user_id'] : 0,
-				isset( $token['token_hash'] ) ? (string) $token['token_hash'] : '',
-				isset( $token['token_prefix'] ) ? (string) $token['token_prefix'] : '',
-				isset( $token['label'] ) ? (string) $token['label'] : '',
-				array_key_exists( 'allowed_capabilities', $token ) && null !== $token['allowed_capabilities'] ? array_values( array_map( 'strval', (array) $token['allowed_capabilities'] ) ) : null,
-				array_key_exists( 'expires_at', $token ) && null !== $token['expires_at'] ? (string) $token['expires_at'] : null,
-				array_key_exists( 'last_used_at', $token ) && null !== $token['last_used_at'] ? (string) $token['last_used_at'] : null,
-				array_key_exists( 'created_at', $token ) && null !== $token['created_at'] ? (string) $token['created_at'] : null,
-				array_key_exists( 'client_id', $token ) && null !== $token['client_id'] ? (string) $token['client_id'] : null,
-				array_key_exists( 'workspace_id', $token ) && null !== $token['workspace_id'] ? (string) $token['workspace_id'] : null,
-				isset( $token['metadata'] ) && is_array( $token['metadata'] ) ? $token['metadata'] : array()
+				self::int_field( $token, 'token_id' ),
+				self::string_field( $token, 'agent_id' ),
+				self::int_field( $token, 'owner_user_id' ),
+				self::string_field( $token, 'token_hash' ),
+				self::string_field( $token, 'token_prefix' ),
+				self::string_field( $token, 'label' ),
+				array_key_exists( 'allowed_capabilities', $token ) && null !== $token['allowed_capabilities'] ? self::string_list( $token['allowed_capabilities'] ) : null,
+				self::nullable_string_field( $token, 'expires_at' ),
+				self::nullable_string_field( $token, 'last_used_at' ),
+				self::nullable_string_field( $token, 'created_at' ),
+				self::nullable_string_field( $token, 'client_id' ),
+				self::nullable_string_field( $token, 'workspace_id' ),
+				self::assoc_array_field( $token, 'metadata' )
 			);
+		}
+
+		/**
+		 * @param array<string,mixed> $source Source fields.
+		 */
+		private static function int_field( array $source, string $key ): int {
+			$value = $source[ $key ] ?? null;
+			return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (int) $value : 0;
+		}
+
+		/**
+		 * @param array<string,mixed> $source Source fields.
+		 */
+		private static function string_field( array $source, string $key ): string {
+			$value = $source[ $key ] ?? null;
+			return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (string) $value : '';
+		}
+
+		/**
+		 * @param array<string,mixed> $source Source fields.
+		 */
+		private static function nullable_string_field( array $source, string $key ): ?string {
+			if ( ! array_key_exists( $key, $source ) || null === $source[ $key ] ) {
+				return null;
+			}
+
+			return self::string_field( $source, $key );
+		}
+
+		/**
+		 * @param mixed $value Raw list.
+		 * @return string[]
+		 */
+		private static function string_list( $value ): array {
+			if ( ! is_array( $value ) ) {
+				return array();
+			}
+
+			$strings = array();
+			foreach ( $value as $item ) {
+				if ( is_int( $item ) || is_float( $item ) || is_string( $item ) || is_bool( $item ) ) {
+					$strings[] = (string) $item;
+				}
+			}
+
+			return $strings;
+		}
+
+		/**
+		 * @param array<string,mixed> $source Source fields.
+		 * @return array<string,mixed>
+		 */
+		private static function assoc_array_field( array $source, string $key ): array {
+			$value = $source[ $key ] ?? null;
+			if ( ! is_array( $value ) ) {
+				return array();
+			}
+
+			$assoc = array();
+			foreach ( $value as $field => $field_value ) {
+				if ( is_string( $field ) ) {
+					$assoc[ $field ] = $field_value;
+				}
+			}
+
+			return $assoc;
 		}
 
 		/**

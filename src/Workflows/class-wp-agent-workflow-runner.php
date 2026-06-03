@@ -46,14 +46,16 @@ defined( 'ABSPATH' ) || exit;
 class WP_Agent_Workflow_Runner {
 
 	/**
-	 * @var array<string,callable> Step type → handler. Each handler receives
-	 *                             ( array $resolved_step, array $context ) and
-	 *                             returns array|WP_Error. Consumers extend
-	 *                             via the constructor or the
-	 *                             `wp_agent_workflow_step_handlers` filter.
+	 * @var array<string,mixed> Step type → handler candidate. Each callable handler
+	 *                          receives ( array $resolved_step, array $context )
+	 *                          and returns array|WP_Error. Consumers extend via
+	 *                          the constructor or the filter.
 	 */
 	protected array $step_handlers;
 
+	/**
+	 * @param array<string,mixed> $step_handlers Step type handler candidates.
+	 */
 	public function __construct(
 		protected ?WP_Agent_Workflow_Run_Recorder $recorder = null,
 		array $step_handlers = array()
@@ -73,7 +75,7 @@ class WP_Agent_Workflow_Runner {
 		 *
 		 * @since 0.103.0
 		 *
-		 * @param array<string,callable> $handlers Default + caller-supplied handlers.
+		 * @param array<string,mixed> $handlers Default + caller-supplied handlers.
 		 */
 		$this->step_handlers = (array) apply_filters(
 			'wp_agent_workflow_step_handlers',
@@ -87,10 +89,10 @@ class WP_Agent_Workflow_Runner {
 	 * @since 0.103.0
 	 *
 	 * @param WP_Agent_Workflow_Spec $spec
-	 * @param array                  $inputs Caller-supplied inputs. Required
+	 * @param array<mixed>                  $inputs Caller-supplied inputs. Required
 	 *                                       inputs missing here cause an early
 	 *                                       failure with a structured error.
-	 * @param array                  $options Runtime options:
+	 * @param array<mixed>                  $options Runtime options:
 	 *                                        - `run_id` (string, optional): caller-suggested run id.
 	 *                                        - `continue_on_error` (bool): keep running after a failed step. Default false.
 	 *                                        - `metadata` (array): forwarded to the run result.
@@ -99,7 +101,7 @@ class WP_Agent_Workflow_Runner {
 	 */
 	public function run( WP_Agent_Workflow_Spec $spec, array $inputs = array(), array $options = array() ): WP_Agent_Workflow_Run_Result {
 		$started_at    = time();
-		$run_id        = (string) ( $options['run_id'] ?? self::generate_run_id() );
+		$run_id        = self::string_value( $options['run_id'] ?? self::generate_run_id() );
 		$metadata      = (array) ( $options['metadata'] ?? array() );
 		$evidence_refs = (array) ( $options['evidence_refs'] ?? array() );
 
@@ -172,8 +174,8 @@ class WP_Agent_Workflow_Runner {
 		$failure_error     = array();
 
 		foreach ( $spec->get_steps() as $step ) {
-			$step_id  = (string) $step['id'];
-			$type     = (string) $step['type'];
+			$step_id  = self::string_value( $step['id'] ?? null );
+			$type     = self::string_value( $step['type'] ?? null );
 			$start_ts = time();
 			$resolved = 'foreach' === $type
 				? self::expand_foreach_outer_step( $step, $context )
@@ -285,15 +287,18 @@ class WP_Agent_Workflow_Runner {
 	 *
 	 * @since 0.107.0
 	 *
-	 * @param array $step
-	 * @param array $context
-	 * @return array
+	 * @param array<mixed> $step
+	 * @param array<mixed> $context
+	 * @return array<mixed>
 	 */
 	private static function expand_foreach_outer_step( array $step, array $context ): array {
 		$nested = $step['steps'] ?? array();
 		unset( $step['steps'] );
 
-		$expanded          = WP_Agent_Workflow_Bindings::expand( $step, $context );
+		$expanded = WP_Agent_Workflow_Bindings::expand( $step, $context );
+		if ( ! is_array( $expanded ) ) {
+			$expanded = array();
+		}
 		$expanded['steps'] = $nested;
 
 		return $expanded;
@@ -304,11 +309,12 @@ class WP_Agent_Workflow_Runner {
 	 *
 	 * @since 0.103.0
 	 *
+	 * @param array<mixed> $inputs Caller-supplied inputs.
 	 * @return array{code:string,message:string,data?:mixed}|null
 	 */
 	private static function validate_inputs( WP_Agent_Workflow_Spec $spec, array $inputs ): ?array {
 		foreach ( $spec->get_inputs() as $name => $schema ) {
-			$required = ! empty( $schema['required'] );
+			$required = is_array( $schema ) && ! empty( $schema['required'] );
 			$present  = array_key_exists( $name, $inputs );
 
 			if ( $required && ! $present ) {
@@ -329,9 +335,9 @@ class WP_Agent_Workflow_Runner {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $step    Resolved step (bindings already expanded).
-	 * @param array $context Resolution context (unused here).
-	 * @return array|WP_Error
+	 * @param array<mixed> $step    Resolved step (bindings already expanded).
+	 * @param array<mixed> $context Resolution context (unused here).
+	 * @return array<mixed>|WP_Error
 	 */
 	public static function default_ability_handler( array $step, array $context ) {
 		unset( $context );
@@ -341,7 +347,7 @@ class WP_Agent_Workflow_Runner {
 				'Abilities API is not loaded; cannot dispatch ability step.'
 			);
 		}
-		$ability_name = (string) ( $step['ability'] ?? '' );
+		$ability_name = self::string_value( $step['ability'] ?? null );
 		$ability      = wp_get_ability( $ability_name );
 		if ( null === $ability ) {
 			return new \WP_Error(
@@ -363,9 +369,9 @@ class WP_Agent_Workflow_Runner {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $step    Resolved step (bindings already expanded).
-	 * @param array $context Resolution context (unused here).
-	 * @return array|WP_Error
+	 * @param array<mixed> $step    Resolved step (bindings already expanded).
+	 * @param array<mixed> $context Resolution context (unused here).
+	 * @return array<mixed>|WP_Error
 	 */
 	public static function default_agent_handler( array $step, array $context ) {
 		unset( $context );
@@ -383,15 +389,15 @@ class WP_Agent_Workflow_Runner {
 			);
 		}
 		$input  = array(
-			'agent'      => (string) ( $step['agent'] ?? '' ),
-			'message'    => (string) ( $step['message'] ?? '' ),
+			'agent'      => self::string_value( $step['agent'] ?? null ),
+			'message'    => self::string_value( $step['message'] ?? null ),
 			'session_id' => $step['session_id'] ?? null,
 		);
 		$result = $ability->execute( $input );
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}
-		return is_array( $result ) ? $result : array( 'reply' => (string) $result );
+		return is_array( $result ) ? $result : array( 'reply' => self::string_value( $result ) );
 	}
 
 	/**
@@ -400,9 +406,9 @@ class WP_Agent_Workflow_Runner {
 	 *
 	 * @since 0.107.0
 	 *
-	 * @param array $step    Resolved outer foreach step.
-	 * @param array $context Resolution context.
-	 * @return array|WP_Error
+	 * @param array<mixed> $step    Resolved outer foreach step.
+	 * @param array<mixed> $context Resolution context.
+	 * @return array<mixed>|WP_Error
 	 */
 	public static function default_foreach_handler( array $step, array $context ) {
 		$items = $step['items'] ?? array();
@@ -421,8 +427,10 @@ class WP_Agent_Workflow_Runner {
 			);
 		}
 
-		$as                = isset( $step['as'] ) && '' !== (string) $step['as'] ? (string) $step['as'] : 'item';
-		$index_as          = isset( $step['index_as'] ) && '' !== (string) $step['index_as'] ? (string) $step['index_as'] : 'index';
+		$as_value          = self::string_value( $step['as'] ?? null );
+		$index_as_value    = self::string_value( $step['index_as'] ?? null );
+		$as                = '' !== $as_value ? $as_value : 'item';
+		$index_as          = '' !== $index_as_value ? $index_as_value : 'index';
 		$continue_on_error = ! empty( $step['continue_on_error'] );
 		$handlers          = (array) apply_filters(
 			'wp_agent_workflow_step_handlers',
@@ -435,7 +443,10 @@ class WP_Agent_Workflow_Runner {
 		$iterations        = array();
 
 		foreach ( array_values( $items ) as $index => $item ) {
-			$iteration_context         = $context;
+			$iteration_context = $context;
+			if ( ! isset( $iteration_context['steps'] ) || ! is_array( $iteration_context['steps'] ) ) {
+				$iteration_context['steps'] = array();
+			}
 			$iteration_context['vars'] = array_merge(
 				(array) ( $context['vars'] ?? array() ),
 				array(
@@ -454,8 +465,8 @@ class WP_Agent_Workflow_Runner {
 					);
 				}
 
-				$nested_id = (string) ( $nested_step['id'] ?? '' );
-				$type      = (string) ( $nested_step['type'] ?? '' );
+				$nested_id = self::string_value( $nested_step['id'] ?? null );
+				$type      = self::string_value( $nested_step['type'] ?? null );
 				$handler   = $handlers[ $type ] ?? null;
 				if ( '' === $nested_id || ! is_callable( $handler ) ) {
 					$error = new \WP_Error(
@@ -524,5 +535,18 @@ class WP_Agent_Workflow_Runner {
 			return wp_generate_uuid4();
 		}
 		return 'wf_' . uniqid( '', true );
+	}
+
+	/**
+	 * Return a string only for values that can safely be represented as text.
+	 *
+	 * @param mixed $value Value to normalize.
+	 */
+	private static function string_value( $value ): string {
+		if ( is_scalar( $value ) || $value instanceof \Stringable ) {
+			return (string) $value;
+		}
+
+		return '';
 	}
 }

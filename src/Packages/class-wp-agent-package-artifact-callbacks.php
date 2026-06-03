@@ -57,7 +57,11 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact_Callbacks' ) ) {
 			return self::invoke( $artifact, 'get_delete_callback', $context );
 		}
 
-		private static function invoke( WP_Agent_Package_Artifact $artifact, string $getter, array $context ) {
+		/**
+		 * @param array<string,mixed> $context Consumer context.
+		 * @return mixed|null Callback result, or null when no callback is registered.
+		 */
+		private static function invoke( WP_Agent_Package_Artifact $artifact, string $getter, array $context ): mixed {
 			$type = wp_get_agent_package_artifact_type( $artifact->get_type() );
 			if ( null === $type || ! method_exists( $type, $getter ) ) {
 				return null;
