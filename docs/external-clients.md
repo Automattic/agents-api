@@ -291,13 +291,11 @@ array(
 		'external_conversation_id'     => 'opaque-channel-or-thread-id',
 		'external_message_id'          => 'opaque-message-id',
 		'room_kind'                    => 'dm',
-		'context_binding'              => array(
-			'source_type'     => 'optional-opaque-source-type',
-			'source_id'       => 'optional-opaque-source-id',
-			'scope_id'        => 'optional-opaque-scope-id',
-			'policy'          => 'optional-policy-name-or-object',
-			'current_item_id' => 'optional-opaque-item-id',
-		),
+		'context_source_type'          => 'optional-opaque-source-type',
+		'context_source_id'            => 'optional-opaque-source-id',
+		'context_scope_id'             => 'optional-opaque-scope-id',
+		'context_selection_policy'     => 'optional-policy-name-or-object',
+		'current_context_item_id'      => 'optional-opaque-item-id',
 	),
 )
 ```
@@ -305,14 +303,15 @@ array(
 Runtime adapters can decide which metadata affects prompt policy, routing,
 storage, or observability.
 
-`context_binding` is an optional convention for clients that need a turn bound
-to selected material, whether that material is docs, memory, tool output, search
-results, files, CRM records, support articles, or another host-defined source.
-Agents API preserves these values and forwards them through the same
-`client_context` envelope; it does not define the source model, lookup algorithm,
-authorization policy, or prompt assembly rules. Hosts that support scoped context
-selection should validate the opaque ids and policy values against their own
-workspace/access model before using them.
+Clients may include additional opaque `client_context` metadata when a turn
+should be associated with selected material, whether that material is docs,
+memory, tool output, search results, files, CRM records, support articles, or
+another host-defined source. The example `context_*` keys above are conventions,
+not schema requirements. Agents API preserves the envelope and forwards it to
+host-owned permission/access hooks; it does not define the source model, lookup
+algorithm, authorization policy, or prompt assembly rules. Hosts that support
+scoped context selection should validate any opaque ids and policy values
+against their own workspace/access model before using them.
 
 ### Normalized External Message
 

@@ -211,9 +211,7 @@ function agents_frontend_chat_rest_string_key_array( array $value ): array {
  */
 function agents_frontend_chat_rest_scope( \WP_REST_Request $request ): array {
 	$client_context  = $request->get_param( 'client_context' );
-	$context_binding = is_array( $client_context )
-		? agents_frontend_chat_rest_context_binding( agents_frontend_chat_rest_string_key_array( $client_context ) )
-		: array();
+	$client_context  = is_array( $client_context ) ? agents_frontend_chat_rest_string_key_array( $client_context ) : array();
 	$scope                     = \AgentsAPI\AI\Auth\agents_access_request_scope(
 		array(
 			'workspace_id' => $request->get_param( 'workspace_id' ),
@@ -221,27 +219,12 @@ function agents_frontend_chat_rest_scope( \WP_REST_Request $request ): array {
 		)
 	);
 	$scope['request_metadata'] = array(
-		'rest_route'      => AGENTS_FRONTEND_CHAT_REST_NAMESPACE . AGENTS_FRONTEND_CHAT_REST_ROUTE,
-		'context_binding' => $context_binding,
+		'rest_route'     => AGENTS_FRONTEND_CHAT_REST_NAMESPACE . AGENTS_FRONTEND_CHAT_REST_ROUTE,
+		'client_context' => $client_context,
 	);
-	$scope['context_binding']  = $context_binding;
+	$scope['client_context']   = $client_context;
 
 	return $scope;
-}
-
-/**
- * Extract the optional generic context-binding subset.
- *
- * @param array<string,mixed> $client_context Canonical client context.
- * @return array<string,mixed>
- */
-function agents_frontend_chat_rest_context_binding( array $client_context ): array {
-	$context_binding = $client_context['context_binding'] ?? array();
-	if ( ! is_array( $context_binding ) ) {
-		return array();
-	}
-
-	return agents_frontend_chat_rest_string_key_array( $context_binding );
 }
 
 /**

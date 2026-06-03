@@ -381,8 +381,7 @@ function agents_chat_input_schema(): array {
 			),
 			'client_context'        => array(
 				'type'        => 'object',
-				'description' => 'Optional transport-level context describing where this turn originated. '
-					. 'Hosts may also use context_binding to bind a turn to generic retrieved or selected material without making the substrate product-specific.',
+				'description' => 'Optional transport-level context describing where this turn originated. Hosts may include opaque, product-owned metadata; Agents API preserves it but does not define product semantics.',
 				'properties'  => array(
 					'source'                   => array(
 						'type'        => 'string',
@@ -429,18 +428,6 @@ function agents_chat_input_schema(): array {
 					'peer_agent_call'          => array(
 						'type'        => 'boolean',
 						'description' => 'Whether this turn is an explicit agent-to-agent delegation call.',
-					),
-					'context_binding'          => array(
-						'type'        => 'object',
-						'description' => 'Optional opaque context selection metadata, such as a selected source, item, scope, policy, or provenance pointer. '
-							. 'Hosts own authorization and retrieval behavior.',
-						'properties'  => array(
-							'source_type'     => array( 'type' => array( 'string', 'null' ) ),
-							'source_id'       => array( 'type' => array( 'string', 'null' ) ),
-							'scope_id'        => array( 'type' => array( 'string', 'null' ) ),
-							'policy'          => array( 'type' => array( 'string', 'object', 'null' ) ),
-							'current_item_id' => array( 'type' => array( 'string', 'null' ) ),
-						),
 					),
 				),
 			),
