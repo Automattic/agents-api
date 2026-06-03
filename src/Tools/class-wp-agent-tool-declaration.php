@@ -25,6 +25,19 @@ class WP_Agent_Tool_Declaration {
 	public const SCOPE_RUN       = 'run';
 
 	/**
+	 * Fields owned by the canonical declaration envelope.
+	 */
+	private const CANONICAL_FIELDS = array(
+		'name'        => true,
+		'source'      => true,
+		'description' => true,
+		'parameters'  => true,
+		'executor'    => true,
+		'scope'       => true,
+		'runtime'     => true,
+	);
+
+	/**
 	 * Generic runtime metadata key for duplicate-call behavior.
 	 */
 	public const RUNTIME_DUPLICATE_POLICY = 'duplicate_policy';
@@ -119,13 +132,37 @@ class WP_Agent_Tool_Declaration {
 		$executor = $declaration['executor'] ?? null;
 
 		if ( self::EXECUTOR_CLIENT === $executor || self::SOURCE_CLIENT === self::sourceFromName( $name ) ) {
+			$declaration = self::applyClientRequestDefaults( $declaration );
 			return self::normalize( $declaration );
 		}
 
-		$errors = self::validateHostDeclaration( $declaration );
+		try {
+			return self::normalizeForServer( $declaration );
+		} catch ( \InvalidArgumentException $error ) {
+			throw new \InvalidArgumentException(
+				str_replace( 'invalid_server_tool_declaration:', 'invalid_conversation_tool_declaration:', $error->getMessage() )
+			);
+		}
+	}
+
+	/**
+	 * Normalize a host/server-mediated tool declaration.
+	 *
+	 * Server declarations describe model-facing tools that the host mediates via
+	 * `WP_Agent_Tool_Executor`. The declaration is intentionally neutral: Agents
+	 * API validates the envelope, while the host still owns concrete execution,
+	 * authorization, and product-specific routing.
+	 *
+	 * @param array<mixed> $declaration Raw server tool declaration.
+	 * @return array<mixed> Normalized declaration.
+	 */
+	public static function normalizeForServer( array $declaration ): array {
+		$declaration = self::applyServerDefaults( $declaration );
+
+		$errors = self::validateServerDeclaration( $declaration );
 		if ( ! empty( $errors ) ) {
 			$message = sprintf(
-				'invalid_conversation_tool_declaration: %s',
+				'invalid_server_tool_declaration: %s',
 				implode( ', ', self::sanitizeErrorKeys( $errors ) )
 			);
 
@@ -134,12 +171,13 @@ class WP_Agent_Tool_Declaration {
 			);
 		}
 
-		$source      = self::sourceFromName( $name );
+		$name        = is_string( $declaration['name'] ?? null ) ? $declaration['name'] : '';
+		$source      = $declaration['source'] ?? '';
 		$description = $declaration['description'] ?? '';
 
 		$normalized = array(
 			'name'        => $name,
-			'source'      => $source,
+			'source'      => is_string( $source ) ? trim( $source ) : '',
 			'description' => is_string( $description ) ? trim( $description ) : '',
 			'parameters'  => $declaration['parameters'] ?? array(),
 			'executor'    => self::EXECUTOR_HOST,
@@ -150,6 +188,8 @@ class WP_Agent_Tool_Declaration {
 		if ( ! empty( $runtime ) ) {
 			$normalized['runtime'] = $runtime;
 		}
+
+		$normalized = array_merge( $normalized, self::normalizeExtensionFields( $declaration ) );
 
 		return $normalized;
 	}
@@ -217,7 +257,7 @@ class WP_Agent_Tool_Declaration {
 	 * @param array<mixed> $declaration Raw host declaration.
 	 * @return string[] Machine-readable invalid field names.
 	 */
-	private static function validateHostDeclaration( array $declaration ): array {
+	public static function validateServerDeclaration( array $declaration ): array {
 		$errors = array();
 
 		$name = $declaration['name'] ?? null;
@@ -229,14 +269,15 @@ class WP_Agent_Tool_Declaration {
 			$errors[] = 'name';
 		}
 
-		$source = is_string( $name ) ? self::sourceFromName( $name ) : '';
-		if ( '' === $source || self::SOURCE_CLIENT === $source ) {
+		if ( self::SOURCE_CLIENT === ( is_string( $name ) ? self::sourceFromName( $name ) : '' ) ) {
 			$errors[] = 'source';
 		}
 
+		$source = $declaration['source'] ?? null;
 		if (
-			isset( $declaration['source'] )
-			&& $declaration['source'] !== $source
+			! is_string( $source )
+			|| '' === $source
+			|| ! preg_match( '/^[a-z][a-z0-9_-]*$/', $source )
 		) {
 			$errors[] = 'source';
 		}
@@ -266,6 +307,91 @@ class WP_Agent_Tool_Declaration {
 		}
 
 		return array_values( array_unique( $errors ) );
+	}
+
+	/**
+	 * Apply server declaration defaults before validation.
+	 *
+	 * @param array<mixed> $declaration Raw declaration.
+	 * @return array<mixed> Declaration with server defaults.
+	 */
+	private static function applyServerDefaults( array $declaration ): array {
+		$name = is_string( $declaration['name'] ?? null ) ? $declaration['name'] : '';
+		if ( ! isset( $declaration['source'] ) || ! is_string( $declaration['source'] ) || '' === $declaration['source'] ) {
+			$declaration['source'] = self::sourceFromName( $name );
+		}
+
+		if ( ! isset( $declaration['parameters'] ) ) {
+			$declaration['parameters'] = array();
+		}
+
+		if ( ! isset( $declaration['executor'] ) || self::EXECUTOR_CLIENT !== $declaration['executor'] ) {
+			$declaration['executor'] = self::EXECUTOR_HOST;
+		}
+
+		if ( ! isset( $declaration['scope'] ) ) {
+			$declaration['scope'] = self::SCOPE_RUN;
+		}
+
+		return $declaration;
+	}
+
+	/**
+	 * Apply compatibility defaults for existing client tools at request/catalog boundaries.
+	 *
+	 * The low-level `normalize()` contract remains strict. Conversation/request
+	 * ingestion accepts older `client/*` catalog declarations that omitted fields
+	 * already implied by the tool name and loop context.
+	 *
+	 * @param array<mixed> $declaration Raw declaration.
+	 * @return array<mixed> Declaration with request/catalog defaults.
+	 */
+	private static function applyClientRequestDefaults( array $declaration ): array {
+		$name = is_string( $declaration['name'] ?? null ) ? $declaration['name'] : '';
+
+		if ( ! isset( $declaration['source'] ) ) {
+			$declaration['source'] = self::SOURCE_CLIENT;
+		}
+
+		if ( ! isset( $declaration['description'] ) || ! is_string( $declaration['description'] ) || '' === trim( $declaration['description'] ) ) {
+			$declaration['description'] = $name;
+		}
+
+		if ( ! isset( $declaration['parameters'] ) ) {
+			$declaration['parameters'] = array();
+		}
+
+		if ( ! isset( $declaration['executor'] ) ) {
+			$declaration['executor'] = self::EXECUTOR_CLIENT;
+		}
+
+		if ( ! isset( $declaration['scope'] ) ) {
+			$declaration['scope'] = self::SCOPE_RUN;
+		}
+
+		return $declaration;
+	}
+
+	/**
+	 * Preserve JSON-friendly, non-envelope fields used by generic tool mediation.
+	 *
+	 * @param array<mixed> $declaration Raw declaration.
+	 * @return array<string, mixed> Normalized extension fields.
+	 */
+	private static function normalizeExtensionFields( array $declaration ): array {
+		$extensions = array();
+		foreach ( $declaration as $key => $value ) {
+			if ( ! is_string( $key ) || isset( self::CANONICAL_FIELDS[ $key ] ) ) {
+				continue;
+			}
+
+			$normalized_value = self::normalizeRuntimeMetadataValue( $value );
+			if ( null !== $normalized_value ) {
+				$extensions[ $key ] = $normalized_value;
+			}
+		}
+
+		return $extensions;
 	}
 
 	/**

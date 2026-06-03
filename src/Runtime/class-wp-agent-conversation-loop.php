@@ -8,6 +8,7 @@
 namespace AgentsAPI\AI;
 
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Call;
+use AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Result;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Executor;
@@ -2492,8 +2493,25 @@ class WP_Agent_Conversation_Loop {
 	private static function normalize_tool_declarations( array $declarations ): array {
 		$normalized = array();
 		foreach ( $declarations as $name => $declaration ) {
-			if ( is_string( $name ) && is_array( $declaration ) ) {
-				$normalized[ $name ] = self::normalize_assoc_array( $declaration );
+			if ( ! is_array( $declaration ) ) {
+				continue;
+			}
+
+			$declaration = self::normalize_assoc_array( $declaration );
+			if ( is_string( $name ) && '' !== $name && ! isset( $declaration['name'] ) ) {
+				$declaration['name'] = $name;
+			}
+
+			try {
+				$tool = self::normalize_assoc_array( WP_Agent_Tool_Declaration::normalizeForConversationRequest( $declaration ) );
+			} catch ( \InvalidArgumentException $error ) {
+				unset( $error );
+				continue;
+			}
+
+			$tool_name = is_string( $tool['name'] ?? null ) ? $tool['name'] : '';
+			if ( '' !== $tool_name ) {
+				$normalized[ $tool_name ] = $tool;
 			}
 		}
 
