@@ -88,6 +88,102 @@ external daemon / mobile client / message relay
 Agents API owns the generic bridge registration, queue-first delivery, pending
 polling, and ack logic so runtimes do not copy product-specific bridge code.
 
+### JSON-RPC Protocol Endpoint
+
+A protocol client is a browser or app component that speaks a generic JSON-RPC
+chat wire, rather than a WordPress plugin (direct channel) or a bridge daemon.
+This is the shape consumed by JSON-RPC chat UIs that send `message/send` and
+`message/stream` over HTTP/SSE.
+
+```text
+JSON-RPC chat client
+-> POST agents-api/v1/agent/{agent_id}   (JSON-RPC 2.0)
+-> agents/chat ability  (message/send)   or
+-> streaming runtime    (message/stream, Server-Sent Events)
+-> Task / message/delta frames
+```
+
+`register-agents-chat-jsonrpc-route.php` registers this endpoint. It is a thin
+envelope over the same `agents/chat` ability the direct channels use, so it
+inherits the same handler, session store, run-control, and permissions.
+
+**Wire (mapped onto the canonical chat contract):**
+
+| Method | Transport | Request | Response |
+| --- | --- | --- | --- |
+| `message/send` | JSON | `{jsonrpc, id, method, params}` | `{jsonrpc, id, result: Task}` |
+| `message/stream` | SSE | same, `Accept: text/event-stream` | `data: {…}` frames |
+
+`params` is `MessageSendParams` (`{id?, sessionId?, message, metadata?}`); the
+user's text is the concatenation of the message's `text` parts (parts with
+`contentType: "context"` are excluded from the visible message). The response
+`Task` is derived from the canonical `agents/chat` output:
+
+```text
+agents/chat output   JSON-RPC Task
+------------------   -------------
+run_id            -> id
+session_id        -> sessionId
+reply             -> status.message.parts[0].text
+completed===false -> status.state: "input-required" (else "completed")
+```
+
+**Streaming (`message/stream`).** The endpoint emits two SSE frame types:
+per-token `message/delta` notifications, then a terminal `result: Task` frame.
+
+Token streaming requires a streaming runtime registered via the
+`wp_agent_chat_stream_handler` filter (or the `register_chat_stream_handler()`
+helper). The streaming handler is the token-by-token sibling of the synchronous
+`wp_agent_chat_handler`:
+
+```php
+use function AgentsAPI\AI\Channels\register_chat_stream_handler;
+
+register_chat_stream_handler(
+	function ( array $input, callable $emit ): array {
+		// Emit canonical deltas as tokens arrive.
+		$emit( array( 'type' => 'content', 'text' => 'Hel' ) );
+		$emit( array( 'type' => 'content', 'text' => 'lo' ) );
+		// Tool deltas are also supported:
+		// array( 'type' => 'tool_call',     'tool_call_id' => 't1', 'tool_name' => 'search', 'index' => 0 )
+		// array( 'type' => 'tool_argument', 'tool_call_id' => 't1', 'text' => '{"q":"…"}', 'index' => 0 )
+
+		// Return the canonical agents/chat output once complete.
+		return array(
+			'session_id' => $input['session_id'] ?? '',
+			'reply'      => 'Hello',
+			'run_id'     => $input['run_id'] ?? '',
+			'completed'  => true,
+		);
+	}
+);
+```
+
+When no streaming runtime is registered, `message/stream` degrades gracefully:
+it runs the synchronous `agents/chat` handler and emits a single terminal Task
+frame. The endpoint therefore works with any sync handler, just without
+token-level granularity.
+
+The provider/turn-runner itself stays out of Agents API — both the sync and
+streaming handlers are consumer territory (the same boundary as `agents/chat`).
+
+**End-to-end wiring.** A runnable endpoint composes three pieces:
+
+```php
+// 1. Durable sessions: opt into the default WordPress-native conversation store.
+add_filter( 'agents_api_enable_default_conversation_store', '__return_true' );
+
+// 2. A runtime: register a chat handler (sync) and/or a stream handler (tokens).
+AgentsAPI\AI\Channels\register_chat_handler( $my_sync_handler );
+AgentsAPI\AI\Channels\register_chat_stream_handler( $my_stream_handler );
+
+// 3. Point the client at agents-api/v1/agent/{agent_id}.
+```
+
+Pieces 1 (the conversation store) and 3 (the endpoint) ship in Agents API; the
+store is the persistence example, and the endpoint is the transport. Piece 2 —
+the runtime that calls a provider — is supplied by a consumer plugin.
+
 ## Connectors API Boundary
 
 WordPress Connectors API is the default registry and settings layer for

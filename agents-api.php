@@ -196,6 +196,7 @@ require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-ability.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-run-control-abilities.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-frontend-chat-rest-route.php';
+require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-jsonrpc-route.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-dispatch-message-ability.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-bindings.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-spec-validator.php';
