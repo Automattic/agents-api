@@ -118,6 +118,19 @@ agents_api_smoke_assert_equals( 3, $turn_count, 'loop stopped at turn 3 when pol
 agents_api_smoke_assert_equals( 3, count( $policy_log ), 'policy was consulted for each tool execution', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/finish', $policy_log[2]['tool_name'], 'policy received the finish tool name', $failures, $passes );
 
+$stop_events = array_values(
+	array_filter(
+		$result['events'],
+		static function ( array $event ): bool {
+			return 'completion_policy_stop' === ( $event['type'] ?? '' );
+		}
+	)
+);
+
+agents_api_smoke_assert_equals( 1, count( $stop_events ), 'complete decision records one stop event', $failures, $passes );
+agents_api_smoke_assert_equals( 'finish tool called', $stop_events[0]['metadata']['message'] ?? '', 'stop event carries decision message', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'tool_name' => 'client/finish', 'turn' => 3 ), $stop_events[0]['metadata']['context'] ?? array(), 'stop event carries decision context', $failures, $passes );
+
 echo "\n[2] Completion policy coexists with should_continue — policy takes precedence:\n";
 $policy_log       = array();
 $continue_called  = 0;
