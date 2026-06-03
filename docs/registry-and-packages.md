@@ -89,19 +89,33 @@ Core classes:
 | `WP_Agent_Materialization_Result` | Result status plus optional installed state and projected request-local `WP_Agent`. |
 | `WP_Agent_Installed_Agent_State_Store` | Storage-neutral interface for resolving, materializing, and deleting installed state. |
 | `WP_Agent_Installed_Agent_Projector` | Helper for projecting durable installed state back into a request-local `WP_Agent` definition. |
+| `WP_Agent_Registered_Agent_Materialization_Adapter` | Storage-neutral adapter interface for reconciling the current registered-agent snapshot into host-owned runtime or persisted agents. |
+
+`wp_materialize_registered_agents()` is the generic registry materialization entry point. Pass an adapter directly, or provide one through `wp_agent_registered_agent_materialization_adapter`. Agents API returns an empty result set when no adapter is available; it never creates a default table, option, post type, runtime process, access grant, token, or queue.
 
 The intended lifecycle is:
 
 ```text
 request-local WP_Agent or WP_Agent_Package agent
   -> host resolves owner_user_id and instance_key
-  -> host materializes durable installed state through its store
+  -> host materializes the registered snapshot through its adapter
+  -> adapter materializes durable installed state through its store when needed
   -> package adoption may reconcile artifacts through package contracts
   -> projector turns durable state back into a request-local WP_Agent
   -> host registers/projected agents during its normal request bootstrap
 ```
 
 Owner resolution remains host-owned. `WP_Agent` can declare an `owner_resolver` callback and default config, but Agents API does not call that resolver automatically or grant access. A host materializer should resolve an owner explicitly, pass it into `WP_Agent_Materialization_Request`, and persist only the host-approved installed state. This keeps sensitive owner/access semantics auditable instead of inferred from ambient runtime context.
+
+Registered-agent materialization timing is explicit. Product plugins register definitions during `wp_agents_api_init`; host runtimes call `wp_materialize_registered_agents()` later in their own bootstrap, CLI, admin, package-install, or reconcile flow. The helper passes the current registry snapshot to the adapter and does not schedule recurring reconciliation by itself.
+
+Adapter identity and duplicate rules:
+
+- The registry rejects duplicate request-local slugs before the adapter sees them; the first registered definition wins and the duplicate attempt emits an invalid-usage notice with source provenance when available.
+- Adapter implementations should key durable/runtime state by the normalized `(agent_slug, owner_user_id, instance_key)` tuple. Repeating materialization for the same tuple is idempotent and should return `updated`, `skipped`, `projected`, or another accurate `WP_Agent_Materialization_Result` status instead of creating a second logical agent.
+- Registered definition updates for an existing slug reconcile the existing durable/runtime identity. The adapter decides which fields are mutable, how package provenance is compared, and whether user-modified runtime artifacts require approval.
+- Removed definitions are represented by absence from the registered snapshot. Adapters that keep prior installed state may mark missing identities as `removed`, `disabled`, or `skipped` according to host policy; Agents API does not delete host state automatically.
+- Source/provenance metadata remains generic. Producers should place JSON-friendly provenance in `WP_Agent::get_meta()` using keys such as `source_plugin`, `source_type`, `source_package`, and `source_version`; adapters may persist or report those values without interpreting them as a Data Machine concept.
 
 The installed-agent contract composes with package adoption but does not replace it. `WP_Agent_Package_Adoption_Orchestrator` handles artifact planning/application through artifact callbacks; the installed-agent state store handles the durable agent instance row or equivalent host record. Products such as Data Machine can implement both surfaces against their own storage and then project persisted agents into the request-local registry.
 

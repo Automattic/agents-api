@@ -27,6 +27,7 @@
       "php tests/message-coalesce-smoke.php",
       "php tests/registry-smoke.php",
       "php tests/installed-agent-materialization-smoke.php",
+      "php tests/registered-agent-materialization-adapter-smoke.php",
       "php tests/package-lifecycle-smoke.php",
       "php tests/package-capability-contract-smoke.php",
       "php tests/package-adoption-orchestration-smoke.php",
