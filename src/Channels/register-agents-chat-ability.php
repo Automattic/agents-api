@@ -325,31 +325,31 @@ function agents_chat_input_schema(): array {
 		'type'       => 'object',
 		'required'   => array( 'agent', 'message' ),
 		'properties' => array(
-			'agent'          => array(
+			'agent'                 => array(
 				'type'        => 'string',
 				'description' => 'Slug or ID of the registered agent that should handle this turn.',
 			),
-			'message'        => array(
+			'message'               => array(
 				'type'        => 'string',
 				'description' => 'User-side text for the agent to respond to.',
 			),
-			'session_id'     => array(
+			'session_id'            => array(
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Existing session ID to continue, or null to start a new session.',
 			),
-			'run_id'         => array(
+			'run_id'                => array(
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Optional client-supplied idempotency/run key. If omitted, the dispatcher provides an opaque run ID to the runtime and response.',
 			),
-			'principal'      => agents_chat_principal_schema(),
-			'session_owner'  => agents_chat_session_owner_schema(),
-			'attachments'    => array(
+			'principal'             => agents_chat_principal_schema(),
+			'session_owner'         => agents_chat_session_owner_schema(),
+			'attachments'           => array(
 				'type'        => 'array',
 				'description' => 'Channel-side attachments (images, voice notes, files, link previews). Shape is runtime-defined; runtimes ignore unknown attachment types.',
 				'default'     => array(),
 				'items'       => array( 'type' => 'object' ),
 			),
-			'tool_policy'    => array(
+			'tool_policy'           => array(
 				'type'        => array( 'object', 'null' ),
 				'description' => 'Optional caller-owned tool policy for this turn. Runtimes may use this to narrow tool visibility for peer-agent or sandbox invocations.',
 				'properties'  => array(
@@ -363,7 +363,7 @@ function agents_chat_input_schema(): array {
 					),
 				),
 			),
-			'allow_only'     => array(
+			'allow_only'            => array(
 				'type'        => 'array',
 				'description' => 'Optional per-turn allow-list of tool names. Runtimes may intersect this with agent policy and available tool declarations.',
 				'default'     => array(),
@@ -379,7 +379,7 @@ function agents_chat_input_schema(): array {
 					),
 				),
 			),
-			'client_context' => array(
+			'client_context'        => array(
 				'type'        => 'object',
 				'description' => 'Transport-level context describing where this turn originated.',
 				'properties'  => array(
