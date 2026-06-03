@@ -582,7 +582,7 @@ class WP_Agent_Conversation_Loop {
 				$declarations,
 				$tool_context
 			);
-			$prepared_tool_call           = isset( $prepared['tool_call'] ) && is_array( $prepared['tool_call'] ) ? $prepared['tool_call'] : array();
+			$prepared_tool_call           = self::array_or_empty( $prepared['tool_call'] ?? null );
 			$prepared_tool_def            = isset( $prepared['tool_def'] ) && is_array( $prepared['tool_def'] ) ? $prepared['tool_def'] : array();
 			$tool_definition              = self::associative_array_or_null( $prepared['tool_def'] ?? ( $declarations[ $tool_name ] ?? null ) );
 			$mediator_complete            = false;
@@ -1856,6 +1856,16 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		return $associative;
+	}
+
+	/**
+	 * Return an array value or an empty array for non-array input.
+	 *
+	 * @param mixed $value Candidate value.
+	 * @return array<mixed>
+	 */
+	private static function array_or_empty( $value ): array {
+		return is_array( $value ) ? $value : array();
 	}
 
 	/**
