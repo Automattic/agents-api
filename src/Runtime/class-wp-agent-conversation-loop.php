@@ -744,18 +744,18 @@ class WP_Agent_Conversation_Loop {
 			$diagnostics = self::post_tool_result_diagnostics(
 				$post_tool_diagnostics,
 				array(
-					'tool_name'          => $tool_name,
-					'tool_call_id'       => $tool_call_id,
-					'turn'               => $turn,
-					'turn_context'       => $turn_context,
-					'tool_declaration'   => $tool_definition,
-					'result'             => $exec_result,
-					'success'            => (bool) ( $exec_result['success'] ?? false ),
-					'parameters_sha256'  => self::stable_sha256( $parameters_for_policy ),
+					'tool_name'         => $tool_name,
+					'tool_call_id'      => $tool_call_id,
+					'turn'              => $turn,
+					'turn_context'      => $turn_context,
+					'tool_declaration'  => $tool_definition,
+					'result'            => $exec_result,
+					'success'           => (bool) ( $exec_result['success'] ?? false ),
+					'parameters_sha256' => self::stable_sha256( $parameters_for_policy ),
 				)
 			);
 			if ( ! empty( $diagnostics ) ) {
-				$diagnostics_metadata             = array_merge(
+				$diagnostics_metadata            = array_merge(
 					array(
 						'tool_name'    => $tool_name,
 						'tool_call_id' => $tool_call_id,
@@ -1021,7 +1021,7 @@ class WP_Agent_Conversation_Loop {
 	 * @return array{action: string, result: array<string,mixed>, complete: bool}
 	 */
 	private static function pre_tool_mediation_decision( ?callable $mediator, array $context ): array {
-		$proceed = array(
+		$proceed  = array(
 			'action'   => 'proceed',
 			'result'   => array(),
 			'complete' => false,
@@ -1137,7 +1137,7 @@ class WP_Agent_Conversation_Loop {
 			}
 
 			$metadata['status'] = WP_Agent_Runtime_Tool_Request::STATUS_PENDING;
-			$result = WP_Agent_Tool_Result::normalize( array(
+			$result             = WP_Agent_Tool_Result::normalize( array(
 				'success'              => false,
 				'tool_name'            => $tool_name,
 				'status'               => WP_Agent_Runtime_Tool_Request::STATUS_PENDING,
