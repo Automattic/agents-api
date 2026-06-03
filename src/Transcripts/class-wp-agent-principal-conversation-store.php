@@ -18,6 +18,9 @@ defined( 'ABSPATH' ) || exit;
  * persist sessions for non-user principals. `$owner` is the canonical shape
  * returned by WP_Agent_Execution_Principal::conversation_owner():
  * `array( 'type' => 'user|audience|token|system', 'key' => '<opaque stable key>' )`.
+ * The owner key is opaque to Agents API. Runtime adapters may hash or otherwise
+ * protect it at rest, but list/get/create/delete semantics must remain scoped to
+ * the `(workspace, owner_type, owner_key)` tuple.
  *
  * Legacy WP_Agent_Conversation_Store implementations remain valid for user-owned
  * sessions through the int user ID methods above.

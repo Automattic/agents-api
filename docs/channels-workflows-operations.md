@@ -205,6 +205,26 @@ Transcript contracts live in `src/Transcripts/` and runtime persister contracts 
 - `WP_Agent_Conversation_Lock` and `WP_Agent_Null_Conversation_Lock`: lock contracts used by the conversation loop to avoid concurrent session mutation.
 - `WP_Agent_Transcript_Persister` and `WP_Agent_Null_Transcript_Persister`: loop-level persistence adapters.
 
+### Canonical conversation sessions
+
+Agents API owns the canonical conversation-session ability surface for agent chat channels:
+
+| Ability | Purpose |
+| --- | --- |
+| `agents/list-conversation-sessions` | List sessions for the resolved `(workspace, owner)` tuple. |
+| `agents/get-conversation-session` | Read one session owned by the current principal. |
+| `agents/create-conversation-session` | Create an empty session for the current principal. |
+| `agents/update-conversation-session-title` | Update the stored display title. |
+| `agents/delete-conversation-session` | Idempotently delete the session. |
+
+The backing store is resolved through `WP_Agent_Conversation_Sessions::get_store()`, which accepts a direct `conversation_store` context value or the `wp_agent_conversation_store` filter. This keeps the contract storage-neutral: runtimes can use posts, custom tables, remote stores, files, or in-memory fakes as long as they implement the interface.
+
+Canonical session rows should expose stable generic fields when available: `session_id`, `workspace_type`, `workspace_id`, `owner_type`, `owner_key`, `user_id`, `agent_slug`, `title`, `messages`, `metadata`, `provider`, `model`, `provider_response_id`, `context`, `created_at`, `updated_at`, `last_read_at`, and `expires_at`. `list_sessions()` should omit `messages` when `include_messages` is false. `update_session()` replaces the complete transcript and metadata, and the provider fields link the transcript to provider-side continuation state without making the session store own run-status storage.
+
+Principal-aware stores should implement `WP_Agent_Principal_Conversation_Store` for non-user owners such as browser sessions, external channels, tokens, or system principals. Stores that hash or hide owner keys should also implement `WP_Agent_Principal_Conversation_Session_Reader` so `get`, `update-title`, and `delete` can verify ownership without exposing raw owner keys in generic rows.
+
+Product-specific state belongs in `metadata` under namespaced keys. For example, Data Machine can keep read/progress/reporting fields under `metadata['data_machine']` while exposing the canonical Agents API fields to channel clients. Data Machine `datamachine/*chat-session*` abilities, REST routes, and CLI commands can then become compatibility/product aliases over its adapter instead of a parallel generic contract.
+
 Approval primitives live in `src/Approvals/`:
 
 - `WP_Agent_Pending_Action`: JSON-friendly proposal and audit value object.

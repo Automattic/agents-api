@@ -573,7 +573,7 @@ function agents_conversation_sessions_list_input_schema(): array {
 function agents_conversation_session_owner_schema(): array {
 	return array(
 		'type'        => array( 'object', 'null' ),
-		'description' => 'Opaque, isolating owner for persisted conversation sessions. Use for anonymous browser or external-channel chats when no logged-in user owns the transcript. Do not use a shared public audience as a session owner.',
+		'description' => 'Opaque, isolating owner for persisted conversation sessions. Use for anonymous browser or external-channel chats when no logged-in user owns the transcript. Do not use a shared public audience as a session owner. Runtime adapters may store this key hashed, but canonical abilities scope list/get/create/update-title/delete by the resolved owner tuple.',
 		'properties'  => array(
 			'type'  => array( 'type' => 'string' ),
 			'key'   => array( 'type' => 'string' ),
@@ -586,7 +586,11 @@ function agents_conversation_session_owner_schema(): array {
 function agents_conversation_sessions_create_input_schema(): array {
 	$schema = agents_conversation_sessions_list_input_schema();
 	if ( isset( $schema['properties'] ) && is_array( $schema['properties'] ) ) {
-		$schema['properties']['metadata'] = array( 'type' => 'object' );
+		$schema['properties']['metadata'] = array(
+			'type'                 => 'object',
+			'description'          => 'Optional JSON-serializable session metadata. Product-specific fields should live under namespaced keys so the generic session schema remains runtime-neutral.',
+			'additionalProperties' => true,
+		);
 	}
 	return $schema;
 }
@@ -634,7 +638,41 @@ function agents_conversation_session_output_schema(): array {
 	return array(
 		'type'       => 'object',
 		'required'   => array( 'session' ),
-		'properties' => array( 'session' => array( 'type' => 'object' ) ),
+		'properties' => array(
+			'session' => agents_conversation_session_row_schema(),
+		),
+	);
+}
+
+/** @return array<string,mixed> */
+function agents_conversation_session_row_schema(): array {
+	return array(
+		'type'                 => 'object',
+		'description'          => 'Canonical conversation session row. Unknown fields are optional runtime/product extensions; product-specific metadata should be namespaced inside metadata.',
+		'additionalProperties' => true,
+		'properties'           => array(
+			'session_id'           => array( 'type' => 'string' ),
+			'workspace_type'       => array( 'type' => 'string' ),
+			'workspace_id'         => array( 'type' => 'string' ),
+			'owner_type'           => array( 'type' => 'string' ),
+			'owner_key'            => array( 'type' => 'string' ),
+			'user_id'              => array( 'type' => 'integer' ),
+			'agent_slug'           => array( 'type' => 'string' ),
+			'title'                => array( 'type' => 'string' ),
+			'messages'             => array( 'type' => 'array' ),
+			'metadata'             => array(
+				'type'                 => 'object',
+				'additionalProperties' => true,
+			),
+			'provider'             => array( 'type' => 'string' ),
+			'model'                => array( 'type' => 'string' ),
+			'provider_response_id' => array( 'type' => array( 'string', 'null' ) ),
+			'context'              => array( 'type' => 'string' ),
+			'created_at'           => array( 'type' => array( 'string', 'null' ) ),
+			'updated_at'           => array( 'type' => array( 'string', 'null' ) ),
+			'last_read_at'         => array( 'type' => array( 'string', 'null' ) ),
+			'expires_at'           => array( 'type' => array( 'string', 'null' ) ),
+		),
 	);
 }
 
