@@ -78,7 +78,7 @@ final class WP_Agent_Byte_Limit_Tool_Result_Truncator implements WP_Agent_Tool_R
 	}
 
 	/**
-	 * Preserve compact UI metadata from oversized result payloads.
+	 * Preserve compact result metadata from oversized result payloads.
 	 *
 	 * @param array<string,mixed> $result Tool execution result.
 	 * @return array<string,mixed> Preserved metadata fields.

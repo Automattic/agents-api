@@ -141,7 +141,7 @@ class WP_Agent_Conversation_Loop {
 			'completion_tokens' => 0,
 			'total_tokens'      => 0,
 		);
-		$result_metadata     = array();
+		$result_metadata      = array();
 		$request_metadata     = array();
 		$provider_diagnostics = array();
 
