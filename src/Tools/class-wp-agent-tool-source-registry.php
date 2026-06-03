@@ -200,7 +200,14 @@ class WP_Agent_Tool_Source_Registry {
 		$tool_definition['source'] = is_string( $tool_definition['source'] ?? null ) && '' !== $tool_definition['source'] ? $tool_definition['source'] : $source_slug;
 
 		try {
-			return WP_Agent_Tool_Declaration::normalizeForServer( $tool_definition );
+			$normalized = array();
+			foreach ( WP_Agent_Tool_Declaration::normalizeForServer( $tool_definition ) as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$normalized[ $key ] = $value;
+				}
+			}
+
+			return $normalized;
 		} catch ( \InvalidArgumentException $error ) {
 			unset( $error );
 			return array();
