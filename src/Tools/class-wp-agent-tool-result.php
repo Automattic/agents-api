@@ -7,6 +7,8 @@
 
 namespace AgentsAPI\AI\Tools;
 
+use AgentsAPI\AI\WP_Agent_Citation_Metadata;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -69,10 +71,7 @@ class WP_Agent_Tool_Result {
 		}
 
 		$success = (bool) ( $result['success'] ?? false );
-		$metadata = $result['metadata'] ?? array();
-		if ( ! is_array( $metadata ) ) {
-			$metadata = array();
-		}
+		$metadata = WP_Agent_Citation_Metadata::normalize_metadata( $result['metadata'] ?? array() );
 
 		$runtime = WP_Agent_Tool_Declaration::normalizeRuntimeMetadata( $result['runtime'] ?? array() );
 

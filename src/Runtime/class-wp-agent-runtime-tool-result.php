@@ -34,14 +34,14 @@ class WP_Agent_Runtime_Tool_Result {
 		}
 
 		$payload  = $result['result'] ?? array();
-		$metadata = $result['metadata'] ?? array();
+		$metadata = WP_Agent_Citation_Metadata::normalize_metadata( $result['metadata'] ?? array() );
 
 		$normalized = array(
 			'status'     => self::STATUS_SUBMITTED,
 			'request_id' => trim( $request_id ),
 			'tool_name'  => trim( $tool_name ),
 			'success'    => (bool) ( $result['success'] ?? true ),
-			'metadata'   => is_array( $metadata ) ? $metadata : array(),
+			'metadata'   => $metadata,
 		);
 
 		if ( $normalized['success'] ) {

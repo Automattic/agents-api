@@ -108,6 +108,7 @@ require_once AGENTS_API_PATH . 'src/Consent/class-wp-agent-consent-operation.php
 require_once AGENTS_API_PATH . 'src/Consent/class-wp-agent-consent-decision.php';
 require_once AGENTS_API_PATH . 'src/Consent/class-wp-agent-consent-policy.php';
 require_once AGENTS_API_PATH . 'src/Consent/class-wp-agent-default-consent-policy.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-citation-metadata.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-message.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-execution-principal.php';
 require_once AGENTS_API_PATH . 'src/Transcripts/register-agents-conversation-session-abilities.php';
