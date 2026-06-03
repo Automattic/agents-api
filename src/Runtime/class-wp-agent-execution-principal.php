@@ -23,6 +23,7 @@ final class WP_Agent_Execution_Principal {
 	public const AUTH_SOURCE_APPLICATION_PASSWORD = 'application_password';
 	public const AUTH_SOURCE_AGENT_TOKEN          = 'agent_token';
 	public const AUTH_SOURCE_AUDIENCE             = 'audience';
+	public const AUTH_SOURCE_RUNTIME              = 'runtime';
 	public const AUTH_SOURCE_SYSTEM               = 'system';
 
 	public const KNOWN_AUTH_SOURCES = array(
@@ -30,18 +31,24 @@ final class WP_Agent_Execution_Principal {
 		self::AUTH_SOURCE_APPLICATION_PASSWORD,
 		self::AUTH_SOURCE_AGENT_TOKEN,
 		self::AUTH_SOURCE_AUDIENCE,
+		self::AUTH_SOURCE_RUNTIME,
 		self::AUTH_SOURCE_SYSTEM,
 	);
 
 	public const OWNER_TYPE_USER     = 'user';
 	public const OWNER_TYPE_AUDIENCE = 'audience';
+	public const OWNER_TYPE_RUNTIME  = 'runtime';
 	public const OWNER_TYPE_TOKEN    = 'token';
 	public const OWNER_TYPE_SYSTEM   = 'system';
 
-	public const REQUEST_CONTEXT_REST = 'rest';
-	public const REQUEST_CONTEXT_CLI  = 'cli';
-	public const REQUEST_CONTEXT_CRON = 'cron';
-	public const REQUEST_CONTEXT_CHAT = 'chat';
+	public const REQUEST_CONTEXT_REST    = 'rest';
+	public const REQUEST_CONTEXT_CLI     = 'cli';
+	public const REQUEST_CONTEXT_CRON    = 'cron';
+	public const REQUEST_CONTEXT_CHAT    = 'chat';
+	public const REQUEST_CONTEXT_SANDBOX = 'sandbox';
+
+	public const AUDIENCE_CLAIM_RUNTIME_TYPE     = 'runtime_type';
+	public const RUNTIME_TYPE_DISPOSABLE_SANDBOX = 'disposable_sandbox';
 
 	/**
 	 * @param int         $acting_user_id    WordPress user ID on whose behalf the run executes. 0 = system/anonymous context.
@@ -215,6 +222,46 @@ final class WP_Agent_Execution_Principal {
 	 */
 	public static function audience( string $audience_id, string $effective_agent_id, string $request_context = self::REQUEST_CONTEXT_REST, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, array $audience_claims = array(), ?string $owner_key = null ): self {
 		return new self( 0, $effective_agent_id, self::AUTH_SOURCE_AUDIENCE, $request_context, null, $request_metadata, $workspace_id, $client_id, null, null, $audience_id, $audience_claims, null !== $owner_key ? self::OWNER_TYPE_AUDIENCE : null, $owner_key );
+	}
+
+	/**
+	 * Build a principal for a host-attested disposable runtime sandbox.
+	 *
+	 * Disposable sandbox principals are non-user principals with an opaque runtime
+	 * owner key so transcripts and policy decisions do not bleed into the parent
+	 * control plane or another sandbox session.
+	 *
+	 * @param string              $sandbox_id        Host-owned sandbox/session identifier.
+	 * @param string              $effective_agent_id Registered agent ID/slug effective for the run.
+	 * @param array<string,mixed> $request_metadata  Request metadata.
+	 * @param string|null         $workspace_id      Optional host workspace/scope identifier.
+	 * @param string|null         $client_id         Optional client/runtime identifier.
+	 * @param array<string,mixed> $audience_claims   Additional host-owned sandbox claims.
+	 * @param string|null         $owner_key         Optional opaque transcript owner key. Defaults to the sandbox id.
+	 * @return self
+	 */
+	public static function disposable_sandbox( string $sandbox_id, string $effective_agent_id, array $request_metadata = array(), ?string $workspace_id = null, ?string $client_id = null, array $audience_claims = array(), ?string $owner_key = null ): self {
+		$audience_claims = array_merge(
+			array( self::AUDIENCE_CLAIM_RUNTIME_TYPE => self::RUNTIME_TYPE_DISPOSABLE_SANDBOX ),
+			$audience_claims
+		);
+
+		return new self(
+			0,
+			$effective_agent_id,
+			self::AUTH_SOURCE_RUNTIME,
+			self::REQUEST_CONTEXT_SANDBOX,
+			null,
+			$request_metadata,
+			$workspace_id,
+			$client_id,
+			null,
+			null,
+			$sandbox_id,
+			$audience_claims,
+			self::OWNER_TYPE_RUNTIME,
+			$owner_key ?? $sandbox_id
+		);
 	}
 
 	/**

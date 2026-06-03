@@ -35,6 +35,36 @@ class WP_Agent_Tool_Declaration {
 	public const RUNTIME_COMPLETION_SIGNAL = 'completion_signal';
 
 	/**
+	 * Generic runtime metadata key for where a tool may be exposed.
+	 */
+	public const RUNTIME_CAPABILITY_SCOPE = 'capability_scope';
+
+	/**
+	 * Tool may be exposed inside a disposable runtime sandbox.
+	 */
+	public const CAPABILITY_SCOPE_SANDBOX_SAFE = 'sandbox_safe';
+
+	/**
+	 * Tool belongs to the parent/control-plane runtime and should stay out of sandboxes.
+	 */
+	public const CAPABILITY_SCOPE_PARENT_ONLY = 'parent_only';
+
+	/**
+	 * Generic runtime metadata key for the target execution environment.
+	 */
+	public const RUNTIME_ENVIRONMENT = 'environment';
+
+	/**
+	 * Tool declaration targets a disposable sandbox runtime.
+	 */
+	public const ENVIRONMENT_DISPOSABLE_SANDBOX = 'disposable_sandbox';
+
+	/**
+	 * Tool declaration targets a parent/control-plane runtime.
+	 */
+	public const ENVIRONMENT_PARENT_CONTROL = 'parent_control';
+
+	/**
 	 * Normalize a runtime tool declaration or throw a field-scoped error.
 	 *
 	 * @param array<mixed> $declaration Raw runtime tool declaration.

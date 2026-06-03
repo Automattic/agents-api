@@ -34,8 +34,10 @@ $declaration = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalize(
 		'executor'    => 'client',
 		'scope'       => 'run',
 		'runtime'     => array(
-			'duplicate_policy' => 'repeatable',
-			'completion_signal' => 'progress',
+			AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::RUNTIME_DUPLICATE_POLICY  => 'repeatable',
+			AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::RUNTIME_COMPLETION_SIGNAL => 'progress',
+			AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::RUNTIME_CAPABILITY_SCOPE  => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::CAPABILITY_SCOPE_SANDBOX_SAFE,
+			AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::RUNTIME_ENVIRONMENT       => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::ENVIRONMENT_DISPOSABLE_SANDBOX,
 			'unsupported'       => new stdClass(),
 		),
 	)
@@ -45,6 +47,8 @@ agents_api_smoke_assert_equals( 'client', $declaration['source'], 'runtime decla
 agents_api_smoke_assert_equals( 'run', $declaration['scope'], 'runtime declaration records run scope', $failures, $passes );
 agents_api_smoke_assert_equals( 'repeatable', $declaration['runtime']['duplicate_policy'] ?? '', 'runtime declaration preserves duplicate policy metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'progress', $declaration['runtime']['completion_signal'] ?? '', 'runtime declaration preserves completion signal metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'sandbox_safe', $declaration['runtime']['capability_scope'] ?? '', 'runtime declaration preserves sandbox-safe capability scope metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'disposable_sandbox', $declaration['runtime']['environment'] ?? '', 'runtime declaration preserves disposable sandbox environment metadata', $failures, $passes );
 agents_api_smoke_assert_equals( false, array_key_exists( 'unsupported', $declaration['runtime'] ?? array() ), 'runtime declaration drops unsupported metadata values', $failures, $passes );
 
 $host_declaration = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(

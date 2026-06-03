@@ -197,8 +197,14 @@ Canonical keys:
 | --- | --- | --- |
 | `duplicate_policy` | `repeatable` | The same tool may be called repeatedly with the same parameters when the host considers that safe. |
 | `completion_signal` | `progress` | A successful tool result is progress toward completion and may be used by caller-owned completion policy. |
+| `capability_scope` | `sandbox_safe` or `parent_only` | Whether a host may expose the tool inside a disposable sandbox or should keep it in the parent/control-plane runtime. |
+| `environment` | `disposable_sandbox` or `parent_control` | The intended execution environment for a declaration or result. |
 
 The substrate treats `runtime` as a JSON-friendly associative array. It preserves scalar and nested array values with string keys, drops unsupported values, and leaves product-specific interpretation to callers.
+
+Disposable sandbox consumers should advertise runtime-local tools with `capability_scope: sandbox_safe` and `environment: disposable_sandbox`. Parent-only tools such as repository mutation, deployment, approval, or product control-plane actions should use `capability_scope: parent_only` and stay out of sandbox-visible declarations. Agents API records and propagates this vocabulary; hosts still own the concrete allow/deny policy and execution adapter.
+
+Disposable runtimes can also resolve an execution principal with `WP_Agent_Execution_Principal::disposable_sandbox()`. The helper produces a non-user runtime principal with `auth_source: runtime`, `request_context: sandbox`, a host-owned sandbox `audience_id`, and an isolated runtime conversation owner key. Hosts remain responsible for attesting the sandbox, choosing the owner key, and enforcing authorization policy.
 
 When the conversation loop mediates tool calls, declaration runtime metadata is propagated into the normalized tool result and exposed on the corresponding `tool_execution_results[]` entry:
 
