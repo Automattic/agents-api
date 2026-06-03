@@ -184,6 +184,21 @@ agents_api_smoke_assert_equals( 'audience:docs-readers', $audience_from_array->a
 agents_api_smoke_assert_equals( array( 'tier' => 'viewer' ), $audience_from_array->audience_claims, 'from_array restores audience claims', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_AUDIENCE, 'key' => 'browser-session:opaque-456' ), $audience_from_array->conversation_owner(), 'from_array restores explicit conversation owner', $failures, $passes );
 
+$runtime_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::runtime(
+	'runtime-session-123',
+	'delegated-runtime-agent',
+	array( 'route' => '/agents/runtime' ),
+	'workspace:demo',
+	'example-runtime',
+	array( AgentsAPI\AI\WP_Agent_Execution_Principal::AUDIENCE_CLAIM_RUNTIME_TYPE => 'ephemeral' )
+);
+agents_api_smoke_assert_equals( 0, $runtime_principal->acting_user_id, 'runtime principal has no WordPress user', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_RUNTIME, $runtime_principal->auth_source, 'runtime principal records runtime auth source', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_RUNTIME, $runtime_principal->request_context, 'runtime principal records runtime request context', $failures, $passes );
+agents_api_smoke_assert_equals( 'runtime-session-123', $runtime_principal->audience_id, 'runtime principal records runtime id as audience id', $failures, $passes );
+agents_api_smoke_assert_equals( 'ephemeral', $runtime_principal->audience_claims[ AgentsAPI\AI\WP_Agent_Execution_Principal::AUDIENCE_CLAIM_RUNTIME_TYPE ] ?? null, 'runtime principal preserves host-supplied runtime type claim', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_RUNTIME, 'key' => 'runtime-session-123' ), $runtime_principal->conversation_owner(), 'runtime principal derives isolated runtime conversation owner', $failures, $passes );
+
 try {
 	new AgentsAPI\AI\WP_Agent_Execution_Principal( -1, 'agent', AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER, AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );
 	agents_api_smoke_assert_equals( true, false, 'negative user id is rejected', $failures, $passes );

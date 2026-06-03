@@ -197,8 +197,14 @@ Canonical keys:
 | --- | --- | --- |
 | `duplicate_policy` | `repeatable` | The same tool may be called repeatedly with the same parameters when the host considers that safe. |
 | `completion_signal` | `progress` | A successful tool result is progress toward completion and may be used by caller-owned completion policy. |
+| `capability_scope` | `runtime_local` or `control_plane` | Whether a host may expose the tool to a delegated runtime or should keep it in the parent/control-plane runtime. |
+| `environment` | `runtime_local` or `control_plane` | The intended execution environment for a declaration or result. |
 
 The substrate treats `runtime` as a JSON-friendly associative array. It preserves scalar and nested array values with string keys, drops unsupported values, and leaves product-specific interpretation to callers.
+
+Delegated runtime consumers should advertise runtime-local tools with `capability_scope: runtime_local` and `environment: runtime_local`. Control-plane tools such as repository mutation, deployment, approval, or parent orchestration actions should use `capability_scope: control_plane` and stay out of runtime-local declarations. Agents API records and propagates this vocabulary; hosts still own the concrete allow/deny policy and execution adapter.
+
+Delegated runtimes can also resolve an execution principal with `WP_Agent_Execution_Principal::runtime()`. The helper produces a non-user runtime principal with `auth_source: runtime`, `request_context: runtime`, a host-owned runtime `audience_id`, and an isolated runtime conversation owner key. Hosts remain responsible for attesting the runtime, choosing the owner key, supplying any `runtime_type` claim, and enforcing authorization policy.
 
 When the conversation loop mediates tool calls, declaration runtime metadata is propagated into the normalized tool result and exposed on the corresponding `tool_execution_results[]` entry:
 
