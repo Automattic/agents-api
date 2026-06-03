@@ -93,7 +93,7 @@ jobs:
   docs-agent:
     name: Run Docs Agent
     needs: prepare
-    uses: Extra-Chill/homeboy-extensions/.github/workflows/datamachine-agent-ci.yml@main
+    uses: Extra-Chill/homeboy-extensions/.github/workflows/datamachine-agent-ci.yml@179eedbeb1da7a0b7dfacd10a6010019fd62a68b # main
     with:
       bundle_path: bundles/docs-agent
       bundle_repo: https://github.com/Automattic/docs-agent.git
