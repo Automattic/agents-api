@@ -133,6 +133,115 @@ $tool_call_messages = array_values(
 agents_api_smoke_assert_equals( 'call_123', $tool_call_messages[0]['metadata']['tool_call_id'] ?? '', 'tool call metadata preserves provider tool call id', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'text' => 'hello world' ), $tool_call_messages[0]['payload']['parameters'] ?? array(), 'tool call payload preserves provider parameters for runtime replay', $failures, $passes );
 
+echo "\n[Pre-tool mediator proceed/reject/replace decisions (#260):\n";
+
+$executor->executed       = array();
+$proceed_mediator_context = array();
+$proceed_result           = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'mediate proceed' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'id'         => 'call_proceed',
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'go ahead' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 1,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+		'pre_tool_mediator' => static function ( array $context ) use ( &$proceed_mediator_context ): array {
+			$proceed_mediator_context = $context;
+			return array( 'action' => 'proceed' );
+		},
+	)
+);
+
+agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'proceed mediator allows executor call', $failures, $passes );
+agents_api_smoke_assert_equals( 'call_proceed', $proceed_mediator_context['tool_call_id'] ?? '', 'mediator receives tool call id', $failures, $passes );
+agents_api_smoke_assert_equals( 'client/summarize', $proceed_mediator_context['prepared_tool_call']['tool_name'] ?? '', 'mediator receives prepared tool call', $failures, $passes );
+agents_api_smoke_assert_equals( 'repeatable', $proceed_mediator_context['tool_declaration']['runtime']['duplicate_policy'] ?? '', 'mediator receives tool declaration runtime metadata', $failures, $passes );
+agents_api_smoke_assert_equals( true, count( $proceed_mediator_context['messages'] ?? array() ) >= 2, 'mediator receives current transcript including tool-call message', $failures, $passes );
+agents_api_smoke_assert_equals( 'GO AHEAD', $proceed_result['tool_execution_results'][0]['result']['result']['summary'] ?? '', 'proceed result keeps executor payload', $failures, $passes );
+
+$executor->executed = array();
+$reject_result      = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'reject duplicate' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'id'         => 'call_reject',
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'duplicate' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 1,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+		'pre_tool_mediator' => static function (): array {
+			return array(
+				'action'   => 'reject',
+				'error'    => 'Duplicate tool call rejected.',
+				'metadata' => array( 'error_type' => 'duplicate_tool_call' ),
+			);
+		},
+	)
+);
+
+agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'reject mediator prevents executor call', $failures, $passes );
+agents_api_smoke_assert_equals( false, $reject_result['tool_execution_results'][0]['result']['success'] ?? true, 'reject decision records failed tool result', $failures, $passes );
+agents_api_smoke_assert_equals( 'Duplicate tool call rejected.', $reject_result['tool_execution_results'][0]['result']['error'] ?? '', 'reject decision records mediator error', $failures, $passes );
+agents_api_smoke_assert_equals( 'duplicate_tool_call', $reject_result['tool_audit_events'][0]['error_type'] ?? '', 'reject decision records audit error type', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'tool_call', 'tool_result' ), array_column( $reject_result['tool_events'], 'type' ), 'reject decision records canonical tool events', $failures, $passes );
+agents_api_smoke_assert_equals( 'error', $reject_result['tool_events'][1]['status'] ?? '', 'reject decision records error tool event status', $failures, $passes );
+
+$executor->executed = array();
+$replace_result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'replace result' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'id'         => 'call_replace',
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'replace me' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 1,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+		'pre_tool_mediator' => static function (): array {
+			return array(
+				'action' => 'replace_result',
+				'result' => array(
+					'success' => true,
+					'result'  => array( 'summary' => 'supplied by mediator' ),
+				),
+			);
+		},
+	)
+);
+
+agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'replace mediator prevents executor call', $failures, $passes );
+agents_api_smoke_assert_equals( true, $replace_result['tool_execution_results'][0]['result']['success'] ?? false, 'replace decision records successful tool result', $failures, $passes );
+agents_api_smoke_assert_equals( 'supplied by mediator', $replace_result['tool_execution_results'][0]['result']['result']['summary'] ?? '', 'replace decision records supplied payload', $failures, $passes );
+agents_api_smoke_assert_equals( true, $replace_result['tool_audit_events'][0]['success'] ?? false, 'replace decision records successful audit event', $failures, $passes );
+agents_api_smoke_assert_equals( 'success', $replace_result['tool_events'][1]['status'] ?? '', 'replace decision records success tool event status', $failures, $passes );
+
 echo "\n[2] Loop runs without mediation when no tool_executor is provided (backwards compatible):\n";
 $executor->executed = array();
 
