@@ -114,6 +114,7 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-effective-agent-resol
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-compaction-item.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-compaction-conservation.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-declaration.php';
+require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-runtime-tool-policy.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-action-policy.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-access-policy.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-action-policy-provider.php';
