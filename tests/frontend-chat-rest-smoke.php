@@ -93,7 +93,14 @@ $access_store = new class( $grant ) implements WP_Agent_Access_Store {
 	public function get_users_for_agent( string $agent_id, ?string $workspace_id = null ): array { return array(); }
 };
 
-add_filter( 'wp_agent_access_store', static fn( $store ) => $store instanceof WP_Agent_Access_Store ? $store : $access_store );
+$access_contexts = array();
+add_filter(
+	'wp_agent_access_store',
+	static function ( $store, array $context = array() ) use ( $access_store, &$access_contexts ) {
+		$access_contexts[] = $context;
+		return $store instanceof WP_Agent_Access_Store ? $store : $access_store;
+	}
+);
 
 do_action( 'rest_api_init' );
 
@@ -123,7 +130,13 @@ $request = new WP_REST_Request(
 		'message'        => 'Hi there',
 		'session_id'     => 'existing-session',
 		'attachments'    => array( array( 'type' => 'image' ) ),
-		'client_context' => array( 'client_name' => 'block-chat' ),
+		'client_context' => array(
+			'client_name'         => 'block-chat',
+			'corpus_id'           => 'support-corpus',
+			'knowledge_base_id'   => 'kb-123',
+			'retrieval_policy'    => array( 'mode' => 'focused', 'limit' => 4 ),
+			'current_document_id' => 'doc-789',
+		),
 		'workspace_id'   => 'site:42',
 		'client_id'      => 'browser-1',
 	)
@@ -139,6 +152,13 @@ agents_api_smoke_assert_equals( 'support-agent', $captured['agent'] ?? null, 'di
 agents_api_smoke_assert_equals( 'Hi there', $captured['message'] ?? null, 'dispatch forwards message', $failures, $passes );
 agents_api_smoke_assert_equals( 'rest', $captured['client_context']['source'] ?? null, 'dispatch marks REST source', $failures, $passes );
 agents_api_smoke_assert_equals( 'block-chat', $captured['client_context']['client_name'] ?? null, 'dispatch preserves client name', $failures, $passes );
+agents_api_smoke_assert_equals( 'support-corpus', $captured['client_context']['corpus_id'] ?? null, 'dispatch preserves corpus id', $failures, $passes );
+agents_api_smoke_assert_equals( 'kb-123', $captured['client_context']['knowledge_base_id'] ?? null, 'dispatch preserves knowledge base id', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'mode' => 'focused', 'limit' => 4 ), $captured['client_context']['retrieval_policy'] ?? null, 'dispatch preserves retrieval policy', $failures, $passes );
+agents_api_smoke_assert_equals( 'doc-789', $captured['client_context']['current_document_id'] ?? null, 'dispatch preserves current document id', $failures, $passes );
+agents_api_smoke_assert_equals( 'support-corpus', $access_contexts[0]['knowledge_context']['corpus_id'] ?? null, 'access scope receives corpus id', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'mode' => 'focused', 'limit' => 4 ), $access_contexts[0]['knowledge_context']['retrieval_policy'] ?? null, 'access scope receives retrieval policy', $failures, $passes );
+agents_api_smoke_assert_equals( 'doc-789', $access_contexts[0]['request_metadata']['knowledge_context']['current_document_id'] ?? null, 'access metadata receives document id', $failures, $passes );
 
 $blocked = AgentsAPI\AI\Channels\agents_frontend_chat_rest_permission(
 	new WP_REST_Request(

@@ -210,6 +210,10 @@ function agents_frontend_chat_rest_string_key_array( array $value ): array {
  * @return array<string,mixed>
  */
 function agents_frontend_chat_rest_scope( \WP_REST_Request $request ): array {
+	$client_context  = $request->get_param( 'client_context' );
+	$knowledge_scope = is_array( $client_context )
+		? agents_frontend_chat_rest_knowledge_context( agents_frontend_chat_rest_string_key_array( $client_context ) )
+		: array();
 	$scope                     = \AgentsAPI\AI\Auth\agents_access_request_scope(
 		array(
 			'workspace_id' => $request->get_param( 'workspace_id' ),
@@ -217,10 +221,34 @@ function agents_frontend_chat_rest_scope( \WP_REST_Request $request ): array {
 		)
 	);
 	$scope['request_metadata'] = array(
-		'rest_route' => AGENTS_FRONTEND_CHAT_REST_NAMESPACE . AGENTS_FRONTEND_CHAT_REST_ROUTE,
+		'rest_route'        => AGENTS_FRONTEND_CHAT_REST_NAMESPACE . AGENTS_FRONTEND_CHAT_REST_ROUTE,
+		'knowledge_context' => $knowledge_scope,
 	);
+	$scope['knowledge_context'] = $knowledge_scope;
 
 	return $scope;
+}
+
+/**
+ * Extract the optional generic corpus/retrieval context subset.
+ *
+ * @param array<string,mixed> $client_context Canonical client context.
+ * @return array<string,mixed>
+ */
+function agents_frontend_chat_rest_knowledge_context( array $client_context ): array {
+	$knowledge_context = array();
+	foreach ( array( 'corpus_id', 'knowledge_base_id', 'retrieval_policy', 'current_document_id' ) as $key ) {
+		if ( array_key_exists( $key, $client_context ) ) {
+			$value = $client_context[ $key ];
+			if ( is_scalar( $value ) || null === $value || is_array( $value ) ) {
+				$knowledge_context[ $key ] = is_array( $value )
+					? agents_frontend_chat_rest_string_key_array( $value )
+					: $value;
+			}
+		}
+	}
+
+	return $knowledge_context;
 }
 
 /**
