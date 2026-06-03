@@ -298,6 +298,9 @@ $result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 3, $turn_count, 'explicit turns budget overrides higher max_turns', $failures, $passes );
 agents_api_smoke_assert_equals( 'budget_exceeded', $result['status'] ?? null, 'explicit turns budget produces budget_exceeded status', $failures, $passes );
 agents_api_smoke_assert_equals( 'turns', $result['budget'] ?? null, 'explicit turns budget identified in result', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STATUS_INCOMPLETE, $result['run_outcome']['status'] ?? '', 'explicit turns budget run outcome is incomplete', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STOP_MAX_TURNS, $result['run_outcome']['stop_reason'] ?? '', 'explicit turns budget run outcome stop reason is max turns', $failures, $passes );
+agents_api_smoke_assert_equals( true, $result['run_outcome']['retryable'] ?? false, 'explicit turns budget run outcome is retryable', $failures, $passes );
 
 echo "\n[9] Agent runtime max_iterations clamps loop turns and reaches runner context:\n";
 $turn_count  = 0;

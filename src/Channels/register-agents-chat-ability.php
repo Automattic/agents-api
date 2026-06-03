@@ -40,6 +40,7 @@
 namespace AgentsAPI\AI\Channels;
 
 use AgentsAPI\AI\WP_Agent_Chat_Run_Control;
+use AgentsAPI\AI\WP_Agent_Execution_Principal;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -110,6 +111,16 @@ add_action(
  * @return array<string,mixed>|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_chat_dispatch( array $input ) {
+	$principal = agents_chat_principal_from_input( $input );
+	if ( is_wp_error( $principal ) ) {
+		do_action( 'agents_chat_dispatch_failed', $principal->get_error_code(), $input );
+		return $principal;
+	}
+
+	if ( $principal instanceof WP_Agent_Execution_Principal ) {
+		$input['principal'] = $principal->to_array();
+	}
+
 	$run_id = agents_chat_optional_string( $input['run_id'] ?? null );
 	if ( null === $run_id ) {
 		$input['run_id'] = WP_Agent_Chat_Run_Control::generate_run_id();
@@ -237,6 +248,27 @@ function agents_chat_string_keyed_array( array $data ): array {
  * @return bool
  */
 function agents_chat_permission( array $input ): bool {
+	$allowed   = current_user_can( 'manage_options' );
+	$principal = agents_chat_principal_from_input( $input );
+	if ( is_wp_error( $principal ) ) {
+		return false;
+	}
+
+	if ( $principal instanceof WP_Agent_Execution_Principal ) {
+		/**
+		 * Filter permission for host-attested runtime principals.
+		 *
+		 * Hosts can authorize disposable runtimes here after validating their own
+		 * runtime binding/session claims. Agents API normalizes the principal but
+		 * does not trust arbitrary runtime principal input by default.
+		 *
+		 * @param bool                         $allowed   Current permission decision.
+		 * @param WP_Agent_Execution_Principal $principal Normalized principal.
+		 * @param array<mixed>                 $input     Canonical chat input.
+		 */
+		$allowed = (bool) apply_filters( 'agents_chat_runtime_principal_permission', $allowed, $principal, $input );
+	}
+
 	/**
 	 * Filter the permission decision for the canonical chat ability.
 	 *
@@ -245,9 +277,39 @@ function agents_chat_permission( array $input ): bool {
 	 */
 	return (bool) apply_filters(
 		'agents_chat_permission',
-		current_user_can( 'manage_options' ),
+		$allowed,
 		$input
 	);
+}
+
+/**
+ * Normalize optional execution principal input for agents/chat.
+ *
+ * @param array<mixed> $input Canonical chat input.
+ * @return WP_Agent_Execution_Principal|\WP_Error|null
+ */
+function agents_chat_principal_from_input( array $input ) {
+	if ( ! array_key_exists( 'principal', $input ) || null === $input['principal'] ) {
+		return null;
+	}
+
+	if ( $input['principal'] instanceof WP_Agent_Execution_Principal ) {
+		return $input['principal'];
+	}
+
+	if ( ! is_array( $input['principal'] ) ) {
+		return new \WP_Error( 'agents_chat_invalid_principal', 'agents/chat principal must be an object when provided.' );
+	}
+
+	try {
+		return WP_Agent_Execution_Principal::from_array( agents_chat_string_keyed_array( $input['principal'] ) );
+	} catch ( \Throwable $error ) {
+		return new \WP_Error(
+			'agents_chat_invalid_principal',
+			'Invalid agents/chat execution principal.',
+			array( 'reason' => $error->getMessage() )
+		);
+	}
 }
 
 /**
@@ -263,30 +325,31 @@ function agents_chat_input_schema(): array {
 		'type'       => 'object',
 		'required'   => array( 'agent', 'message' ),
 		'properties' => array(
-			'agent'          => array(
+			'agent'                 => array(
 				'type'        => 'string',
 				'description' => 'Slug or ID of the registered agent that should handle this turn.',
 			),
-			'message'        => array(
+			'message'               => array(
 				'type'        => 'string',
 				'description' => 'User-side text for the agent to respond to.',
 			),
-			'session_id'     => array(
+			'session_id'            => array(
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Existing session ID to continue, or null to start a new session.',
 			),
-			'run_id'         => array(
+			'run_id'                => array(
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Optional client-supplied idempotency/run key. If omitted, the dispatcher provides an opaque run ID to the runtime and response.',
 			),
-			'session_owner'  => agents_chat_session_owner_schema(),
-			'attachments'    => array(
+			'principal'             => agents_chat_principal_schema(),
+			'session_owner'         => agents_chat_session_owner_schema(),
+			'attachments'           => array(
 				'type'        => 'array',
 				'description' => 'Channel-side attachments (images, voice notes, files, link previews). Shape is runtime-defined; runtimes ignore unknown attachment types.',
 				'default'     => array(),
 				'items'       => array( 'type' => 'object' ),
 			),
-			'tool_policy'    => array(
+			'tool_policy'           => array(
 				'type'        => array( 'object', 'null' ),
 				'description' => 'Optional caller-owned tool policy for this turn. Runtimes may use this to narrow tool visibility for peer-agent or sandbox invocations.',
 				'properties'  => array(
@@ -300,7 +363,7 @@ function agents_chat_input_schema(): array {
 					),
 				),
 			),
-			'allow_only'     => array(
+			'allow_only'            => array(
 				'type'        => 'array',
 				'description' => 'Optional per-turn allow-list of tool names. Runtimes may intersect this with agent policy and available tool declarations.',
 				'default'     => array(),
@@ -316,7 +379,7 @@ function agents_chat_input_schema(): array {
 					),
 				),
 			),
-			'client_context' => array(
+			'client_context'        => array(
 				'type'        => 'object',
 				'description' => 'Transport-level context describing where this turn originated.',
 				'properties'  => array(
@@ -368,6 +431,33 @@ function agents_chat_input_schema(): array {
 					),
 				),
 			),
+		),
+	);
+}
+
+/**
+ * Canonical execution principal schema for agents/chat.
+ *
+ * @return array<string, mixed>
+ */
+function agents_chat_principal_schema(): array {
+	return array(
+		'type'        => array( 'object', 'null' ),
+		'description' => 'Optional execution principal resolved by a trusted host/runtime. Disposable runtimes should use auth_source=runtime and request_context=runtime with opaque owner isolation.',
+		'properties'  => array(
+			'acting_user_id'     => array( 'type' => 'integer' ),
+			'effective_agent_id' => array( 'type' => 'string' ),
+			'auth_source'        => array( 'type' => 'string' ),
+			'request_context'    => array( 'type' => 'string' ),
+			'token_id'           => array( 'type' => array( 'integer', 'null' ) ),
+			'request_metadata'   => array( 'type' => 'object' ),
+			'workspace_id'       => array( 'type' => array( 'string', 'null' ) ),
+			'client_id'          => array( 'type' => array( 'string', 'null' ) ),
+			'audience_id'        => array( 'type' => array( 'string', 'null' ) ),
+			'audience_claims'    => array( 'type' => 'object' ),
+			'owner_type'         => array( 'type' => array( 'string', 'null' ) ),
+			'owner_key'          => array( 'type' => array( 'string', 'null' ) ),
+			'binding'            => array( 'type' => array( 'object', 'null' ) ),
 		),
 	);
 }

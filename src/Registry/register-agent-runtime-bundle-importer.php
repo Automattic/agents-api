@@ -7,6 +7,149 @@
 
 defined( 'ABSPATH' ) || exit;
 
+if ( ! function_exists( 'wp_agent_import_runtime_bundles' ) ) {
+	/**
+	 * Import one or more runtime agent bundle specs through the generic importer seam.
+	 *
+	 * Specs may include an inline `bundle` object or a `source` path to a JSON file.
+	 * Concrete storage stays with the active registry/materialization adapter; this
+	 * helper only normalizes transport and produces stable per-item result envelopes.
+	 *
+	 * @param array<int,mixed>    $bundle_specs Runtime bundle specs.
+	 * @param array<string,mixed> $input        Shared import input.
+	 * @return list<array<string,mixed>> Per-spec import results.
+	 */
+	function wp_agent_import_runtime_bundles( array $bundle_specs, array $input = array() ): array {
+		$results = array();
+		foreach ( $bundle_specs as $index => $spec ) {
+			if ( ! is_array( $spec ) ) {
+				$results[] = wp_agent_runtime_bundle_import_result( array(
+					'success' => false,
+					'index'   => $index,
+					'error'   => array(
+						'code'    => 'wp_agent_runtime_bundle_spec_invalid',
+						'message' => 'Runtime agent bundle spec must be an object.',
+					),
+				) );
+				continue;
+			}
+
+			$result = apply_filters( 'wp_agent_runtime_import_bundle', null, $spec, $input, $index );
+			if ( is_wp_error( $result ) ) {
+				$results[] = wp_agent_runtime_bundle_import_result( array(
+					'success' => false,
+					'index'   => $index,
+					'error'   => array(
+						'code'    => $result->get_error_code(),
+						'message' => $result->get_error_message(),
+						'data'    => $result->get_error_data(),
+					),
+				) );
+				continue;
+			}
+
+			if ( null === $result ) {
+				$results[] = wp_agent_runtime_bundle_import_result( array(
+					'success' => false,
+					'index'   => $index,
+					'error'   => array(
+						'code'    => 'wp_agent_runtime_bundle_unclaimed',
+						'message' => 'No runtime bundle importer accepted this spec.',
+					),
+				) );
+				continue;
+			}
+
+			$normalized          = is_array( $result ) ? $result : array( 'result' => $result );
+			$normalized['index'] = $index;
+			if ( ! array_key_exists( 'success', $normalized ) ) {
+				$normalized['success'] = true;
+			}
+			$results[] = wp_agent_runtime_bundle_import_result( $normalized );
+		}
+
+		return $results;
+	}
+}
+
+if ( ! function_exists( 'wp_agent_runtime_bundle_import_result' ) ) {
+	/**
+	 * Normalize one runtime bundle import result to a string-keyed envelope.
+	 *
+	 * @param array<mixed> $result Raw import result.
+	 * @return array<string,mixed>
+	 */
+	function wp_agent_runtime_bundle_import_result( array $result ): array {
+		$normalized = array();
+		foreach ( $result as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $value;
+			}
+		}
+		return $normalized;
+	}
+}
+
+if ( ! function_exists( 'wp_agent_runtime_bundle_from_source' ) ) {
+	/**
+	 * Load and decode a runtime bundle JSON file.
+	 *
+	 * @param string $source Source path.
+	 * @param int    $index  Spec index for error metadata.
+	 * @return array<string,mixed>|WP_Error Bundle array or error.
+	 */
+	function wp_agent_runtime_bundle_from_source( string $source, int $index ) {
+		$source = trim( $source );
+		if ( '' === $source || ! is_readable( $source ) ) {
+			return new WP_Error(
+				'wp_agent_runtime_bundle_source_unreadable',
+				'Runtime agent bundle source is not readable.',
+				array( 'index' => $index )
+			);
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Runtime bundle sources are local JSON files, not remote URLs.
+		$contents = file_get_contents( $source );
+		if ( false === $contents ) {
+			return new WP_Error(
+				'wp_agent_runtime_bundle_source_read_failed',
+				'Runtime agent bundle source could not be read.',
+				array( 'index' => $index )
+			);
+		}
+
+		try {
+			$bundle = json_decode( $contents, true, 512, JSON_THROW_ON_ERROR );
+		} catch ( JsonException $error ) {
+			return new WP_Error(
+				'wp_agent_runtime_bundle_source_invalid_json',
+				'Runtime agent bundle source must contain valid JSON.',
+				array(
+					'index'  => $index,
+					'reason' => $error->getMessage(),
+				)
+			);
+		}
+
+		if ( ! is_array( $bundle ) ) {
+			return new WP_Error(
+				'wp_agent_runtime_bundle_source_invalid_shape',
+				'Runtime agent bundle source must decode to an object.',
+				array( 'index' => $index )
+			);
+		}
+
+		$normalized = array();
+		foreach ( $bundle as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $value;
+			}
+		}
+
+		return $normalized;
+	}
+}
+
 add_filter(
 	'wp_agent_runtime_import_bundle',
 	static function ( $result, array $spec, array $input = array(), int $index = 0 ) {
@@ -25,7 +168,14 @@ add_filter(
 		};
 
 		$bundle = is_array( $spec['bundle'] ?? null ) ? $spec['bundle'] : array();
-		$agent  = is_array( $bundle['agent'] ?? null ) ? $bundle['agent'] : array();
+		if ( empty( $bundle ) && is_string( $spec['source'] ?? null ) ) {
+			$source_bundle = wp_agent_runtime_bundle_from_source( $spec['source'], $index );
+			if ( is_wp_error( $source_bundle ) ) {
+				return $source_bundle;
+			}
+			$bundle = $source_bundle;
+		}
+		$agent = is_array( $bundle['agent'] ?? null ) ? $bundle['agent'] : array();
 		if ( empty( $agent ) ) {
 			return null;
 		}
