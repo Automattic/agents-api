@@ -124,13 +124,13 @@ class WP_Agent_Conversation_Loop {
 		// descriptor) in their per-turn return value; the loop accumulates
 		// these and exposes them in the final result so consumers don't have
 		// to track them out-of-band via mutable state.
-		$turns_run        = 0;
-		$total_usage      = array(
+		$turns_run            = 0;
+		$total_usage          = array(
 			'prompt_tokens'     => 0,
 			'completion_tokens' => 0,
 			'total_tokens'      => 0,
 		);
-		$request_metadata = array();
+		$request_metadata     = array();
 		$provider_diagnostics = array();
 
 		if ( null !== $transcript_lock && '' !== $lock_session_id ) {
@@ -1282,7 +1282,7 @@ class WP_Agent_Conversation_Loop {
 		$mediation_enabled = self::resolve_tool_executor( $options ) instanceof WP_Agent_Tool_Executor && ! empty( $tool_declarations );
 
 		return static function ( array $messages, array $context ) use ( $adapter, $options, $tool_declarations, $run_id, $session_id, $request, $budgets, $mediation_enabled ): array {
-			$context = self::normalize_assoc_array( $context );
+			$context          = self::normalize_assoc_array( $context );
 			$provider_request = new WP_Agent_Provider_Turn_Request(
 				$messages,
 				$tool_declarations,
