@@ -71,8 +71,15 @@ class WP_Agent_Citation_Metadata {
 	 */
 	public static function normalize( array $citation ): array {
 		$normalized = array();
+		foreach ( $citation as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $value;
+			}
+		}
 
 		foreach ( array( 'source', 'source_title', 'source_url', 'document_id', 'chunk_id', 'excerpt' ) as $key ) {
+			unset( $normalized[ $key ] );
+
 			if ( isset( $citation[ $key ] ) && is_scalar( $citation[ $key ] ) ) {
 				$value = trim( (string) $citation[ $key ] );
 				if ( '' !== $value ) {
@@ -81,6 +88,7 @@ class WP_Agent_Citation_Metadata {
 			}
 		}
 
+		unset( $normalized['score'] );
 		if ( isset( $citation['score'] ) && is_numeric( $citation['score'] ) ) {
 			$normalized['score'] = (float) $citation['score'];
 		}

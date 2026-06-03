@@ -41,7 +41,7 @@ $normalized_metadata = AgentsAPI\AI\WP_Agent_Citation_Metadata::normalize_metada
 agents_api_smoke_assert_equals( 'trace-123', $normalized_metadata['trace_id'] ?? '', 'citation normalization preserves unrelated metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'docs', $normalized_metadata['citations'][0]['source'] ?? '', 'citation preserves generic source label', $failures, $passes );
 agents_api_smoke_assert_equals( 0.87, $normalized_metadata['citations'][0]['score'] ?? null, 'citation normalizes numeric score', $failures, $passes );
-agents_api_smoke_assert_equals( false, array_key_exists( 'plugin_name', $normalized_metadata['citations'][0] ?? array() ), 'citation drops product-specific fields from canonical shape', $failures, $passes );
+agents_api_smoke_assert_equals( 'product-specific-field', $normalized_metadata['citations'][0]['plugin_name'] ?? '', 'citation preserves caller-owned extension fields', $failures, $passes );
 
 $context_item = new AgentsAPI\AI\Context\WP_Agent_Context_Item(
 	'Retrieved context excerpt.',
