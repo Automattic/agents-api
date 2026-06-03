@@ -539,6 +539,12 @@ function agents_conversation_session_full( array $session ): array {
 		$session['metadata'] = array();
 	}
 
+	foreach ( array( 'session_id', 'workspace_type', 'workspace_id', 'owner_type', 'owner_key', 'agent_slug', 'title', 'provider', 'model', 'context' ) as $field ) {
+		$session[ $field ] = isset( $session[ $field ] ) && is_scalar( $session[ $field ] ) ? (string) $session[ $field ] : '';
+	}
+
+	$session['user_id'] = isset( $session['user_id'] ) && is_numeric( $session['user_id'] ) ? (int) $session['user_id'] : 0;
+
 	return $session;
 }
 

@@ -170,6 +170,9 @@ smoke_assert( true, isset( $in['properties']['session_owner'] ), 'input_schema_h
 smoke_assert( true, isset( $in['properties']['session_owner']['properties']['type'] ), 'session_owner_schema_has_type', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['session_owner']['properties']['key'] ), 'session_owner_schema_has_key', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['attachments'] ), 'input_schema_has_attachments', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['tool_policy']['properties']['mode'] ), 'input_schema_has_tool_policy', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['allow_only']['items'] ), 'input_schema_has_allow_only', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['completion_assertions']['properties']['required_tool_names'] ), 'input_schema_has_completion_assertions', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context']['properties']['sender_id'] ), 'client_context_schema_has_sender_id', $failures, $passes );
 smoke_assert( true, in_array( 'peer-agent', $in['properties']['client_context']['properties']['source']['enum'] ?? array(), true ), 'client_context_source_allows_peer_agent', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context']['properties']['caller_agent'] ), 'client_context_schema_has_caller_agent', $failures, $passes );

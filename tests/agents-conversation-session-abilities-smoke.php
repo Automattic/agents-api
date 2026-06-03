@@ -210,6 +210,8 @@ $input     = array(
 $created = agents_create_conversation_session( $input );
 smoke_assert( 's-1', $created['session']['session_id'] ?? null, 'create returns stored session', $failures, $passes );
 smoke_assert( 'frontend', $created['session']['metadata']['client'] ?? null, 'create passes metadata to store', $failures, $passes );
+smoke_assert( true, is_string( $created['session']['title'] ?? null ), 'create normalizes session title to string', $failures, $passes );
+smoke_assert( true, is_string( $created['session']['provider'] ?? null ) && is_string( $created['session']['model'] ?? null ), 'create normalizes nullable provider fields to strings', $failures, $passes );
 
 $store->update_session( 's-1', array( array( 'role' => 'user', 'content' => 'hello' ) ) );
 $got = agents_get_conversation_session( array( 'principal' => $principal, 'session_id' => 's-1' ) );
