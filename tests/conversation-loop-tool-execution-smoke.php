@@ -602,6 +602,8 @@ agents_api_smoke_assert_equals( false, $pending_result['completed'] ?? true, 'pe
 agents_api_smoke_assert_equals( 'client/summarize', $pending_result['runtime_tool_pending']['tool_name'] ?? '', 'pending request carries tool name', $failures, $passes );
 agents_api_smoke_assert_equals( 'client-call-1', $pending_result['runtime_tool_pending']['tool_call_id'] ?? '', 'pending request carries tool call id', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'tool_call', AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING ), array_column( $pending_result['tool_events'], 'type' ), 'pending request is recorded in canonical tool events', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STATUS_PENDING_RUNTIME_TOOL, $pending_result['run_outcome']['status'] ?? '', 'pending runtime tool run outcome is pending', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING, $pending_result['run_outcome']['stop_reason'] ?? '', 'pending runtime tool run outcome stop reason is pending', $failures, $passes );
 
 echo "\n[Pre-tool filter hook allows, rejects, or pauses external runtime tools (#259):\n";
 
@@ -722,6 +724,7 @@ agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'pre-tool filte
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING, $filter_pending_result['status'] ?? '', 'pre-tool filter pending sets canonical loop status', $failures, $passes );
 agents_api_smoke_assert_equals( 'call_filter_pending', $filter_pending_result['runtime_tool_pending']['tool_call_id'] ?? '', 'pre-tool filter pending request carries tool call id', $failures, $passes );
 agents_api_smoke_assert_equals( 'browser', $filter_pending_result['runtime_tool_pending']['metadata']['transport'] ?? '', 'pre-tool filter pending request preserves host metadata', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STATUS_PENDING_RUNTIME_TOOL, $filter_pending_result['run_outcome']['status'] ?? '', 'pre-tool filter pending run outcome is pending', $failures, $passes );
 
 echo "\n[Post-tool diagnostics option and filter attach audit metadata (#259):\n";
 

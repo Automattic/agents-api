@@ -20,6 +20,17 @@ class WP_Agent_Conversation_Result {
 	public const SCHEMA  = 'agents-api.conversation-result';
 	public const VERSION = 1;
 
+	public const RUN_OUTCOME_SCHEMA  = 'agents-api.run-outcome';
+	public const RUN_OUTCOME_VERSION = 1;
+
+	public const OUTCOME_STATUS_COMPLETED            = 'completed';
+	public const OUTCOME_STATUS_INCOMPLETE           = 'incomplete';
+	public const OUTCOME_STATUS_FAILED               = 'failed';
+	public const OUTCOME_STATUS_PENDING_RUNTIME_TOOL = 'runtime_tool_pending';
+	public const OUTCOME_STOP_NATURAL                = 'natural';
+	public const OUTCOME_STOP_MAX_TURNS              = 'max_turns';
+	public const OUTCOME_STOP_PROVIDER_ERROR         = 'provider_error';
+
 	/**
 	 * Validate and normalize a loop result.
 	 *
@@ -237,7 +248,125 @@ class WP_Agent_Conversation_Result {
 			throw self::invalid( 'runtime_tool_pending', 'must be an array when present' );
 		}
 
+		$result['run_outcome'] = self::normalizeRunOutcome( $result['run_outcome'] ?? null, $result );
+
 		return $result;
+	}
+
+	/**
+	 * Normalize the stable run outcome envelope.
+	 *
+	 * The envelope is intentionally generic: products can map it to their own
+	 * artifact/remediation contracts without parsing provider or runtime metadata.
+	 *
+	 * @param mixed        $outcome Raw outcome value.
+	 * @param array<mixed> $result  Normalized conversation result fields.
+	 * @return array<string,mixed>
+	 */
+	private static function normalizeRunOutcome( $outcome, array $result ): array {
+		$raw       = is_array( $outcome ) ? $outcome : array();
+		$status    = self::stringValue( $raw['status'] ?? null );
+		$completed = array_key_exists( 'completed', $raw ) ? (bool) $raw['completed'] : (bool) ( $result['completed'] ?? true );
+
+		if ( '' === $status ) {
+			$status = self::deriveOutcomeStatus( $result, $completed );
+		}
+
+		$normalized = array(
+			'schema'      => self::RUN_OUTCOME_SCHEMA,
+			'version'     => self::RUN_OUTCOME_VERSION,
+			'status'      => $status,
+			'completed'   => $completed,
+			'stop_reason' => self::deriveStopReason( $raw, $result, $status, $completed ),
+			'retryable'   => array_key_exists( 'retryable', $raw ) ? (bool) $raw['retryable'] : self::deriveRetryable( $result, $status ),
+		);
+
+		if ( isset( $raw['failure'] ) && is_array( $raw['failure'] ) ) {
+			$normalized['failure'] = self::stringKeyedArray( $raw['failure'] );
+		} elseif ( isset( $result['failure'] ) && is_array( $result['failure'] ) ) {
+			$normalized['failure'] = self::stringKeyedArray( $result['failure'] );
+		}
+
+		if ( isset( $raw['assertions'] ) && is_array( $raw['assertions'] ) ) {
+			$normalized['assertions'] = self::stringKeyedArray( $raw['assertions'] );
+		}
+
+		if ( isset( $raw['provider_error'] ) && is_array( $raw['provider_error'] ) ) {
+			$normalized['provider_error'] = self::stringKeyedArray( $raw['provider_error'] );
+		} elseif ( isset( $result['failure'] ) && is_array( $result['failure'] ) && self::OUTCOME_STOP_PROVIDER_ERROR === $normalized['stop_reason'] ) {
+			$normalized['provider_error'] = self::stringKeyedArray( $result['failure'] );
+		}
+
+		if ( isset( $raw['metadata'] ) && is_array( $raw['metadata'] ) ) {
+			$normalized['metadata'] = self::stringKeyedArray( $raw['metadata'] );
+		}
+
+		return $normalized;
+	}
+
+	/** @param array<mixed> $result */
+	private static function deriveOutcomeStatus( array $result, bool $completed ): string {
+		$status = self::stringValue( $result['status'] ?? null );
+		if ( self::OUTCOME_STATUS_PENDING_RUNTIME_TOOL === $status ) {
+			return self::OUTCOME_STATUS_PENDING_RUNTIME_TOOL;
+		}
+		if ( 'failed' === $status || isset( $result['failure'] ) ) {
+			return self::OUTCOME_STATUS_FAILED;
+		}
+		return $completed ? self::OUTCOME_STATUS_COMPLETED : self::OUTCOME_STATUS_INCOMPLETE;
+	}
+
+	/**
+	 * @param array<mixed> $raw    Raw outcome fields.
+	 * @param array<mixed> $result Normalized result fields.
+	 */
+	private static function deriveStopReason( array $raw, array $result, string $status, bool $completed ): string {
+		$stop_reason = self::stringValue( $raw['stop_reason'] ?? null );
+		if ( '' !== $stop_reason ) {
+			return $stop_reason;
+		}
+
+		$result_status = self::stringValue( $result['status'] ?? null );
+		if ( 'budget_exceeded' === $result_status && 'turns' === self::stringValue( $result['budget'] ?? null ) ) {
+			return self::OUTCOME_STOP_MAX_TURNS;
+		}
+		if ( self::OUTCOME_STATUS_PENDING_RUNTIME_TOOL === $status ) {
+			return self::OUTCOME_STATUS_PENDING_RUNTIME_TOOL;
+		}
+		if ( self::OUTCOME_STATUS_FAILED === $status ) {
+			return self::OUTCOME_STOP_PROVIDER_ERROR;
+		}
+		return $completed ? self::OUTCOME_STOP_NATURAL : $result_status;
+	}
+
+	/** @param array<mixed> $result */
+	private static function deriveRetryable( array $result, string $status ): bool {
+		if ( self::OUTCOME_STATUS_PENDING_RUNTIME_TOOL === $status ) {
+			return false;
+		}
+		if ( 'budget_exceeded' === self::stringValue( $result['status'] ?? null ) ) {
+			return true;
+		}
+		return self::OUTCOME_STATUS_FAILED === $status;
+	}
+
+	/** @param mixed $value Raw value. */
+	private static function stringValue( $value ): string {
+		return is_scalar( $value ) ? trim( (string) $value ) : '';
+	}
+
+	/**
+	 * @param array<mixed> $value Raw array.
+	 * @return array<string,mixed>
+	 */
+	private static function stringKeyedArray( array $value ): array {
+		$normalized = array();
+		foreach ( $value as $key => $item ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $item;
+			}
+		}
+		return $normalized;
 	}
 
 	/**

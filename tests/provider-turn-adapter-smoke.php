@@ -162,6 +162,8 @@ agents_api_smoke_assert_equals( 'Final answer from fake adapter.', $result['fina
 agents_api_smoke_assert_equals( 19, $result['usage']['total_tokens'], 'loop accumulates adapter usage', $failures, $passes );
 agents_api_smoke_assert_equals( 'provider-req-2', $result['request_metadata']['provider_request_id'], 'loop surfaces latest provider request metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 2, count( $result['provider_diagnostics'] ), 'loop accumulates provider diagnostics per turn', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STATUS_COMPLETED, $result['run_outcome']['status'] ?? '', 'loop successful run outcome is completed', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STOP_NATURAL, $result['run_outcome']['stop_reason'] ?? '', 'loop successful run outcome stop reason is natural', $failures, $passes );
 
 echo "\n[3] Content-only provider-turn adapters work without tool mediation:\n";
 $content_only_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
@@ -208,5 +210,8 @@ agents_api_smoke_assert_equals( 'failed', $failure_result['status'] ?? '', 'type
 agents_api_smoke_assert_equals( false, $failure_result['completed'] ?? true, 'typed provider failure is incomplete', $failures, $passes );
 agents_api_smoke_assert_equals( 'rate_limit', $failure_result['failure']['type'] ?? '', 'typed provider failure preserves type', $failures, $passes );
 agents_api_smoke_assert_equals( 30, $failure_result['provider_diagnostics'][0]['retry_after_seconds'] ?? 0, 'typed provider failure preserves diagnostics', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STATUS_FAILED, $failure_result['run_outcome']['status'] ?? '', 'provider failure run outcome is failed', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STOP_PROVIDER_ERROR, $failure_result['run_outcome']['stop_reason'] ?? '', 'provider failure run outcome stop reason is provider error', $failures, $passes );
+agents_api_smoke_assert_equals( 'rate_limit', $failure_result['run_outcome']['provider_error']['type'] ?? '', 'provider failure run outcome preserves provider error', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API provider-turn adapter', $failures, $passes );

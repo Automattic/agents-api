@@ -90,4 +90,40 @@ echo "\n[3] Non-agent bundles remain available for other importers:\n";
 $unclaimed = apply_filters( 'wp_agent_runtime_import_bundle', null, array( 'bundle' => array( 'not_agent' => true ) ), array(), 3 );
 agents_api_smoke_assert_equals( null, $unclaimed, 'non-agent bundle is not claimed', $failures, $passes );
 
+echo "\n[4] Source bundle files and list helper use the generic importer:\n";
+$source_bundle = array(
+	'bundle_version' => '1.0.0',
+	'bundle_slug'    => 'runtime-source-agent',
+	'agent'          => array(
+		'agent_slug'   => 'runtime-source-agent',
+		'agent_name'   => 'Runtime Source Agent',
+		'agent_config' => array( 'runtime' => array( 'source' => 'file' ) ),
+	),
+);
+$source_file = tempnam( sys_get_temp_dir(), 'agents-api-runtime-bundle-' );
+file_put_contents( $source_file, wp_json_encode( $source_bundle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
+$source_result = apply_filters( 'wp_agent_runtime_import_bundle', null, array( 'source' => $source_file ), array( 'on_conflict' => 'upgrade' ), 4 );
+agents_api_smoke_assert_equals( true, is_array( $source_result ) && true === ( $source_result['success'] ?? false ), 'source bundle import succeeds', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_agent( 'runtime-source-agent' ), 'source bundle registered agent', $failures, $passes );
+
+$helper_results = wp_agent_import_runtime_bundles(
+	array(
+		array( 'bundle' => array(
+			'bundle_slug' => 'runtime-helper-agent',
+			'agent'       => array(
+				'agent_slug'   => 'runtime-helper-agent',
+				'agent_name'   => 'Runtime Helper Agent',
+				'agent_config' => array( 'runtime' => array( 'source' => 'helper' ) ),
+			),
+		) ),
+		array( 'bundle' => array( 'not_agent' => true ) ),
+	),
+	array( 'on_conflict' => 'upgrade' )
+);
+agents_api_smoke_assert_equals( true, $helper_results[0]['success'] ?? false, 'helper import marks accepted bundle successful', $failures, $passes );
+agents_api_smoke_assert_equals( 'registered', $helper_results[0]['status'] ?? '', 'helper import preserves registered status', $failures, $passes );
+agents_api_smoke_assert_equals( false, $helper_results[1]['success'] ?? true, 'helper import marks unclaimed bundle failed', $failures, $passes );
+agents_api_smoke_assert_equals( 'wp_agent_runtime_bundle_unclaimed', $helper_results[1]['error']['code'] ?? '', 'helper import has stable unclaimed error', $failures, $passes );
+@unlink( $source_file );
+
 agents_api_smoke_finish( 'Agents API runtime agent bundle importer', $failures, $passes );

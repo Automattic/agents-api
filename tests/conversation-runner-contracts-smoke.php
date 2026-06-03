@@ -102,6 +102,8 @@ agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::SCHEM
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::VERSION, $runner_result['version'], 'runner result exposes canonical version', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $runner_result['messages'] ), 'runner returns normalized messages', $failures, $passes );
 agents_api_smoke_assert_equals( array(), $runner_result['tool_execution_results'], 'runner result normalization provides empty tool results', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::RUN_OUTCOME_SCHEMA, $runner_result['run_outcome']['schema'] ?? '', 'runner result exposes run outcome schema', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STATUS_COMPLETED, $runner_result['run_outcome']['status'] ?? '', 'runner result defaults to completed outcome', $failures, $passes );
 
 echo "\n[3] Completion decisions and policies are immutable value contracts:\n";
 $policy = new class() implements AgentsAPI\AI\WP_Agent_Conversation_Completion_Policy {
