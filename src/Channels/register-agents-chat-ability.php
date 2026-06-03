@@ -286,6 +286,36 @@ function agents_chat_input_schema(): array {
 				'default'     => array(),
 				'items'       => array( 'type' => 'object' ),
 			),
+			'tool_policy'    => array(
+				'type'        => array( 'object', 'null' ),
+				'description' => 'Optional caller-owned tool policy for this turn. Runtimes may use this to narrow tool visibility for peer-agent or sandbox invocations.',
+				'properties'  => array(
+					'mode'  => array(
+						'type' => 'string',
+						'enum' => array( 'allow', 'deny' ),
+					),
+					'tools' => array(
+						'type'  => 'array',
+						'items' => array( 'type' => 'string' ),
+					),
+				),
+			),
+			'allow_only'     => array(
+				'type'        => 'array',
+				'description' => 'Optional per-turn allow-list of tool names. Runtimes may intersect this with agent policy and available tool declarations.',
+				'default'     => array(),
+				'items'       => array( 'type' => 'string' ),
+			),
+			'completion_assertions' => array(
+				'type'        => array( 'object', 'null' ),
+				'description' => 'Optional runtime-defined completion assertions for this turn, such as required tool names before natural completion is accepted.',
+				'properties'  => array(
+					'required_tool_names' => array(
+						'type'  => 'array',
+						'items' => array( 'type' => 'string' ),
+					),
+				),
+			),
 			'client_context' => array(
 				'type'        => 'object',
 				'description' => 'Transport-level context describing where this turn originated.',

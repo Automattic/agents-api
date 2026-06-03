@@ -80,6 +80,7 @@ require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-composable-context.ph
 require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-context-section-registry.php';
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agents-registry.php';
 require_once AGENTS_API_PATH . 'src/Registry/register-agents.php';
+require_once AGENTS_API_PATH . 'src/Registry/register-agent-runtime-bundle-importer.php';
 require_once AGENTS_API_PATH . 'src/Packages/register-agent-package-artifacts.php';
 require_once AGENTS_API_PATH . 'src/Workspace/class-wp-agent-workspace-scope.php';
 require_once AGENTS_API_PATH . 'src/Identity/class-wp-agent-identity-scope.php';
