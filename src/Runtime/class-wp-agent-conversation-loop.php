@@ -64,7 +64,10 @@ class WP_Agent_Conversation_Loop {
 	 *   invoked after a mediated tool call is prepared and before execution. Receives
 	 *   one array context with transcript messages, raw/prepared tool call data,
 	 *   declaration, turn context, and prior mediated results. Return
-	 *   `{ action: 'proceed'|'reject'|'replace_result', ... }`.
+	 *   `{ action: 'proceed'|'reject'|'replace_result'|'pending', ... }`.
+	 * - `post_tool_result_diagnostics` (callable|null): Optional synchronous callback
+	 *   for host diagnostics after mediated execution. Receives an audit-oriented
+	 *   context and returns metadata stored with the tool execution result.
 	 * - `completion_policy` (WP_Agent_Conversation_Completion_Policy|null): Typed completion policy.
 	 * - `spin_detector` (WP_Agent_Spin_Detector|null): Optional repeated tool-call detector.
 	 * - `identical_failure_tracker` (WP_Agent_Identical_Failure_Tracker|null): Optional repeated failure nudger.
@@ -97,6 +100,7 @@ class WP_Agent_Conversation_Loop {
 		$failure_tracker       = self::resolve_identical_failure_tracker( $options );
 		$result_truncator      = self::resolve_tool_result_truncator( $options );
 		$pre_tool_mediator     = self::resolve_pre_tool_mediator( $options );
+		$post_tool_diagnostics = self::resolve_post_tool_result_diagnostics( $options );
 		$interrupt_source      = self::resolve_interrupt_source( $options );
 		$request               = self::resolve_request( $messages, $options );
 		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
@@ -287,7 +291,8 @@ class WP_Agent_Conversation_Loop {
 						$result_truncator,
 						$messages,
 						$pre_tool_mediator,
-						$tool_results
+						$tool_results,
+						$post_tool_diagnostics
 					);
 
 					$messages              = $mediation_result['messages'];
@@ -486,6 +491,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param array<int, array<string, mixed>>         $prior_messages  Transcript before this mediated turn.
 	 * @param callable|null                            $pre_tool_mediator Optional pre-tool mediator.
 	 * @param array<int, array<string, mixed>>         $prior_tool_results Prior mediated tool results.
+	 * @param callable|null                            $post_tool_diagnostics Optional post-result diagnostics callback.
 	 * @return array{messages: array<int, array<string, mixed>>, tool_execution_results: array<int, array<string, mixed>>, tool_events: array<int, array<string, mixed>>, tool_audit_events: array<int, array<string, mixed>>, events: array<int, array<string, mixed>>, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, runtime_tool_pending: array<string, mixed>|null, spin_signatures: array<int, WP_Agent_Spin_Signature>}
 	 */
 	private static function mediate_tool_calls(
@@ -501,7 +507,8 @@ class WP_Agent_Conversation_Loop {
 		?WP_Agent_Tool_Result_Truncator $truncator = null,
 		array $prior_messages = array(),
 		?callable $pre_tool_mediator = null,
-		array $prior_tool_results = array()
+		array $prior_tool_results = array(),
+		?callable $post_tool_diagnostics = null
 	): array {
 		$core = new WP_Agent_Tool_Execution_Core();
 
@@ -586,21 +593,22 @@ class WP_Agent_Conversation_Loop {
 			$prepared_tool_def            = isset( $prepared['tool_def'] ) && is_array( $prepared['tool_def'] ) ? $prepared['tool_def'] : array();
 			$tool_definition              = self::associative_array_or_null( $prepared['tool_def'] ?? ( $declarations[ $tool_name ] ?? null ) );
 			$mediator_complete            = false;
+			$mediation_context            = array(
+				'messages'               => $messages,
+				'raw_tool_call'          => $raw_call,
+				'prepared_tool_call'     => ! empty( $prepared['ready'] ) ? $prepared_tool_call : null,
+				'tool_declaration'       => $tool_definition,
+				'tool_name'              => $tool_name,
+				'parameters'             => $parameters,
+				'tool_call_id'           => $tool_call_id,
+				'turn_context'           => $turn_context,
+				'turn'                   => $turn,
+				'prior_tool_results'     => array_merge( $prior_tool_results, $tool_execution_results ),
+				'prior_mediated_results' => $tool_execution_results,
+			);
 			$mediator_decision            = self::pre_tool_mediation_decision(
 				$pre_tool_mediator,
-				array(
-					'messages'               => $messages,
-					'raw_tool_call'          => $raw_call,
-					'prepared_tool_call'     => ! empty( $prepared['ready'] ) ? $prepared_tool_call : null,
-					'tool_declaration'       => $tool_definition,
-					'tool_name'              => $tool_name,
-					'parameters'             => $parameters,
-					'tool_call_id'           => $tool_call_id,
-					'turn_context'           => $turn_context,
-					'turn'                   => $turn,
-					'prior_tool_results'     => array_merge( $prior_tool_results, $tool_execution_results ),
-					'prior_mediated_results' => $tool_execution_results,
-				)
+				$mediation_context
 			);
 
 			if ( 'reject' === $mediator_decision['action'] ) {
@@ -609,6 +617,9 @@ class WP_Agent_Conversation_Loop {
 			} elseif ( 'replace_result' === $mediator_decision['action'] ) {
 				$exec_result       = $mediator_decision['result'];
 				$mediator_complete = $mediator_decision['complete'];
+			} elseif ( 'pending' === $mediator_decision['action'] ) {
+				$exec_result       = $mediator_decision['result'];
+				$mediator_complete = true;
 			} elseif ( empty( $prepared['ready'] ) ) {
 				unset( $prepared['ready'] );
 				$exec_result = $prepared;
@@ -728,6 +739,36 @@ class WP_Agent_Conversation_Loop {
 			$runtime = isset( $exec_result['runtime'] ) && is_array( $exec_result['runtime'] ) ? $exec_result['runtime'] : array();
 			if ( ! empty( $runtime ) ) {
 				$execution_result['runtime'] = $runtime;
+			}
+
+			$diagnostics = self::post_tool_result_diagnostics(
+				$post_tool_diagnostics,
+				array(
+					'tool_name'         => $tool_name,
+					'tool_call_id'      => $tool_call_id,
+					'turn'              => $turn,
+					'turn_context'      => $turn_context,
+					'tool_declaration'  => $tool_definition,
+					'result'            => $exec_result,
+					'success'           => (bool) ( $exec_result['success'] ?? false ),
+					'parameters_sha256' => self::stable_sha256( $parameters_for_policy ),
+				)
+			);
+			if ( ! empty( $diagnostics ) ) {
+				$diagnostics_metadata            = array_merge(
+					array(
+						'tool_name'    => $tool_name,
+						'tool_call_id' => $tool_call_id,
+						'turn'         => $turn,
+					),
+					$diagnostics
+				);
+				$execution_result['diagnostics'] = $diagnostics;
+				$events[]                        = array(
+					'type'     => 'tool_result_diagnostics',
+					'metadata' => $diagnostics_metadata,
+				);
+				self::emit_event( $on_event, 'tool_result_diagnostics', $diagnostics_metadata );
 			}
 
 			$tool_execution_results[] = $execution_result;
@@ -980,40 +1021,80 @@ class WP_Agent_Conversation_Loop {
 	 * @return array{action: string, result: array<string,mixed>, complete: bool}
 	 */
 	private static function pre_tool_mediation_decision( ?callable $mediator, array $context ): array {
-		$proceed = array(
+		$proceed  = array(
 			'action'   => 'proceed',
 			'result'   => array(),
 			'complete' => false,
 		);
+		$decision = $proceed;
 
-		if ( null === $mediator ) {
-			return $proceed;
+		if ( null !== $mediator ) {
+			try {
+				$decision = self::normalize_pre_tool_mediation_decision( call_user_func( $mediator, $context ), $context, $proceed );
+			} catch ( \Throwable $error ) {
+				unset( $error );
+				$decision = $proceed;
+			}
 		}
 
-		try {
-			$decision = call_user_func( $mediator, $context );
-		} catch ( \Throwable $error ) {
-			unset( $error );
-			return $proceed;
+		if ( function_exists( 'apply_filters' ) ) {
+			try {
+				$decision = self::normalize_pre_tool_mediation_decision(
+					apply_filters( 'agents_api_pre_tool_call_decision', $decision, $context ),
+					$context,
+					$decision
+				);
+			} catch ( \Throwable $error ) {
+				unset( $error );
+			}
 		}
 
+		return $decision;
+	}
+
+	/**
+	 * Normalize a pre-tool mediation decision from an option callback or filter.
+	 *
+	 * @param mixed                                                        $decision Raw decision.
+	 * @param array<string,mixed>                                          $context  Tool mediation context.
+	 * @param array{action: string, result: array<string,mixed>, complete: bool} $fallback Fallback normalized decision.
+	 * @return array{action: string, result: array<string,mixed>, complete: bool}
+	 */
+	private static function normalize_pre_tool_mediation_decision( $decision, array $context, array $fallback ): array {
 		if ( ! is_array( $decision ) ) {
-			return $proceed;
+			return $fallback;
 		}
 
 		$action = $decision['action'] ?? 'proceed';
 		$action = is_string( $action ) ? strtolower( trim( $action ) ) : 'proceed';
-		if ( ! in_array( $action, array( 'proceed', 'reject', 'replace_result' ), true ) ) {
-			return $proceed;
+		if ( ! in_array( $action, array( 'proceed', 'reject', 'replace_result', 'pending' ), true ) ) {
+			return $fallback;
 		}
 
 		if ( 'proceed' === $action ) {
-			return $proceed;
+			return array(
+				'action'   => 'proceed',
+				'result'   => array(),
+				'complete' => false,
+			);
 		}
 
 		$tool_name = $context['tool_name'] ?? '';
 		if ( ! is_string( $tool_name ) || '' === $tool_name ) {
-			return $proceed;
+			return $fallback;
+		}
+
+		if ( 'reject' === $action && isset( $decision['result'] ) && is_array( $decision['result'] ) ) {
+			try {
+				$result = WP_Agent_Tool_Result::normalize( $decision['result'] );
+				return array(
+					'action'   => 'reject',
+					'result'   => $result,
+					'complete' => ! empty( $decision['complete'] ),
+				);
+			} catch ( \Throwable $error ) {
+				unset( $error );
+			}
 		}
 
 		if ( 'reject' === $action ) {
@@ -1029,17 +1110,53 @@ class WP_Agent_Conversation_Loop {
 				$metadata,
 				$runtime
 			);
+		} elseif ( 'pending' === $action ) {
+			$runtime      = self::associative_array_or_null( $decision['runtime'] ?? null ) ?? array();
+			$metadata     = self::associative_array_or_null( $decision['metadata'] ?? null ) ?? array();
+			$tool_call_id = is_string( $context['tool_call_id'] ?? null ) ? $context['tool_call_id'] : '';
+			$parameters   = is_array( $context['parameters'] ?? null ) ? $context['parameters'] : array();
+			$turn_context = self::normalize_assoc_array( $context['turn_context'] ?? array() );
+			$request      = self::associative_array_or_null( $decision['runtime_tool_request'] ?? ( $decision['request'] ?? ( $decision['result'] ?? null ) ) ) ?? array();
+
+			try {
+				$request = WP_Agent_Runtime_Tool_Request::normalize( array_merge(
+					$request,
+					array(
+						'tool_name'    => $request['tool_name'] ?? $tool_name,
+						'tool_call_id' => $request['tool_call_id'] ?? $tool_call_id,
+						'parameters'   => $request['parameters'] ?? $parameters,
+						'run_id'       => $request['run_id'] ?? ( is_string( $turn_context['run_id'] ?? null ) ? $turn_context['run_id'] : '' ),
+						'timeout_at'   => $request['timeout_at'] ?? ( is_string( $turn_context['runtime_tool_timeout_at'] ?? null ) ? $turn_context['runtime_tool_timeout_at'] : '' ),
+						'runtime'      => $request['runtime'] ?? $runtime,
+						'metadata'     => $request['metadata'] ?? $metadata,
+					)
+				) );
+			} catch ( \Throwable $error ) {
+				unset( $error );
+				return $fallback;
+			}
+
+			$metadata['status'] = WP_Agent_Runtime_Tool_Request::STATUS_PENDING;
+			$result             = WP_Agent_Tool_Result::normalize( array(
+				'success'              => false,
+				'tool_name'            => $tool_name,
+				'status'               => WP_Agent_Runtime_Tool_Request::STATUS_PENDING,
+				'error'                => is_string( $decision['error'] ?? null ) && '' !== trim( $decision['error'] ) ? trim( $decision['error'] ) : 'Waiting for external runtime tool result.',
+				'metadata'             => $metadata,
+				'runtime'              => $runtime,
+				'runtime_tool_request' => $request,
+			) );
 		} else {
 			$raw_result = $decision['result'] ?? null;
 			if ( ! is_array( $raw_result ) ) {
-				return $proceed;
+				return $fallback;
 			}
 			$raw_result['tool_name'] = is_string( $raw_result['tool_name'] ?? null ) && '' !== $raw_result['tool_name'] ? $raw_result['tool_name'] : $tool_name;
 			try {
 				$result = WP_Agent_Tool_Result::normalize( $raw_result );
 			} catch ( \Throwable $error ) {
 				unset( $error );
-				return $proceed;
+				return $fallback;
 			}
 		}
 
@@ -1048,6 +1165,41 @@ class WP_Agent_Conversation_Loop {
 			'result'   => $result,
 			'complete' => ! empty( $decision['complete'] ),
 		);
+	}
+
+	/**
+	 * Collect optional host diagnostics for a mediated tool result.
+	 *
+	 * @param callable|null       $callback Optional diagnostics callback.
+	 * @param array<string,mixed> $context  Audit-oriented diagnostics context.
+	 * @return array<string,mixed> Diagnostics metadata.
+	 */
+	private static function post_tool_result_diagnostics( ?callable $callback, array $context ): array {
+		$diagnostics = array();
+
+		if ( null !== $callback ) {
+			try {
+				$value = call_user_func( $callback, $context );
+				if ( is_array( $value ) ) {
+					$diagnostics = self::normalize_assoc_array( $value );
+				}
+			} catch ( \Throwable $error ) {
+				unset( $error );
+			}
+		}
+
+		if ( function_exists( 'apply_filters' ) ) {
+			try {
+				$value = apply_filters( 'agents_api_mediated_tool_result_diagnostics', $diagnostics, $context );
+				if ( is_array( $value ) ) {
+					$diagnostics = self::normalize_assoc_array( $value );
+				}
+			} catch ( \Throwable $error ) {
+				unset( $error );
+			}
+		}
+
+		return $diagnostics;
 	}
 
 	/**
@@ -1877,6 +2029,17 @@ class WP_Agent_Conversation_Loop {
 	private static function resolve_pre_tool_mediator( array $options ): ?callable {
 		$mediator = $options['pre_tool_mediator'] ?? null;
 		return is_callable( $mediator ) ? $mediator : null;
+	}
+
+	/**
+	 * Resolve the post-tool result diagnostics callback from options.
+	 *
+	 * @param array<string, mixed> $options Loop options.
+	 * @return callable|null
+	 */
+	private static function resolve_post_tool_result_diagnostics( array $options ): ?callable {
+		$callback = $options['post_tool_result_diagnostics'] ?? null;
+		return is_callable( $callback ) ? $callback : null;
 	}
 
 	/**
