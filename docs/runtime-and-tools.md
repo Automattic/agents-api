@@ -141,7 +141,7 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 
 ## Runtime tool declarations
 
-`AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration` validates per-run tool declarations. The current substrate shape is intentionally narrow:
+`AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalize()` validates per-run client tool declarations. The runtime-client shape is intentionally narrow:
 
 - tool names must be namespaced as `client/tool_slug`;
 - `source` must match the name prefix and currently resolves to `client`;
@@ -169,6 +169,23 @@ $tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalize(
 ```
 
 Invalid declarations produce machine-readable invalid field names through `validate()` or an `InvalidArgumentException` from `normalize()`.
+
+Conversation requests use `normalizeForConversationRequest()` so replay/audit records can carry the full model-facing tool catalog without weakening the client runtime contract. Client tools still pass through strict `normalize()`. Host-owned tools use `executor => 'host'`, `scope => 'run'`, a namespaced stable name, matching source metadata, description, parameters schema, and optional runtime metadata:
+
+```php
+$tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(
+	array(
+		'name'        => 'ability/search_posts',
+		'source'      => 'ability',
+		'description' => 'Search host-owned posts.',
+		'parameters'  => array(
+			'required' => array( 'query' ),
+		),
+		'executor'    => 'host',
+		'scope'       => 'run',
+	)
+);
+```
 
 ### Tool runtime metadata
 

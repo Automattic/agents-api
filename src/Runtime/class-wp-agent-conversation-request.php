@@ -176,7 +176,7 @@ class WP_Agent_Conversation_Request {
 			}
 
 			try {
-				$normalized[] = self::string_keyed_array( WP_Agent_Tool_Declaration::normalize( self::string_keyed_array( $tool ) ) );
+				$normalized[] = self::string_keyed_array( WP_Agent_Tool_Declaration::normalizeForConversationRequest( self::string_keyed_array( $tool ) ) );
 			} catch ( \InvalidArgumentException $error ) {
 				throw self::invalid( 'tools[' . $index . ']', $error->getMessage() );
 			}
