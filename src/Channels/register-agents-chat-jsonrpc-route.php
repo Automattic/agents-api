@@ -30,18 +30,18 @@ use AgentsAPI\AI\WP_Agent_Chat_Run_Control;
 
 defined( 'ABSPATH' ) || exit;
 
-const AGENTS_CHAT_JSONRPC_NAMESPACE   = 'agents-api/v1';
-const AGENTS_CHAT_JSONRPC_ROUTE       = '/agent/(?P<agent_id>[A-Za-z0-9._-]+)';
-const AGENTS_CHAT_JSONRPC_VERSION     = '2.0';
-const AGENTS_CHAT_JSONRPC_METHOD_SEND = 'message/send';
+const AGENTS_CHAT_JSONRPC_NAMESPACE     = 'agents-api/v1';
+const AGENTS_CHAT_JSONRPC_ROUTE         = '/agent/(?P<agent_id>[A-Za-z0-9._-]+)';
+const AGENTS_CHAT_JSONRPC_VERSION       = '2.0';
+const AGENTS_CHAT_JSONRPC_METHOD_SEND   = 'message/send';
 const AGENTS_CHAT_JSONRPC_METHOD_STREAM = 'message/stream';
 
 // JSON-RPC 2.0 reserved error codes (see the spec + agenttic-client ErrorCodes).
-const AGENTS_CHAT_JSONRPC_ERR_PARSE          = -32700;
-const AGENTS_CHAT_JSONRPC_ERR_INVALID_REQUEST = -32600;
+const AGENTS_CHAT_JSONRPC_ERR_PARSE            = -32700;
+const AGENTS_CHAT_JSONRPC_ERR_INVALID_REQUEST  = -32600;
 const AGENTS_CHAT_JSONRPC_ERR_METHOD_NOT_FOUND = -32601;
-const AGENTS_CHAT_JSONRPC_ERR_INVALID_PARAMS  = -32602;
-const AGENTS_CHAT_JSONRPC_ERR_INTERNAL        = -32603;
+const AGENTS_CHAT_JSONRPC_ERR_INVALID_PARAMS   = -32602;
+const AGENTS_CHAT_JSONRPC_ERR_INTERNAL         = -32603;
 
 add_action(
 	'rest_api_init',
@@ -155,11 +155,11 @@ function agents_chat_jsonrpc_permission( \WP_REST_Request $request ): bool|\WP_E
  * @return \WP_REST_Response
  */
 function agents_chat_jsonrpc_dispatch( \WP_REST_Request $request ): \WP_REST_Response {
-	$agent   = sanitize_title( agents_chat_jsonrpc_string( $request->get_param( 'agent_id' ) ) );
-	$body    = $request->get_json_params();
-	$rpc_id  = agents_chat_jsonrpc_request_id( $body );
-	$method  = isset( $body['method'] ) && is_string( $body['method'] ) ? $body['method'] : '';
-	$params  = isset( $body['params'] ) && is_array( $body['params'] ) ? $body['params'] : array();
+	$agent  = sanitize_title( agents_chat_jsonrpc_string( $request->get_param( 'agent_id' ) ) );
+	$body   = $request->get_json_params();
+	$rpc_id = agents_chat_jsonrpc_request_id( $body );
+	$method = isset( $body['method'] ) && is_string( $body['method'] ) ? $body['method'] : '';
+	$params = isset( $body['params'] ) && is_array( $body['params'] ) ? $body['params'] : array();
 
 	if ( AGENTS_CHAT_JSONRPC_VERSION !== ( $body['jsonrpc'] ?? null ) ) {
 		return rest_ensure_response(
@@ -509,7 +509,7 @@ function agents_chat_jsonrpc_attachments( array $message ): array {
 		if ( ! is_array( $part ) || 'file' !== ( $part['type'] ?? null ) ) {
 			continue;
 		}
-		$file = isset( $part['file'] ) && is_array( $part['file'] ) ? $part['file'] : array();
+		$file          = isset( $part['file'] ) && is_array( $part['file'] ) ? $part['file'] : array();
 		$attachments[] = agents_chat_jsonrpc_string_keyed_array( $file );
 	}
 
