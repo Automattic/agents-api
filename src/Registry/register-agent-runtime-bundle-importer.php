@@ -108,6 +108,7 @@ if ( ! function_exists( 'wp_agent_runtime_bundle_from_source' ) ) {
 			);
 		}
 
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Runtime bundle sources are local JSON files, not remote URLs.
 		$contents = file_get_contents( $source );
 		if ( false === $contents ) {
 			return new WP_Error(
@@ -174,7 +175,7 @@ add_filter(
 			}
 			$bundle = $source_bundle;
 		}
-		$agent  = is_array( $bundle['agent'] ?? null ) ? $bundle['agent'] : array();
+		$agent = is_array( $bundle['agent'] ?? null ) ? $bundle['agent'] : array();
 		if ( empty( $agent ) ) {
 			return null;
 		}
