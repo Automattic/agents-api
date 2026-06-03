@@ -94,7 +94,8 @@ class WP_Agent_Conversation_Loop {
 		$max_turns             = self::max_turns( $options['max_turns'] ?? 1 );
 		$context               = self::normalize_assoc_array( $options['context'] ?? array() );
 		$tool_executor         = self::resolve_tool_executor( $options );
-		$tool_declarations     = self::resolve_tool_declarations( $options );
+		$rejected_declarations = array();
+		$tool_declarations     = self::resolve_tool_declarations( $options, $rejected_declarations );
 		$should_continue       = self::resolve_should_continue( $options, $tool_executor, $tool_declarations );
 		$completion_policy     = self::resolve_completion_policy( $options );
 		$transcript_persister  = self::resolve_transcript_persister( $options );
@@ -118,7 +119,8 @@ class WP_Agent_Conversation_Loop {
 		$wall_clock_started_at = microtime( true );
 		$wall_clock_initial    = isset( $budgets['wall_clock_seconds'] ) ? $budgets['wall_clock_seconds']->current() : 0;
 		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
-		$messages              = self::normalize_messages( $messages );
+		self::emit_tool_declaration_diagnostics( $on_event, $rejected_declarations, $tool_declarations, $tool_executor );
+		$messages = self::normalize_messages( $messages );
 		if ( '' !== $run_id && '' !== $lock_session_id ) {
 			WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, array( 'source' => 'conversation_loop' ) );
 		}
@@ -285,7 +287,7 @@ class WP_Agent_Conversation_Loop {
 
 				// When mediation is enabled, the turn runner returns tool_calls
 				// and the loop handles execution. Otherwise, the caller-managed path applies.
-				if ( $mediation_enabled && isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ) {
+				if ( null !== $tool_executor && $mediation_enabled && isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ) {
 					$mediation_result = self::mediate_tool_calls(
 						self::normalize_assoc_array( $result ),
 						$tool_executor,
@@ -880,7 +882,7 @@ class WP_Agent_Conversation_Loop {
 		foreach ( $continuation_messages as $continuation_message ) {
 			$continuation_role = is_string( $continuation_message['role'] ?? null ) ? $continuation_message['role'] : '';
 			$messages[]        = $continuation_message;
-			$events[]   = array(
+			$events[]          = array(
 				'type'     => 'continuation_message_added',
 				'metadata' => array(
 					'turn' => $turn,
@@ -1637,7 +1639,7 @@ class WP_Agent_Conversation_Loop {
 				foreach ( $continuation_messages as $continuation_message ) {
 					$continuation_role = is_string( $continuation_message['role'] ?? null ) ? $continuation_message['role'] : '';
 					$messages[]        = $continuation_message;
-					$events[]   = array(
+					$events[]          = array(
 						'type'     => 'continuation_message_added',
 						'metadata' => array(
 							'role' => $continuation_role,
@@ -1706,6 +1708,50 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		return $metadata;
+	}
+
+	/**
+	 * Surface tool declarations that were dropped during normalization.
+	 *
+	 * Invalid declarations are silently removed from the mediation list, which
+	 * can flip mediation off entirely when every declaration is rejected — the
+	 * model emits tool calls but nothing executes, with no indication why. This
+	 * emits a `tool_declarations_rejected` event (with each declaration's name
+	 * and validation reason) whenever any are dropped, plus a prominent
+	 * `tool_mediation_disabled` event when declarations were supplied alongside a
+	 * tool executor but all of them were rejected.
+	 *
+	 * @param callable|null                                    $on_event          Event sink.
+	 * @param array<int, array{name: string, reason: string}>  $rejected          Rejected declarations with reasons.
+	 * @param array<string, array<string, mixed>>              $tool_declarations Accepted declarations.
+	 * @param WP_Agent_Tool_Executor|null                      $tool_executor     Resolved tool executor.
+	 */
+	private static function emit_tool_declaration_diagnostics( ?callable $on_event, array $rejected, array $tool_declarations, ?WP_Agent_Tool_Executor $tool_executor ): void {
+		if ( empty( $rejected ) ) {
+			return;
+		}
+
+		self::emit_event(
+			$on_event,
+			'tool_declarations_rejected',
+			array(
+				'rejected'       => array_values( $rejected ),
+				'rejected_count' => count( $rejected ),
+				'accepted_count' => count( $tool_declarations ),
+			)
+		);
+
+		if ( empty( $tool_declarations ) && null !== $tool_executor ) {
+			self::emit_event(
+				$on_event,
+				'tool_mediation_disabled',
+				array(
+					'reason'         => 'all_declarations_rejected',
+					'rejected'       => array_values( $rejected ),
+					'rejected_count' => count( $rejected ),
+				)
+			);
+		}
 	}
 
 	/**
@@ -1977,12 +2023,13 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Resolve tool declarations from options.
 	 *
-	 * @param array<string, mixed> $options Loop options.
+	 * @param array<string, mixed>                            $options  Loop options.
+	 * @param array<int, array{name: string, reason: string}> $rejected Out: rejected declarations with reasons.
 	 * @return array<string, array<string, mixed>> Tool declarations keyed by name.
 	 */
-	private static function resolve_tool_declarations( array $options ): array {
+	private static function resolve_tool_declarations( array $options, array &$rejected = array() ): array {
 		$declarations = $options['tool_declarations'] ?? null;
-		return is_array( $declarations ) ? self::normalize_tool_declarations( $declarations ) : array();
+		return is_array( $declarations ) ? self::normalize_tool_declarations( $declarations, $rejected ) : array();
 	}
 
 	/**
@@ -2528,25 +2575,43 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Normalize tool declarations to declarations keyed by tool name.
 	 *
-	 * @param array<mixed> $declarations Raw declarations.
+	 * Declarations that fail validation are dropped from the result and recorded
+	 * in `$rejected` (with their declared name and validation reason) so callers
+	 * can surface them instead of degrading silently.
+	 *
+	 * @param array<mixed>                                  $declarations Raw declarations.
+	 * @param array<int, array{name: string, reason: string}> $rejected   Out: rejected declarations with reasons.
 	 * @return array<string, array<string, mixed>> Tool declarations.
 	 */
-	private static function normalize_tool_declarations( array $declarations ): array {
+	private static function normalize_tool_declarations( array $declarations, array &$rejected = array() ): array {
 		$normalized = array();
 		foreach ( $declarations as $name => $declaration ) {
+			$declared_name = is_string( $name ) && '' !== $name ? $name : '';
+
 			if ( ! is_array( $declaration ) ) {
+				$rejected[] = array(
+					'name'   => $declared_name,
+					'reason' => 'declaration must be an array',
+				);
 				continue;
 			}
 
 			$declaration = self::normalize_assoc_array( $declaration );
-			if ( is_string( $name ) && '' !== $name && ! isset( $declaration['name'] ) ) {
-				$declaration['name'] = $name;
+			if ( '' !== $declared_name && ! isset( $declaration['name'] ) ) {
+				$declaration['name'] = $declared_name;
+			}
+
+			if ( '' === $declared_name && is_string( $declaration['name'] ?? null ) ) {
+				$declared_name = $declaration['name'];
 			}
 
 			try {
 				$tool = self::normalize_assoc_array( WP_Agent_Tool_Declaration::normalizeForConversationRequest( $declaration ) );
 			} catch ( \InvalidArgumentException $error ) {
-				unset( $error );
+				$rejected[] = array(
+					'name'   => $declared_name,
+					'reason' => $error->getMessage(),
+				);
 				continue;
 			}
 

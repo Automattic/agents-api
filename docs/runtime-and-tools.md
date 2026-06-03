@@ -140,6 +140,27 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 );
 ```
 
+Mediation turns on only when both `tool_executor` and at least one **valid**
+`tool_declarations` entry are present. Declarations are validated through
+`WP_Agent_Tool_Declaration::normalizeForConversationRequest()`, and the client
+runtime contract is strict (see [Runtime tool declarations](#runtime-tool-declarations)):
+names must be `client/<slug>` and the namespace must resolve to `source: client`.
+A declaration like `openclawp__get-recent-posts` (no slash) or
+`openclawp/get-recent-posts` (source `openclawp`) fails validation.
+
+Invalid declarations are dropped from the mediation list. So the loop can detect
+that misconfiguration instead of silently degrading to a no-tools turn, it emits:
+
+- `tool_declarations_rejected` — whenever any declaration is dropped, with
+  `rejected` (each `{ name, reason }`), `rejected_count`, and `accepted_count`.
+- `tool_mediation_disabled` — when a `tool_executor` was supplied but **every**
+  declaration was rejected (so mediation is off and tool calls will never run),
+  with `reason: 'all_declarations_rejected'`.
+
+Both fire through the `on_event` sink and the `agents_api_loop_event` action.
+Without this, a name-format mismatch surfaces only as "the model emitted a tool
+call but nothing executed and the reply is empty," with no indication why.
+
 ### Pre-tool mediation decisions
 
 `pre_tool_mediator` lets a host make a synchronous product-owned decision after the loop has appended the canonical tool-call message and prepared the call, but before concrete execution. Agents API does not persist mediation decisions; hosts can observe the resulting canonical messages, `tool_execution_results`, `tool_events`, `tool_audit_events`, and loop events through existing surfaces.
