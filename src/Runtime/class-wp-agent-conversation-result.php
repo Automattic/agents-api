@@ -209,6 +209,10 @@ class WP_Agent_Conversation_Result {
 			throw self::invalid( 'request_metadata', 'must be an array when present' );
 		}
 
+		if ( array_key_exists( 'provider_diagnostics', $result ) && ! is_array( $result['provider_diagnostics'] ) ) {
+			throw self::invalid( 'provider_diagnostics', 'must be an array when present' );
+		}
+
 		if ( array_key_exists( 'completed', $result ) && ! is_bool( $result['completed'] ) ) {
 			throw self::invalid( 'completed', 'must be a boolean when present' );
 		}

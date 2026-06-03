@@ -127,6 +127,9 @@ require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-default-tool-tier-resol
 require_once AGENTS_API_PATH . 'src/Tools/register-agent-ability-meta-abilities.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-request.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-runner.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-provider-turn-request.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-provider-turn-result.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-provider-turn-adapter.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-completion-decision.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-completion-policy.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-transcript-persister.php';
