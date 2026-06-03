@@ -32,10 +32,14 @@ class WP_Agent_Conversation_Loop {
 	 * Run a conversation loop.
 	 *
 	 * The turn runner receives `(array $messages, array $context)` and must return
-	 * an array. When tool mediation is enabled (`tool_executor` + `tool_declarations`),
-	 * the turn runner can return a `tool_calls` key (array of `{name, parameters}`)
-	 * and the loop handles execution internally. Otherwise the turn runner must
-	 * return an `WP_Agent_Conversation_Result`-compatible array as before.
+	 * an array. Callers may also pass `provider_turn_adapter` in options; that
+	 * adapter receives `WP_Agent_Provider_Turn_Request` and returns a normalized
+	 * `WP_Agent_Provider_Turn_Result` shape while the loop keeps ownership of
+	 * continuation and mediated tool execution. When tool mediation is enabled
+	 * (`tool_executor` + `tool_declarations`), the turn runner or provider-turn
+	 * adapter can return a `tool_calls` key (array of `{name, parameters}`) and
+	 * the loop handles execution internally. Otherwise the turn runner must return
+	 * an `WP_Agent_Conversation_Result`-compatible array as before.
 	 *
 	 * Supported options:
 	 *
@@ -53,6 +57,7 @@ class WP_Agent_Conversation_Loop {
 	 *   opt into the historical continue-always behavior.
 	 * - `compaction_policy` (array|null): Optional compaction policy.
 	 * - `summarizer` (callable|null): Optional compaction summarizer.
+	 * - `provider_turn_adapter` (WP_Agent_Provider_Turn_Adapter|callable|null): Provider dispatch adapter.
 	 * - `tool_executor` (WP_Agent_Tool_Executor|null): Tool execution adapter.
 	 * - `tool_declarations` (array|null): Tool declarations keyed by name.
 	 * - `completion_policy` (WP_Agent_Conversation_Completion_Policy|null): Typed completion policy.
@@ -67,11 +72,11 @@ class WP_Agent_Conversation_Loop {
 	 * - `on_event` (callable|null): Caller-owned lifecycle event sink `fn(string $event, array $payload)`.
 	 *
 	 * @param array<int, array<string, mixed>> $messages    Initial transcript messages.
-	 * @param callable                         $turn_runner Caller-owned turn adapter.
+	 * @param callable|null                    $turn_runner Caller-owned turn adapter.
 	 * @param array<string, mixed>             $options     Loop options.
 	 * @return array<string, mixed> Normalized conversation result.
 	 */
-	public static function run( array $messages, callable $turn_runner, array $options = array() ): array {
+	public static function run( array $messages, ?callable $turn_runner = null, array $options = array() ): array {
 		$runtime_overrides     = self::resolve_runtime_overrides( $options );
 		$options               = self::apply_runtime_overrides_to_options( $options, $runtime_overrides );
 		$max_turns             = self::max_turns( $options['max_turns'] ?? 1 );
@@ -95,6 +100,7 @@ class WP_Agent_Conversation_Loop {
 		$budget_resolution     = self::resolve_budgets( $options, $max_turns );
 		$budgets               = $budget_resolution['budgets'];
 		$has_explicit_turns    = $budget_resolution['has_explicit_turns'];
+		$turn_runner           = self::resolve_turn_runner( $turn_runner, $options, $tool_declarations, $run_id, $lock_session_id, $request, $budgets );
 		$wall_clock_started_at = microtime( true );
 		$wall_clock_initial    = isset( $budgets['wall_clock_seconds'] ) ? $budgets['wall_clock_seconds']->current() : 0;
 		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
@@ -125,6 +131,7 @@ class WP_Agent_Conversation_Loop {
 			'total_tokens'      => 0,
 		);
 		$request_metadata = array();
+		$provider_diagnostics = array();
 
 		if ( null !== $transcript_lock && '' !== $lock_session_id ) {
 			$lock_token = $transcript_lock->acquire_session_lock( $lock_session_id, $lock_ttl );
@@ -209,6 +216,41 @@ class WP_Agent_Conversation_Loop {
 					) );
 
 					throw $error;
+				}
+
+				if ( isset( $result['provider_diagnostics'] ) && is_array( $result['provider_diagnostics'] ) ) {
+					$provider_diagnostics[] = self::normalize_assoc_array( $result['provider_diagnostics'] );
+				}
+
+				if ( isset( $result['failure'] ) && is_array( $result['failure'] ) ) {
+					$failure = self::normalize_provider_turn_failure( $result['failure'], $turn );
+					self::emit_event( $on_event, 'failed', array(
+						'turn'  => $turn,
+						'error' => $failure['message'],
+					) );
+
+					$failure_result = self::normalize_conversation_result( array(
+						'messages'               => $messages,
+						'tool_execution_results' => self::normalize_array_list( $tool_results ),
+						'tool_events'            => self::normalize_array_list( $tool_events ),
+						'tool_audit_events'      => self::normalize_array_list( $tool_audit_events ),
+						'events'                 => self::normalize_array_list( $events ),
+						'status'                 => 'failed',
+						'completed'              => false,
+						'turn_count'             => $turn,
+						'final_content'          => self::extract_final_content( $messages ),
+						'usage'                  => $total_usage,
+						'request_metadata'       => $request_metadata,
+						'provider_diagnostics'   => $provider_diagnostics,
+						'failure'                => $failure,
+					) );
+
+					if ( '' !== $run_id && '' !== $lock_session_id ) {
+						WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED );
+					}
+
+					self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
+					return $failure_result;
 				}
 
 				// Accumulate optional observability fields from the turn runner.
@@ -354,6 +396,7 @@ class WP_Agent_Conversation_Loop {
 				'final_content'          => self::extract_final_content( $messages ),
 				'usage'                  => $total_usage,
 				'request_metadata'       => $request_metadata,
+				'provider_diagnostics'   => $provider_diagnostics,
 				'completed'              => true,
 			);
 
@@ -1208,6 +1251,134 @@ class WP_Agent_Conversation_Loop {
 	}
 
 	/**
+	 * Resolve the caller turn runner or wrap a provider-turn adapter.
+	 *
+	 * @param callable|null                         $turn_runner       Caller-owned turn runner.
+	 * @param array<string, mixed>                  $options           Loop options.
+	 * @param array<string, array<string, mixed>>   $tool_declarations Tool declarations keyed by name.
+	 * @param string                                $run_id            Run identifier.
+	 * @param string                                $session_id        Session identifier.
+	 * @param WP_Agent_Conversation_Request         $request           Conversation request.
+	 * @param array<string, WP_Agent_Iteration_Budget> $budgets        Resolved budgets.
+	 * @return callable
+	 */
+	private static function resolve_turn_runner( ?callable $turn_runner, array $options, array $tool_declarations, string $run_id, string $session_id, WP_Agent_Conversation_Request $request, array $budgets ): callable {
+		$provider_turn_adapter = $options['provider_turn_adapter'] ?? null;
+		if ( null === $provider_turn_adapter ) {
+			if ( null === $turn_runner ) {
+				throw new \InvalidArgumentException( 'invalid_agent_conversation_loop: a turn runner or provider_turn_adapter is required' );
+			}
+
+			return $turn_runner;
+		}
+
+		if ( $provider_turn_adapter instanceof WP_Agent_Provider_Turn_Adapter ) {
+			$adapter = array( $provider_turn_adapter, 'run_turn' );
+		} elseif ( is_callable( $provider_turn_adapter ) ) {
+			$adapter = $provider_turn_adapter;
+		} else {
+			throw new \InvalidArgumentException( 'invalid_agent_conversation_loop: provider_turn_adapter must implement WP_Agent_Provider_Turn_Adapter or be callable' );
+		}
+		$mediation_enabled = self::resolve_tool_executor( $options ) instanceof WP_Agent_Tool_Executor && ! empty( $tool_declarations );
+
+		return static function ( array $messages, array $context ) use ( $adapter, $options, $tool_declarations, $run_id, $session_id, $request, $budgets, $mediation_enabled ): array {
+			$context = self::normalize_assoc_array( $context );
+			$provider_request = new WP_Agent_Provider_Turn_Request(
+				$messages,
+				$tool_declarations,
+				self::provider_turn_model_metadata( $context, $options ),
+				self::provider_turn_runtime_metadata( $context, $options ),
+				$context,
+				self::provider_turn_budget_metadata( $budgets ),
+				$run_id,
+				$session_id,
+				$request->metadata()
+			);
+
+			$raw_result = call_user_func( $adapter, $provider_request );
+			if ( ! is_array( $raw_result ) ) {
+				throw new \InvalidArgumentException( 'invalid_agent_provider_turn_result: adapter must return an array' );
+			}
+
+			$result = WP_Agent_Provider_Turn_Result::normalize( $raw_result );
+			if ( isset( $result['message'] ) && is_array( $result['message'] ) && '' === $result['content'] ) {
+				$result['content'] = is_string( $result['message']['content'] ?? null ) ? $result['message']['content'] : '';
+			}
+
+			if ( ! $mediation_enabled ) {
+				if ( isset( $result['message'] ) && is_array( $result['message'] ) ) {
+					$messages[] = $result['message'];
+				} else {
+					$content = is_string( $result['content'] ?? null ) ? $result['content'] : '';
+					if ( '' !== $content ) {
+						$messages[] = WP_Agent_Message::text( 'assistant', $content );
+					}
+				}
+
+				$result['tool_execution_results'] = array();
+				$result['events']                 = array();
+			}
+
+			$result['messages'] = $messages;
+			return $result;
+		};
+	}
+
+	/**
+	 * Extract provider/model metadata for provider-turn adapters.
+	 *
+	 * @param array<string, mixed> $context Turn context.
+	 * @param array<string, mixed> $options Loop options.
+	 * @return array<string, mixed>
+	 */
+	private static function provider_turn_model_metadata( array $context, array $options ): array {
+		$model = self::normalize_assoc_array( $options['model'] ?? array() );
+		foreach ( array( 'provider_id', 'model_id', 'temperature' ) as $key ) {
+			if ( array_key_exists( $key, $context ) && ! array_key_exists( $key, $model ) ) {
+				$model[ $key ] = $context[ $key ];
+			}
+		}
+
+		return $model;
+	}
+
+	/**
+	 * Extract runtime metadata for provider-turn adapters.
+	 *
+	 * @param array<string, mixed> $context Turn context.
+	 * @param array<string, mixed> $options Loop options.
+	 * @return array<string, mixed>
+	 */
+	private static function provider_turn_runtime_metadata( array $context, array $options ): array {
+		$runtime = self::normalize_assoc_array( $options['runtime'] ?? array() );
+		foreach ( array( 'runtime_id', 'runtime_context', 'request_kind' ) as $key ) {
+			if ( array_key_exists( $key, $context ) && ! array_key_exists( $key, $runtime ) ) {
+				$runtime[ $key ] = $context[ $key ];
+			}
+		}
+
+		return $runtime;
+	}
+
+	/**
+	 * Snapshot budget counters for provider-turn adapters.
+	 *
+	 * @param array<string, WP_Agent_Iteration_Budget> $budgets Resolved budgets.
+	 * @return array<string, mixed>
+	 */
+	private static function provider_turn_budget_metadata( array $budgets ): array {
+		$metadata = array();
+		foreach ( $budgets as $name => $budget ) {
+			$metadata[ $name ] = array(
+				'current' => $budget->current(),
+				'limit'   => $budget->ceiling(),
+			);
+		}
+
+		return $metadata;
+	}
+
+	/**
 	 * Emit a lifecycle event through the caller sink and WordPress observers.
 	 *
 	 * The caller-owned `on_event` sink and the `agents_api_loop_event` action are
@@ -1895,6 +2066,25 @@ class WP_Agent_Conversation_Loop {
 	 */
 	private static function normalize_conversation_result( array $result ): array {
 		return self::normalize_assoc_array( WP_Agent_Conversation_Result::normalize( $result ) );
+	}
+
+	/**
+	 * Normalize provider-turn typed failure information.
+	 *
+	 * @param array<mixed> $failure Raw failure.
+	 * @param int          $turn    Current turn.
+	 * @return array<string, mixed>
+	 */
+	private static function normalize_provider_turn_failure( array $failure, int $turn ): array {
+		$normalized = self::normalize_assoc_array( $failure );
+		$type       = is_string( $normalized['type'] ?? null ) && '' !== $normalized['type'] ? $normalized['type'] : 'provider_turn_failure';
+		$message    = is_string( $normalized['message'] ?? null ) && '' !== $normalized['message'] ? $normalized['message'] : 'Provider turn failed.';
+
+		$normalized['type']       = $type;
+		$normalized['message']    = $message;
+		$normalized['turn_count'] = isset( $normalized['turn_count'] ) && is_int( $normalized['turn_count'] ) ? $normalized['turn_count'] : $turn;
+
+		return $normalized;
 	}
 
 	/**
