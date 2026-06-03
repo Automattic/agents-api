@@ -594,7 +594,7 @@ class WP_Agent_Conversation_Loop {
 					'prepared_tool_call'     => ! empty( $prepared['ready'] ) ? $prepared_tool_call : null,
 					'tool_declaration'       => $tool_definition,
 					'tool_name'              => $tool_name,
-					'parameters'             => is_array( $parameters ) ? $parameters : array(),
+					'parameters'             => $parameters,
 					'tool_call_id'           => $tool_call_id,
 					'turn_context'           => $turn_context,
 					'turn'                   => $turn,
@@ -1846,13 +1846,16 @@ class WP_Agent_Conversation_Loop {
 			return null;
 		}
 
-		foreach ( array_keys( $value ) as $key ) {
+		$associative = array();
+		foreach ( $value as $key => $item ) {
 			if ( ! is_string( $key ) ) {
 				return null;
 			}
+
+			$associative[ $key ] = $item;
 		}
 
-		return $value;
+		return $associative;
 	}
 
 	/**
