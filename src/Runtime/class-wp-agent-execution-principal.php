@@ -47,7 +47,7 @@ final class WP_Agent_Execution_Principal {
 	public const REQUEST_CONTEXT_CHAT    = 'chat';
 	public const REQUEST_CONTEXT_RUNTIME = 'runtime';
 
-	public const AUDIENCE_CLAIM_RUNTIME_TYPE     = 'runtime_type';
+	public const AUDIENCE_CLAIM_RUNTIME_TYPE = 'runtime_type';
 
 	/**
 	 * @param int         $acting_user_id    WordPress user ID on whose behalf the run executes. 0 = system/anonymous context.
