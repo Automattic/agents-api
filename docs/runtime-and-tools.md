@@ -290,7 +290,7 @@ If a concrete executor returns its own `runtime` metadata, the normalized result
 
 ### Citation metadata
 
-Retrieval tools place canonical citations in result metadata under `metadata['citations']`. The substrate citation shape is intentionally small and generic: each citation may include `source`, `source_title`, `source_url`, `document_id`, `chunk_id`, `score`, and `excerpt`. Agents API normalizes this citation list for mediated tool results and delegated runtime tool results while preserving unrelated caller-owned metadata and additional caller-owned fields inside each citation.
+Retrieval tools place canonical citations in result metadata under `metadata['citations']`. The substrate citation shape is intentionally small and generic: each citation may include `source`, `source_id`, `item_id`, `fragment_id`, `source_title`, `source_url`, `score`, and `excerpt`. Agents API normalizes this citation list for mediated tool results and delegated runtime tool results while preserving unrelated caller-owned metadata and additional caller-owned fields inside each citation.
 
 ## Tool execution core
 

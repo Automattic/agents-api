@@ -77,7 +77,7 @@ class WP_Agent_Citation_Metadata {
 			}
 		}
 
-		foreach ( array( 'source', 'source_title', 'source_url', 'document_id', 'chunk_id', 'excerpt' ) as $key ) {
+		foreach ( array( 'source', 'source_id', 'item_id', 'fragment_id', 'source_title', 'source_url', 'excerpt' ) as $key ) {
 			unset( $normalized[ $key ] );
 
 			if ( isset( $citation[ $key ] ) && is_scalar( $citation[ $key ] ) ) {

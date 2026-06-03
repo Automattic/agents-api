@@ -22,12 +22,14 @@ agents_api_smoke_require_module();
 $citations = array(
 	array(
 		'source'       => 'docs',
+		'source_id'    => 'docs-primary',
 		'source_title' => 'Agents Handbook',
 		'source_url'   => 'https://example.com/agents',
-		'document_id'  => 'doc-1',
-		'chunk_id'     => 'chunk-2',
+		'item_id'      => 'item-1',
+		'fragment_id'  => 'fragment-2',
 		'score'        => '0.87',
 		'excerpt'      => 'Retrieved context excerpt.',
+		'document_id'  => 'doc-extension',
 		'plugin_name'  => 'product-specific-field',
 	),
 );
@@ -40,8 +42,10 @@ $metadata = array(
 $normalized_metadata = AgentsAPI\AI\WP_Agent_Citation_Metadata::normalize_metadata( $metadata );
 agents_api_smoke_assert_equals( 'trace-123', $normalized_metadata['trace_id'] ?? '', 'citation normalization preserves unrelated metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'docs', $normalized_metadata['citations'][0]['source'] ?? '', 'citation preserves generic source label', $failures, $passes );
+agents_api_smoke_assert_equals( 'docs-primary', $normalized_metadata['citations'][0]['source_id'] ?? '', 'citation preserves generic source id', $failures, $passes );
 agents_api_smoke_assert_equals( 0.87, $normalized_metadata['citations'][0]['score'] ?? null, 'citation normalizes numeric score', $failures, $passes );
 agents_api_smoke_assert_equals( 'product-specific-field', $normalized_metadata['citations'][0]['plugin_name'] ?? '', 'citation preserves caller-owned extension fields', $failures, $passes );
+agents_api_smoke_assert_equals( 'doc-extension', $normalized_metadata['citations'][0]['document_id'] ?? '', 'citation preserves non-canonical caller-owned ids as extensions', $failures, $passes );
 
 $context_item = new AgentsAPI\AI\Context\WP_Agent_Context_Item(
 	'Retrieved context excerpt.',
@@ -53,14 +57,14 @@ $context_item = new AgentsAPI\AI\Context\WP_Agent_Context_Item(
 	$metadata
 );
 $context_array = $context_item->to_array();
-agents_api_smoke_assert_equals( 'doc-1', $context_array['metadata']['citations'][0]['document_id'] ?? '', 'context item carries citation metadata through array export', $failures, $passes );
+agents_api_smoke_assert_equals( 'item-1', $context_array['metadata']['citations'][0]['item_id'] ?? '', 'context item carries citation metadata through array export', $failures, $passes );
 
 $tool_result = AgentsAPI\AI\Tools\WP_Agent_Tool_Result::success(
 	'ability/search_docs',
 	array( 'matches' => array( 'doc-1' ) ),
 	$metadata
 );
-agents_api_smoke_assert_equals( 'chunk-2', $tool_result['metadata']['citations'][0]['chunk_id'] ?? '', 'tool result normalization preserves citation metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'fragment-2', $tool_result['metadata']['citations'][0]['fragment_id'] ?? '', 'tool result normalization preserves citation metadata', $failures, $passes );
 
 $runtime_result = AgentsAPI\AI\WP_Agent_Runtime_Tool_Result::normalize(
 	array(
