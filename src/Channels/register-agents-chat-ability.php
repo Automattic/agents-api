@@ -322,7 +322,7 @@ function agents_chat_input_schema(): array {
 				'properties'  => array(
 					'source'                   => array(
 						'type'        => 'string',
-						'enum'        => array( 'channel', 'bridge', 'rest', 'block', 'peer-agent' ),
+						'enum'        => array( 'channel', 'bridge', 'rest', 'block', 'peer-agent', 'jsonrpc' ),
 						'description' => 'How the request reached this dispatcher.',
 					),
 					'client_name'              => array(

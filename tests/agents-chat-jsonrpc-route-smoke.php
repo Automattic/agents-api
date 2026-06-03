@@ -95,6 +95,7 @@ use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_delta_frame;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_result_frame;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_error_frame;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_extract_text;
+use function AgentsAPI\AI\Channels\agents_chat_input_schema;
 use function AgentsAPI\AI\Channels\register_chat_stream_handler;
 
 do_action( 'rest_api_init' );
@@ -129,6 +130,9 @@ agents_api_smoke_assert_equals( 'Hello world', $input['message'] ?? null, 'input
 agents_api_smoke_assert_equals( 'sess-9', $input['session_id'] ?? null, 'input carries sessionId', $failures, $passes );
 agents_api_smoke_assert_equals( 'rpc-1', $input['run_id'] ?? null, 'input maps JSON-RPC id to run_id', $failures, $passes );
 agents_api_smoke_assert_equals( 'jsonrpc', $input['client_context']['source'] ?? null, 'input marks jsonrpc source', $failures, $passes );
+$input_schema = agents_chat_input_schema();
+$source_enum  = $input_schema['properties']['client_context']['properties']['source']['enum'] ?? array();
+agents_api_smoke_assert_equals( true, in_array( $input['client_context']['source'] ?? null, $source_enum, true ), 'input source is accepted by agents/chat schema', $failures, $passes );
 agents_api_smoke_assert_equals( 'a.png', $input['attachments'][0]['name'] ?? null, 'input extracts file parts as attachments', $failures, $passes );
 
 $empty = agents_chat_jsonrpc_input_from_params( array( 'message' => array( 'parts' => array() ) ), 'support-agent' );
