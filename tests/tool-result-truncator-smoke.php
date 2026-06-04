@@ -28,7 +28,7 @@ $executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
 			'tool_name' => $tool_call['tool_name'],
 			'result'    => array(
 				'body'              => str_repeat( 'x', 200 ),
-				'citations'         => array( array( 'url' => 'https://example.test/tool-source' ) ),
+				'citations'         => array( array( 'source_url' => 'https://example.test/tool-source' ) ),
 				'retrieved_context' => array( array( 'id' => 'tool-context-1' ) ),
 			),
 		);
@@ -79,8 +79,8 @@ $truncated_result = $result['tool_execution_results'][0]['result'] ?? array();
 
 agents_api_smoke_assert_equals( true, (bool) ( $truncated_result['metadata']['truncated'] ?? false ), 'tool execution result is marked truncated', $failures, $passes );
 agents_api_smoke_assert_equals( true, isset( $truncated_result['result']['excerpt'] ), 'tool execution result stores excerpt payload', $failures, $passes );
-agents_api_smoke_assert_equals( 'https://example.test/tool-source', $truncated_result['result']['citations'][0]['url'] ?? '', 'tool execution result preserves citation metadata after truncation', $failures, $passes );
-agents_api_smoke_assert_equals( 'tool-context-1', $truncated_result['result']['retrieved_context'][0]['id'] ?? '', 'tool execution result preserves retrieved-context metadata after truncation', $failures, $passes );
+agents_api_smoke_assert_equals( 'https://example.test/tool-source', $truncated_result['result']['citations'][0]['source_url'] ?? '', 'tool execution result preserves citation metadata after truncation', $failures, $passes );
+agents_api_smoke_assert_equals( false, isset( $truncated_result['result']['retrieved_context'] ), 'tool execution result does not preserve bulky retrieved-context payloads after truncation', $failures, $passes );
 agents_api_smoke_assert_equals( false, str_contains( wp_json_encode( $truncated_result ), str_repeat( 'x', 200 ) ), 'truncated execution result omits full original body', $failures, $passes );
 
 $tool_result_messages = array_values(
