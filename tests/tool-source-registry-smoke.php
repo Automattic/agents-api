@@ -62,6 +62,7 @@ $registry->registerSource(
 			'static/only'  => array(
 				'description' => 'Static-only declaration.',
 			),
+			'static/minimal' => array(),
 		);
 	},
 	30
@@ -210,6 +211,7 @@ agents_api_smoke_assert_equals(
 		'runtime/filtered',
 		'filtered/only',
 		'static/only',
+		'static/minimal',
 	),
 	array_keys( $tools ),
 	'registry gathers multiple ordered sources with duplicate-name precedence',
@@ -234,6 +236,13 @@ agents_api_smoke_assert_equals(
 	array(),
 	$tools['static/only']['parameters'],
 	'registry normalizes missing parameters to an array',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
+	'static/minimal',
+	$tools['static/minimal']['description'],
+	'registry defaults missing source descriptions from the tool name',
 	$failures,
 	$passes
 );
