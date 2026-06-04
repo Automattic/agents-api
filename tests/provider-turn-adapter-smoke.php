@@ -72,6 +72,16 @@ agents_api_smoke_assert_equals( 'fake-runtime', $request->runtime()['runtime_id'
 agents_api_smoke_assert_equals( 'run-123', $request->runId(), 'provider request carries run id', $failures, $passes );
 agents_api_smoke_assert_equals( 'session-456', $request->sessionId(), 'provider request carries session id', $failures, $passes );
 
+$host_tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(
+	array(
+		'name'        => 'workspace_read',
+		'description' => 'Read a workspace file.',
+		'parameters'  => array( 'type' => 'object' ),
+	)
+);
+agents_api_smoke_assert_equals( 'workspace_read', $host_tool['name'], 'host tool declarations allow unnamespaced names', $failures, $passes );
+agents_api_smoke_assert_equals( 'host', $host_tool['source'], 'unnamespaced host tools receive a host source', $failures, $passes );
+
 $normalized_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
 	array(
 		'content'              => 'Using a tool.',
