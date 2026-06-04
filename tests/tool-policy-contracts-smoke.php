@@ -68,6 +68,13 @@ $tools = array(
 		'scope'        => 'run',
 		'runtime_tool' => true,
 	),
+	'web_fetch'        => array(
+		'name'       => 'web_fetch',
+		'categories' => array( 'read' ),
+		'modes'      => array( 'chat' ),
+		'executor'   => 'host',
+		'scope'      => 'run',
+	),
 );
 
 $resolver = new WP_Agent_Tool_Policy();
@@ -142,7 +149,7 @@ $resolved = $resolver->resolve(
 );
 $resolved_names = array_keys( $resolved );
 sort( $resolved_names );
-agents_api_smoke_assert_equals( array( 'client/mandatory', 'client/read', 'client/write' ), $resolved_names, 'runtime tools are excluded by default without hiding ordinary tools', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'client/mandatory', 'client/read', 'client/write', 'web_fetch' ), $resolved_names, 'runtime tools are excluded by default without hiding ordinary host tools', $failures, $passes );
 
 $resolved = $resolver->resolve(
 	$tools,
@@ -173,7 +180,7 @@ $resolved = $resolver->resolve(
 );
 $resolved_names = array_keys( $resolved );
 sort( $resolved_names );
-agents_api_smoke_assert_equals( array( 'client/mandatory', 'client/read', 'client/runtime' ), $resolved_names, 'deny policy still requires runtime_tools opt-in for runtime tools', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'client/mandatory', 'client/read', 'client/runtime', 'web_fetch' ), $resolved_names, 'deny policy still requires runtime_tools opt-in for runtime tools without hiding host tools', $failures, $passes );
 
 $resolved = $resolver->resolve(
 	$tools,
@@ -199,7 +206,7 @@ $resolved = $resolver->resolve(
 );
 $resolved_names = array_keys( $resolved );
 sort( $resolved_names );
-agents_api_smoke_assert_equals( array( 'client/ambient', 'client/mandatory', 'client/read', 'client/write' ), $resolved_names, 'runtime category opt-in composes with final explicit deny', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'client/ambient', 'client/mandatory', 'client/read', 'client/write', 'web_fetch' ), $resolved_names, 'runtime category opt-in composes with final explicit deny without hiding host tools', $failures, $passes );
 
 echo "\n[6] Sensitive required parameters stay auditable and intentional:\n";
 $parameters = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
