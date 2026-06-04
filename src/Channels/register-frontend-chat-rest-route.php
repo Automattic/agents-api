@@ -210,8 +210,8 @@ function agents_frontend_chat_rest_string_key_array( array $value ): array {
  * @return array<string,mixed>
  */
 function agents_frontend_chat_rest_scope( \WP_REST_Request $request ): array {
-	$client_context  = $request->get_param( 'client_context' );
-	$client_context  = is_array( $client_context ) ? agents_frontend_chat_rest_string_key_array( $client_context ) : array();
+	$client_context            = $request->get_param( 'client_context' );
+	$client_context            = is_array( $client_context ) ? agents_frontend_chat_rest_string_key_array( $client_context ) : array();
 	$scope                     = \AgentsAPI\AI\Auth\agents_access_request_scope(
 		array(
 			'workspace_id' => $request->get_param( 'workspace_id' ),
