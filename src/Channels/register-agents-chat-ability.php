@@ -381,7 +381,7 @@ function agents_chat_input_schema(): array {
 			),
 			'client_context'        => array(
 				'type'        => 'object',
-				'description' => 'Transport-level context describing where this turn originated.',
+				'description' => 'Optional transport-level context describing where this turn originated. Hosts may include opaque, product-owned metadata; Agents API preserves it but does not define product semantics.',
 				'properties'  => array(
 					'source'                   => array(
 						'type'        => 'string',

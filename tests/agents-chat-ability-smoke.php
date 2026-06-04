@@ -180,6 +180,7 @@ smoke_assert( true, in_array( 'peer-agent', $in['properties']['client_context'][
 smoke_assert( true, isset( $in['properties']['client_context']['properties']['caller_agent'] ), 'client_context_schema_has_caller_agent', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context']['properties']['caller_session_id'] ), 'client_context_schema_has_caller_session_id', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context']['properties']['peer_agent_call'] ), 'client_context_schema_has_peer_agent_call', $failures, $passes );
+smoke_assert( false, isset( $in['properties']['client_context']['properties']['context_binding'] ), 'client_context_schema_omits_context_binding_api', $failures, $passes );
 smoke_assert( false, isset( $in['properties']['client_context']['properties']['agent_chat_depth'] ), 'client_context_schema_omits_tool_specific_depth', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['principal'] ), 'input_schema_has_principal', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['principal']['properties']['auth_source'] ), 'principal_schema_has_auth_source', $failures, $passes );
