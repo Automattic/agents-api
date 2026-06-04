@@ -138,12 +138,11 @@ $request = new WP_REST_Request(
 		'session_id'     => 'existing-session',
 		'attachments'    => array( array( 'type' => 'image' ) ),
 		'client_context' => array(
-			'client_name'              => 'block-chat',
-			'context_source_type'      => 'docs',
-			'context_source_id'        => 'source-123',
-			'context_scope_id'         => 'workspace-help',
-			'context_selection_policy' => array( 'mode' => 'focused', 'limit' => 4 ),
-			'current_context_item_id'  => 'item-789',
+			'client_name'  => 'block-chat',
+			'host_context' => array(
+				'opaque_id' => 'selected-material-123',
+				'hints'     => array( 'current-item' ),
+			),
 		),
 		'workspace_id'   => 'site:42',
 		'client_id'      => 'browser-1',
@@ -162,13 +161,10 @@ agents_api_smoke_assert_equals( 'support-agent', $captured['agent'] ?? null, 'di
 agents_api_smoke_assert_equals( 'Hi there', $captured['message'] ?? null, 'dispatch forwards message', $failures, $passes );
 agents_api_smoke_assert_equals( 'rest', $captured['client_context']['source'] ?? null, 'dispatch marks REST source', $failures, $passes );
 agents_api_smoke_assert_equals( 'block-chat', $captured['client_context']['client_name'] ?? null, 'dispatch preserves client name', $failures, $passes );
-agents_api_smoke_assert_equals( 'docs', $captured['client_context']['context_source_type'] ?? null, 'dispatch preserves opaque context source type', $failures, $passes );
-agents_api_smoke_assert_equals( 'source-123', $captured['client_context']['context_source_id'] ?? null, 'dispatch preserves opaque context source id', $failures, $passes );
-agents_api_smoke_assert_equals( array( 'mode' => 'focused', 'limit' => 4 ), $captured['client_context']['context_selection_policy'] ?? null, 'dispatch preserves opaque context policy', $failures, $passes );
-agents_api_smoke_assert_equals( 'item-789', $captured['client_context']['current_context_item_id'] ?? null, 'dispatch preserves opaque current item id', $failures, $passes );
-agents_api_smoke_assert_equals( 'workspace-help', $access_contexts[0]['client_context']['context_scope_id'] ?? null, 'access scope receives opaque context scope id', $failures, $passes );
-agents_api_smoke_assert_equals( array( 'mode' => 'focused', 'limit' => 4 ), $access_contexts[0]['client_context']['context_selection_policy'] ?? null, 'access scope receives opaque context policy', $failures, $passes );
-agents_api_smoke_assert_equals( 'item-789', $access_contexts[0]['request_metadata']['client_context']['current_context_item_id'] ?? null, 'access metadata receives opaque current item id', $failures, $passes );
+agents_api_smoke_assert_equals( 'selected-material-123', $captured['client_context']['host_context']['opaque_id'] ?? null, 'dispatch preserves caller-owned context metadata', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'current-item' ), $captured['client_context']['host_context']['hints'] ?? null, 'dispatch preserves nested caller-owned context metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'selected-material-123', $access_contexts[0]['client_context']['host_context']['opaque_id'] ?? null, 'access scope receives caller-owned context metadata', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'current-item' ), $access_contexts[0]['request_metadata']['client_context']['host_context']['hints'] ?? null, 'access metadata receives nested caller-owned context metadata', $failures, $passes );
 
 $blocked = AgentsAPI\AI\Channels\agents_frontend_chat_rest_permission(
 	new WP_REST_Request(
