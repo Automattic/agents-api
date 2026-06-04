@@ -80,6 +80,19 @@ class WP_Agent_Runtime_Tool_Request {
 	}
 
 	/**
+	 * Mark a normalized request as timed out without changing its identity.
+	 *
+	 * @param array<string, mixed> $request Raw or normalized runtime tool request.
+	 * @return array<string, mixed> Timeout request payload.
+	 */
+	public static function timeout( array $request ): array {
+		$normalized           = self::normalize( $request );
+		$normalized['status'] = self::STATUS_TIMEOUT;
+
+		return $normalized;
+	}
+
+	/**
 	 * Build a stable request id when the host did not supply one.
 	 *
 	 * @param string $tool_name Tool name.

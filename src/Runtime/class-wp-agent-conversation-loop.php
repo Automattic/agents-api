@@ -81,6 +81,7 @@ class WP_Agent_Conversation_Loop {
 	 * - `transcript_session_id` (string): Session ID to lock when a lock store is provided.
 	 * - `transcript_lock_ttl` (int): Lock TTL in seconds. Defaults to 300.
 	 * - `transcript_persister` (WP_Agent_Transcript_Persister|null): Transcript persister.
+	 * - `runtime_tool_request_store` (WP_Agent_Runtime_Tool_Request_Store|null): Optional durable store for pending runtime-tool requests.
 	 * - `on_event` (callable|null): Caller-owned lifecycle event sink `fn(string $event, array $payload)`.
 	 *
 	 * @param array<int, array<string, mixed>> $messages    Initial transcript messages.
@@ -99,6 +100,7 @@ class WP_Agent_Conversation_Loop {
 		$should_continue       = self::resolve_should_continue( $options, $tool_executor, $tool_declarations );
 		$completion_policy     = self::resolve_completion_policy( $options );
 		$transcript_persister  = self::resolve_transcript_persister( $options );
+		$runtime_tool_store    = self::resolve_runtime_tool_request_store( $options );
 		$transcript_lock       = self::resolve_transcript_lock( $options );
 		$on_event              = self::resolve_event_sink( $options );
 		$spin_detector         = self::resolve_spin_detector( $options );
@@ -302,7 +304,8 @@ class WP_Agent_Conversation_Loop {
 						$messages,
 						$pre_tool_mediator,
 						$tool_results,
-						$post_tool_diagnostics
+						$post_tool_diagnostics,
+						$runtime_tool_store
 					);
 
 					$messages              = $mediation_result['messages'];
@@ -503,6 +506,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param callable|null                            $pre_tool_mediator Optional pre-tool mediator.
 	 * @param array<int, array<string, mixed>>         $prior_tool_results Prior mediated tool results.
 	 * @param callable|null                            $post_tool_diagnostics Optional post-result diagnostics callback.
+	 * @param WP_Agent_Runtime_Tool_Request_Store|null $runtime_tool_store Optional durable runtime tool request store.
 	 * @return array{messages: array<int, array<string, mixed>>, tool_execution_results: array<int, array<string, mixed>>, tool_events: array<int, array<string, mixed>>, tool_audit_events: array<int, array<string, mixed>>, events: array<int, array<string, mixed>>, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, runtime_tool_pending: array<string, mixed>|null, spin_signatures: array<int, WP_Agent_Spin_Signature>}
 	 */
 	private static function mediate_tool_calls(
@@ -519,7 +523,8 @@ class WP_Agent_Conversation_Loop {
 		array $prior_messages = array(),
 		?callable $pre_tool_mediator = null,
 		array $prior_tool_results = array(),
-		?callable $post_tool_diagnostics = null
+		?callable $post_tool_diagnostics = null,
+		?WP_Agent_Runtime_Tool_Request_Store $runtime_tool_store = null
 	): array {
 		$core = new WP_Agent_Tool_Execution_Core();
 
@@ -645,6 +650,22 @@ class WP_Agent_Conversation_Loop {
 
 			$pending_request = self::runtime_tool_pending_request( $exec_result, $tool_name, $tool_call_id, $parameters_for_policy, $turn_context );
 			if ( null !== $pending_request ) {
+				$pending_request['metadata'] = array_merge(
+					self::normalize_assoc_array( $pending_request['metadata'] ?? array() ),
+					array( 'turn_count' => $turn )
+				);
+				if ( null !== $runtime_tool_store ) {
+					$pending_request = WP_Agent_Runtime_Tool_Lifecycle::create_pending_request(
+						$runtime_tool_store,
+						$pending_request,
+						array(
+							'turn'         => $turn,
+							'tool_name'    => $tool_name,
+							'tool_call_id' => $tool_call_id,
+							'turn_context' => $turn_context,
+						)
+					);
+				}
 				$pending_request_json = self::json_encode_safe( $pending_request );
 				$runtime_tool_pending = $pending_request;
 				$messages[]           = WP_Agent_Message::toolResult(
@@ -2151,6 +2172,23 @@ class WP_Agent_Conversation_Loop {
 	private static function resolve_transcript_persister( array $options ): ?WP_Agent_Transcript_Persister {
 		$persister = $options['transcript_persister'] ?? null;
 		return $persister instanceof WP_Agent_Transcript_Persister ? $persister : null;
+	}
+
+	/**
+	 * Resolve the durable runtime-tool request store from options.
+	 *
+	 * @param array<string, mixed> $options Loop options.
+	 * @return WP_Agent_Runtime_Tool_Request_Store|null
+	 */
+	private static function resolve_runtime_tool_request_store( array $options ): ?WP_Agent_Runtime_Tool_Request_Store {
+		foreach ( array( 'runtime_tool_request_store', 'runtime_tool_store' ) as $key ) {
+			$store = $options[ $key ] ?? null;
+			if ( $store instanceof WP_Agent_Runtime_Tool_Request_Store ) {
+				return $store;
+			}
+		}
+
+		return null;
 	}
 
 	/**

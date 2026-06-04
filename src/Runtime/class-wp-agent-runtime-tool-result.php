@@ -54,4 +54,23 @@ class WP_Agent_Runtime_Tool_Result {
 
 		return $normalized;
 	}
+
+	/**
+	 * Normalize a submitted result against its stored pending request.
+	 *
+	 * @param array<string, mixed> $request Normalized runtime tool request.
+	 * @param array<string, mixed> $result Raw submitted result.
+	 * @return array<string, mixed> Normalized result payload.
+	 */
+	public static function from_request( array $request, array $result ): array {
+		$request = WP_Agent_Runtime_Tool_Request::normalize( $request );
+
+		return self::normalize( array_merge(
+			$result,
+			array(
+				'request_id' => $result['request_id'] ?? $request['request_id'],
+				'tool_name'  => $result['tool_name'] ?? $request['tool_name'],
+			)
+		) );
+	}
 }

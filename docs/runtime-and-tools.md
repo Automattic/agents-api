@@ -202,6 +202,45 @@ array(
 
 `proceed` preserves normal execution. `reject` creates a normalized failed tool result without calling the executor. `replace_result` appends the supplied normalized result without calling the executor. Setting `complete` truthy stops the mediated turn after the canonical tool-result message and result/event/audit entries have been appended.
 
+### Durable runtime-tool lifecycle
+
+External runtime tools can pause the loop with `status: runtime_tool_pending`. Agents API owns the product-neutral lifecycle contract for those requests while hosts own concrete storage, queues, session lookup, and continuation scheduling.
+
+Public lifecycle contracts:
+
+- `WP_Agent_Runtime_Tool_Request` normalizes pending requests and timeout transitions.
+- `WP_Agent_Runtime_Tool_Result` normalizes submitted client/runtime results, including results normalized against a stored request.
+- `WP_Agent_Runtime_Tool_Request_Store` is the host persistence boundary with `create`, `get`, `complete`, `timeout`, and `recent_pending` methods.
+- `WP_Agent_Runtime_Tool_Continuation` is the host resume boundary for continuing a paused run after submit or timeout.
+- `WP_Agent_Runtime_Tool_Lifecycle` coordinates create, submit, timeout, recent-pending reads, transcript-compatible result payloads, and continuation callbacks.
+
+The conversation loop accepts an optional `runtime_tool_request_store` (or `runtime_tool_store`) option. When supplied, pending runtime-tool requests are normalized and handed to `WP_Agent_Runtime_Tool_Lifecycle::create_pending_request()` before the loop returns `status: runtime_tool_pending`.
+
+```php
+$result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	$messages,
+	$turn_runner,
+	array(
+		'tool_executor'              => $executor,
+		'tool_declarations'          => $tools,
+		'runtime_tool_request_store' => $request_store,
+	)
+);
+
+$submission = AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::submit_result(
+	$request_store,
+	array(
+		'request_id' => $request_id,
+		'success'    => true,
+		'result'     => array( 'value' => 'client supplied result' ),
+	),
+	$continuation,
+	array( 'source' => 'browser' )
+);
+```
+
+Generic lifecycle events fire as WordPress actions: `agents_api_runtime_tool_request_created`, `agents_api_runtime_tool_result_submitted`, `agents_api_runtime_tool_request_timed_out`, and `agents_api_runtime_tool_request_resumed`. The event payloads contain normalized request/result envelopes plus caller-owned context. Agents API does not define Data Machine jobs, chat-session metadata, browser storage, or any other product-specific persistence shape.
+
 ## Runtime tool declarations
 
 `AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalize()` validates per-run client tool declarations. The runtime-client shape is intentionally narrow:
