@@ -100,6 +100,87 @@ $normalized_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
 agents_api_smoke_assert_equals( 'client/lookup', $normalized_turn['tool_calls'][0]['name'], 'provider result normalizes tool call names', $failures, $passes );
 agents_api_smoke_assert_equals( 3, $normalized_turn['usage']['total_tokens'], 'provider result preserves usage', $failures, $passes );
 
+echo "\n[1b] Provider-turn result extracts structured and fallback tool calls:\n";
+$structured_result = new class() {
+	public function getCandidates(): array {
+		return array(
+			new class() {
+				public function getMessage() {
+					return new class() {
+						public function getParts(): array {
+							return array(
+								new class() {
+									public function getFunctionCall() {
+										return new class() {
+											public function getName(): string {
+												return 'client/lookup';
+											}
+
+											public function getArgs(): string {
+												return '{"query":"structured"}';
+											}
+
+											public function getId(): string {
+												return 'structured-call-1';
+											}
+										};
+									}
+
+									public function getText(): string {
+										return '<function_calls><invoke name="client/lookup"><parameter name="query">fallback</parameter></invoke></function_calls>';
+									}
+								},
+							);
+						}
+					};
+				}
+			},
+		);
+	}
+};
+
+$structured_calls = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::extract_tool_calls( $structured_result );
+agents_api_smoke_assert_equals( 1, count( $structured_calls ), 'structured function calls take precedence over fallback text', $failures, $passes );
+agents_api_smoke_assert_equals( 'structured-call-1', $structured_calls[0]['id'] ?? '', 'structured call id is preserved', $failures, $passes );
+agents_api_smoke_assert_equals( 'structured', $structured_calls[0]['parameters']['query'] ?? '', 'structured call JSON args are decoded', $failures, $passes );
+
+$xml_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
+	array(
+		'content' => '<function_calls><invoke name="client/lookup"><parameter name="query">xml &amp; tags</parameter></invoke></function_calls>',
+	)
+);
+agents_api_smoke_assert_equals( 'client/lookup', $xml_turn['tool_calls'][0]['name'] ?? '', 'XML fallback extracts tool name', $failures, $passes );
+agents_api_smoke_assert_equals( 'xml & tags', $xml_turn['tool_calls'][0]['parameters']['query'] ?? '', 'XML fallback decodes parameters', $failures, $passes );
+
+$json_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
+	array(
+		'content' => '```json' . "\n" . '{"tool_calls":[{"id":"json-1","function":{"name":"client/lookup","arguments":"{\\"query\\":\\"json\\"}"}}]}' . "\n" . '```',
+	)
+);
+agents_api_smoke_assert_equals( 'json-1', $json_turn['tool_calls'][0]['id'] ?? '', 'fenced JSON fallback preserves id', $failures, $passes );
+agents_api_smoke_assert_equals( 'json', $json_turn['tool_calls'][0]['parameters']['query'] ?? '', 'fenced JSON fallback decodes function arguments', $failures, $passes );
+
+$tag_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
+	array(
+		'content' => '<tool_call name="client/lookup">{"query":"tag"}</tool_call>',
+	)
+);
+agents_api_smoke_assert_equals( 'tag', $tag_turn['tool_calls'][0]['parameters']['query'] ?? '', 'tag fallback extracts JSON body parameters', $failures, $passes );
+
+$named_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
+	array(
+		'content' => 'client/lookup query="named text"',
+	)
+);
+agents_api_smoke_assert_equals( 'named text', $named_turn['tool_calls'][0]['parameters']['query'] ?? '', 'named text fallback extracts key value parameters', $failures, $passes );
+
+$deduped_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
+	array(
+		'content' => '<tool_call>{"name":"client/lookup","parameters":{"query":"dup"}}</tool_call>' . "\n" . '```json' . "\n" . '{"name":"client/lookup","parameters":{"query":"dup"}}' . "\n" . '```',
+	)
+);
+agents_api_smoke_assert_equals( 1, count( $deduped_turn['tool_calls'] ), 'fallback parser overlap is deduplicated', $failures, $passes );
+
 echo "\n[2] Conversation loop can run through a fake provider-turn adapter without Data Machine:\n";
 $adapter_calls = array();
 $adapter       = new class( $adapter_calls ) implements AgentsAPI\AI\WP_Agent_Provider_Turn_Adapter {
