@@ -152,6 +152,8 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-byte-limit-tool-resul
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-request.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-result.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-request-store.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-continuation.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-lifecycle.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-result.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-chat-run-control.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-loop.php';

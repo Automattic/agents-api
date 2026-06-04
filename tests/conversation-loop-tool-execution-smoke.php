@@ -605,6 +605,60 @@ agents_api_smoke_assert_equals( array( 'tool_call', AgentsAPI\AI\WP_Agent_Runtim
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STATUS_PENDING_RUNTIME_TOOL, $pending_result['run_outcome']['status'] ?? '', 'pending runtime tool run outcome is pending', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING, $pending_result['run_outcome']['stop_reason'] ?? '', 'pending runtime tool run outcome stop reason is pending', $failures, $passes );
 
+$loop_runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+	public array $requests = array();
+
+	public function create( array $request ): void {
+		$this->requests[ $request['request_id'] ] = $request;
+	}
+
+	public function get( string $request_id ): ?array {
+		return $this->requests[ $request_id ] ?? null;
+	}
+
+	public function complete( string $request_id, array $result ): void {
+		unset( $result );
+		$this->requests[ $request_id ]['status'] = 'completed';
+	}
+
+	public function timeout( string $request_id ): void {
+		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT;
+	}
+
+	public function recent_pending( array $query = array() ): array {
+		unset( $query );
+		return array_values( $this->requests );
+	}
+};
+
+$stored_pending_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'choose stored' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'id'         => 'client-call-store-1',
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'needs durable browser handoff' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'                  => 3,
+		'tool_executor'              => $pending_executor,
+		'tool_declarations'          => $tools,
+		'runtime_tool_request_store' => $loop_runtime_tool_store,
+		'context'                    => array( 'run_id' => 'run-loop-store' ),
+	)
+);
+
+$stored_request_id = $stored_pending_result['runtime_tool_pending']['request_id'] ?? '';
+agents_api_smoke_assert_equals( true, isset( $loop_runtime_tool_store->requests[ $stored_request_id ] ), 'loop hands pending runtime tool request to configured lifecycle store', $failures, $passes );
+agents_api_smoke_assert_equals( 1, did_action( 'agents_api_runtime_tool_request_created' ), 'loop persistence emits generic runtime tool created event', $failures, $passes );
+agents_api_smoke_assert_equals( 1, $loop_runtime_tool_store->requests[ $stored_request_id ]['metadata']['turn_count'] ?? 0, 'stored pending request records generic turn metadata for replay', $failures, $passes );
+
 echo "\n[Pre-tool filter hook allows, rejects, or pauses external runtime tools (#259):\n";
 
 $filter_contexts = array();

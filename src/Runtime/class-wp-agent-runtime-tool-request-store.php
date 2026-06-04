@@ -43,4 +43,16 @@ interface WP_Agent_Runtime_Tool_Request_Store {
 	 * @param string $request_id Runtime tool request id.
 	 */
 	public function timeout( string $request_id ): void;
+
+	/**
+	 * Return recent pending requests for timeout scans or client polling.
+	 *
+	 * Implementations own concrete filtering semantics, but should support
+	 * product-neutral query keys such as `run_id`, `tool_name`, `before`, and
+	 * `limit` when they are meaningful for the host store.
+	 *
+	 * @param array<string, mixed> $query Product-neutral query hints.
+	 * @return array<int, array<string, mixed>> Normalized pending requests.
+	 */
+	public function recent_pending( array $query = array() ): array;
 }

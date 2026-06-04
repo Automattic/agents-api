@@ -374,4 +374,96 @@ $submitted_result = AgentsAPI\AI\WP_Agent_Runtime_Tool_Result::normalize(
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Result::STATUS_SUBMITTED, $submitted_result['status'], 'runtime tool result has canonical submitted status', $failures, $passes );
 agents_api_smoke_assert_equals( 123, $submitted_result['result']['post_id'] ?? null, 'runtime tool result preserves payload', $failures, $passes );
 
+$runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+	public array $requests = array();
+	public array $results  = array();
+
+	public function create( array $request ): void {
+		$this->requests[ $request['request_id'] ] = $request;
+	}
+
+	public function get( string $request_id ): ?array {
+		return $this->requests[ $request_id ] ?? null;
+	}
+
+	public function complete( string $request_id, array $result ): void {
+		$this->requests[ $request_id ]['status'] = 'completed';
+		$this->results[ $request_id ]            = $result;
+	}
+
+	public function timeout( string $request_id ): void {
+		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT;
+	}
+
+	public function recent_pending( array $query = array() ): array {
+		$limit   = isset( $query['limit'] ) && is_int( $query['limit'] ) ? $query['limit'] : 100;
+		$pending = array_filter(
+			$this->requests,
+			static fn( array $request ): bool => AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING === ( $request['status'] ?? '' )
+		);
+
+		return array_slice( array_values( $pending ), 0, $limit );
+	}
+};
+
+$created_request = AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::create_pending_request( $runtime_tool_store, $pending_request, array( 'source' => 'smoke' ) );
+agents_api_smoke_assert_equals( $pending_request['request_id'], $created_request['request_id'], 'lifecycle creates normalized pending runtime tool requests', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::recent_pending_requests( $runtime_tool_store, array( 'limit' => 1 ) ) ), 'lifecycle exposes recent pending requests through store contract', $failures, $passes );
+
+$continuation_calls = array();
+$submission         = AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::submit_result(
+	$runtime_tool_store,
+	array(
+		'request_id' => $pending_request['request_id'],
+		'success'    => true,
+		'result'     => array( 'post_id' => 456 ),
+	),
+	static function ( array $request, array $result, array $context ) use ( &$continuation_calls ): array {
+		$continuation_calls[] = compact( 'request', 'result', 'context' );
+		return array( 'resumed' => true );
+	},
+	array( 'resume_source' => 'smoke' )
+);
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Result::STATUS_SUBMITTED, $submission['status'], 'lifecycle submission has canonical submitted status', $failures, $passes );
+agents_api_smoke_assert_equals( 'client/choose_post', $submission['result']['tool_name'], 'lifecycle fills submitted result tool name from stored request', $failures, $passes );
+agents_api_smoke_assert_equals( 456, $submission['tool_result_message']['result']['result']['post_id'] ?? null, 'lifecycle creates transcript-compatible tool result message payload', $failures, $passes );
+agents_api_smoke_assert_equals( true, $submission['continuation_result']['resumed'] ?? false, 'lifecycle invokes continuation callback after submission', $failures, $passes );
+agents_api_smoke_assert_equals( 'smoke', $continuation_calls[0]['context']['resume_source'] ?? '', 'continuation receives caller context', $failures, $passes );
+
+$timeout_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+	public array $requests = array();
+
+	public function create( array $request ): void {
+		$this->requests[ $request['request_id'] ] = $request;
+	}
+
+	public function get( string $request_id ): ?array {
+		return $this->requests[ $request_id ] ?? null;
+	}
+
+	public function complete( string $request_id, array $result ): void {
+		unset( $result );
+		$this->requests[ $request_id ]['status'] = 'completed';
+	}
+
+	public function timeout( string $request_id ): void {
+		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT;
+	}
+
+	public function recent_pending( array $query = array() ): array {
+		unset( $query );
+		return array_values( array_filter(
+			$this->requests,
+			static fn( array $request ): bool => AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING === ( $request['status'] ?? '' )
+		) );
+	}
+};
+
+$timeout_request = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::from_tool_call( 'client/choose_post', 'call_timeout', array(), array( 'run_id' => 'run-timeout' ) );
+AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::create_pending_request( $timeout_store, $timeout_request );
+$timeout = AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::timeout_request( $timeout_store, $timeout_request['request_id'] );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT, $timeout['status'], 'lifecycle timeout has canonical timeout status', $failures, $passes );
+agents_api_smoke_assert_equals( false, $timeout['result']['success'] ?? true, 'lifecycle timeout creates failed runtime tool result', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT, $timeout_store->requests[ $timeout_request['request_id'] ]['status'] ?? '', 'lifecycle delegates timeout transition to store', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API tool runtime', $failures, $passes );
