@@ -237,7 +237,7 @@ class WP_Agent_Provider_Turn_Result {
 						continue;
 					}
 
-					$parameter_value = function_exists( '\wp_strip_all_tags' )
+					$parameter_value               = function_exists( '\wp_strip_all_tags' )
 						? \wp_strip_all_tags( (string) $parameter_match[2] )
 						: (string) preg_replace( '/<[^>]*>/', '', (string) $parameter_match[2] );
 					$parameters[ $parameter_name ] = html_entity_decode( trim( $parameter_value ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
@@ -436,12 +436,12 @@ class WP_Agent_Provider_Turn_Result {
 	/**
 	 * Call a no-argument object method when available.
 	 *
-	 * @param mixed  $object Object candidate.
+	 * @param mixed  $candidate Object candidate.
 	 * @param string $method Method name.
 	 * @return mixed
 	 */
-	private static function call_no_args( $object, string $method ) {
-		return is_object( $object ) && method_exists( $object, $method ) ? $object->{$method}() : null;
+	private static function call_no_args( $candidate, string $method ) {
+		return is_object( $candidate ) && method_exists( $candidate, $method ) ? $candidate->{$method}() : null;
 	}
 
 	/**
