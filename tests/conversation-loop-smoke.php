@@ -60,8 +60,8 @@ $metadata_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 			'messages'               => $messages,
 			'tool_execution_results' => array(),
 			'metadata'               => array(
-				'citations'         => array( array( 'url' => 'https://example.test/source' ) ),
-				'retrieved_context' => array( array( 'id' => 'ctx-1', 'title' => 'Source' ) ),
+				'citations'    => array( array( 'url' => 'https://example.test/source' ) ),
+				'source_items' => array( array( 'id' => 'source-item-1', 'title' => 'Source' ) ),
 			),
 			'request_metadata'       => array(
 				'provider_request_id' => 'req-citations-1',
@@ -72,7 +72,7 @@ $metadata_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 );
 
 agents_api_smoke_assert_equals( 'https://example.test/source', $metadata_result['metadata']['citations'][0]['url'] ?? '', 'loop preserves generic result citation metadata', $failures, $passes );
-agents_api_smoke_assert_equals( 'ctx-1', $metadata_result['metadata']['retrieved_context'][0]['id'] ?? '', 'loop preserves generic retrieved-context metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'source-item-1', $metadata_result['metadata']['source_items'][0]['id'] ?? '', 'loop preserves caller-owned result metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'req-citations-1', $metadata_result['request_metadata']['provider_request_id'] ?? '', 'caller-managed loop preserves request metadata', $failures, $passes );
 
 echo "\n[2] Loop can apply caller-supplied compaction without owning model dispatch:\n";
