@@ -114,6 +114,8 @@ class WP_Agent_Tool_Declaration {
 			$normalized['runtime'] = $runtime;
 		}
 
+		$normalized = array_merge( $normalized, self::normalizeExtensionFields( $declaration ) );
+
 		return $normalized;
 	}
 

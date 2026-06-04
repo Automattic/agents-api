@@ -147,7 +147,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		 * Exclude caller-provided runtime tools unless policy explicitly opts them in.
 		 *
 		 * Non-runtime tools are never affected by this guard. Runtime tools match neutral
-		 * declaration metadata (`runtime_tool`, `executor=client`, or `scope=run`) and
+		 * declaration metadata (`runtime_tool` or `executor=client`) and
 		 * must be explicitly named, category-matched, or preserved by host policy.
 		 *
 		 * @param array<string, array<string, mixed>> $tools              Tool definitions keyed by tool name.
@@ -193,8 +193,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		 */
 		public function is_runtime_tool( array $tool ): bool {
 			return true === ( $tool['runtime_tool'] ?? false )
-				|| 'client' === ( $tool['executor'] ?? null )
-				|| 'run' === ( $tool['scope'] ?? null );
+				|| 'client' === ( $tool['executor'] ?? null );
 		}
 
 		/**

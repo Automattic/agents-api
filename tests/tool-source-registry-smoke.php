@@ -62,6 +62,7 @@ $registry->registerSource(
 			'static/only'  => array(
 				'description' => 'Static-only declaration.',
 			),
+			'static/minimal' => array(),
 		);
 	},
 	30
@@ -106,6 +107,13 @@ $registry->registerSource(
 				'name'        => 'agent/shared',
 				'source'      => 'runtime',
 				'description' => 'Runtime declaration.',
+			),
+			'client/pick'  => array(
+				'description' => 'Client runtime declaration.',
+				'executor'    => 'client',
+				'external_executor' => true,
+				'runtime_tool' => true,
+				'scope'       => 'run',
 			),
 			'runtime/only' => array(
 				'description' => 'Runtime-only declaration.',
@@ -200,10 +208,12 @@ agents_api_smoke_assert_equals(
 	array(
 		'agent/shared',
 		'adjacent/only',
+		'client/pick',
 		'runtime/only',
 		'runtime/filtered',
 		'filtered/only',
 		'static/only',
+		'static/minimal',
 	),
 	array_keys( $tools ),
 	'registry gathers multiple ordered sources with duplicate-name precedence',
@@ -232,6 +242,13 @@ agents_api_smoke_assert_equals(
 	$passes
 );
 agents_api_smoke_assert_equals(
+	'static/minimal',
+	$tools['static/minimal']['description'],
+	'registry defaults missing source descriptions from the tool name',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
 	'host',
 	$tools['static/only']['executor'] ?? null,
 	'registry normalizes gathered tools to host executor declarations',
@@ -242,6 +259,27 @@ agents_api_smoke_assert_equals(
 	'run',
 	$tools['static/only']['scope'] ?? null,
 	'registry normalizes gathered tools to run scope declarations',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
+	'client',
+	$tools['client/pick']['executor'] ?? null,
+	'registry preserves client runtime tool executor declarations',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
+	'client',
+	$tools['client/pick']['source'] ?? null,
+	'registry preserves client runtime tool source declarations',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
+	true,
+	$tools['client/pick']['external_executor'] ?? false,
+	'registry preserves client runtime extension metadata',
 	$failures,
 	$passes
 );
