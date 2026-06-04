@@ -261,11 +261,7 @@ class WP_Agent_Tool_Declaration {
 		$errors = array();
 
 		$name = $declaration['name'] ?? null;
-		if (
-			! is_string( $name )
-			|| '' === $name
-			|| ! preg_match( '/^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/', $name )
-		) {
+		if ( ! is_string( $name ) || '' === $name || ! self::isValidHostToolName( $name ) ) {
 			$errors[] = 'name';
 		}
 
@@ -318,7 +314,7 @@ class WP_Agent_Tool_Declaration {
 	private static function applyServerDefaults( array $declaration ): array {
 		$name = is_string( $declaration['name'] ?? null ) ? $declaration['name'] : '';
 		if ( ! isset( $declaration['source'] ) || ! is_string( $declaration['source'] ) || '' === $declaration['source'] ) {
-			$declaration['source'] = self::sourceFromName( $name );
+			$declaration['source'] = self::sourceFromName( $name ) ?: 'host';
 		}
 
 		if ( ! isset( $declaration['parameters'] ) ) {
@@ -479,6 +475,17 @@ class WP_Agent_Tool_Declaration {
 	public static function sourceFromName( string $name ): string {
 		$parts = explode( '/', $name, 2 );
 		return count( $parts ) === 2 ? $parts[0] : '';
+	}
+
+	/**
+	 * Whether a host-mediated tool name is valid.
+	 *
+	 * @param string $name Tool name.
+	 * @return bool Whether the name is valid.
+	 */
+	private static function isValidHostToolName( string $name ): bool {
+		return 1 === preg_match( '/^[a-z][a-z0-9_-]*$/', $name )
+			|| 1 === preg_match( '/^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/', $name );
 	}
 
 	/**

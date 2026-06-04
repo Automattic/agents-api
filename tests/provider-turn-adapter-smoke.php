@@ -72,6 +72,16 @@ agents_api_smoke_assert_equals( 'fake-runtime', $request->runtime()['runtime_id'
 agents_api_smoke_assert_equals( 'run-123', $request->runId(), 'provider request carries run id', $failures, $passes );
 agents_api_smoke_assert_equals( 'session-456', $request->sessionId(), 'provider request carries session id', $failures, $passes );
 
+$host_tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(
+	array(
+		'name'        => 'workspace_read',
+		'description' => 'Read a workspace file.',
+		'parameters'  => array( 'type' => 'object' ),
+	)
+);
+agents_api_smoke_assert_equals( 'workspace_read', $host_tool['name'], 'host tool declarations allow unnamespaced names', $failures, $passes );
+agents_api_smoke_assert_equals( 'host', $host_tool['source'], 'unnamespaced host tools receive a host source', $failures, $passes );
+
 $normalized_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
 	array(
 		'content'              => 'Using a tool.',
@@ -184,7 +194,51 @@ agents_api_smoke_assert_equals( 'Plain assistant answer.', $content_only_result[
 agents_api_smoke_assert_equals( 2, count( $content_only_result['messages'] ), 'content-only adapter appends one assistant message', $failures, $passes );
 agents_api_smoke_assert_equals( 'content-only-1', $content_only_result['request_metadata']['provider_request_id'], 'content-only adapter preserves request metadata', $failures, $passes );
 
-echo "\n[4] Provider-turn typed failures become canonical failed loop results:\n";
+echo "\n[4] Provider-turn adapters can append continuation messages before the next turn:\n";
+$continuation_adapter = new class() implements AgentsAPI\AI\WP_Agent_Provider_Turn_Adapter {
+	/** @var array<int, array<string, mixed>> Captured requests. */
+	public array $requests = array();
+
+	public function run_turn( AgentsAPI\AI\WP_Agent_Provider_Turn_Request $request ): array {
+		$this->requests[] = $request->to_array();
+		$turn             = (int) ( $request->context()['turn'] ?? 0 );
+
+		if ( 1 === $turn ) {
+			return array(
+				'content'               => 'I am not done yet.',
+				'continuation_messages' => array(
+					array(
+						'role'    => 'user',
+						'content' => 'Please continue until the task is complete.',
+					),
+				),
+			);
+		}
+
+		return array(
+			'content' => 'Complete after continuation.',
+		);
+	}
+};
+
+$continuation_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'finish with a continuation if needed' ) ),
+	null,
+	array(
+		'provider_turn_adapter' => $continuation_adapter,
+		'max_turns'             => 3,
+		'should_continue'       => static function ( array $turn_result ): bool {
+			return ! empty( $turn_result['continuation_messages'] );
+		},
+	)
+);
+
+agents_api_smoke_assert_equals( 2, count( $continuation_adapter->requests ), 'continuation message causes a second provider turn', $failures, $passes );
+agents_api_smoke_assert_equals( 'Please continue until the task is complete.', $continuation_adapter->requests[1]['messages'][2]['content'] ?? '', 'second provider turn receives continuation message', $failures, $passes );
+agents_api_smoke_assert_equals( 'Complete after continuation.', $continuation_result['final_content'], 'continuation run surfaces final content', $failures, $passes );
+agents_api_smoke_assert_equals( 'continuation_message_added', $continuation_result['events'][0]['type'] ?? '', 'continuation run records an event', $failures, $passes );
+
+echo "\n[5] Provider-turn typed failures become canonical failed loop results:\n";
 $failing_adapter = static function ( AgentsAPI\AI\WP_Agent_Provider_Turn_Request $unused ): array {
 	unset( $unused );
 	return array(
