@@ -111,6 +111,8 @@ $registry->registerSource(
 			'client/pick'  => array(
 				'description' => 'Client runtime declaration.',
 				'executor'    => 'client',
+				'external_executor' => true,
+				'runtime_tool' => true,
 				'scope'       => 'run',
 			),
 			'runtime/only' => array(
@@ -271,6 +273,13 @@ agents_api_smoke_assert_equals(
 	'client',
 	$tools['client/pick']['source'] ?? null,
 	'registry preserves client runtime tool source declarations',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
+	true,
+	$tools['client/pick']['external_executor'] ?? false,
+	'registry preserves client runtime extension metadata',
 	$failures,
 	$passes
 );
