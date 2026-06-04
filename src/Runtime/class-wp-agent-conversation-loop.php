@@ -878,17 +878,18 @@ class WP_Agent_Conversation_Loop {
 			is_array( $result['continuation_messages'] ?? null ) ? $result['continuation_messages'] : array()
 		);
 		foreach ( $continuation_messages as $continuation_message ) {
-			$messages[] = $continuation_message;
+			$continuation_role = is_string( $continuation_message['role'] ?? null ) ? $continuation_message['role'] : '';
+			$messages[]        = $continuation_message;
 			$events[]   = array(
 				'type'     => 'continuation_message_added',
 				'metadata' => array(
 					'turn' => $turn,
-					'role' => (string) ( $continuation_message['role'] ?? '' ),
+					'role' => $continuation_role,
 				),
 			);
 			self::emit_event( $on_event, 'continuation_message_added', array(
 				'turn' => $turn,
-				'role' => (string) ( $continuation_message['role'] ?? '' ),
+				'role' => $continuation_role,
 			) );
 		}
 
@@ -1634,11 +1635,12 @@ class WP_Agent_Conversation_Loop {
 					is_array( $result['continuation_messages'] ?? null ) ? $result['continuation_messages'] : array()
 				);
 				foreach ( $continuation_messages as $continuation_message ) {
-					$messages[] = $continuation_message;
+					$continuation_role = is_string( $continuation_message['role'] ?? null ) ? $continuation_message['role'] : '';
+					$messages[]        = $continuation_message;
 					$events[]   = array(
 						'type'     => 'continuation_message_added',
 						'metadata' => array(
-							'role' => (string) ( $continuation_message['role'] ?? '' ),
+							'role' => $continuation_role,
 						),
 					);
 				}
