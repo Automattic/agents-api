@@ -27,12 +27,13 @@ class WP_Agent_Provider_Turn_Result {
 	 */
 	public static function normalize( array $result ): array {
 		$normalized = array(
-			'content'              => self::string_value( $result['content'] ?? '' ),
-			'message'              => null,
-			'tool_calls'           => array(),
-			'usage'                => self::assoc_array( $result['usage'] ?? array(), 'usage' ),
-			'request_metadata'     => self::assoc_array( $result['request_metadata'] ?? array(), 'request_metadata' ),
-			'provider_diagnostics' => self::assoc_array( $result['provider_diagnostics'] ?? array(), 'provider_diagnostics' ),
+			'content'               => self::string_value( $result['content'] ?? '' ),
+			'message'               => null,
+			'continuation_messages' => array(),
+			'tool_calls'            => array(),
+			'usage'                 => self::assoc_array( $result['usage'] ?? array(), 'usage' ),
+			'request_metadata'      => self::assoc_array( $result['request_metadata'] ?? array(), 'request_metadata' ),
+			'provider_diagnostics'  => self::assoc_array( $result['provider_diagnostics'] ?? array(), 'provider_diagnostics' ),
 		);
 
 		if ( isset( $result['message'] ) ) {
@@ -47,6 +48,13 @@ class WP_Agent_Provider_Turn_Result {
 				throw self::invalid( 'tool_calls', 'must be an array when present' );
 			}
 			$normalized['tool_calls'] = self::normalize_tool_calls( $result['tool_calls'] );
+		}
+
+		if ( isset( $result['continuation_messages'] ) ) {
+			if ( ! is_array( $result['continuation_messages'] ) ) {
+				throw self::invalid( 'continuation_messages', 'must be an array when present' );
+			}
+			$normalized['continuation_messages'] = WP_Agent_Message::normalize_many( $result['continuation_messages'] );
 		}
 
 		if ( isset( $result['failure'] ) ) {

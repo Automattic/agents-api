@@ -36,11 +36,14 @@ class WP_Agent_Conversation_Loop {
 	 * an array. Callers may also pass `provider_turn_adapter` in options; that
 	 * adapter receives `WP_Agent_Provider_Turn_Request` and returns a normalized
 	 * `WP_Agent_Provider_Turn_Result` shape while the loop keeps ownership of
-	 * continuation and mediated tool execution. When tool mediation is enabled
-	 * (`tool_executor` + `tool_declarations`), the turn runner or provider-turn
-	 * adapter can return a `tool_calls` key (array of `{name, parameters}`) and
-	 * the loop handles execution internally. Otherwise the turn runner must return
-	 * an `WP_Agent_Conversation_Result`-compatible array as before.
+	 * continuation and mediated tool execution. Provider-turn results may include
+		 * `continuation_messages` to append caller-supplied follow-up messages before
+		 * the next turn without taking over the whole runner. When tool mediation is
+		 * enabled (`tool_executor` + `tool_declarations`), the turn runner or
+		 * provider-turn adapter can return a `tool_calls` key (array of `{name,
+		 * parameters}`) and the loop handles execution internally. Otherwise the turn
+		 * runner must return an `WP_Agent_Conversation_Result`-compatible array as
+		 * before.
 	 *
 	 * Supported options:
 	 *
@@ -871,9 +874,27 @@ class WP_Agent_Conversation_Loop {
 			}
 		}
 
-		// No tool calls at all = natural completion (assistant responded with text only).
+		$continuation_messages = self::normalize_messages(
+			is_array( $result['continuation_messages'] ?? null ) ? $result['continuation_messages'] : array()
+		);
+		foreach ( $continuation_messages as $continuation_message ) {
+			$messages[] = $continuation_message;
+			$events[]   = array(
+				'type'     => 'continuation_message_added',
+				'metadata' => array(
+					'turn' => $turn,
+					'role' => (string) ( $continuation_message['role'] ?? '' ),
+				),
+			);
+			self::emit_event( $on_event, 'continuation_message_added', array(
+				'turn' => $turn,
+				'role' => (string) ( $continuation_message['role'] ?? '' ),
+			) );
+		}
+
+		// No tool calls and no continuation messages = natural completion.
 		if ( empty( $tool_calls ) ) {
-			$complete = true;
+			$complete = empty( $continuation_messages );
 		}
 
 		return array(
@@ -1600,6 +1621,7 @@ class WP_Agent_Conversation_Loop {
 			}
 
 			if ( ! $mediation_enabled ) {
+				$events = array();
 				if ( isset( $result['message'] ) && is_array( $result['message'] ) ) {
 					$messages[] = $result['message'];
 				} else {
@@ -1608,9 +1630,21 @@ class WP_Agent_Conversation_Loop {
 						$messages[] = WP_Agent_Message::text( 'assistant', $content );
 					}
 				}
+				$continuation_messages = self::normalize_messages(
+					is_array( $result['continuation_messages'] ?? null ) ? $result['continuation_messages'] : array()
+				);
+				foreach ( $continuation_messages as $continuation_message ) {
+					$messages[] = $continuation_message;
+					$events[]   = array(
+						'type'     => 'continuation_message_added',
+						'metadata' => array(
+							'role' => (string) ( $continuation_message['role'] ?? '' ),
+						),
+					);
+				}
 
 				$result['tool_execution_results'] = array();
-				$result['events']                 = array();
+				$result['events']                 = $events;
 			}
 
 			$result['messages'] = $messages;
