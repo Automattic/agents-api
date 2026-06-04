@@ -107,6 +107,11 @@ $registry->registerSource(
 				'source'      => 'runtime',
 				'description' => 'Runtime declaration.',
 			),
+			'client/pick'  => array(
+				'description' => 'Client runtime declaration.',
+				'executor'    => 'client',
+				'scope'       => 'run',
+			),
 			'runtime/only' => array(
 				'description' => 'Runtime-only declaration.',
 			),
@@ -200,6 +205,7 @@ agents_api_smoke_assert_equals(
 	array(
 		'agent/shared',
 		'adjacent/only',
+		'client/pick',
 		'runtime/only',
 		'runtime/filtered',
 		'filtered/only',
@@ -242,6 +248,20 @@ agents_api_smoke_assert_equals(
 	'run',
 	$tools['static/only']['scope'] ?? null,
 	'registry normalizes gathered tools to run scope declarations',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
+	'client',
+	$tools['client/pick']['executor'] ?? null,
+	'registry preserves client runtime tool executor declarations',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
+	'client',
+	$tools['client/pick']['source'] ?? null,
+	'registry preserves client runtime tool source declarations',
 	$failures,
 	$passes
 );

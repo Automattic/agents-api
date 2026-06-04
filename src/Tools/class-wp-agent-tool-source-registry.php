@@ -196,12 +196,15 @@ class WP_Agent_Tool_Source_Registry {
 	 * @return array<string, mixed>
 	 */
 	private function normalizeGatheredTool( string $tool_name, string $source_slug, array $tool_definition ): array {
-		$tool_definition['name']   = is_string( $tool_definition['name'] ?? null ) && '' !== $tool_definition['name'] ? $tool_definition['name'] : $tool_name;
-		$tool_definition['source'] = is_string( $tool_definition['source'] ?? null ) && '' !== $tool_definition['source'] ? $tool_definition['source'] : $source_slug;
+		$tool_definition['name'] = is_string( $tool_definition['name'] ?? null ) && '' !== $tool_definition['name'] ? $tool_definition['name'] : $tool_name;
+
+		if ( ! is_string( $tool_definition['source'] ?? null ) || '' === $tool_definition['source'] ) {
+			$tool_definition['source'] = 0 === strpos( $tool_definition['name'], 'client/' ) ? WP_Agent_Tool_Declaration::SOURCE_CLIENT : $source_slug;
+		}
 
 		try {
 			$normalized = array();
-			foreach ( WP_Agent_Tool_Declaration::normalizeForServer( $tool_definition ) as $key => $value ) {
+			foreach ( WP_Agent_Tool_Declaration::normalizeForConversationRequest( $tool_definition ) as $key => $value ) {
 				if ( is_string( $key ) ) {
 					$normalized[ $key ] = $value;
 				}
