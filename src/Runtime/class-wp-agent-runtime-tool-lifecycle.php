@@ -12,6 +12,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Product-neutral runtime-tool lifecycle operations.
  */
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Validation exceptions are not rendered output.
 class WP_Agent_Runtime_Tool_Lifecycle {
 
 	/**
@@ -55,12 +56,12 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 		do_action( 'agents_api_runtime_tool_result_submitted', $normalized_request, $normalized_result, $context );
 
 		$envelope = array(
-			'status'                 => WP_Agent_Runtime_Tool_Result::STATUS_SUBMITTED,
-			'request'                => $normalized_request,
-			'result'                 => $normalized_result,
-			'tool_result_message'    => self::tool_result_message_payload( $normalized_request, $normalized_result ),
-			'tool_execution_result'  => self::tool_execution_result_payload( $normalized_request, $normalized_result ),
-			'continuation_result'    => null,
+			'status'                => WP_Agent_Runtime_Tool_Result::STATUS_SUBMITTED,
+			'request'               => $normalized_request,
+			'result'                => $normalized_result,
+			'tool_result_message'   => self::tool_result_message_payload( $normalized_request, $normalized_result ),
+			'tool_execution_result' => self::tool_execution_result_payload( $normalized_request, $normalized_result ),
+			'continuation_result'   => null,
 		);
 
 		if ( null !== $continuation ) {
@@ -95,8 +96,8 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 		$timeout_result     = WP_Agent_Runtime_Tool_Result::from_request(
 			$normalized_request,
 			array(
-				'success' => false,
-				'error'   => 'Runtime tool request timed out.',
+				'success'  => false,
+				'error'    => 'Runtime tool request timed out.',
 				'metadata' => array( 'status' => WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT ),
 			)
 		);
@@ -106,12 +107,12 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 		do_action( 'agents_api_runtime_tool_request_timed_out', $timeout_request, $timeout_result, $context );
 
 		$envelope = array(
-			'status'                 => WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT,
-			'request'                => $timeout_request,
-			'result'                 => $timeout_result,
-			'tool_result_message'    => self::tool_result_message_payload( $normalized_request, $timeout_result ),
-			'tool_execution_result'  => self::tool_execution_result_payload( $normalized_request, $timeout_result ),
-			'continuation_result'    => null,
+			'status'                => WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT,
+			'request'               => $timeout_request,
+			'result'                => $timeout_result,
+			'tool_result_message'   => self::tool_result_message_payload( $normalized_request, $timeout_result ),
+			'tool_execution_result' => self::tool_execution_result_payload( $normalized_request, $timeout_result ),
+			'continuation_result'   => null,
 		);
 
 		if ( null !== $continuation ) {
