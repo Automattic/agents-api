@@ -85,14 +85,12 @@ final class WP_Agent_Byte_Limit_Tool_Result_Truncator implements WP_Agent_Tool_R
 	 */
 	private function preserve_result_metadata( array $result ): array {
 		$payload = isset( $result['result'] ) && is_array( $result['result'] ) ? $result['result'] : array();
-		$keep    = array();
-
-		foreach ( array( 'citations' ) as $field ) {
-			if ( array_key_exists( $field, $payload ) ) {
-				$keep[ $field ] = $payload[ $field ];
-			}
+		if ( ! array_key_exists( WP_Agent_Citation_Metadata::KEY, $payload ) ) {
+			return array();
 		}
 
-		return $keep;
+		return array(
+			WP_Agent_Citation_Metadata::KEY => WP_Agent_Citation_Metadata::normalize_many( $payload[ WP_Agent_Citation_Metadata::KEY ] ),
+		);
 	}
 }
