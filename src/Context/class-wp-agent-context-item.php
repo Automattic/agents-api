@@ -10,6 +10,8 @@
 
 namespace AgentsAPI\AI\Context;
 
+use AgentsAPI\AI\WP_Agent_Citation_Metadata;
+
 defined( 'ABSPATH' ) || exit;
 
 final class WP_Agent_Context_Item {
@@ -49,7 +51,7 @@ final class WP_Agent_Context_Item {
 			'provenance'     => $this->provenance,
 			'conflict_kind'  => WP_Agent_Context_Conflict_Kind::normalize( $this->conflict_kind ),
 			'conflict_key'   => $this->conflict_key,
-			'metadata'       => $this->metadata,
+			'metadata'       => WP_Agent_Citation_Metadata::normalize_metadata( $this->metadata ),
 		);
 	}
 }

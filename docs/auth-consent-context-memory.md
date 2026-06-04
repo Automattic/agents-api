@@ -128,6 +128,8 @@ Context items carry both content and provenance:
 - `conflict_key`
 - `metadata`
 
+Retrieved context items place canonical citation metadata at `metadata['citations']`. Each citation is a generic associative array with optional `source`, `source_id`, `item_id`, `fragment_id`, `source_title`, `source_url`, `score`, and `excerpt` fields. Agents API normalizes these canonical fields and preserves additional caller-owned citation metadata without interpreting it.
+
 Authority tiers are generic, with platform/support/workspace/user/agent/conversation ordering defined in `WP_Agent_Context_Authority_Tier`. `WP_Agent_Default_Context_Conflict_Resolver` resolves authoritative facts by authority tier and preferences by specificity then authority.
 
 ## Memory store contract

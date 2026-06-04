@@ -69,6 +69,7 @@
       "php tests/spin-detector-smoke.php",
       "php tests/identical-failure-tracker-smoke.php",
       "php tests/tool-result-truncator-smoke.php",
+      "php tests/citation-metadata-smoke.php",
       "php tests/context-registry-smoke.php",
       "php tests/conversation-loop-smoke.php",
       "php tests/provider-turn-adapter-smoke.php",
