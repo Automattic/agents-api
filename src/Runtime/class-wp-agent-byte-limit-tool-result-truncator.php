@@ -44,15 +44,19 @@ final class WP_Agent_Byte_Limit_Tool_Result_Truncator implements WP_Agent_Tool_R
 			);
 		}
 
-		$excerpt   = substr( (string) $encoded, 0, $this->max_bytes );
-		$metadata  = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
-		$truncated = $result;
+		$excerpt            = substr( (string) $encoded, 0, $this->max_bytes );
+		$metadata           = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
+		$preserved_metadata = $this->preserve_result_metadata( $result );
+		$truncated          = $result;
 
-		$truncated['result']   = array(
-			'truncated'      => true,
-			'excerpt'        => $excerpt,
-			'original_bytes' => $original_bytes,
-			'excerpt_bytes'  => strlen( $excerpt ),
+		$truncated['result']   = array_merge(
+			array(
+				'truncated'      => true,
+				'excerpt'        => $excerpt,
+				'original_bytes' => $original_bytes,
+				'excerpt_bytes'  => strlen( $excerpt ),
+			),
+			$preserved_metadata
 		);
 		$truncated['metadata'] = array_merge(
 			$metadata,
@@ -71,5 +75,24 @@ final class WP_Agent_Byte_Limit_Tool_Result_Truncator implements WP_Agent_Tool_R
 				'excerpt_bytes'  => strlen( $excerpt ),
 			),
 		);
+	}
+
+	/**
+	 * Preserve compact result metadata from oversized result payloads.
+	 *
+	 * @param array<string,mixed> $result Tool execution result.
+	 * @return array<string,mixed> Preserved metadata fields.
+	 */
+	private function preserve_result_metadata( array $result ): array {
+		$payload = isset( $result['result'] ) && is_array( $result['result'] ) ? $result['result'] : array();
+		$keep    = array();
+
+		foreach ( array( 'citations', 'retrieved_context', 'retrieved_contexts' ) as $field ) {
+			if ( array_key_exists( $field, $payload ) ) {
+				$keep[ $field ] = $payload[ $field ];
+			}
+		}
+
+		return $keep;
 	}
 }

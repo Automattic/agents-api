@@ -216,6 +216,10 @@ class WP_Agent_Conversation_Result {
 			throw self::invalid( 'usage', 'must be an array when present' );
 		}
 
+		if ( array_key_exists( 'metadata', $result ) && ! is_array( $result['metadata'] ) ) {
+			throw self::invalid( 'metadata', 'must be an array when present' );
+		}
+
 		if ( array_key_exists( 'request_metadata', $result ) && ! is_array( $result['request_metadata'] ) ) {
 			throw self::invalid( 'request_metadata', 'must be an array when present' );
 		}
