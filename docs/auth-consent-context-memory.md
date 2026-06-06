@@ -60,7 +60,40 @@ Missing headers produce a top-of-chain context. Malformed headers throw `Invalid
 
 ## Execution principals and workspace scope
 
-`AgentsAPI\AI\WP_Agent_Execution_Principal` represents one runtime actor: acting user id, effective agent id/slug, auth source, request context, optional token id, workspace id, client id, capability ceiling, caller context, and JSON-friendly metadata.
+`AgentsAPI\AI\WP_Agent_Execution_Principal` represents one runtime actor: acting user id, effective agent id/slug, auth source, request context, optional token id, workspace id, client id, capability ceiling, caller context, non-user audience id/claims, optional transcript owner, and JSON-friendly metadata.
+
+Generic principal fields:
+
+| Field | Purpose |
+| --- | --- |
+| `acting_user_id` | WordPress user ID on whose behalf execution happens, or `0` for non-user/runtime/system principals. Hosts still enforce capabilities with WordPress-native auth, caps, and REST permission callbacks. |
+| `effective_agent_id` | Registered agent id/slug effective for this run. This is routing identity, not a permission grant by itself. |
+| `auth_source` | Product-neutral source such as `user`, `application_password`, `agent_token`, `audience`, `runtime`, or `system`; hosts may register additional sources with `wp_agent_known_auth_sources`. |
+| `request_context` | Entry context such as `rest`, `cli`, `cron`, `chat`, or `runtime`. |
+| `workspace_id` | Host-owned scope id for persistence, tool policy, audit, or result filtering. |
+| `client_id` | Host/client surface identifier, such as a frontend, bridge, runtime, or API client. |
+| `audience_id` / `audience_claims` | Host-resolved non-user audience context. Claims are private runtime/audit data, not a display contract. |
+| `owner_type` / `owner_key` | Optional transcript/session owner. Non-user principals must use opaque host-owned owner keys; audience access alone is not a transcript owner. |
+| `capability_ceiling` | Optional ceiling intersected by authorization policy with WordPress capabilities. |
+| `caller_context` | Cross-agent/cross-host chain context for delegation and loop prevention. |
+| `request_metadata` / `binding` | Private host audit/runtime data. These fields are not safe citation or frontend metadata. |
+
+Permission-aware tools and retrieval surfaces should attach only safe principal metadata to user-visible citations, diagnostics, or frontend result objects. `to_safe_metadata()` returns the generic safe shape: schema version, effective agent, auth source, request context, acting user id, workspace id, client id, audience id, owner type, and boolean flags for conversation-owner/capability/caller-context presence. It intentionally omits token ids, owner keys, request metadata, audience claims, capability details, and cryptographic binding claims.
+
+Hosts that need richer audit trails should persist the full `to_array()` shape in private storage they control. Frontend clients, citations, and source diagnostics should use the safe metadata shape plus result-level status fields instead of receiving raw credentials, tokens, opaque session ids, or authorization internals.
+
+Client context is caller-owned runtime context carried on conversation requests and frontend channel payloads. It may describe selected UI state, host context, explicit routing hints, or opaque client metadata, but Agents API does not infer tool arguments from it. Tool declarations must opt in with `client_context_bindings`, either as `array( 'parameter_name' )` or `array( 'parameter_name' => 'context_key' )`. Sensitive ambient keys such as `api_key`, `token`, `authorization`, `cookie`, `nonce`, or `password` must be passed only through explicit bindings/defaults and host-owned authorization policy; matching key names alone never satisfies required parameters.
+
+Permission-aware retrieval results should use product-neutral status vocabulary so frontend clients can explain restricted output without learning product-specific policy:
+
+| Status | Meaning |
+| --- | --- |
+| `allowed` | The source/result was available to the current principal. |
+| `denied` | The source/result exists but the current principal cannot access it. |
+| `partial` | Some matching items were withheld or redacted. |
+| `source_restricted` | The source itself is unavailable in the current workspace/client/principal context. |
+
+Result and citation metadata may include `access_status`, `restriction_reason`, `source`, `source_id`, `item_id`, `fragment_id`, `source_title`, `source_url`, `score`, `excerpt`, and `principal` using `to_safe_metadata()`. Concrete auth checks remain downstream: WordPress users, roles, capabilities, REST permission callbacks, and host policy decide access; Agents API only defines the transportable, product-neutral context shape.
 
 `AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope` is the generic workspace identity shared by memory, transcripts, persistence, and audit adapters. It is deliberately `(workspace_type, workspace_id)` rather than a WordPress site id so consumers can map sites, networks, code workspaces, pull requests, or ephemeral environments without changing generic contracts.
 

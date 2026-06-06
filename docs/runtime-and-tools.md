@@ -430,6 +430,18 @@ If a concrete executor returns its own `runtime` metadata, the normalized result
 
 Retrieval tools place canonical citations in result metadata under `metadata['citations']`. The substrate citation shape is intentionally small and generic: each citation may include `source`, `source_id`, `item_id`, `fragment_id`, `source_title`, `source_url`, `score`, and `excerpt`. Agents API normalizes this citation list for mediated tool results and delegated runtime tool results while preserving unrelated caller-owned metadata and additional caller-owned fields inside each citation.
 
+Permission-aware citations and source diagnostics may add product-neutral access metadata:
+
+| Key | Meaning |
+| --- | --- |
+| `access_status` | `allowed`, `denied`, `partial`, or `source_restricted`. |
+| `restriction_reason` | Optional generic reason such as `capability`, `workspace`, `audience`, `source_policy`, or `redacted`. |
+| `principal` | Optional safe principal metadata from `WP_Agent_Execution_Principal::to_safe_metadata()`. |
+
+Do not attach raw request metadata, token ids, owner keys, audience claims, capability lists, cookies, nonces, credentials, or cryptographic binding claims to citation metadata. If a host needs those details for audits, it should write a private audit record and expose only safe principal/source metadata to model-visible or frontend-visible result surfaces.
+
+Frontend clients should treat citation access metadata as explanation and display context, not as authorization. Downstream WordPress auth, capabilities, REST permission callbacks, source adapters, and host policy remain the enforcement points.
+
 ## Tool execution core
 
 `WP_Agent_Tool_Execution_Core` mediates calls without owning any concrete tool implementation.
