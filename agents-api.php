@@ -83,6 +83,8 @@ require_once AGENTS_API_PATH . 'src/Registry/register-agents.php';
 require_once AGENTS_API_PATH . 'src/Registry/register-agent-runtime-bundle-importer.php';
 require_once AGENTS_API_PATH . 'src/Packages/register-agent-package-artifacts.php';
 require_once AGENTS_API_PATH . 'src/Workspace/class-wp-agent-workspace-scope.php';
+require_once AGENTS_API_PATH . 'src/Workspace/class-wp-agent-safe-execution-workspace.php';
+require_once AGENTS_API_PATH . 'src/Workspace/register-safe-execution-workspace.php';
 require_once AGENTS_API_PATH . 'src/Identity/class-wp-agent-identity-scope.php';
 require_once AGENTS_API_PATH . 'src/Identity/class-wp-agent-materialized-identity.php';
 require_once AGENTS_API_PATH . 'src/Identity/class-wp-agent-identity-store.php';
