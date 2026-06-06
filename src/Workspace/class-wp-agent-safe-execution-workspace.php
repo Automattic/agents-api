@@ -38,6 +38,10 @@ final class WP_Agent_Safe_Execution_Workspace {
 	 * Whether the module can operate with the current configuration.
 	 */
 	public static function available(): bool {
+		if ( ! self::enabled() ) {
+			return false;
+		}
+
 		return is_string( self::root_realpath() );
 	}
 
