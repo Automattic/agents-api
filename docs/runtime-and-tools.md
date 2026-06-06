@@ -20,6 +20,84 @@ Agents API owns reusable runtime mechanics:
 
 Consumers own provider/model dispatch, prompt assembly, concrete tools, durable storage, streaming UX, product-specific continuation policy, and final business semantics.
 
+## Task execution targets
+
+Agents API also exposes product-neutral task execution plumbing for work that is
+larger than one chat turn but should still flow through a generic agent/session
+contract. The substrate owns normalization, placement hints, executor discovery,
+dispatch, result envelopes, and run-control helpers. Executor providers own all
+concrete side effects.
+
+Public task contracts:
+
+- `agents-api/task-input/v1` normalizes task ID, instructions, structured input,
+  attachments, client context, metadata, session ID, and run ID.
+- `agents-api/execution-placement/v1` carries placement hints: preferred target,
+  allowed targets, resource class, required capabilities, and provider-owned
+  metadata.
+- `agents-api/executor-target/v1` lets providers declare executor targets with
+  IDs, labels, kind, capabilities, resource classes, and opaque metadata.
+- `agents-api/task-result/v1` is the canonical result envelope with status,
+  run/session IDs, executor ID, artifact refs, diagnostics, events, provenance,
+  optional output, timestamps, and metadata.
+
+Registered abilities:
+
+| Ability | Purpose |
+| --- | --- |
+| `agents/run-task` | Dispatch a normalized task to a registered executor target. |
+| `agents/list-execution-targets` | Discover registered targets and filter by placement needs. |
+| `agents/get-task-run` | Read the canonical status/result for an addressable task run. |
+| `agents/cancel-task-run` | Request best-effort cancellation for an addressable task run. |
+
+Executor providers register targets through `wp_agent_execution_targets` and
+dispatch handlers through `wp_agent_task_handler`, mirroring the `agents/chat`
+and `wp_agent_chat_handler` pattern:
+
+```php
+add_filter(
+	'wp_agent_execution_targets',
+	static function ( array $targets ): array {
+		$targets[] = array(
+			'id'               => 'example-runtime',
+			'label'            => 'Example Runtime',
+			'kind'             => 'runtime',
+			'capabilities'     => array( 'tasks.run', 'artifacts.reference' ),
+			'resource_classes' => array( 'generic' ),
+		);
+
+		return $targets;
+	}
+);
+
+add_filter(
+	'wp_agent_task_handler',
+	static function ( $handler, array $input, array $target ) {
+		if ( null !== $handler || 'example-runtime' !== $target['id'] ) {
+			return $handler;
+		}
+
+		return static function ( array $input, array $target ): array {
+			return array(
+				'schema'      => 'agents-api/task-result/v1',
+				'run_id'      => $input['run_id'],
+				'session_id'  => $input['session_id'],
+				'executor_id' => $target['id'],
+				'status'      => 'succeeded',
+				'diagnostics' => array( 'summary' => 'completed' ),
+			);
+		};
+	},
+	10,
+	3
+);
+```
+
+Agents API does not read or write files, create worktrees, run Git, run browser
+runtimes, open pull requests, or mutate sites from this contract. Providers can
+implement those side effects behind executor targets, but they remain provider
+responsibilities and must not be encoded into the generic task schema.
+
 ## Message and request shapes
 
 `AgentsAPI\AI\WP_Agent_Message` normalizes transcript entries into JSON-friendly message arrays. The loop accepts arrays and normalizes them before passing them to caller adapters.

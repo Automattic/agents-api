@@ -186,6 +186,7 @@ $expected_source_directories = array(
 	'Registry',
 	'Routines',
 	'Runtime',
+	'Tasks',
 	'Tools',
 	'Transcripts',
 	'Triggers',

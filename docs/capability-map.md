@@ -21,6 +21,7 @@ the substrate can match their own components against it.
 | Iteration / runaway limits | `WP_Agent_Iteration_Budget` | [`src/Runtime/class-wp-agent-iteration-budget.php`](../src/Runtime/class-wp-agent-iteration-budget.php) | [Runtime and Tools](runtime-and-tools.md) |
 | Transcript persistence hook | `WP_Agent_Transcript_Persister` | [`src/Runtime/class-wp-agent-transcript-persister.php`](../src/Runtime/class-wp-agent-transcript-persister.php) | [Runtime and Tools](runtime-and-tools.md) |
 | Lifecycle events / observability | `agents_api_loop_event` action + `on_event` sink | [`src/Runtime/class-wp-agent-conversation-loop.php`](../src/Runtime/class-wp-agent-conversation-loop.php) | [Runtime and Tools](runtime-and-tools.md) |
+| Task execution target plumbing | `agents/run-task`, task run-control helpers, executor target filters | [`src/Tasks/`](../src/Tasks/) | [Runtime and Tools](runtime-and-tools.md#task-execution-targets) |
 
 ## Tools
 
@@ -88,5 +89,9 @@ filter, so a consumer plugs in its own backend without forking:
 | `wp_agent_conversation_store` | Transcript / session backend |
 | `wp_agent_memory_store` | Memory backend |
 | `wp_agent_pending_action_store` | Approval queue backend |
+| `wp_agent_execution_targets` | Task executor target declarations |
+| `wp_agent_task_handler` | Task executor dispatch handler |
+| `wp_agent_task_run_status_handler` | Task run status backend |
+| `wp_agent_task_run_cancel_handler` | Task cancellation backend |
 | `agents_api_execution_principal` | How the current principal is resolved |
 | `agents_api_enable_default_conversation_store` | Opt in to the built-in WordPress-native conversation store |

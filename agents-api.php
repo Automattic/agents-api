@@ -156,6 +156,7 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-continua
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-lifecycle.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-result.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-chat-run-control.php';
+require_once AGENTS_API_PATH . 'src/Tasks/class-wp-agent-task-run-control.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-loop.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-call.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-parameters.php';
@@ -199,6 +200,7 @@ require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-ability.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-run-control-abilities.php';
+require_once AGENTS_API_PATH . 'src/Tasks/register-agents-task-abilities.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-frontend-chat-rest-route.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-jsonrpc-route.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-dispatch-message-ability.php';
