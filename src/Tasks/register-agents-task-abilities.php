@@ -9,10 +9,10 @@ namespace AgentsAPI\AI\Tasks;
 
 defined( 'ABSPATH' ) || exit;
 
-const AGENTS_RUN_TASK_ABILITY              = 'agents/run-task';
+const AGENTS_RUN_TASK_ABILITY               = 'agents/run-task';
 const AGENTS_LIST_EXECUTION_TARGETS_ABILITY = 'agents/list-execution-targets';
-const AGENTS_GET_TASK_RUN_ABILITY          = 'agents/get-task-run';
-const AGENTS_CANCEL_TASK_RUN_ABILITY       = 'agents/cancel-task-run';
+const AGENTS_GET_TASK_RUN_ABILITY           = 'agents/get-task-run';
+const AGENTS_CANCEL_TASK_RUN_ABILITY        = 'agents/cancel-task-run';
 
 add_action(
 	'wp_abilities_api_categories_init',
@@ -116,8 +116,8 @@ function agents_run_task( array $input ) {
 	if ( is_wp_error( $targets ) ) {
 		return $targets;
 	}
-	$placement = is_array( $input['placement'] ?? null ) ? agents_task_string_keyed_array( $input['placement'] ) : array();
-	$run_id    = agents_task_string( $input['run_id'] ?? '' );
+	$placement  = is_array( $input['placement'] ?? null ) ? agents_task_string_keyed_array( $input['placement'] ) : array();
+	$run_id     = agents_task_string( $input['run_id'] ?? '' );
 	$session_id = agents_task_string( $input['session_id'] ?? '' );
 
 	$target = agents_task_select_target( $targets, $placement );
@@ -134,7 +134,7 @@ function agents_run_task( array $input ) {
 
 	$executor_id          = agents_task_string( $target['id'] ?? '' );
 	$input['executor_id'] = $executor_id;
-	$metadata            = array(
+	$metadata             = array(
 		'executor_id'    => $executor_id,
 		'target_kind'    => $target['kind'],
 		'resource_class' => $placement['resource_class'] ?? '',
@@ -357,14 +357,14 @@ function agents_task_normalize_input( array $input ) {
 	$task['attachments']  = is_array( $task['attachments'] ?? null ) ? array_values( $task['attachments'] ) : ( is_array( $input['attachments'] ?? null ) ? array_values( $input['attachments'] ) : array() );
 	$task['metadata']     = is_array( $task['metadata'] ?? null ) ? agents_task_string_keyed_array( $task['metadata'] ) : array();
 
-	$input['schema']        = agents_task_optional_string( $input['schema'] ?? null ) ?? 'agents-api/task-input/v1';
-	$input['task']          = $task;
-	$input['task_id']       = $task_id;
-	$input['session_id']    = $session_id;
-	$input['run_id']        = $run_id;
-	$input['placement']     = agents_task_normalize_placement( is_array( $input['placement'] ?? null ) ? agents_task_string_keyed_array( $input['placement'] ) : $input );
+	$input['schema']         = agents_task_optional_string( $input['schema'] ?? null ) ?? 'agents-api/task-input/v1';
+	$input['task']           = $task;
+	$input['task_id']        = $task_id;
+	$input['session_id']     = $session_id;
+	$input['run_id']         = $run_id;
+	$input['placement']      = agents_task_normalize_placement( is_array( $input['placement'] ?? null ) ? agents_task_string_keyed_array( $input['placement'] ) : $input );
 	$input['client_context'] = is_array( $input['client_context'] ?? null ) ? agents_task_string_keyed_array( $input['client_context'] ) : array();
-	$input['metadata']      = is_array( $input['metadata'] ?? null ) ? agents_task_string_keyed_array( $input['metadata'] ) : array();
+	$input['metadata']       = is_array( $input['metadata'] ?? null ) ? agents_task_string_keyed_array( $input['metadata'] ) : array();
 
 	return $input;
 }
@@ -538,9 +538,15 @@ function agents_task_placement_schema(): array {
 		'properties' => array(
 			'schema'                => array( 'type' => 'string' ),
 			'preferred_target'      => array( 'type' => array( 'string', 'null' ) ),
-			'allowed_targets'       => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+			'allowed_targets'       => array(
+				'type'  => 'array',
+				'items' => array( 'type' => 'string' ),
+			),
 			'resource_class'        => array( 'type' => 'string' ),
-			'required_capabilities' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+			'required_capabilities' => array(
+				'type'  => 'array',
+				'items' => array( 'type' => 'string' ),
+			),
 			'metadata'              => array( 'type' => 'object' ),
 		),
 	);
@@ -557,8 +563,14 @@ function agents_executor_target_schema(): array {
 			'label'            => array( 'type' => 'string' ),
 			'kind'             => array( 'type' => 'string' ),
 			'description'      => array( 'type' => 'string' ),
-			'capabilities'     => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
-			'resource_classes' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+			'capabilities'     => array(
+				'type'  => 'array',
+				'items' => array( 'type' => 'string' ),
+			),
+			'resource_classes' => array(
+				'type'  => 'array',
+				'items' => array( 'type' => 'string' ),
+			),
 			'metadata'         => array( 'type' => 'object' ),
 		),
 	);
@@ -573,11 +585,20 @@ function agents_task_result_schema(): array {
 			'schema'        => array( 'type' => 'string' ),
 			'run_id'        => array( 'type' => 'string' ),
 			'session_id'    => array( 'type' => 'string' ),
-			'status'        => array( 'type' => 'string', 'enum' => WP_Agent_Task_Run_Control::statuses() ),
+			'status'        => array(
+				'type' => 'string',
+				'enum' => WP_Agent_Task_Run_Control::statuses(),
+			),
 			'executor_id'   => array( 'type' => 'string' ),
-			'artifact_refs' => array( 'type' => 'array', 'items' => array( 'type' => 'object' ) ),
+			'artifact_refs' => array(
+				'type'  => 'array',
+				'items' => array( 'type' => 'object' ),
+			),
 			'diagnostics'   => array( 'type' => 'object' ),
-			'events'        => array( 'type' => 'array', 'items' => array( 'type' => 'object' ) ),
+			'events'        => array(
+				'type'  => 'array',
+				'items' => array( 'type' => 'object' ),
+			),
 			'provenance'    => array( 'type' => 'object' ),
 			'output'        => array( 'type' => array( 'object', 'array', 'string', 'number', 'boolean', 'null' ) ),
 			'started_at'    => array( 'type' => 'string' ),
@@ -618,9 +639,15 @@ function agents_list_execution_targets_input_schema(): array {
 	return array(
 		'type'       => 'object',
 		'properties' => array(
-			'allowed_targets'       => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+			'allowed_targets'       => array(
+				'type'  => 'array',
+				'items' => array( 'type' => 'string' ),
+			),
 			'resource_class'        => array( 'type' => 'string' ),
-			'required_capabilities' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+			'required_capabilities' => array(
+				'type'  => 'array',
+				'items' => array( 'type' => 'string' ),
+			),
 		),
 	);
 }
@@ -632,7 +659,10 @@ function agents_list_execution_targets_output_schema(): array {
 		'required'   => array( 'schema', 'targets' ),
 		'properties' => array(
 			'schema'  => array( 'type' => 'string' ),
-			'targets' => array( 'type' => 'array', 'items' => agents_executor_target_schema() ),
+			'targets' => array(
+				'type'  => 'array',
+				'items' => agents_executor_target_schema(),
+			),
 		),
 	);
 }

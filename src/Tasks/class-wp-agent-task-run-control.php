@@ -134,9 +134,9 @@ class WP_Agent_Task_Run_Control {
 	 * @return array<string,mixed> Normalized run.
 	 */
 	public static function save_run( array $run ): array {
-		$normalized              = self::normalize_run( $run );
+		$normalized               = self::normalize_run( $run );
 		$normalized['updated_at'] = '' !== $normalized['updated_at'] ? $normalized['updated_at'] : self::now();
-		$run_id                  = self::string_value( $normalized['run_id'] );
+		$run_id                   = self::string_value( $normalized['run_id'] );
 
 		$state                    = self::state();
 		$state['runs'][ $run_id ] = $normalized;
