@@ -83,6 +83,7 @@
       "php tests/conversation-loop-budgets-smoke.php",
       "php tests/channels-smoke.php",
       "php tests/chat-run-control-smoke.php",
+      "php tests/task-execution-smoke.php",
       "php tests/frontend-chat-rest-smoke.php",
       "php tests/agents-chat-jsonrpc-route-smoke.php",
       "php tests/agents-dispatch-message-ability-smoke.php",
