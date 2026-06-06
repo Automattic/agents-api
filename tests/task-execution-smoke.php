@@ -108,25 +108,42 @@ add_filter(
 		$captured_target = $target;
 		return static function ( array $runtime_input, array $runtime_target ): array {
 			return array(
-				'run_id'        => $runtime_input['run_id'],
-				'session_id'    => $runtime_input['session_id'],
-				'executor_id'   => $runtime_target['id'],
-				'status'        => 'succeeded',
-				'artifact_refs' => array(
+				'run_id'            => $runtime_input['run_id'],
+				'session_id'        => $runtime_input['session_id'],
+				'executor_id'       => $runtime_target['id'],
+				'status'            => 'succeeded',
+				'execution_metrics' => array(
+					'environment'         => 'test',
+					'wall_time_ms'        => '42',
+					'startup_time_ms'     => 7,
+					'tool_call_count'     => 2,
+					'per_tool_timings_ms' => array( 'inspect' => '11' ),
+					'payload_bytes_in'    => 100,
+					'payload_bytes_out'   => 200,
+					'artifact_bytes'      => 300,
+					'quality_signals'     => array( 'confidence' => 'high' ),
+					'raw_refs'            => array(
+						array(
+							'id'   => 'metrics-raw-1',
+							'type' => 'trace',
+						),
+					),
+				),
+				'artifact_refs'     => array(
 					array(
 						'id'   => 'artifact-1',
 						'type' => 'log',
 					),
 				),
-				'diagnostics'   => array( 'summary' => 'ok' ),
-				'events'        => array(
+				'diagnostics'       => array( 'summary' => 'ok' ),
+				'events'            => array(
 					array(
 						'id'   => 'evt-1',
 						'type' => 'completed',
 					),
 				),
-				'provenance'    => array( 'source' => 'fake' ),
-				'output'        => array( 'answer' => 'done' ),
+				'provenance'        => array( 'source' => 'fake' ),
+				'output'            => array( 'answer' => 'done' ),
 			);
 		};
 	},
@@ -161,6 +178,12 @@ agents_api_smoke_assert_equals( 'fake-executor', $captured_target['id'] ?? null,
 agents_api_smoke_assert_equals( 'agents-api/task-result/v1', $result['schema'] ?? null, 'run-task returns result envelope schema', $failures, $passes );
 agents_api_smoke_assert_equals( 'succeeded', $result['status'] ?? null, 'run-task normalizes task result status', $failures, $passes );
 agents_api_smoke_assert_equals( 'fake-executor', $result['executor_id'] ?? null, 'run-task preserves executor id', $failures, $passes );
+agents_api_smoke_assert_equals( 'object', $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Tasks\AGENTS_RUN_TASK_ABILITY ]['output_schema']['properties']['execution_metrics']['type'] ?? null, 'run-task result schema allows execution metrics', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents-api/execution-metrics/v1', $result['execution_metrics']['schema'] ?? null, 'run-task normalizes execution metrics schema', $failures, $passes );
+agents_api_smoke_assert_equals( 'test', $result['execution_metrics']['environment'] ?? null, 'run-task preserves metrics environment', $failures, $passes );
+agents_api_smoke_assert_equals( 'fake-executor', $result['execution_metrics']['executor_id'] ?? null, 'run-task fills metrics executor id', $failures, $passes );
+agents_api_smoke_assert_equals( 42, $result['execution_metrics']['wall_time_ms'] ?? null, 'run-task normalizes metrics wall time', $failures, $passes );
+agents_api_smoke_assert_equals( 11, $result['execution_metrics']['per_tool_timings_ms']['inspect'] ?? null, 'run-task normalizes per-tool timing metrics', $failures, $passes );
 agents_api_smoke_assert_equals( 'artifact-1', $result['artifact_refs'][0]['id'] ?? null, 'run-task preserves artifact refs', $failures, $passes );
 
 $stored = AgentsAPI\AI\Tasks\agents_get_task_run(
@@ -170,6 +193,9 @@ $stored = AgentsAPI\AI\Tasks\agents_get_task_run(
 	)
 );
 agents_api_smoke_assert_equals( 'succeeded', $stored['status'] ?? null, 'get-task-run reads stored normalized result', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents-api/execution-metrics/v1', $stored['execution_metrics']['schema'] ?? null, 'get-task-run preserves stored metrics schema', $failures, $passes );
+agents_api_smoke_assert_equals( 300, $stored['execution_metrics']['artifact_bytes'] ?? null, 'get-task-run preserves stored metrics artifact bytes', $failures, $passes );
+agents_api_smoke_assert_equals( 'metrics-raw-1', $stored['execution_metrics']['raw_refs'][0]['id'] ?? null, 'get-task-run preserves stored metrics raw refs', $failures, $passes );
 
 AgentsAPI\AI\Tasks\WP_Agent_Task_Run_Control::start_run( 'task-run-cancel', 'task-session-cancel', 'fake-executor' );
 $cancelled = AgentsAPI\AI\Tasks\agents_cancel_task_run(

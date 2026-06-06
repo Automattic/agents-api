@@ -582,28 +582,57 @@ function agents_task_result_schema(): array {
 		'type'       => 'object',
 		'required'   => array( 'schema', 'run_id', 'session_id', 'status', 'executor_id' ),
 		'properties' => array(
-			'schema'        => array( 'type' => 'string' ),
-			'run_id'        => array( 'type' => 'string' ),
-			'session_id'    => array( 'type' => 'string' ),
-			'status'        => array(
+			'schema'            => array( 'type' => 'string' ),
+			'run_id'            => array( 'type' => 'string' ),
+			'session_id'        => array( 'type' => 'string' ),
+			'status'            => array(
 				'type' => 'string',
 				'enum' => WP_Agent_Task_Run_Control::statuses(),
 			),
-			'executor_id'   => array( 'type' => 'string' ),
-			'artifact_refs' => array(
+			'executor_id'       => array( 'type' => 'string' ),
+			'execution_metrics' => agents_execution_metrics_schema(),
+			'artifact_refs'     => array(
 				'type'  => 'array',
 				'items' => array( 'type' => 'object' ),
 			),
-			'diagnostics'   => array( 'type' => 'object' ),
-			'events'        => array(
+			'diagnostics'       => array( 'type' => 'object' ),
+			'events'            => array(
 				'type'  => 'array',
 				'items' => array( 'type' => 'object' ),
 			),
-			'provenance'    => array( 'type' => 'object' ),
-			'output'        => array( 'type' => array( 'object', 'array', 'string', 'number', 'boolean', 'null' ) ),
-			'started_at'    => array( 'type' => 'string' ),
-			'updated_at'    => array( 'type' => 'string' ),
-			'metadata'      => array( 'type' => 'object' ),
+			'provenance'        => array( 'type' => 'object' ),
+			'output'            => array( 'type' => array( 'object', 'array', 'string', 'number', 'boolean', 'null' ) ),
+			'started_at'        => array( 'type' => 'string' ),
+			'updated_at'        => array( 'type' => 'string' ),
+			'metadata'          => array( 'type' => 'object' ),
+		),
+	);
+}
+
+/** @return array<string,mixed> */
+function agents_execution_metrics_schema(): array {
+	return array(
+		'type'       => 'object',
+		'properties' => array(
+			'schema'              => array( 'type' => 'string' ),
+			'environment'         => array( 'type' => 'string' ),
+			'executor_id'         => array( 'type' => 'string' ),
+			'wall_time_ms'        => array( 'type' => 'integer' ),
+			'startup_time_ms'     => array( 'type' => 'integer' ),
+			'tool_call_count'     => array( 'type' => 'integer' ),
+			'per_tool_timings_ms' => array(
+				'type'                 => 'object',
+				'additionalProperties' => array( 'type' => 'integer' ),
+			),
+			'payload_bytes_in'    => array( 'type' => 'integer' ),
+			'payload_bytes_out'   => array( 'type' => 'integer' ),
+			'artifact_bytes'      => array( 'type' => 'integer' ),
+			'failure_class'       => array( 'type' => 'string' ),
+			'quality_signals'     => array( 'type' => 'object' ),
+			'raw_refs'            => array(
+				'type'  => 'array',
+				'items' => array( 'type' => 'object' ),
+			),
 		),
 	);
 }
