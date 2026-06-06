@@ -73,8 +73,8 @@ agents_api_smoke_assert_equals( false, isset( $GLOBALS['__agents_api_smoke_abili
 $root = sys_get_temp_dir() . '/agents-api-safe-workspace-' . bin2hex( random_bytes( 4 ) );
 mkdir( $root, 0755, true );
 
-add_filter( 'agents_api_enable_blessed_workspace', static fn(): bool => true );
-add_filter( 'agents_api_blessed_workspace_root', static fn(): string => $root );
+add_filter( 'agents_api_enable_safe_workspace', static fn(): bool => true );
+add_filter( 'agents_api_safe_workspace_root', static fn(): string => $root );
 
 do_action( 'wp_abilities_api_categories_init' );
 do_action( 'wp_abilities_api_init' );
@@ -128,7 +128,7 @@ $traversal = call_user_func(
 agents_api_smoke_assert_equals( true, $traversal instanceof WP_Error, 'write rejects parent traversal', $failures, $passes );
 agents_api_smoke_assert_equals( false, file_exists( $root . '/escape.txt' ), 'traversal does not write outside workspace', $failures, $passes );
 
-add_filter( 'agents_api_blessed_workspace_root', static fn(): string => dirname( __DIR__ ), 20 );
+add_filter( 'agents_api_safe_workspace_root', static fn(): string => dirname( __DIR__ ), 20 );
 
 $blocked_targets = AgentsAPI\AI\Tasks\agents_execution_targets();
 agents_api_smoke_assert_equals( array(), $blocked_targets, 'workspace target rejects site-containing root', $failures, $passes );

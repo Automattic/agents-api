@@ -34,7 +34,10 @@ add_action(
 				'input'       => agents_workspace_handle_schema(),
 				'output'      => agents_workspace_prepare_output_schema(),
 				'callback'    => array( WP_Agent_Safe_Execution_Workspace::class, 'prepare' ),
-				'annotations' => array( 'destructive' => true ),
+				'annotations' => array(
+					'destructive' => true,
+					'idempotent'  => false,
+				),
 			),
 			'agents/workspace-list'       => array(
 				'label'       => 'List Safe Execution Workspaces',
@@ -58,7 +61,10 @@ add_action(
 				'input'       => agents_workspace_file_schema( true ),
 				'output'      => agents_workspace_write_output_schema(),
 				'callback'    => array( WP_Agent_Safe_Execution_Workspace::class, 'write_file' ),
-				'annotations' => array( 'destructive' => true ),
+				'annotations' => array(
+					'destructive' => true,
+					'idempotent'  => false,
+				),
 			),
 		);
 
@@ -89,7 +95,7 @@ add_action(
 
 function agents_workspace_permission(): bool {
 	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
-	return (bool) apply_filters( 'agents_api_blessed_workspace_permission', $allowed );
+	return (bool) apply_filters( 'agents_api_safe_workspace_permission', $allowed );
 }
 
 /** @return array<string,mixed> */

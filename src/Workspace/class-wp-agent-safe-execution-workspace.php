@@ -20,17 +20,17 @@ final class WP_Agent_Safe_Execution_Workspace {
 	 * Whether the optional module is enabled.
 	 */
 	public static function enabled(): bool {
-		$enabled = defined( 'AGENTS_API_ENABLE_BLESSED_WORKSPACE' ) && (bool) AGENTS_API_ENABLE_BLESSED_WORKSPACE;
-		return (bool) apply_filters( 'agents_api_enable_blessed_workspace', $enabled );
+		$enabled = defined( 'AGENTS_API_ENABLE_SAFE_WORKSPACE' ) && (bool) AGENTS_API_ENABLE_SAFE_WORKSPACE;
+		return (bool) apply_filters( 'agents_api_enable_safe_workspace', $enabled );
 	}
 
 	/**
 	 * Configured root path for all safe execution workspaces.
 	 */
 	public static function root(): string {
-		$constant = defined( 'AGENTS_API_BLESSED_WORKSPACE_ROOT' ) ? constant( 'AGENTS_API_BLESSED_WORKSPACE_ROOT' ) : '';
+		$constant = defined( 'AGENTS_API_SAFE_WORKSPACE_ROOT' ) ? constant( 'AGENTS_API_SAFE_WORKSPACE_ROOT' ) : '';
 		$root     = is_scalar( $constant ) ? (string) $constant : '';
-		$root     = apply_filters( 'agents_api_blessed_workspace_root', $root );
+		$root     = apply_filters( 'agents_api_safe_workspace_root', $root );
 		return is_string( $root ) ? rtrim( $root, '/\\' ) : '';
 	}
 
