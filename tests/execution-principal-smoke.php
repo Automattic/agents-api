@@ -54,6 +54,21 @@ agents_api_smoke_assert_equals( 'kimaki', $principal_array['client_id'], 'princi
 agents_api_smoke_assert_equals( array( 'edit_posts' ), $principal_array['capability_ceiling']['allowed_capabilities'], 'principal exports capability ceiling', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_TOKEN, 'key' => '456' ), $principal->conversation_owner(), 'agent token derives token conversation owner', $failures, $passes );
 
+$safe_metadata = $principal->to_safe_metadata();
+agents_api_smoke_assert_equals( 1, $safe_metadata['schema_version'], 'safe metadata declares schema version', $failures, $passes );
+agents_api_smoke_assert_equals( 'content-helper', $safe_metadata['effective_agent_id'], 'safe metadata includes effective agent id', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_AGENT_TOKEN, $safe_metadata['auth_source'], 'safe metadata includes auth source', $failures, $passes );
+agents_api_smoke_assert_equals( 'site:42', $safe_metadata['workspace_id'], 'safe metadata includes workspace id', $failures, $passes );
+agents_api_smoke_assert_equals( 'kimaki', $safe_metadata['client_id'], 'safe metadata includes client id', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_TOKEN, $safe_metadata['owner_type'], 'safe metadata includes owner type without owner key', $failures, $passes );
+agents_api_smoke_assert_equals( true, $safe_metadata['has_conversation_owner'], 'safe metadata reports conversation owner presence', $failures, $passes );
+agents_api_smoke_assert_equals( true, $safe_metadata['has_capability_ceiling'], 'safe metadata reports capability ceiling presence', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'token_id', $safe_metadata ), 'safe metadata omits token id', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'request_metadata', $safe_metadata ), 'safe metadata omits request metadata', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'owner_key', $safe_metadata ), 'safe metadata omits owner key', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'capability_ceiling', $safe_metadata ), 'safe metadata omits capability details', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'binding', $safe_metadata ), 'safe metadata omits binding claims', $failures, $passes );
+
 $from_array = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
 	array(
 		'acting_user_id'       => '7',

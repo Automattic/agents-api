@@ -328,6 +328,36 @@ final class WP_Agent_Execution_Principal {
 	}
 
 	/**
+	 * Export the safe principal metadata shape for citations and diagnostics.
+	 *
+	 * This intentionally omits request metadata, token ids, audience claims,
+	 * capability details, owner keys, and binding claims. Those fields may carry
+	 * credentials, opaque session ids, or host-specific authorization material.
+	 * Hosts that need richer audit data should persist it in a private audit log
+	 * rather than attaching it to user-visible citations or tool diagnostics.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public function to_safe_metadata(): array {
+		$owner = $this->conversation_owner();
+
+		return array(
+			'schema_version'         => 1,
+			'effective_agent_id'     => $this->effective_agent_id,
+			'auth_source'            => $this->auth_source,
+			'request_context'        => $this->request_context,
+			'acting_user_id'         => $this->acting_user_id,
+			'workspace_id'           => $this->workspace_id,
+			'client_id'              => $this->client_id,
+			'audience_id'            => $this->audience_id,
+			'owner_type'             => is_array( $owner ) ? $owner['type'] : null,
+			'has_conversation_owner' => is_array( $owner ),
+			'has_capability_ceiling' => $this->capability_ceiling instanceof \WP_Agent_Capability_Ceiling,
+			'has_caller_context'     => $this->caller_context instanceof \WP_Agent_Caller_Context,
+		);
+	}
+
+	/**
 	 * Return host-owned cryptographic binding claims for this principal.
 	 *
 	 * @return array<string,mixed>|null Binding claims, or null when unbound.
