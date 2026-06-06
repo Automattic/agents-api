@@ -75,19 +75,20 @@ class WP_Agent_Task_Run_Control {
 		}
 
 		return array(
-			'schema'        => self::string_value( $run['schema'] ?? 'agents-api/task-result/v1' ),
-			'run_id'        => $run_id,
-			'session_id'    => $session_id,
-			'status'        => $status,
-			'executor_id'   => $executor_id,
-			'artifact_refs' => self::list_value( $run['artifact_refs'] ?? array() ),
-			'diagnostics'   => self::map_value( $run['diagnostics'] ?? array() ),
-			'events'        => self::list_value( $run['events'] ?? array() ),
-			'provenance'    => self::map_value( $run['provenance'] ?? array() ),
-			'output'        => $run['output'] ?? null,
-			'started_at'    => self::string_value( $run['started_at'] ?? null ),
-			'updated_at'    => self::string_value( $run['updated_at'] ?? null ),
-			'metadata'      => self::map_value( $run['metadata'] ?? array() ),
+			'schema'            => self::string_value( $run['schema'] ?? 'agents-api/task-result/v1' ),
+			'run_id'            => $run_id,
+			'session_id'        => $session_id,
+			'status'            => $status,
+			'executor_id'       => $executor_id,
+			'execution_metrics' => self::execution_metrics_value( $run['execution_metrics'] ?? array(), $executor_id ),
+			'artifact_refs'     => self::list_value( $run['artifact_refs'] ?? array() ),
+			'diagnostics'       => self::map_value( $run['diagnostics'] ?? array() ),
+			'events'            => self::list_value( $run['events'] ?? array() ),
+			'provenance'        => self::map_value( $run['provenance'] ?? array() ),
+			'output'            => $run['output'] ?? null,
+			'started_at'        => self::string_value( $run['started_at'] ?? null ),
+			'updated_at'        => self::string_value( $run['updated_at'] ?? null ),
+			'metadata'          => self::map_value( $run['metadata'] ?? array() ),
 		);
 	}
 
@@ -210,6 +211,81 @@ class WP_Agent_Task_Run_Control {
 		}
 
 		return $map;
+	}
+
+	/** @return array<string,mixed> */
+	private static function execution_metrics_value( mixed $value, string $executor_id ): array {
+		$metrics = self::map_value( $value );
+		if ( array() === $metrics ) {
+			return array();
+		}
+
+		$metrics['schema'] = self::non_empty_string_value( $metrics['schema'] ?? null ) ?? 'agents-api/execution-metrics/v1';
+		if ( ! isset( $metrics['executor_id'] ) && '' !== $executor_id ) {
+			$metrics['executor_id'] = $executor_id;
+		}
+
+		foreach ( array( 'environment', 'executor_id', 'failure_class' ) as $field ) {
+			if ( isset( $metrics[ $field ] ) ) {
+				$value = self::non_empty_string_value( $metrics[ $field ] );
+				if ( null === $value ) {
+					unset( $metrics[ $field ] );
+				} else {
+					$metrics[ $field ] = $value;
+				}
+			}
+		}
+
+		foreach ( array( 'wall_time_ms', 'startup_time_ms', 'tool_call_count', 'payload_bytes_in', 'payload_bytes_out', 'artifact_bytes' ) as $field ) {
+			if ( isset( $metrics[ $field ] ) ) {
+				$value = self::non_negative_int_value( $metrics[ $field ] );
+				if ( null === $value ) {
+					unset( $metrics[ $field ] );
+				} else {
+					$metrics[ $field ] = $value;
+				}
+			}
+		}
+
+		if ( isset( $metrics['per_tool_timings_ms'] ) ) {
+			$metrics['per_tool_timings_ms'] = self::non_negative_int_map_value( $metrics['per_tool_timings_ms'] );
+		}
+		if ( isset( $metrics['quality_signals'] ) ) {
+			$metrics['quality_signals'] = self::map_value( $metrics['quality_signals'] );
+		}
+		if ( isset( $metrics['raw_refs'] ) ) {
+			$metrics['raw_refs'] = self::list_value( $metrics['raw_refs'] );
+		}
+
+		return $metrics;
+	}
+
+	private static function non_empty_string_value( mixed $value ): ?string {
+		$value = trim( self::string_value( $value ) );
+		return '' === $value ? null : $value;
+	}
+
+	private static function non_negative_int_value( mixed $value ): ?int {
+		if ( ! is_int( $value ) && ! is_float( $value ) && ! ( is_string( $value ) && is_numeric( $value ) ) ) {
+			return null;
+		}
+
+		$value = (int) $value;
+		return 0 <= $value ? $value : null;
+	}
+
+	/** @return array<string,int> */
+	private static function non_negative_int_map_value( mixed $value ): array {
+		$map        = self::map_value( $value );
+		$normalized = array();
+		foreach ( $map as $key => $item ) {
+			$item = self::non_negative_int_value( $item );
+			if ( null !== $item ) {
+				$normalized[ $key ] = $item;
+			}
+		}
+
+		return $normalized;
 	}
 
 	/** @return array<int,mixed> */
