@@ -274,6 +274,16 @@ class WP_Agent_Provider_Turn_Result {
 			}
 		}
 
+		// Some providers emit a bare JSON tool-call object as the entire message
+		// with no fence or tag wrapper. Treat a trimmed text that is a single JSON
+		// object as a payload candidate so those calls are not dropped.
+		if ( empty( $payloads ) ) {
+			$trimmed = trim( $text );
+			if ( '' !== $trimmed && '{' === $trimmed[0] && '}' === substr( $trimmed, -1 ) ) {
+				$payloads[] = $trimmed;
+			}
+		}
+
 		return self::tool_calls_from_json_payloads( $payloads, 'json-tool-call' );
 	}
 
@@ -361,6 +371,13 @@ class WP_Agent_Provider_Turn_Result {
 			foreach ( array_slice( $calls, 0, 16 ) as $call_index => $call ) {
 				if ( ! is_array( $call ) ) {
 					continue;
+				}
+
+				// Some providers wrap the call in a `function_call` object, often
+				// tagged with `{"type":"function_call", ...}`. Use that inner object
+				// as the call source so its name/arguments are read correctly.
+				if ( isset( $call['function_call'] ) && is_array( $call['function_call'] ) ) {
+					$call = $call['function_call'];
 				}
 
 				$function   = isset( $call['function'] ) && is_array( $call['function'] ) ? $call['function'] : array();

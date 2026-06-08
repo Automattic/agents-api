@@ -160,6 +160,14 @@ $json_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
 agents_api_smoke_assert_equals( 'json-1', $json_turn['tool_calls'][0]['id'] ?? '', 'fenced JSON fallback preserves id', $failures, $passes );
 agents_api_smoke_assert_equals( 'json', $json_turn['tool_calls'][0]['parameters']['query'] ?? '', 'fenced JSON fallback decodes function arguments', $failures, $passes );
 
+$function_call_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
+	array(
+		'content' => '{"type":"function_call","function_call":{"name":"client/lookup","arguments":{"query":"wrapped"}}}',
+	)
+);
+agents_api_smoke_assert_equals( 'client/lookup', $function_call_turn['tool_calls'][0]['name'] ?? '', 'function_call wrapper extracts tool name', $failures, $passes );
+agents_api_smoke_assert_equals( 'wrapped', $function_call_turn['tool_calls'][0]['parameters']['query'] ?? '', 'function_call wrapper decodes object arguments', $failures, $passes );
+
 $tag_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
 	array(
 		'content' => '<tool_call name="client/lookup">{"query":"tag"}</tool_call>',
