@@ -173,12 +173,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Agents API
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
       - name: Checkout Docs Agent
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           repository: Automattic/docs-agent
           ref: ${{ inputs.docs_agent_ref }}
