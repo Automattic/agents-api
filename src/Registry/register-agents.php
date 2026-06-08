@@ -111,6 +111,114 @@ if ( ! function_exists( 'wp_unregister_agent' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_get_agent_identity_store' ) ) {
+	/**
+	 * Resolves the host-provided materialized identity store.
+	 *
+	 * Hosts can pass a store with `$context['identity_store']` or provide one
+	 * through the `wp_agent_identity_store` filter. Agents API does not choose a
+	 * concrete storage backend.
+	 *
+	 * @param array<string,mixed> $context Host-owned request context.
+	 * @return \AgentsAPI\Core\Identity\WP_Agent_Identity_Store|null
+	 */
+	function wp_get_agent_identity_store( array $context = array() ): ?\AgentsAPI\Core\Identity\WP_Agent_Identity_Store {
+		return \AgentsAPI\Core\Identity\WP_Agent_Identity_Stores::get_store( $context );
+	}
+}
+
+if ( ! function_exists( 'wp_materialize_agent_identity' ) ) {
+	/**
+	 * Materializes a registered agent definition through a host identity store.
+	 *
+	 * The identity scope is derived from the registered agent slug, owner user ID,
+	 * and instance key. Callers may pass `owner_user_id` and `instance_key` in
+	 * `$args`; otherwise owner defaults to the agent's resolver when present, then
+	 * `0`, and instance defaults to `default`.
+	 *
+	 * @param string|WP_Agent                                             $agent Agent slug or definition object.
+	 * @param \AgentsAPI\Core\Identity\WP_Agent_Identity_Store|null      $store Store, or null to use the resolver.
+	 * @param array<string,mixed>                                         $args  Host-owned materialization options and context.
+	 * @return \AgentsAPI\Core\Identity\WP_Agent_Materialized_Identity|null Materialized identity, or null without a registered agent/store.
+	 */
+	function wp_materialize_agent_identity( $agent, ?\AgentsAPI\Core\Identity\WP_Agent_Identity_Store $store = null, array $args = array() ): ?\AgentsAPI\Core\Identity\WP_Agent_Materialized_Identity {
+		$agent = $agent instanceof WP_Agent ? $agent : wp_get_agent( (string) $agent );
+		if ( ! $agent instanceof WP_Agent ) {
+			return null;
+		}
+
+		$store = $store instanceof \AgentsAPI\Core\Identity\WP_Agent_Identity_Store ? $store : wp_get_agent_identity_store( $args );
+		if ( ! $store instanceof \AgentsAPI\Core\Identity\WP_Agent_Identity_Store ) {
+			return null;
+		}
+
+		$owner_user_id = wp_resolve_agent_identity_owner_user_id( $agent, $args );
+		$instance_key  = isset( $args['instance_key'] ) && is_scalar( $args['instance_key'] ) ? (string) $args['instance_key'] : 'default';
+		$scope         = new \AgentsAPI\Core\Identity\WP_Agent_Identity_Scope( $agent->get_slug(), $owner_user_id, $instance_key );
+		$meta          = $agent->get_meta();
+		if ( isset( $args['meta'] ) && is_array( $args['meta'] ) ) {
+			foreach ( $args['meta'] as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$meta[ $key ] = $value;
+				}
+			}
+		}
+
+		return $store->materialize( $scope, $agent->get_default_config(), $meta );
+	}
+}
+
+if ( ! function_exists( 'wp_materialize_registered_agent_identities' ) ) {
+	/**
+	 * Materializes all currently registered agents through a host identity store.
+	 *
+	 * @param \AgentsAPI\Core\Identity\WP_Agent_Identity_Store|null $store Store, or null to use the resolver.
+	 * @param array<string,mixed>                                    $args  Host-owned materialization options and context.
+	 * @return array<string,\AgentsAPI\Core\Identity\WP_Agent_Materialized_Identity> Identities keyed by registered agent slug.
+	 */
+	function wp_materialize_registered_agent_identities( ?\AgentsAPI\Core\Identity\WP_Agent_Identity_Store $store = null, array $args = array() ): array {
+		$store = $store instanceof \AgentsAPI\Core\Identity\WP_Agent_Identity_Store ? $store : wp_get_agent_identity_store( $args );
+		if ( ! $store instanceof \AgentsAPI\Core\Identity\WP_Agent_Identity_Store ) {
+			return array();
+		}
+
+		$identities = array();
+		foreach ( wp_get_agents() as $agent ) {
+			$identity = wp_materialize_agent_identity( $agent, $store, $args );
+			if ( $identity instanceof \AgentsAPI\Core\Identity\WP_Agent_Materialized_Identity ) {
+				$identities[ $agent->get_slug() ] = $identity;
+			}
+		}
+
+		return $identities;
+	}
+}
+
+if ( ! function_exists( 'wp_resolve_agent_identity_owner_user_id' ) ) {
+	/**
+	 * Resolves the owner user ID for generic identity materialization.
+	 *
+	 * @param WP_Agent            $agent Registered agent definition.
+	 * @param array<string,mixed> $args  Materialization options.
+	 * @return int Non-negative owner user ID. Zero means shared/no owner.
+	 */
+	function wp_resolve_agent_identity_owner_user_id( WP_Agent $agent, array $args = array() ): int {
+		if ( isset( $args['owner_user_id'] ) && is_numeric( $args['owner_user_id'] ) ) {
+			return max( 0, (int) $args['owner_user_id'] );
+		}
+
+		$owner_resolver = $agent->get_owner_resolver();
+		if ( is_callable( $owner_resolver ) ) {
+			$owner_user_id = call_user_func( $owner_resolver );
+			if ( is_numeric( $owner_user_id ) ) {
+				return max( 0, (int) $owner_user_id );
+			}
+		}
+
+		return 0;
+	}
+}
+
 if ( ! function_exists( 'wp_materialize_registered_agents' ) ) {
 	/**
 	 * Materializes registered agents through a host-provided adapter.
