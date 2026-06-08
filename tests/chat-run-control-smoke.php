@@ -22,42 +22,58 @@ $GLOBALS['__agents_api_smoke_abilities']  = array();
 $GLOBALS['__agents_api_smoke_categories'] = array();
 $GLOBALS['__agents_api_smoke_options']    = array();
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private array $data = array() ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-	public function get_error_data(): array { return $this->data; }
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '', private array $data = array() ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+		public function get_error_data(): array { return $this->data; }
+	}
 }
 
-function current_user_can( string $capability ): bool {
-	unset( $capability );
-	return true;
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $capability ): bool {
+		unset( $capability );
+		return true;
+	}
 }
 
-function wp_has_ability_category( string $category ): bool {
-	return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+if ( ! function_exists( 'wp_has_ability_category' ) ) {
+	function wp_has_ability_category( string $category ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+	}
 }
 
-function wp_register_ability_category( string $category, array $args ): void {
-	$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+if ( ! function_exists( 'wp_register_ability_category' ) ) {
+	function wp_register_ability_category( string $category, array $args ): void {
+		$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+	}
 }
 
-function wp_has_ability( string $ability ): bool {
-	return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+if ( ! function_exists( 'wp_has_ability' ) ) {
+	function wp_has_ability( string $ability ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+	}
 }
 
-function wp_register_ability( string $ability, array $args ): void {
-	$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+if ( ! function_exists( 'wp_register_ability' ) ) {
+	function wp_register_ability( string $ability, array $args ): void {
+		$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+	}
 }
 
-function get_option( string $option, $default = false ) {
-	return $GLOBALS['__agents_api_smoke_options'][ $option ] ?? $default;
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $option, $default = false ) {
+		return $GLOBALS['__agents_api_smoke_options'][ $option ] ?? $default;
+	}
 }
 
-function update_option( string $option, $value, $autoload = null ): bool {
-	unset( $autoload );
-	$GLOBALS['__agents_api_smoke_options'][ $option ] = $value;
-	return true;
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $option, $value, $autoload = null ): bool {
+		unset( $autoload );
+		$GLOBALS['__agents_api_smoke_options'][ $option ] = $value;
+		return true;
+	}
 }
 
 agents_api_smoke_require_module();
@@ -65,10 +81,10 @@ agents_api_smoke_require_module();
 do_action( 'wp_abilities_api_categories_init' );
 do_action( 'wp_abilities_api_init' );
 
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_GET_CHAT_RUN_ABILITY ] ), 'get-run ability registers', $failures, $passes );
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_CANCEL_CHAT_RUN_ABILITY ] ), 'cancel-run ability registers', $failures, $passes );
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_QUEUE_CHAT_MESSAGE_ABILITY ] ), 'queue-message ability registers', $failures, $passes );
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_LIST_CHAT_RUN_EVENTS_ABILITY ] ), 'list-run-events ability registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Channels\AGENTS_GET_CHAT_RUN_ABILITY ), 'get-run ability registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Channels\AGENTS_CANCEL_CHAT_RUN_ABILITY ), 'cancel-run ability registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Channels\AGENTS_QUEUE_CHAT_MESSAGE_ABILITY ), 'queue-message ability registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Channels\AGENTS_LIST_CHAT_RUN_EVENTS_ABILITY ), 'list-run-events ability registers', $failures, $passes );
 agents_api_smoke_assert_equals( true, in_array( 'run_id', AgentsAPI\AI\Channels\agents_chat_output_schema()['required'] ?? array(), true ) || isset( AgentsAPI\AI\Channels\agents_chat_output_schema()['properties']['run_id'] ), 'chat output schema exposes run_id', $failures, $passes );
 
 $captured_chat_input = array();

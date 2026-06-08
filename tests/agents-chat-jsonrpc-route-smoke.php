@@ -28,62 +28,94 @@ $GLOBALS['__agents_api_smoke_routes']          = array();
 $GLOBALS['__agents_api_smoke_abilities']       = array();
 $GLOBALS['__agents_api_smoke_categories']      = array();
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private array $data = array() ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-	public function get_error_data(): array { return $this->data; }
-}
-
-class WP_REST_Request {
-	public function __construct( private array $params = array(), private array $json = array() ) {}
-	public function get_param( string $key ) {
-		return $this->params[ $key ] ?? null;
-	}
-	public function get_json_params(): array {
-		return $this->json;
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '', private array $data = array() ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+		public function get_error_data(): array { return $this->data; }
 	}
 }
 
-class WP_REST_Response {
-	public function __construct( public mixed $data ) {}
+if ( ! class_exists( 'WP_REST_Request' ) ) {
+	class WP_REST_Request {
+		public function __construct( private array $params = array(), private array $json = array() ) {}
+		public function get_param( string $key ) {
+			return $this->params[ $key ] ?? null;
+		}
+		public function get_json_params(): array {
+			return $this->json;
+		}
+	}
 }
 
-function rest_ensure_response( $value ): WP_REST_Response {
-	return $value instanceof WP_REST_Response ? $value : new WP_REST_Response( $value );
+if ( ! class_exists( 'WP_REST_Response' ) ) {
+	class WP_REST_Response {
+		public function __construct( public mixed $data ) {}
+	}
 }
 
-function register_rest_route( string $namespace, string $route, array $args ): void {
-	$GLOBALS['__agents_api_smoke_routes'][ $namespace . $route ] = $args;
+if ( ! function_exists( 'rest_ensure_response' ) ) {
+	function rest_ensure_response( $value ): WP_REST_Response {
+		return $value instanceof WP_REST_Response ? $value : new WP_REST_Response( $value );
+	}
 }
 
-function get_current_user_id(): int {
-	return (int) $GLOBALS['__agents_api_smoke_current_user_id'];
+if ( ! function_exists( 'register_rest_route' ) ) {
+	function register_rest_route( string $namespace, string $route, array $args ): void {
+		$GLOBALS['__agents_api_smoke_routes'][ $namespace . $route ] = $args;
+	}
 }
 
-function current_user_can( string $capability ): bool {
-	unset( $capability );
-	return (bool) ( $GLOBALS['__agents_api_smoke_can_manage'] ?? false );
+if ( ! function_exists( 'get_current_user_id' ) ) {
+	function get_current_user_id(): int {
+		return (int) $GLOBALS['__agents_api_smoke_current_user_id'];
+	}
 }
 
-function wp_has_ability_category( string $category ): bool {
-	return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $capability ): bool {
+		unset( $capability );
+		return (bool) ( $GLOBALS['__agents_api_smoke_can_manage'] ?? false );
+	}
+} else {
+	add_filter(
+		'user_has_cap',
+		static function ( array $allcaps ): array {
+			$allcaps['manage_options'] = (bool) ( $GLOBALS['__agents_api_smoke_can_manage'] ?? false );
+			return $allcaps;
+		}
+	);
 }
 
-function wp_register_ability_category( string $category, array $args ): void {
-	$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+if ( ! function_exists( 'wp_has_ability_category' ) ) {
+	function wp_has_ability_category( string $category ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+	}
 }
 
-function wp_has_ability( string $ability ): bool {
-	return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+if ( ! function_exists( 'wp_register_ability_category' ) ) {
+	function wp_register_ability_category( string $category, array $args ): void {
+		$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+	}
 }
 
-function wp_register_ability( string $ability, array $args ): void {
-	$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+if ( ! function_exists( 'wp_has_ability' ) ) {
+	function wp_has_ability( string $ability ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+	}
 }
 
-function wp_get_ability( string $name ) {
-	return $GLOBALS['__agents_api_smoke_abilities'][ $name ] ?? null;
+if ( ! function_exists( 'wp_register_ability' ) ) {
+	function wp_register_ability( string $ability, array $args ): void {
+		$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+	}
+}
+
+if ( ! function_exists( 'wp_get_ability' ) ) {
+	function wp_get_ability( string $name ) {
+		return $GLOBALS['__agents_api_smoke_abilities'][ $name ] ?? null;
+	}
 }
 
 agents_api_smoke_require_module();
@@ -102,8 +134,20 @@ do_action( 'rest_api_init' );
 
 // --- Route registration -----------------------------------------------------
 $route_key = 'agents-api/v1/agent/(?P<agent_id>[A-Za-z0-9._-]+)';
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_routes'][ $route_key ] ), 'JSON-RPC agent route registers', $failures, $passes );
-agents_api_smoke_assert_equals( 'POST', $GLOBALS['__agents_api_smoke_routes'][ $route_key ]['methods'] ?? null, 'JSON-RPC route uses POST', $failures, $passes );
+$route     = $GLOBALS['__agents_api_smoke_routes'][ $route_key ] ?? null;
+
+if ( null === $route && function_exists( 'rest_get_server' ) ) {
+	$routes = rest_get_server()->get_routes();
+	$route  = $routes[ '/' . $route_key ] ?? null;
+}
+
+$route_methods = $route['methods'] ?? null;
+if ( is_array( $route ) && isset( $route[0]['methods'] ) ) {
+	$route_methods = $route[0]['methods'];
+}
+
+agents_api_smoke_assert_equals( true, null !== $route, 'JSON-RPC agent route registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, 'POST' === $route_methods || ( is_array( $route_methods ) && ! empty( $route_methods['POST'] ) ), 'JSON-RPC route uses POST', $failures, $passes );
 
 // --- Input mapping: MessageSendParams -> canonical agents/chat input --------
 $params = array(

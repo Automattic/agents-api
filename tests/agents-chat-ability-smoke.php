@@ -14,53 +14,47 @@ $passes   = 0;
 
 echo "agents-chat-ability-smoke\n";
 
-// ─── Minimal WP stubs ──────────────────────────────────────────────
+require_once __DIR__ . '/agents-api-smoke-helpers.php';
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private mixed $data = null ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-	public function get_error_data(): mixed { return $this->data; }
-}
-
-function is_wp_error( $value ): bool {
-	return $value instanceof WP_Error;
-}
-
-function current_user_can( string $cap ): bool {
-	unset( $cap );
-	return $GLOBALS['__smoke_can'] ?? false;
-}
-
-$GLOBALS['__smoke_filters'] = array();
-
-function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	unset( $accepted_args );
-	$GLOBALS['__smoke_filters'][ $hook ][ $priority ][] = $cb;
-}
-
-function apply_filters( string $hook, $value, ...$args ) {
-	$callbacks = $GLOBALS['__smoke_filters'][ $hook ] ?? array();
-	ksort( $callbacks );
-	foreach ( $callbacks as $priority_callbacks ) {
-		foreach ( $priority_callbacks as $cb ) {
-			$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
-		}
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '', private mixed $data = null ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+		public function get_error_data(): mixed { return $this->data; }
 	}
-	return $value;
 }
 
-function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	add_filter( $hook, $cb, $priority, $accepted_args );
-}
-
-function do_action( string $hook, ...$args ): void {
-	$callbacks = $GLOBALS['__smoke_filters'][ $hook ] ?? array();
-	ksort( $callbacks );
-	foreach ( $callbacks as $priority_callbacks ) {
-		foreach ( $priority_callbacks as $cb ) {
-			call_user_func_array( $cb, $args );
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $cap ): bool {
+		unset( $cap );
+		return $GLOBALS['__smoke_can'] ?? false;
+	}
+} else {
+	add_filter(
+		'user_has_cap',
+		static function ( array $allcaps ): array {
+			$allcaps['manage_options'] = (bool) ( $GLOBALS['__smoke_can'] ?? false );
+			return $allcaps;
 		}
+	);
+}
+
+function smoke_reset_chat_filters(): void {
+	$hooks = array(
+		'agents_chat_dispatch_failed',
+		'agents_chat_permission',
+		'agents_chat_runtime_principal_permission',
+		'wp_agent_chat_handler',
+	);
+
+	foreach ( $hooks as $hook ) {
+		if ( function_exists( 'remove_all_filters' ) ) {
+			remove_all_filters( $hook );
+			continue;
+		}
+
+		unset( $GLOBALS['__agents_api_smoke_actions'][ $hook ] );
 	}
 }
 
@@ -76,8 +70,7 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 	echo '    actual:   ' . var_export( $actual, true ) . "\n";
 }
 
-require_once __DIR__ . '/../src/Runtime/class-wp-agent-execution-principal.php';
-require_once __DIR__ . '/../src/Channels/register-agents-chat-ability.php';
+agents_api_smoke_require_module();
 
 use function AgentsAPI\AI\Channels\agents_chat_dispatch;
 use function AgentsAPI\AI\Channels\agents_chat_permission;
@@ -124,7 +117,7 @@ smoke_assert( 'channel', $captured['client_context']['source'] ?? null, 'handler
 smoke_assert( 'hello back', $result['reply'] ?? null, 'handler_result_returned', $failures, $passes );
 
 // 4. Handler returning non-array → WP_Error agents_chat_invalid_result + observability fires.
-$GLOBALS['__smoke_filters'] = array();
+smoke_reset_chat_filters();
 $dispatch_failures2 = array();
 add_filter( 'agents_chat_dispatch_failed', static function ( $reason ) use ( &$dispatch_failures2 ) {
 	$dispatch_failures2[] = $reason;
@@ -136,7 +129,7 @@ smoke_assert( 'agents_chat_invalid_result', $bad->get_error_code(), 'invalid_res
 smoke_assert( 'invalid_result', $dispatch_failures2[0] ?? 'missing', 'invalid_result_fires_dispatch_failed', $failures, $passes );
 
 // 5. Handler returning WP_Error → propagated + observability fires with the error code.
-$GLOBALS['__smoke_filters'] = array();
+smoke_reset_chat_filters();
 $dispatch_failures3 = array();
 add_filter( 'agents_chat_dispatch_failed', static function ( $reason ) use ( &$dispatch_failures3 ) {
 	$dispatch_failures3[] = $reason;
@@ -148,7 +141,7 @@ smoke_assert( 'agent_blew_up', $err->get_error_code(), 'handler_wp_error_code_pr
 smoke_assert( 'agent_blew_up', $dispatch_failures3[0] ?? 'missing', 'handler_wp_error_fires_dispatch_failed_with_code', $failures, $passes );
 
 // 6. First-handler-wins: second register call doesn't override.
-$GLOBALS['__smoke_filters'] = array();
+smoke_reset_chat_filters();
 register_chat_handler( static fn( array $i ) => array( 'session_id' => 'A', 'reply' => 'first wins' ) );
 register_chat_handler( static fn( array $i ) => array( 'session_id' => 'B', 'reply' => 'never reached' ) );
 $out = agents_chat_dispatch( array( 'agent' => 'x', 'message' => 'y' ) );
@@ -189,7 +182,7 @@ $out_schema = agents_chat_output_schema();
 smoke_assert( array( 'session_id', 'reply' ), $out_schema['required'] ?? array(), 'output_schema_required_fields', $failures, $passes );
 
 // 9. Runtime principal input is normalized before dispatch and has a scoped permission filter.
-$GLOBALS['__smoke_filters'] = array();
+smoke_reset_chat_filters();
 $runtime_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::runtime(
 	'runtime-session-1',
 	'sandbox-agent',

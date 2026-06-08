@@ -14,80 +14,82 @@ $passes   = 0;
 
 echo "agents-conversation-session-abilities-smoke\n";
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '' ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
+require_once __DIR__ . '/agents-api-smoke-helpers.php';
+
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '' ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+	}
 }
 
-function is_wp_error( $value ): bool {
-	return $value instanceof WP_Error;
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $cap ): bool {
+		return in_array( $cap, $GLOBALS['__smoke_caps'] ?? array(), true );
+	}
+} else {
+	add_filter(
+		'user_has_cap',
+		static function ( array $allcaps ): array {
+			foreach ( $GLOBALS['__smoke_caps'] ?? array() as $cap ) {
+				$allcaps[ $cap ] = true;
+			}
+			return $allcaps;
+		}
+	);
 }
 
-function current_user_can( string $cap ): bool {
-	return in_array( $cap, $GLOBALS['__smoke_caps'] ?? array(), true );
+if ( ! function_exists( 'get_current_user_id' ) ) {
+	function get_current_user_id(): int {
+		return (int) ( $GLOBALS['__smoke_current_user_id'] ?? 0 );
+	}
 }
 
-function get_current_user_id(): int {
-	return (int) ( $GLOBALS['__smoke_current_user_id'] ?? 0 );
+if ( ! function_exists( 'get_current_blog_id' ) ) {
+	function get_current_blog_id(): int {
+		return 42;
+	}
 }
 
-function get_current_blog_id(): int {
-	return 42;
-}
-
-function sanitize_key( string $key ): string {
-	return strtolower( preg_replace( '/[^a-z0-9_\-]/', '', $key ) ?? '' );
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( string $key ): string {
+		return strtolower( preg_replace( '/[^a-z0-9_\-]/', '', $key ) ?? '' );
+	}
 }
 
 $GLOBALS['__smoke_filters']    = array();
 $GLOBALS['__smoke_abilities']  = array();
 $GLOBALS['__smoke_categories'] = array();
 
-function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	unset( $accepted_args );
-	$GLOBALS['__smoke_filters'][ $hook ][ $priority ][] = $cb;
-}
-
-function apply_filters( string $hook, $value, ...$args ) {
-	$callbacks = $GLOBALS['__smoke_filters'][ $hook ] ?? array();
-	ksort( $callbacks );
-	foreach ( $callbacks as $priority_callbacks ) {
-		foreach ( $priority_callbacks as $cb ) {
-			$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
-		}
-	}
-	return $value;
-}
-
-function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	add_filter( $hook, $cb, $priority, $accepted_args );
-}
-
-function do_action( string $hook, ...$args ): void {
-	$callbacks = $GLOBALS['__smoke_filters'][ $hook ] ?? array();
-	ksort( $callbacks );
-	foreach ( $callbacks as $priority_callbacks ) {
-		foreach ( $priority_callbacks as $cb ) {
-			call_user_func_array( $cb, $args );
-		}
+if ( ! function_exists( 'wp_has_ability_category' ) ) {
+	function wp_has_ability_category( string $category ): bool {
+		return isset( $GLOBALS['__smoke_categories'][ $category ] );
 	}
 }
 
-function wp_has_ability_category( string $category ): bool {
-	return isset( $GLOBALS['__smoke_categories'][ $category ] );
+if ( ! function_exists( 'wp_register_ability_category' ) ) {
+	function wp_register_ability_category( string $category, array $args ): void {
+		$GLOBALS['__smoke_categories'][ $category ] = $args;
+	}
 }
 
-function wp_register_ability_category( string $category, array $args ): void {
-	$GLOBALS['__smoke_categories'][ $category ] = $args;
+if ( ! function_exists( 'wp_has_ability' ) ) {
+	function wp_has_ability( string $ability ): bool {
+		return isset( $GLOBALS['__smoke_abilities'][ $ability ] );
+	}
 }
 
-function wp_has_ability( string $ability ): bool {
-	return isset( $GLOBALS['__smoke_abilities'][ $ability ] );
+if ( ! function_exists( 'wp_register_ability' ) ) {
+	function wp_register_ability( string $ability, array $args ): void {
+		$GLOBALS['__smoke_abilities'][ $ability ] = $args;
+	}
 }
 
-function wp_register_ability( string $ability, array $args ): void {
-	$GLOBALS['__smoke_abilities'][ $ability ] = $args;
+if ( ! function_exists( 'wp_get_ability' ) ) {
+	function wp_get_ability( string $ability ) {
+		return $GLOBALS['__smoke_abilities'][ $ability ] ?? null;
+	}
 }
 
 function smoke_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {
@@ -103,13 +105,36 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 	echo '    actual:   ' . var_export( $actual, true ) . "\n";
 }
 
-require_once __DIR__ . '/../src/Workspace/class-wp-agent-workspace-scope.php';
-require_once __DIR__ . '/../src/Runtime/class-wp-agent-execution-principal.php';
-require_once __DIR__ . '/../src/Transcripts/class-wp-agent-conversation-store.php';
-require_once __DIR__ . '/../src/Transcripts/class-wp-agent-principal-conversation-store.php';
-require_once __DIR__ . '/../src/Transcripts/class-wp-agent-principal-conversation-session-reader.php';
-require_once __DIR__ . '/../src/Transcripts/class-wp-agent-conversation-sessions.php';
-require_once __DIR__ . '/../src/Transcripts/register-agents-conversation-session-abilities.php';
+agents_api_smoke_require_module();
+
+add_filter(
+	'agents_api_execution_principal',
+	static function ( $principal, array $context ) {
+		if ( (int) ( $GLOBALS['__smoke_current_user_id'] ?? 0 ) <= 0 ) {
+			return $principal;
+		}
+
+		return AgentsAPI\AI\WP_Agent_Execution_Principal::user_session(
+			(int) $GLOBALS['__smoke_current_user_id'],
+			'demo-agent',
+			$context['request_context'] ?? AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+			array( 'source' => 'smoke-test' ),
+			$context['workspace_id'] ?? null
+		);
+	},
+	10,
+	2
+);
+
+function smoke_ability_input_schema( string $ability_name ): array {
+	$ability = wp_get_ability( $ability_name );
+
+	if ( is_array( $ability ) ) {
+		return is_array( $ability['input_schema'] ?? null ) ? $ability['input_schema'] : array();
+	}
+
+	return is_object( $ability ) && method_exists( $ability, 'get_input_schema' ) ? $ability->get_input_schema() : array();
+}
 
 use AgentsAPI\AI\WP_Agent_Execution_Principal;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Principal_Conversation_Session_Reader;
@@ -387,8 +412,8 @@ smoke_assert( true, wp_has_ability( AGENTS_GET_CONVERSATION_SESSION_ABILITY ), '
 smoke_assert( true, wp_has_ability( AGENTS_CREATE_CONVERSATION_SESSION_ABILITY ), 'create ability registers', $failures, $passes );
 smoke_assert( true, wp_has_ability( AGENTS_UPDATE_CONVERSATION_SESSION_TITLE_ABILITY ), 'update-title ability registers', $failures, $passes );
 smoke_assert( true, wp_has_ability( AGENTS_DELETE_CONVERSATION_SESSION_ABILITY ), 'delete ability registers', $failures, $passes );
-smoke_assert( true, isset( $GLOBALS['__smoke_abilities'][ AGENTS_CREATE_CONVERSATION_SESSION_ABILITY ]['input_schema']['properties']['session_owner'] ), 'create schema exposes session_owner', $failures, $passes );
-smoke_assert( true, isset( $GLOBALS['__smoke_abilities'][ AGENTS_LIST_CONVERSATION_SESSIONS_ABILITY ]['input_schema']['properties']['session_owner'] ), 'list schema exposes session_owner', $failures, $passes );
+smoke_assert( true, isset( smoke_ability_input_schema( AGENTS_CREATE_CONVERSATION_SESSION_ABILITY )['properties']['session_owner'] ), 'create schema exposes session_owner', $failures, $passes );
+smoke_assert( true, isset( smoke_ability_input_schema( AGENTS_LIST_CONVERSATION_SESSIONS_ABILITY )['properties']['session_owner'] ), 'list schema exposes session_owner', $failures, $passes );
 
 if ( $failures ) {
 	echo "\nFAILED: " . count( $failures ) . " agents conversation session ability assertions failed.\n";

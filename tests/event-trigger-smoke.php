@@ -85,6 +85,25 @@ if ( ! function_exists( 'wp_schedule_single_event' ) ) {
 		return true;
 	}
 }
+if ( function_exists( 'add_filter' ) ) {
+	add_filter(
+		'pre_schedule_event',
+		static function ( $pre, $event ) {
+			if ( is_object( $event ) && AgentsAPI\AI\Triggers\WP_AGENT_EVENT_TRIGGER_RUN_HOOK === ( $event->hook ?? '' ) ) {
+				$GLOBALS['smoke_scheduled'][] = array(
+					'timestamp' => (int) ( $event->timestamp ?? 0 ),
+					'hook'      => (string) $event->hook,
+					'args'      => (array) ( $event->args ?? array() ),
+				);
+				return true;
+			}
+
+			return $pre;
+		},
+		10,
+		2
+	);
+}
 
 require_once __DIR__ . '/../src/Triggers/class-wp-agent-event-trigger.php';
 require_once __DIR__ . '/../src/Triggers/class-wp-agent-event-trigger-registry.php';
@@ -156,9 +175,29 @@ echo "\n[5] Handler registers hooks and schedules async dispatch:\n";
 $GLOBALS['smoke_actions']   = array();
 $GLOBALS['smoke_scheduled'] = array();
 register_event_trigger_handler( $trigger );
-smoke_assert( 'transition_post_status', $GLOBALS['smoke_actions'][0]['hook'] ?? null, 'handler attaches source hook', $failures, $passes );
-smoke_assert( PHP_INT_MAX, $GLOBALS['smoke_actions'][0]['priority'] ?? null, 'handler uses late priority', $failures, $passes );
-smoke_assert( 3, $GLOBALS['smoke_actions'][0]['accepted_args'] ?? null, 'handler accepts declared hook args', $failures, $passes );
+
+if ( isset( $GLOBALS['smoke_actions'][0] ) ) {
+	$registered_hook          = $GLOBALS['smoke_actions'][0]['hook'] ?? null;
+	$registered_priority      = $GLOBALS['smoke_actions'][0]['priority'] ?? null;
+	$registered_accepted_args = $GLOBALS['smoke_actions'][0]['accepted_args'] ?? null;
+} else {
+	$registered_hook          = null;
+	$registered_priority      = null;
+	$registered_accepted_args = null;
+	$callbacks                = $GLOBALS['wp_filter']['transition_post_status']->callbacks[ PHP_INT_MAX ] ?? array();
+	foreach ( $callbacks as $callback ) {
+		if ( 3 === (int) ( $callback['accepted_args'] ?? 0 ) ) {
+			$registered_hook          = 'transition_post_status';
+			$registered_priority      = PHP_INT_MAX;
+			$registered_accepted_args = 3;
+			break;
+		}
+	}
+}
+
+smoke_assert( 'transition_post_status', $registered_hook, 'handler attaches source hook', $failures, $passes );
+smoke_assert( PHP_INT_MAX, $registered_priority, 'handler uses late priority', $failures, $passes );
+smoke_assert( 3, $registered_accepted_args, 'handler accepts declared hook args', $failures, $passes );
 
 dispatch_event_trigger_hook(
 	$trigger,
