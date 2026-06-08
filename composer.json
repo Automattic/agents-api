@@ -52,6 +52,7 @@
       "php tests/approval-resolver-contract-smoke.php",
       "php tests/pending-action-abilities-smoke.php",
       "php tests/identity-smoke.php",
+      "php tests/identity-store-materialization-smoke.php",
       "php tests/memory-metadata-contract-smoke.php",
       "php tests/memory-store-resolver-smoke.php",
       "php tests/ability-lifecycle-bridge-smoke.php",
