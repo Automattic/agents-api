@@ -98,6 +98,12 @@ class WP_Agent_Tool_Declaration {
 
 		$name   = is_string( $declaration['name'] ?? null ) ? $declaration['name'] : '';
 		$source = self::sourceFromName( $name );
+		if ( '' === $source && is_string( $declaration['source'] ?? null ) ) {
+			$source = trim( $declaration['source'] );
+		}
+		if ( '' === $source ) {
+			$source = self::SOURCE_CLIENT;
+		}
 		$description = $declaration['description'] ?? '';
 
 		$normalized = array(
@@ -206,15 +212,17 @@ class WP_Agent_Tool_Declaration {
 		$errors = array();
 
 		$name = $declaration['name'] ?? null;
-		if (
-			! is_string( $name )
-			|| '' === $name
-			|| ! preg_match( '/^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/', $name )
-		) {
+		if ( ! is_string( $name ) || '' === $name || ! self::isValidHostToolName( $name ) ) {
 			$errors[] = 'name';
 		}
 
 		$source = is_string( $name ) ? self::sourceFromName( $name ) : '';
+		if ( '' === $source && is_string( $declaration['source'] ?? null ) ) {
+			$source = trim( $declaration['source'] );
+		}
+		if ( '' === $source ) {
+			$source = self::SOURCE_CLIENT;
+		}
 		if ( self::SOURCE_CLIENT !== $source ) {
 			$errors[] = 'source';
 		}

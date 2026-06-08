@@ -58,7 +58,20 @@ $policy = WP_Agent_Runtime_Tool_Policy::fromTools(
 	)
 );
 
+$provider_safe_runtime_tool = WP_Agent_Tool_Declaration::normalize(
+	array(
+		'name'        => 'filesystem_write',
+		'source'      => WP_Agent_Tool_Declaration::SOURCE_CLIENT,
+		'description' => 'Write one generated website artifact file.',
+		'parameters'  => array( 'type' => 'object' ),
+		'executor'    => WP_Agent_Tool_Declaration::EXECUTOR_CLIENT,
+		'scope'       => WP_Agent_Tool_Declaration::SCOPE_RUN,
+	)
+);
+
 agents_api_smoke_assert_equals( WP_Agent_Runtime_Tool_Policy::SCHEMA, $policy['schema'] ?? '', 'policy exposes canonical schema', $failures, $passes );
+agents_api_smoke_assert_equals( 'filesystem_write', $provider_safe_runtime_tool['name'] ?? '', 'provider-safe runtime tool name is accepted', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Tool_Declaration::SOURCE_CLIENT, $provider_safe_runtime_tool['source'] ?? '', 'provider-safe runtime tool keeps client source', $failures, $passes );
 agents_api_smoke_assert_equals( WP_Agent_Runtime_Tool_Policy::VERSION, $policy['version'] ?? 0, 'policy exposes canonical version', $failures, $passes );
 agents_api_smoke_assert_equals( 3, count( $policy['tools'] ?? array() ), 'policy includes all declared tools', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'runtime_type' => 'wordpress-playground', 'session_id' => 'abc123' ), $policy['context'] ?? array(), 'policy context keeps only scalar metadata', $failures, $passes );
