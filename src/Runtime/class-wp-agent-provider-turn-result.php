@@ -182,29 +182,37 @@ class WP_Agent_Provider_Turn_Result {
 			return array();
 		}
 
-		$message = self::call_no_args( reset( $candidates ), 'getMessage' );
-		$parts   = self::call_no_args( $message, 'getParts' );
-		if ( ! is_array( $parts ) ) {
-			return array();
-		}
-
-		$tool_calls = array();
-		foreach ( array_slice( $parts, 0, 64 ) as $part ) {
-			$function_call = self::call_no_args( $part, 'getFunctionCall' );
-			if ( null !== $function_call ) {
-				$name = self::call_no_args( $function_call, 'getName' );
-				if ( is_string( $name ) && '' !== $name ) {
-					$tool_calls[] = array(
-						'name'       => $name,
-						'parameters' => self::normalize_function_args( self::call_no_args( $function_call, 'getArgs' ) ),
-						'id'         => self::call_no_args( $function_call, 'getId' ),
-					);
-				}
+		$tool_calls    = array();
+		$scanned_parts = 0;
+		foreach ( $candidates as $candidate ) {
+			$message = self::call_no_args( $candidate, 'getMessage' );
+			$parts   = self::call_no_args( $message, 'getParts' );
+			if ( ! is_array( $parts ) ) {
+				continue;
 			}
 
-			$text = self::call_no_args( $part, 'getText' );
-			if ( is_string( $text ) ) {
-				$texts[] = $text;
+			foreach ( $parts as $part ) {
+				if ( $scanned_parts >= 64 ) {
+					break 2;
+				}
+
+				++$scanned_parts;
+				$function_call = self::call_no_args( $part, 'getFunctionCall' );
+				if ( null !== $function_call ) {
+					$name = self::call_no_args( $function_call, 'getName' );
+					if ( is_string( $name ) && '' !== $name ) {
+						$tool_calls[] = array(
+							'name'       => $name,
+							'parameters' => self::normalize_function_args( self::call_no_args( $function_call, 'getArgs' ) ),
+							'id'         => self::call_no_args( $function_call, 'getId' ),
+						);
+					}
+				}
+
+				$text = self::call_no_args( $part, 'getText' );
+				if ( is_string( $text ) ) {
+					$texts[] = $text;
+				}
 			}
 		}
 

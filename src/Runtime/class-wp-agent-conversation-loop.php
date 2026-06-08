@@ -863,8 +863,10 @@ class WP_Agent_Conversation_Loop {
 				break;
 			}
 
-			// Consult completion policy.
-			if ( null !== $policy ) {
+			// Consult completion policy. A complete decision stops future model turns,
+			// but the current provider turn may contain more tool calls that still
+			// require paired tool results before the transcript can be replayed.
+			if ( null !== $policy && ! $complete ) {
 				$decision = $policy->recordToolResult(
 					$tool_name,
 					$tool_definition,
@@ -884,7 +886,7 @@ class WP_Agent_Conversation_Loop {
 							'context'   => $decision->context(),
 						),
 					);
-					break;
+					continue;
 				}
 
 				$continuation = self::completion_policy_continuation( $decision, $tool_name, $turn );
