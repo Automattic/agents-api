@@ -212,9 +212,13 @@ agents_api_smoke_assert_equals( true, class_exists( 'WP_Guidelines_Substrate' ),
 agents_api_smoke_assert_equals( true, function_exists( 'wp_guideline_types' ), 'wp_guideline_types helper is available', $failures, $passes );
 
 do_action( 'init' );
+$guideline_post_type = function_exists( 'get_post_type_object' ) ? get_post_type_object( 'wp_guideline' ) : null;
+$guideline_rest_base = is_object( $guideline_post_type ) && isset( $guideline_post_type->rest_base )
+	? $guideline_post_type->rest_base
+	: ( $GLOBALS['__agents_api_smoke_post_types']['wp_guideline']['rest_base'] ?? null );
 agents_api_smoke_assert_equals( true, post_type_exists( 'wp_guideline' ), 'wp_guideline post type is registered on init', $failures, $passes );
 agents_api_smoke_assert_equals( true, taxonomy_exists( 'wp_guideline_type' ), 'wp_guideline_type taxonomy is registered on init', $failures, $passes );
-agents_api_smoke_assert_equals( 'guidelines', $GLOBALS['__agents_api_smoke_post_types']['wp_guideline']['rest_base'] ?? null, 'guideline post type exposes the shared REST base', $failures, $passes );
+agents_api_smoke_assert_equals( 'guidelines', $guideline_rest_base, 'guideline post type exposes the shared REST base', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'artifact', 'content' ), array_keys( wp_guideline_types() ), 'default guideline types match the shared substrate', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API bootstrap', $failures, $passes );

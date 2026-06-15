@@ -22,31 +22,83 @@ $GLOBALS['__agents_api_smoke_current_user_id'] = 7;
 $GLOBALS['__agents_api_smoke_abilities']       = array();
 $GLOBALS['__agents_api_smoke_categories']      = array();
 
-function get_current_user_id(): int {
-	return (int) $GLOBALS['__agents_api_smoke_current_user_id'];
+/**
+ * Switch the acting user for both backends. The pure-PHP shim reads the smoke
+ * global directly. Under real WordPress get_current_user_id() can only return a
+ * real user, so instead of inventing a user row we synthesize the execution
+ * principal from this smoke user id through the agents_api_execution_principal
+ * filter registered below — environment-independent and Playground-safe.
+ */
+function agents_access_smoke_set_user( int $user_id ): void {
+	$GLOBALS['__agents_api_smoke_current_user_id'] = $user_id;
 }
 
-function is_user_logged_in(): bool {
-	return get_current_user_id() > 0;
+if ( ! function_exists( 'get_current_user_id' ) ) {
+	function get_current_user_id(): int {
+		return (int) $GLOBALS['__agents_api_smoke_current_user_id'];
+	}
 }
 
-function wp_has_ability_category( string $category ): bool {
-	return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+if ( ! function_exists( 'is_user_logged_in' ) ) {
+	function is_user_logged_in(): bool {
+		return get_current_user_id() > 0;
+	}
 }
 
-function wp_register_ability_category( string $category, array $args ): void {
-	$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+if ( ! function_exists( 'wp_has_ability_category' ) ) {
+	function wp_has_ability_category( string $category ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+	}
 }
 
-function wp_has_ability( string $ability ): bool {
-	return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+if ( ! function_exists( 'wp_register_ability_category' ) ) {
+	function wp_register_ability_category( string $category, array $args ): void {
+		$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+	}
 }
 
-function wp_register_ability( string $ability, array $args ): void {
-	$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+if ( ! function_exists( 'wp_has_ability' ) ) {
+	function wp_has_ability( string $ability ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+	}
 }
+
+if ( ! function_exists( 'wp_register_ability' ) ) {
+	function wp_register_ability( string $ability, array $args ): void {
+		$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+	}
+}
+
+agents_access_smoke_set_user( 7 );
 
 agents_api_smoke_require_module();
+
+// Under real WordPress get_current_user_id() cannot conjure the smoke user, so
+// synthesize a user-session execution principal for the active smoke user id
+// (when > 0) through the resolution filter. The later audience filter handles
+// the anonymous (user id 0) case.
+if ( ! function_exists( 'get_current_user_id' ) || function_exists( 'wp_set_current_user' ) ) {
+	add_filter(
+		'agents_api_execution_principal',
+		static function ( $principal, array $context ) {
+			$smoke_user = (int) ( $GLOBALS['__agents_api_smoke_current_user_id'] ?? 0 );
+			if ( $smoke_user <= 0 ) {
+				return $principal;
+			}
+
+			return AgentsAPI\AI\WP_Agent_Execution_Principal::user_session(
+				$smoke_user,
+				'current-user',
+				$context['request_context'] ?? AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+				array( 'source' => 'smoke-test' ),
+				$context['workspace_id'] ?? null,
+				$context['client_id'] ?? null
+			);
+		},
+		5,
+		2
+	);
+}
 
 add_action(
 	'wp_agents_api_init',
@@ -208,7 +260,7 @@ agents_api_smoke_assert_equals( true, $public_access['allowed'] ?? false, 'logge
 $ability_list = AgentsAPI\AI\Auth\agents_list_accessible_agents( array( 'workspace_id' => 'site:42' ) );
 agents_api_smoke_assert_equals( 'editor-agent', $ability_list['agents'][0]['slug'] ?? null, 'list-accessible ability returns granted registered agent', $failures, $passes );
 
-$GLOBALS['__agents_api_smoke_current_user_id'] = 0;
+agents_access_smoke_set_user( 0 );
 add_filter(
 	'agents_api_execution_principal',
 	static function ( $principal, array $context ) {

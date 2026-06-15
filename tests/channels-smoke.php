@@ -20,70 +20,91 @@ echo "agents-api-channels-smoke\n";
 
 // ─── Minimal WP stubs (this test does not load the full bootstrap) ──
 
-class WP_Error {
-	public function __construct(
-		private string $code = '',
-		private string $message = ''
-	) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-}
-
-function is_wp_error( $value ): bool {
-	return $value instanceof WP_Error;
-}
-
-$GLOBALS['__channel_smoke_options']   = array();
-$GLOBALS['__channel_smoke_scheduled'] = array();
-$GLOBALS['__channel_smoke_abilities'] = array();
-$GLOBALS['__channel_smoke_filters']   = array();
-
-function get_option( string $key, $default = '' ) {
-	return $GLOBALS['__channel_smoke_options'][ $key ] ?? $default;
-}
-
-function update_option( string $key, $value, $autoload = null ): bool {
-	unset( $autoload );
-	$GLOBALS['__channel_smoke_options'][ $key ] = $value;
-	return true;
-}
-
-function delete_option( string $key ): bool {
-	unset( $GLOBALS['__channel_smoke_options'][ $key ] );
-	return true;
-}
-
-function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool {
-	$GLOBALS['__channel_smoke_scheduled'][] = array(
-		'timestamp' => $timestamp,
-		'hook'      => $hook,
-		'args'      => $args,
-	);
-	return true;
-}
-
-function wp_get_ability( string $name ) {
-	return $GLOBALS['__channel_smoke_abilities'][ $name ] ?? null;
-}
-
-function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	unset( $accepted_args );
-	$GLOBALS['__channel_smoke_filters'][ $hook ][ $priority ][] = $cb;
-}
-
-function apply_filters( string $hook, $value, ...$args ) {
-	$callbacks = $GLOBALS['__channel_smoke_filters'][ $hook ] ?? array();
-	ksort( $callbacks );
-	foreach ( $callbacks as $priority_callbacks ) {
-		foreach ( $priority_callbacks as $cb ) {
-			$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
-		}
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct(
+			private string $code = '',
+			private string $message = ''
+		) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
 	}
-	return $value;
 }
 
-function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	add_filter( $hook, $cb, $priority, $accepted_args );
+if ( ! function_exists( 'is_wp_error' ) ) {
+	function is_wp_error( $value ): bool {
+		return $value instanceof WP_Error;
+	}
+}
+
+$GLOBALS['__channel_smoke_options']              = array();
+$GLOBALS['__channel_smoke_scheduled']            = array();
+$GLOBALS['__channel_smoke_abilities']            = array();
+$GLOBALS['__channel_smoke_filters']              = array();
+$GLOBALS['__channel_smoke_current_ability_slug'] = 'smoke/channel-chat';
+
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $key, $default = '' ) {
+		return $GLOBALS['__channel_smoke_options'][ $key ] ?? $default;
+	}
+}
+
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $key, $value, $autoload = null ): bool {
+		unset( $autoload );
+		$GLOBALS['__channel_smoke_options'][ $key ] = $value;
+		return true;
+	}
+}
+
+if ( ! function_exists( 'delete_option' ) ) {
+	function delete_option( string $key ): bool {
+		unset( $GLOBALS['__channel_smoke_options'][ $key ] );
+		return true;
+	}
+}
+
+if ( ! function_exists( 'wp_schedule_single_event' ) ) {
+	function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool {
+		$GLOBALS['__channel_smoke_scheduled'][] = array(
+			'timestamp' => $timestamp,
+			'hook'      => $hook,
+			'args'      => $args,
+		);
+		return true;
+	}
+}
+
+if ( ! function_exists( 'wp_get_ability' ) ) {
+	function wp_get_ability( string $name ) {
+		return $GLOBALS['__channel_smoke_abilities'][ $name ] ?? null;
+	}
+}
+
+if ( ! function_exists( 'add_filter' ) ) {
+	function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
+		unset( $accepted_args );
+		$GLOBALS['__channel_smoke_filters'][ $hook ][ $priority ][] = $cb;
+	}
+}
+
+if ( ! function_exists( 'apply_filters' ) ) {
+	function apply_filters( string $hook, $value, ...$args ) {
+		$callbacks = $GLOBALS['__channel_smoke_filters'][ $hook ] ?? array();
+		ksort( $callbacks );
+		foreach ( $callbacks as $priority_callbacks ) {
+			foreach ( $priority_callbacks as $cb ) {
+				$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
+			}
+		}
+		return $value;
+	}
+}
+
+if ( ! function_exists( 'add_action' ) ) {
+	function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
+		add_filter( $hook, $cb, $priority, $accepted_args );
+	}
 }
 
 function smoke_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {
@@ -104,6 +125,93 @@ require_once __DIR__ . '/../src/Channels/class-wp-agent-channel-session-store.ph
 require_once __DIR__ . '/../src/Channels/class-wp-agent-option-channel-session-store.php';
 require_once __DIR__ . '/../src/Channels/class-wp-agent-channel-session-map.php';
 require_once __DIR__ . '/../src/Channels/class-wp-agent-channel.php';
+
+// Under the real backend, channel session mappings persist as options. Clear
+// any left over from a previous run so session-isolation assertions start from
+// a clean slate.
+if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) ) {
+	$channel_smoke_wpdb = $GLOBALS['wpdb'];
+	$channel_smoke_keys = $channel_smoke_wpdb->get_col(
+		"SELECT option_name FROM {$channel_smoke_wpdb->options} WHERE option_name LIKE 'wp_agent_channel_session_%'"
+	);
+	foreach ( (array) $channel_smoke_keys as $channel_smoke_key ) {
+		delete_option( $channel_smoke_key );
+	}
+}
+
+add_filter(
+	'wp_agent_channel_chat_ability',
+	static function (): string {
+		return (string) $GLOBALS['__channel_smoke_current_ability_slug'];
+	},
+	1
+);
+
+add_filter(
+	'pre_schedule_event',
+	static function ( $pre, $event ) {
+		if ( is_object( $event ) && 'test_channel_handle' === ( $event->hook ?? '' ) ) {
+			$GLOBALS['__channel_smoke_scheduled'][] = array(
+				'timestamp' => (int) ( $event->timestamp ?? 0 ),
+				'hook'      => (string) $event->hook,
+				'args'      => (array) ( $event->args ?? array() ),
+			);
+			return true;
+		}
+
+		return $pre;
+	},
+	10,
+	2
+);
+
+if ( function_exists( 'wp_register_ability_category' ) && function_exists( 'wp_register_ability' ) ) {
+	add_action(
+		'wp_abilities_api_categories_init',
+		static function (): void {
+			if ( ! function_exists( 'wp_has_ability_category' ) || ! wp_has_ability_category( 'smoke' ) ) {
+				wp_register_ability_category(
+					'smoke',
+					array(
+						'label'       => 'Smoke',
+						'description' => 'Smoke-test abilities.',
+					)
+				);
+			}
+		}
+	);
+
+	add_action(
+		'wp_abilities_api_init',
+		static function (): void {
+			foreach ( array( 'smoke/channel-chat', 'my-plugin/custom-chat' ) as $slug ) {
+				if ( function_exists( 'wp_has_ability' ) && wp_has_ability( $slug ) ) {
+					continue;
+				}
+
+				wp_register_ability(
+					$slug,
+					array(
+						'label'               => 'Channel Smoke Chat',
+						'description'         => 'Delegates channel smoke runs to the current fake ability.',
+						'category'            => 'smoke',
+						'input_schema'        => array( 'type' => 'object' ),
+						'execute_callback'    => static function ( array $input ) use ( $slug ) {
+							$ability = $GLOBALS['__channel_smoke_abilities'][ $slug ] ?? null;
+							return $ability ? $ability->execute( $input ) : new WP_Error( 'missing_smoke_ability', 'Missing channel smoke ability.' );
+						},
+						'permission_callback' => static function (): bool {
+							return true;
+						},
+					)
+				);
+			}
+		}
+	);
+
+	do_action( 'wp_abilities_api_categories_init' );
+	do_action( 'wp_abilities_api_init' );
+}
 
 // ─── Fakes ──────────────────────────────────────────────────────────
 
@@ -156,7 +264,7 @@ class Test_Channel extends \AgentsAPI\AI\Channels\WP_Agent_Channel {
 $happy_ability = new Fake_Ability(
 	array( 'reply' => 'Hello from the agent', 'session_id' => 'sess-123', 'completed' => true )
 );
-$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $happy_ability;
+$GLOBALS['__channel_smoke_abilities']['smoke/channel-chat'] = $happy_ability;
 
 $ch = new Test_Channel( 'chat-A' );
 $ch->handle( array( 'text' => 'hi there' ) );
@@ -245,7 +353,7 @@ class Rich_Channel extends Test_Channel {
 	}
 }
 $rich_ability = new Fake_Ability( array( 'reply' => 'rich response' ) );
-$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $rich_ability;
+$GLOBALS['__channel_smoke_abilities']['smoke/channel-chat'] = $rich_ability;
 $rich = new Rich_Channel( 'chat-rich' );
 $rich->handle( array(
 	'text'        => 'check this out',
@@ -272,7 +380,7 @@ class Custom_Key_Channel extends Test_Channel {
 	}
 }
 $custom_key_ability = new Fake_Ability( array( 'reply' => 'custom key', 'session_id' => 'sess-custom' ) );
-$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $custom_key_ability;
+$GLOBALS['__channel_smoke_abilities']['smoke/channel-chat'] = $custom_key_ability;
 $custom_key = new Custom_Key_Channel( 'chat-custom' );
 $custom_key->handle( array( 'text' => 'use custom key' ) );
 smoke_assert( 'sess-custom', get_option( 'custom_session_key_chat-custom' ), 'custom_session_key_override_is_preserved', $failures, $passes );
@@ -281,7 +389,7 @@ smoke_assert( 'sess-custom', get_option( 'custom_session_key_chat-custom' ), 'cu
 $happy_ability2 = new Fake_Ability(
 	array( 'reply' => 'second reply', 'session_id' => 'sess-123', 'completed' => true )
 );
-$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $happy_ability2;
+$GLOBALS['__channel_smoke_abilities']['smoke/channel-chat'] = $happy_ability2;
 
 $ch2 = new Test_Channel( 'chat-A' );
 $ch2->handle( array( 'text' => 'follow-up' ) );
@@ -293,7 +401,7 @@ smoke_assert( 'follow-up', $happy_ability2->calls[0]['message'] ?? 'missing', 's
 $other_ability = new Fake_Ability(
 	array( 'reply' => 'reply for B', 'session_id' => 'sess-B-456', 'completed' => true )
 );
-$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $other_ability;
+$GLOBALS['__channel_smoke_abilities']['smoke/channel-chat'] = $other_ability;
 
 $ch3 = new Test_Channel( 'chat-B' );
 $ch3->handle( array( 'text' => 'hi' ) );
@@ -308,7 +416,7 @@ smoke_assert(
 
 // 4. Empty message short-circuits with WP_Error, no agent call.
 $null_ability = new Fake_Ability( array( 'reply' => 'should not be called' ) );
-$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $null_ability;
+$GLOBALS['__channel_smoke_abilities']['smoke/channel-chat'] = $null_ability;
 
 $ch4    = new Test_Channel( 'chat-empty' );
 $result = $ch4->handle( array( 'text' => '   ' ) );
@@ -319,7 +427,7 @@ smoke_assert( array(), $null_ability->calls, 'empty_message_skips_agent', $failu
 
 // 5. Ability returns WP_Error → send_error fires.
 $error_ability = new Fake_Ability( new WP_Error( 'agent_blew_up', 'something exploded' ) );
-$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $error_ability;
+$GLOBALS['__channel_smoke_abilities']['smoke/channel-chat'] = $error_ability;
 
 $ch5 = new Test_Channel( 'chat-err' );
 $ch5->handle( array( 'text' => 'try this' ) );
@@ -355,7 +463,7 @@ class Silent_Skip_Channel extends Test_Channel {
 	}
 }
 $silent_ability = new Fake_Ability( array( 'reply' => 'should not be called' ) );
-$GLOBALS['__channel_smoke_abilities']['agents/chat'] = $silent_ability;
+$GLOBALS['__channel_smoke_abilities']['smoke/channel-chat'] = $silent_ability;
 
 $ch_silent = new Silent_Skip_Channel( 'chat-silent' );
 $result    = $ch_silent->handle( array( 'text' => 'echo of own reply', 'from_me' => true ) );

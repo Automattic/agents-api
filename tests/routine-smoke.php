@@ -73,6 +73,17 @@ if ( ! function_exists( 'do_action' ) ) {
 		// registry's lifecycle verbs assert on this from section 6 onwards.
 		$GLOBALS['smoke_dispatched'][] = array( 'hook' => $hook, 'arg' => $args[0] ?? null );
 	}
+} elseif ( function_exists( 'add_action' ) ) {
+	// Real WordPress: the lifecycle verbs fire real actions, so capture them
+	// with real listeners into the same dispatch log the assertions read.
+	foreach ( array( 'wp_agent_routine_paused', 'wp_agent_routine_resumed', 'wp_agent_routine_run_now_requested' ) as $routine_lifecycle_hook ) {
+		add_action(
+			$routine_lifecycle_hook,
+			static function ( $routine = null ) use ( $routine_lifecycle_hook ): void {
+				$GLOBALS['smoke_dispatched'][] = array( 'hook' => $routine_lifecycle_hook, 'arg' => $routine );
+			}
+		);
+	}
 }
 if ( ! function_exists( 'as_schedule_recurring_action' ) ) {
 	function as_schedule_recurring_action( int $start, int $interval, string $hook, array $args = array(), string $group = '' ): int {

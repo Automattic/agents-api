@@ -25,6 +25,8 @@ echo "agents-api-cpt-conversation-store-smoke\n";
 
 /* ----------------------------- in-memory WP shim ---------------------------- */
 
+if ( ! function_exists( 'wp_insert_post' ) ) {
+
 $GLOBALS['__posts']   = array();
 $GLOBALS['__meta']    = array();
 $GLOBALS['__next_id'] = 1;
@@ -285,6 +287,8 @@ if ( ! class_exists( 'WPDB_Cpt_Store_Shim' ) ) {
 }
 $GLOBALS['wpdb'] = new WPDB_Cpt_Store_Shim();
 
+}
+
 /* ------------------------------ load + assert ------------------------------ */
 
 require_once __DIR__ . '/../agents-api.php';
@@ -294,6 +298,10 @@ use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Lock;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Principal_Conversation_Store;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Cpt_Conversation_Store;
 use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
+
+if ( function_exists( 'register_post_type' ) ) {
+	WP_Agent_Cpt_Conversation_Store::register_post_type();
+}
 
 function smoke_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {
 	if ( $expected === $actual ) {
@@ -309,6 +317,23 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 
 $store     = new WP_Agent_Cpt_Conversation_Store();
 $workspace = WP_Agent_Workspace_Scope::from_parts( 'site', '42' );
+
+// Under real WordPress the store reads/writes real conversation posts. Purge any
+// left over from a previous run so the owner-scoped list counts are
+// deterministic. (The pure-PHP shim starts from an empty in-memory store.)
+if ( ! isset( $GLOBALS['__posts'] ) && class_exists( 'WP_Query' ) && function_exists( 'wp_delete_post' ) ) {
+	$existing_sessions = new WP_Query(
+		array(
+			'post_type'      => WP_Agent_Cpt_Conversation_Store::POST_TYPE,
+			'post_status'    => 'any',
+			'posts_per_page' => -1,
+			'fields'         => 'ids',
+		)
+	);
+	foreach ( (array) $existing_sessions->posts as $existing_session_id ) {
+		wp_delete_post( (int) $existing_session_id, true );
+	}
+}
 
 echo "\n[1] Implements the canonical contracts:\n";
 smoke_assert( true, $store instanceof WP_Agent_Conversation_Store, 'implements WP_Agent_Conversation_Store', $failures, $passes );
@@ -386,11 +411,26 @@ smoke_assert( true, is_string( $token2 ) && '' !== $token2, 'reacquire after rel
 
 // Force an expired lock and confirm CAS reclaim.
 $post_id = null;
-foreach ( $GLOBALS['__posts'] as $pid => $p ) {
-	if ( (string) get_post_meta( $pid, '_agents_api_session_id', true ) === $lock_session ) {
-		$post_id = $pid;
-		break;
+
+if ( isset( $GLOBALS['__posts'] ) && is_array( $GLOBALS['__posts'] ) ) {
+	foreach ( $GLOBALS['__posts'] as $pid => $p ) {
+		if ( (string) get_post_meta( $pid, '_agents_api_session_id', true ) === $lock_session ) {
+			$post_id = $pid;
+			break;
+		}
 	}
+} else {
+	$lock_query = new WP_Query(
+		array(
+			'post_type'      => WP_Agent_Cpt_Conversation_Store::POST_TYPE,
+			'post_status'    => 'any',
+			'posts_per_page' => 1,
+			'fields'         => 'ids',
+			'meta_key'       => '_agents_api_session_id',
+			'meta_value'     => $lock_session,
+		)
+	);
+	$post_id    = isset( $lock_query->posts[0] ) ? (int) $lock_query->posts[0] : null;
 }
 update_post_meta( $post_id, '_agents_api_lock', wp_json_encode( array( 'token' => 'stale', 'expires' => time() - 10 ) ) );
 $token3 = $store->acquire_session_lock( $lock_session, 300 );

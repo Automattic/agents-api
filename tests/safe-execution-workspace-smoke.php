@@ -21,32 +21,87 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 $GLOBALS['__agents_api_smoke_abilities']  = array();
 $GLOBALS['__agents_api_smoke_categories'] = array();
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private array $data = array() ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-	public function get_error_data(): array { return $this->data; }
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '', private array $data = array() ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+		public function get_error_data(): array { return $this->data; }
+	}
 }
 
-function current_user_can( string $capability ): bool {
-	unset( $capability );
-	return true;
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $capability ): bool {
+		unset( $capability );
+		return true;
+	}
+} else {
+	add_filter(
+		'user_has_cap',
+		static function ( array $allcaps ): array {
+			$allcaps['manage_options'] = true;
+			return $allcaps;
+		}
+	);
 }
 
-function wp_has_ability_category( string $category ): bool {
-	return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+if ( ! function_exists( 'wp_has_ability_category' ) ) {
+	function wp_has_ability_category( string $category ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+	}
 }
 
-function wp_register_ability_category( string $category, array $args ): void {
-	$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+if ( ! function_exists( 'wp_register_ability_category' ) ) {
+	function wp_register_ability_category( string $category, array $args ): void {
+		$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+	}
 }
 
-function wp_has_ability( string $ability ): bool {
-	return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+if ( ! function_exists( 'wp_has_ability' ) ) {
+	function wp_has_ability( string $ability ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+	}
 }
 
-function wp_register_ability( string $ability, array $args ): void {
-	$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+if ( ! function_exists( 'wp_register_ability' ) ) {
+	function wp_register_ability( string $ability, array $args ): void {
+		$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+	}
+}
+
+/**
+ * Resolve whether an ability is registered, in either backend: the pure-PHP
+ * shim records into the smoke global; real WordPress records into the Abilities
+ * API registry.
+ */
+function agents_api_workspace_smoke_has_ability( string $ability ): bool {
+	if ( isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] ) ) {
+		return true;
+	}
+
+	return function_exists( 'wp_get_ability' ) && null !== wp_get_ability( $ability );
+}
+
+/**
+ * Execute a registered ability in either backend.
+ *
+ * @param string $ability Ability slug.
+ * @param array  $input   Ability input payload.
+ * @return mixed Ability result.
+ */
+function agents_api_workspace_smoke_execute( string $ability, array $input ) {
+	if ( isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ]['execute_callback'] ) ) {
+		return call_user_func( $GLOBALS['__agents_api_smoke_abilities'][ $ability ]['execute_callback'], $input );
+	}
+
+	if ( function_exists( 'wp_get_ability' ) ) {
+		$resolved = wp_get_ability( $ability );
+		if ( null !== $resolved ) {
+			return $resolved->execute( $input );
+		}
+	}
+
+	return null;
 }
 
 function agents_api_workspace_smoke_rm( string $path ): void {
@@ -68,7 +123,7 @@ agents_api_smoke_require_module();
 
 $disabled_targets = AgentsAPI\AI\Tasks\agents_execution_targets();
 agents_api_smoke_assert_equals( array(), $disabled_targets, 'workspace target is disabled by default', $failures, $passes );
-agents_api_smoke_assert_equals( false, isset( $GLOBALS['__agents_api_smoke_abilities']['agents/workspace-prepare'] ), 'workspace abilities are not registered before opt-in', $failures, $passes );
+agents_api_smoke_assert_equals( false, agents_api_workspace_smoke_has_ability( 'agents/workspace-prepare' ), 'workspace abilities are not registered before opt-in', $failures, $passes );
 
 $root = sys_get_temp_dir() . '/agents-api-safe-workspace-' . bin2hex( random_bytes( 4 ) );
 mkdir( $root, 0755, true );
@@ -83,13 +138,13 @@ $targets = AgentsAPI\AI\Tasks\agents_execution_targets();
 agents_api_smoke_assert_equals( 'agents-api/safe-execution-workspace', $targets[0]['id'] ?? '', 'workspace target registers when opted in', $failures, $passes );
 agents_api_smoke_assert_equals( true, in_array( 'code.execution.safe-root', $targets[0]['capabilities'] ?? array(), true ), 'workspace target declares safe-root capability', $failures, $passes );
 agents_api_smoke_assert_equals( true, $targets[0]['metadata']['isolated_from_site'] ?? false, 'workspace target declares site isolation', $failures, $passes );
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities']['agents/workspace-prepare'] ), 'workspace prepare ability registers when opted in', $failures, $passes );
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities']['agents/workspace-write-file'] ), 'workspace write ability registers when opted in', $failures, $passes );
+agents_api_smoke_assert_equals( true, agents_api_workspace_smoke_has_ability( 'agents/workspace-prepare' ), 'workspace prepare ability registers when opted in', $failures, $passes );
+agents_api_smoke_assert_equals( true, agents_api_workspace_smoke_has_ability( 'agents/workspace-write-file' ), 'workspace write ability registers when opted in', $failures, $passes );
 
-$prepare = $GLOBALS['__agents_api_smoke_abilities']['agents/workspace-prepare']['execute_callback'];
-$write   = $GLOBALS['__agents_api_smoke_abilities']['agents/workspace-write-file']['execute_callback'];
-$read    = $GLOBALS['__agents_api_smoke_abilities']['agents/workspace-read-file']['execute_callback'];
-$list    = $GLOBALS['__agents_api_smoke_abilities']['agents/workspace-list']['execute_callback'];
+$prepare = static fn( array $input ) => agents_api_workspace_smoke_execute( 'agents/workspace-prepare', $input );
+$write   = static fn( array $input ) => agents_api_workspace_smoke_execute( 'agents/workspace-write-file', $input );
+$read    = static fn( array $input ) => agents_api_workspace_smoke_execute( 'agents/workspace-read-file', $input );
+$list    = static fn( array $input ) => agents_api_workspace_smoke_execute( 'agents/workspace-list', $input );
 
 $prepared = call_user_func( $prepare, array( 'handle' => 'site-generation' ) );
 agents_api_smoke_assert_equals( true, $prepared['success'] ?? false, 'prepare creates named workspace', $failures, $passes );
@@ -128,7 +183,9 @@ $traversal = call_user_func(
 agents_api_smoke_assert_equals( true, $traversal instanceof WP_Error, 'write rejects parent traversal', $failures, $passes );
 agents_api_smoke_assert_equals( false, file_exists( $root . '/escape.txt' ), 'traversal does not write outside workspace', $failures, $passes );
 
-add_filter( 'agents_api_safe_workspace_root', static fn(): string => dirname( __DIR__ ), 20 );
+// The site root itself is, by definition, "site-containing" in every backend —
+// using ABSPATH avoids assuming the plugin happens to live inside the site tree.
+add_filter( 'agents_api_safe_workspace_root', static fn(): string => rtrim( (string) ABSPATH, '/\\' ), 20 );
 
 $blocked_targets = AgentsAPI\AI\Tasks\agents_execution_targets();
 agents_api_smoke_assert_equals( array(), $blocked_targets, 'workspace target rejects site-containing root', $failures, $passes );

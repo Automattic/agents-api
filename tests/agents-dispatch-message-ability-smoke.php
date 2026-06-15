@@ -14,50 +14,45 @@ $passes   = 0;
 
 echo "agents-dispatch-message-ability-smoke\n";
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '' ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-}
+require_once __DIR__ . '/agents-api-smoke-helpers.php';
 
-function is_wp_error( $value ): bool {
-	return $value instanceof WP_Error;
-}
-
-function current_user_can( string $cap ): bool {
-	unset( $cap );
-	return $GLOBALS['__smoke_can'] ?? false;
-}
-
-$GLOBALS['__smoke_filters'] = array();
-
-function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	unset( $accepted_args );
-	$GLOBALS['__smoke_filters'][ $hook ][ $priority ][] = $cb;
-}
-
-function apply_filters( string $hook, $value, ...$args ) {
-	$callbacks = $GLOBALS['__smoke_filters'][ $hook ] ?? array();
-	ksort( $callbacks );
-	foreach ( $callbacks as $priority_callbacks ) {
-		foreach ( $priority_callbacks as $cb ) {
-			$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
-		}
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '' ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
 	}
-	return $value;
 }
 
-function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	add_filter( $hook, $cb, $priority, $accepted_args );
-}
-
-function do_action( string $hook, ...$args ): void {
-	$callbacks = $GLOBALS['__smoke_filters'][ $hook ] ?? array();
-	ksort( $callbacks );
-	foreach ( $callbacks as $priority_callbacks ) {
-		foreach ( $priority_callbacks as $cb ) {
-			call_user_func_array( $cb, $args );
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $cap ): bool {
+		unset( $cap );
+		return $GLOBALS['__smoke_can'] ?? false;
+	}
+} else {
+	add_filter(
+		'user_has_cap',
+		static function ( array $allcaps ): array {
+			$allcaps['manage_options'] = (bool) ( $GLOBALS['__smoke_can'] ?? false );
+			return $allcaps;
 		}
+	);
+}
+
+function smoke_reset_dispatch_filters(): void {
+	$hooks = array(
+		'agents_dispatch_message_failed',
+		'agents_dispatch_message_permission',
+		'wp_agent_dispatch_message_handler',
+	);
+
+	foreach ( $hooks as $hook ) {
+		if ( function_exists( 'remove_all_filters' ) ) {
+			remove_all_filters( $hook );
+			continue;
+		}
+
+		unset( $GLOBALS['__agents_api_smoke_actions'][ $hook ] );
 	}
 }
 
@@ -73,7 +68,7 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 	echo '    actual:   ' . var_export( $actual, true ) . "\n";
 }
 
-require_once __DIR__ . '/../src/Channels/register-agents-dispatch-message-ability.php';
+agents_api_smoke_require_module();
 
 use function AgentsAPI\AI\Channels\agents_dispatch_message_dispatch;
 use function AgentsAPI\AI\Channels\agents_dispatch_message_input_schema;
@@ -107,7 +102,7 @@ smoke_assert( 'no_handler', $dispatch_failures[0]['reason'] ?? 'missing', 'no_ha
 smoke_assert( 'whatsapp', $dispatch_failures[0]['channel'] ?? 'missing', 'observability_includes_channel', $failures, $passes );
 
 $captured = array();
-$GLOBALS['__smoke_filters'] = array();
+smoke_reset_dispatch_filters();
 register_dispatch_message_handler(
 	static function ( array $input ) use ( &$captured ): array {
 		$captured = $input;
@@ -133,7 +128,7 @@ smoke_assert( 'hola', $captured['message'] ?? null, 'handler_receives_message', 
 smoke_assert( true, $ok['sent'] ?? false, 'handler_result_returned', $failures, $passes );
 smoke_assert( 'm-1', $ok['message_id'] ?? null, 'message_id_returned', $failures, $passes );
 
-$GLOBALS['__smoke_filters'] = array();
+smoke_reset_dispatch_filters();
 register_dispatch_message_handler( static fn( array $input ) => 'bad' );
 $bad = agents_dispatch_message_dispatch( array( 'channel' => 'x', 'recipient' => 'y', 'message' => 'z' ) );
 smoke_assert( true, $bad instanceof WP_Error, 'invalid_result_returns_wp_error', $failures, $passes );
