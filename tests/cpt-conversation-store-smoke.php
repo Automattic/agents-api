@@ -318,6 +318,23 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 $store     = new WP_Agent_Cpt_Conversation_Store();
 $workspace = WP_Agent_Workspace_Scope::from_parts( 'site', '42' );
 
+// Under real WordPress the store reads/writes real conversation posts. Purge any
+// left over from a previous run so the owner-scoped list counts are
+// deterministic. (The pure-PHP shim starts from an empty in-memory store.)
+if ( ! isset( $GLOBALS['__posts'] ) && class_exists( 'WP_Query' ) && function_exists( 'wp_delete_post' ) ) {
+	$existing_sessions = new WP_Query(
+		array(
+			'post_type'      => WP_Agent_Cpt_Conversation_Store::POST_TYPE,
+			'post_status'    => 'any',
+			'posts_per_page' => -1,
+			'fields'         => 'ids',
+		)
+	);
+	foreach ( (array) $existing_sessions->posts as $existing_session_id ) {
+		wp_delete_post( (int) $existing_session_id, true );
+	}
+}
+
 echo "\n[1] Implements the canonical contracts:\n";
 smoke_assert( true, $store instanceof WP_Agent_Conversation_Store, 'implements WP_Agent_Conversation_Store', $failures, $passes );
 smoke_assert( true, $store instanceof WP_Agent_Principal_Conversation_Store, 'implements WP_Agent_Principal_Conversation_Store', $failures, $passes );
