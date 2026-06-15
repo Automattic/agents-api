@@ -131,6 +131,51 @@ agents_api_smoke_assert_equals( 1, count( $stop_events ), 'complete decision rec
 agents_api_smoke_assert_equals( 'finish tool called', $stop_events[0]['metadata']['message'] ?? '', 'stop event carries decision message', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'tool_name' => 'client/finish', 'turn' => 3 ), $stop_events[0]['metadata']['context'] ?? array(), 'stop event carries decision context', $failures, $passes );
 
+echo "\n[1a] Completion policy does not truncate same-turn tool batches:\n";
+$policy_log = array();
+
+$batch_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'write files' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array( 'name' => 'client/finish', 'parameters' => array( 'path' => 'index.html' ) ),
+				array( 'name' => 'client/work', 'parameters' => array( 'path' => 'style.css' ) ),
+			),
+		);
+	},
+	array(
+		'max_turns'         => 5,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+		'completion_policy' => $policy,
+		'should_continue'   => static function (): bool {
+			return true;
+		},
+	)
+);
+
+$batch_tool_names = array_map(
+	static function ( array $tool_result ): string {
+		return (string) ( $tool_result['tool_name'] ?? '' );
+	},
+	$batch_result['tool_execution_results']
+);
+
+$batch_stop_events = array_values(
+	array_filter(
+		$batch_result['events'],
+		static function ( array $event ): bool {
+			return 'completion_policy_stop' === ( $event['type'] ?? '' );
+		}
+	)
+);
+
+agents_api_smoke_assert_equals( array( 'client/finish', 'client/work' ), $batch_tool_names, 'same-turn tool batch executes after completion policy marks complete', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $batch_stop_events ), 'same-turn batch records one completion stop event', $failures, $passes );
+agents_api_smoke_assert_equals( 2, count( $policy_log ), 'policy was consulted for each same-turn tool result', $failures, $passes );
+
 echo "\n[2] Completion policy coexists with should_continue — policy takes precedence:\n";
 $policy_log       = array();
 $continue_called  = 0;

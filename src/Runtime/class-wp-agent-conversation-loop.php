@@ -531,19 +531,20 @@ class WP_Agent_Conversation_Loop {
 		// Fall back to the prior turn's messages when the turn runner omits
 		// `messages` from its return — without this, mediation starts from an
 		// empty list and silently drops history between rounds.
-		$messages               = isset( $result['messages'] ) && is_array( $result['messages'] )
+		$messages                 = isset( $result['messages'] ) && is_array( $result['messages'] )
 			? self::normalize_messages( $result['messages'] )
 			: $prior_messages;
-		$tool_calls             = isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ? $result['tool_calls'] : array();
-		$tool_execution_results = array();
-		$tool_events            = array();
-		$tool_audit_events      = array();
-		$events                 = array();
-		$spin_signatures        = array();
-		$complete               = false;
-		$exceeded_budget        = null;
-		$approval_required      = null;
-		$runtime_tool_pending   = null;
+		$tool_calls               = isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ? $result['tool_calls'] : array();
+		$tool_execution_results   = array();
+		$tool_events              = array();
+		$tool_audit_events        = array();
+		$events                   = array();
+		$spin_signatures          = array();
+		$complete                 = false;
+		$completion_stop_recorded = false;
+		$exceeded_budget          = null;
+		$approval_required        = null;
+		$runtime_tool_pending     = null;
 
 		// If the turn runner returned text content, add it as an assistant message.
 		if ( isset( $result['content'] ) && is_string( $result['content'] ) && '' !== $result['content'] ) {
@@ -866,7 +867,10 @@ class WP_Agent_Conversation_Loop {
 			// Consult completion policy. A complete decision stops future model turns,
 			// but the current provider turn may contain more tool calls that still
 			// require paired tool results before the transcript can be replayed.
-			if ( null !== $policy && ! $complete ) {
+			// The policy is consulted for every same-turn tool result — even after a
+			// prior call in the batch marked the conversation complete — so its
+			// internal state stays consistent; the stop event is still recorded once.
+			if ( null !== $policy ) {
 				$decision = $policy->recordToolResult(
 					$tool_name,
 					$tool_definition,
@@ -877,15 +881,25 @@ class WP_Agent_Conversation_Loop {
 
 				if ( $decision->isComplete() ) {
 					$complete = true;
-					$events[] = array(
-						'type'     => 'completion_policy_stop',
-						'metadata' => array(
-							'tool_name' => $tool_name,
-							'turn'      => $turn,
-							'message'   => $decision->message(),
-							'context'   => $decision->context(),
-						),
-					);
+					if ( ! $completion_stop_recorded ) {
+						$events[]                 = array(
+							'type'     => 'completion_policy_stop',
+							'metadata' => array(
+								'tool_name' => $tool_name,
+								'turn'      => $turn,
+								'message'   => $decision->message(),
+								'context'   => $decision->context(),
+							),
+						);
+						$completion_stop_recorded = true;
+					}
+					continue;
+				}
+
+				// Once the batch is complete, an incomplete decision from a later
+				// same-turn tool must not append a "keep going" continuation nudge —
+				// the conversation is already ending.
+				if ( $complete ) {
 					continue;
 				}
 
