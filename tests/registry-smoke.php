@@ -19,6 +19,26 @@ echo "agents-api-registry-smoke\n";
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
+// Under real WordPress _doing_it_wrong() is native, so the duplicate-agent
+// notice is delivered through the doing_it_wrong_run action rather than the
+// pure-PHP shim. Capture it into the same log the assertions read, and silence
+// the would-be error so the smoke does not abort.
+if ( function_exists( 'add_action' ) && function_exists( 'remove_all_filters' ) ) {
+	add_action(
+		'doing_it_wrong_run',
+		static function ( $function_name, $message, $version ): void {
+			$GLOBALS['__agents_api_smoke_wrong'][] = array(
+				'function' => (string) $function_name,
+				'message'  => (string) $message,
+				'version'  => (string) $version,
+			);
+		},
+		10,
+		3
+	);
+	add_filter( 'doing_it_wrong_trigger_error', '__return_false' );
+}
+
 add_action(
 	'wp_agents_api_init',
 	static function () {

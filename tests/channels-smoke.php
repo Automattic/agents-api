@@ -126,6 +126,19 @@ require_once __DIR__ . '/../src/Channels/class-wp-agent-option-channel-session-s
 require_once __DIR__ . '/../src/Channels/class-wp-agent-channel-session-map.php';
 require_once __DIR__ . '/../src/Channels/class-wp-agent-channel.php';
 
+// Under the real backend, channel session mappings persist as options. Clear
+// any left over from a previous run so session-isolation assertions start from
+// a clean slate.
+if ( isset( $GLOBALS['wpdb'] ) && is_object( $GLOBALS['wpdb'] ) ) {
+	$channel_smoke_wpdb = $GLOBALS['wpdb'];
+	$channel_smoke_keys = $channel_smoke_wpdb->get_col(
+		"SELECT option_name FROM {$channel_smoke_wpdb->options} WHERE option_name LIKE 'wp_agent_channel_session_%'"
+	);
+	foreach ( (array) $channel_smoke_keys as $channel_smoke_key ) {
+		delete_option( $channel_smoke_key );
+	}
+}
+
 add_filter(
 	'wp_agent_channel_chat_ability',
 	static function (): string {
