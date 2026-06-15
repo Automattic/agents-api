@@ -383,51 +383,74 @@ function agents_chat_input_schema(): array {
 				'type'        => 'object',
 				'description' => 'Optional transport-level context describing where this turn originated. Hosts may include opaque, product-owned metadata; Agents API preserves it but does not define product semantics.',
 				'properties'  => array(
-					'source'                   => array(
+					'source'                    => array(
 						'type'        => 'string',
 						'enum'        => array( 'channel', 'bridge', 'rest', 'block', 'peer-agent', 'jsonrpc' ),
 						'description' => 'How the request reached this dispatcher.',
 					),
-					'client_name'              => array(
+					'client_name'               => array(
 						'type'        => 'string',
 						'description' => 'Specific client identifier within the source (e.g. "cli-relay" or "messaging-bot").',
 					),
-					'connector_id'             => array(
+					'connector_id'              => array(
 						'type'        => 'string',
 						'description' => 'Stable connector or channel instance id used for settings, attribution, and external conversation session mapping.',
 					),
-					'external_provider'        => array(
+					'external_provider'         => array(
 						'type'        => array( 'string', 'null' ),
 						'description' => 'External network identifier (e.g. "whatsapp", "slack", "email"). Null if not applicable.',
 					),
-					'external_conversation_id' => array(
+					'external_conversation_id'  => array(
 						'type'        => array( 'string', 'null' ),
 						'description' => 'Opaque external conversation id (chat JID, channel id, thread root). Null if the source has no per-conversation isolation.',
 					),
-					'external_message_id'      => array(
+					'external_message_id'       => array(
 						'type'        => array( 'string', 'null' ),
 						'description' => 'Stable transport-side message id, used for reply threading / dedup / audit.',
 					),
-					'sender_id'                => array(
+					'sender_id'                 => array(
 						'type'        => array( 'string', 'null' ),
 						'description' => 'Opaque external sender id. In group rooms this identifies the human sender inside the conversation.',
 					),
-					'room_kind'                => array(
+					'room_kind'                 => array(
 						'type'        => array( 'string', 'null' ),
-						'enum'        => array( 'dm', 'group', 'channel' ),
+						'enum'        => array( 'dm', 'group', 'channel', null ),
 						'description' => 'Conversation kind: direct message, multi-participant group, broadcast channel. Null when the source has no notion of room kind.',
 					),
-					'caller_agent'             => array(
+					'caller_agent'              => array(
 						'type'        => array( 'string', 'null' ),
 						'description' => 'Agent slug that initiated this turn when source is peer-agent. Null when the source is not another agent.',
 					),
-					'caller_session_id'        => array(
+					'caller_session_id'         => array(
 						'type'        => array( 'string', 'null' ),
 						'description' => 'Originating agent session id when source is peer-agent. Null when unavailable or not applicable.',
 					),
-					'peer_agent_call'          => array(
+					'peer_agent_call'           => array(
 						'type'        => 'boolean',
 						'description' => 'Whether this turn is an explicit agent-to-agent delegation call.',
+					),
+					'runtime_tools'             => array(
+						'type'                 => 'object',
+						'description'          => 'Explicit runtime-local tool declarations supplied by a trusted caller for this turn.',
+						'additionalProperties' => array( 'type' => 'object' ),
+					),
+					'runtime_tool_declarations' => array(
+						'type'                 => 'object',
+						'description'          => 'Alias for explicit runtime-local tool declarations supplied by a trusted caller for this turn.',
+						'additionalProperties' => array( 'type' => 'object' ),
+					),
+					'tool_declarations'         => array(
+						'type'                 => 'object',
+						'description'          => 'Transport-level tool declarations supplied by a trusted caller for this turn.',
+						'additionalProperties' => array( 'type' => 'object' ),
+					),
+					'runtime_tool_callback'     => array(
+						'type'        => 'string',
+						'description' => 'Runtime-local callback identifier for executing runtime tool calls in trusted in-process callers.',
+					),
+					'runtime_tool_timeout'      => array(
+						'type'        => 'integer',
+						'description' => 'Runtime-local tool timeout in seconds.',
 					),
 				),
 			),
