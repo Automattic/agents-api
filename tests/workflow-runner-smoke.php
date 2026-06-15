@@ -17,48 +17,62 @@ $passes   = 0;
 
 echo "workflow-runner-smoke\n";
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private $data = null ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-	public function get_error_data() { return $this->data; }
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '', private $data = null ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+		public function get_error_data() { return $this->data; }
+	}
 }
 
-function is_wp_error( $value ): bool {
-	return $value instanceof WP_Error;
+if ( ! function_exists( 'is_wp_error' ) ) {
+	function is_wp_error( $value ): bool {
+		return $value instanceof WP_Error;
+	}
 }
 
 $GLOBALS['__filters']    = array();
 $GLOBALS['__abilities']  = array();
 
-function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	unset( $accepted_args );
-	$GLOBALS['__filters'][ $hook ][ $priority ][] = $cb;
-}
-function apply_filters( string $hook, $value, ...$args ) {
-	$cbs = $GLOBALS['__filters'][ $hook ] ?? array();
-	ksort( $cbs );
-	foreach ( $cbs as $bucket ) {
-		foreach ( $bucket as $cb ) {
-			$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
-		}
-	}
-	return $value;
-}
-function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	add_filter( $hook, $cb, $priority, $accepted_args );
-}
-function do_action( string $hook, ...$args ): void {
-	$cbs = $GLOBALS['__filters'][ $hook ] ?? array();
-	ksort( $cbs );
-	foreach ( $cbs as $bucket ) {
-		foreach ( $bucket as $cb ) {
-			call_user_func_array( $cb, $args );
-		}
+if ( ! function_exists( 'add_filter' ) ) {
+	function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
+		unset( $accepted_args );
+		$GLOBALS['__filters'][ $hook ][ $priority ][] = $cb;
 	}
 }
-function wp_get_ability( string $name ) {
-	return $GLOBALS['__abilities'][ $name ] ?? null;
+if ( ! function_exists( 'apply_filters' ) ) {
+	function apply_filters( string $hook, $value, ...$args ) {
+		$cbs = $GLOBALS['__filters'][ $hook ] ?? array();
+		ksort( $cbs );
+		foreach ( $cbs as $bucket ) {
+			foreach ( $bucket as $cb ) {
+				$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
+			}
+		}
+		return $value;
+	}
+}
+if ( ! function_exists( 'add_action' ) ) {
+	function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
+		add_filter( $hook, $cb, $priority, $accepted_args );
+	}
+}
+if ( ! function_exists( 'do_action' ) ) {
+	function do_action( string $hook, ...$args ): void {
+		$cbs = $GLOBALS['__filters'][ $hook ] ?? array();
+		ksort( $cbs );
+		foreach ( $cbs as $bucket ) {
+			foreach ( $bucket as $cb ) {
+				call_user_func_array( $cb, $args );
+			}
+		}
+	}
+}
+if ( ! function_exists( 'wp_get_ability' ) ) {
+	function wp_get_ability( string $name ) {
+		return $GLOBALS['__abilities'][ $name ] ?? null;
+	}
 }
 
 class Stub_Ability {
@@ -66,6 +80,61 @@ class Stub_Ability {
 	public function execute( array $input ) {
 		return ( $this->handler )( $input );
 	}
+}
+
+/**
+ * Register a stub ability so the runner can resolve it through wp_get_ability()
+ * in either backend: pure-PHP keeps the Stub_Ability in an in-memory registry;
+ * real WordPress registers it with the Abilities API (deferred to the init
+ * action) using the handler as the execute callback.
+ */
+$GLOBALS['__workflow_runner_smoke_pending'] = array();
+function workflow_runner_smoke_register_ability( string $name, \Closure $handler ): void {
+	$GLOBALS['__abilities'][ $name ] = new Stub_Ability( $handler );
+
+	// Defer real Abilities API registration to the init action (fired once after
+	// all stubs are queued); core rejects registration outside that window.
+	if ( function_exists( 'wp_register_ability' ) ) {
+		$GLOBALS['__workflow_runner_smoke_pending'][ $name ] = $handler;
+	}
+}
+
+if ( function_exists( 'add_action' ) && function_exists( 'wp_register_ability' ) ) {
+	add_action(
+		'wp_abilities_api_categories_init',
+		static function (): void {
+			if ( function_exists( 'wp_has_ability_category' ) && ! wp_has_ability_category( 'workflow-runner-smoke' ) ) {
+				wp_register_ability_category(
+					'workflow-runner-smoke',
+					array(
+						'label'       => 'Workflow Runner Smoke',
+						'description' => 'Workflow runner smoke stubs.',
+					)
+				);
+			}
+		}
+	);
+
+	add_action(
+		'wp_abilities_api_init',
+		static function (): void {
+			foreach ( $GLOBALS['__workflow_runner_smoke_pending'] as $name => $handler ) {
+				wp_register_ability(
+					$name,
+					array(
+						'label'               => $name,
+						'description'         => 'Workflow runner smoke stub.',
+						'category'            => 'workflow-runner-smoke',
+						'input_schema'        => array( 'type' => 'object' ),
+						'output_schema'       => array( 'type' => 'object' ),
+						'execute_callback'    => $handler,
+						'permission_callback' => '__return_true',
+					)
+				);
+			}
+			$GLOBALS['__workflow_runner_smoke_pending'] = array();
+		}
+	);
 }
 
 function smoke_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {
@@ -119,17 +188,20 @@ class Capture_Recorder implements WP_Agent_Workflow_Run_Recorder {
 
 // ─── Happy path: 2 sequential ability steps with bindings between them ───
 
-$GLOBALS['__abilities']['demo/uppercase'] = new Stub_Ability(
+workflow_runner_smoke_register_ability(
+	'demo/uppercase',
 	static function ( array $input ): array {
 		return array( 'value' => strtoupper( (string) ( $input['text'] ?? '' ) ) );
 	}
 );
-$GLOBALS['__abilities']['demo/wrap'] = new Stub_Ability(
+workflow_runner_smoke_register_ability(
+	'demo/wrap',
 	static function ( array $input ): array {
 		return array( 'wrapped' => '<<' . (string) ( $input['inner'] ?? '' ) . '>>' );
 	}
 );
-$GLOBALS['__abilities']['demo/score-item'] = new Stub_Ability(
+workflow_runner_smoke_register_ability(
+	'demo/score-item',
 	static function ( array $input ): array {
 		return array(
 			'id'     => (int) ( $input['id'] ?? 0 ),
@@ -137,6 +209,17 @@ $GLOBALS['__abilities']['demo/score-item'] = new Stub_Ability(
 		);
 	}
 );
+workflow_runner_smoke_register_ability(
+	'demo/boom',
+	static function ( array $input ): \WP_Error {
+		unset( $input );
+		return new \WP_Error( 'demo_bang', 'something broke' );
+	}
+);
+
+// Register all stub abilities with the real Abilities API (no-op in pure-PHP).
+do_action( 'wp_abilities_api_categories_init' );
+do_action( 'wp_abilities_api_init' );
 
 $spec = WP_Agent_Workflow_Spec::from_array(
 	array(
@@ -208,13 +291,6 @@ smoke_assert( $evidence_refs, $last_write['result']['evidence_refs'] ?? array(),
 smoke_assert( true, is_string( json_encode( $evidence_result->get_evidence_refs() ) ), 'evidence refs are JSON-serializable', $failures, $passes );
 
 // ─── Failed step short-circuits ───────────────────────────────────────
-
-$GLOBALS['__abilities']['demo/boom'] = new Stub_Ability(
-	static function ( array $input ): \WP_Error {
-		unset( $input );
-		return new \WP_Error( 'demo_bang', 'something broke' );
-	}
-);
 
 $bad_spec = WP_Agent_Workflow_Spec::from_array(
 	array(

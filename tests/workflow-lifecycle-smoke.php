@@ -22,46 +22,58 @@ $passes   = 0;
 
 echo "workflow-lifecycle-smoke\n";
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private $data = null ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-	public function get_error_data() { return $this->data; }
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '', private $data = null ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+		public function get_error_data() { return $this->data; }
+	}
 }
 
-function is_wp_error( $value ): bool {
-	return $value instanceof WP_Error;
+if ( ! function_exists( 'is_wp_error' ) ) {
+	function is_wp_error( $value ): bool {
+		return $value instanceof WP_Error;
+	}
 }
 
 $GLOBALS['__hooks'] = array();
 
-function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	$GLOBALS['__hooks'][ $hook ][ $priority ][] = array( 'cb' => $cb, 'args' => $accepted_args );
+if ( ! function_exists( 'add_action' ) ) {
+	function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
+		$GLOBALS['__hooks'][ $hook ][ $priority ][] = array( 'cb' => $cb, 'args' => $accepted_args );
+	}
 }
 
-function do_action( string $hook, ...$args ): void {
-	$buckets = $GLOBALS['__hooks'][ $hook ] ?? array();
-	ksort( $buckets );
-	foreach ( $buckets as $bucket ) {
-		foreach ( $bucket as $entry ) {
-			call_user_func_array( $entry['cb'], array_slice( $args, 0, (int) $entry['args'] ) );
+if ( ! function_exists( 'do_action' ) ) {
+	function do_action( string $hook, ...$args ): void {
+		$buckets = $GLOBALS['__hooks'][ $hook ] ?? array();
+		ksort( $buckets );
+		foreach ( $buckets as $bucket ) {
+			foreach ( $bucket as $entry ) {
+				call_user_func_array( $entry['cb'], array_slice( $args, 0, (int) $entry['args'] ) );
+			}
 		}
 	}
 }
 
-function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	add_action( $hook, $cb, $priority, $accepted_args );
+if ( ! function_exists( 'add_filter' ) ) {
+	function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
+		add_action( $hook, $cb, $priority, $accepted_args );
+	}
 }
 
-function apply_filters( string $hook, $value, ...$args ) {
-	$buckets = $GLOBALS['__hooks'][ $hook ] ?? array();
-	ksort( $buckets );
-	foreach ( $buckets as $bucket ) {
-		foreach ( $bucket as $entry ) {
-			$value = call_user_func_array( $entry['cb'], array_slice( array_merge( array( $value ), $args ), 0, (int) $entry['args'] ) );
+if ( ! function_exists( 'apply_filters' ) ) {
+	function apply_filters( string $hook, $value, ...$args ) {
+		$buckets = $GLOBALS['__hooks'][ $hook ] ?? array();
+		ksort( $buckets );
+		foreach ( $buckets as $bucket ) {
+			foreach ( $bucket as $entry ) {
+				$value = call_user_func_array( $entry['cb'], array_slice( array_merge( array( $value ), $args ), 0, (int) $entry['args'] ) );
+			}
 		}
+		return $value;
 	}
-	return $value;
 }
 
 function smoke_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {
@@ -79,17 +91,23 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 // Stub out Action Scheduler so the bridge thinks it's available and records
 // every call we care about.
 $GLOBALS['__as_calls'] = array();
-function as_schedule_recurring_action( int $start, int $interval, string $hook, array $args = array(), string $group = '' ): int {
-	$GLOBALS['__as_calls'][] = array( 'op' => 'schedule_recurring', 'interval' => $interval, 'hook' => $hook, 'args' => $args, 'group' => $group );
-	return 1;
+if ( ! function_exists( 'as_schedule_recurring_action' ) ) {
+	function as_schedule_recurring_action( int $start, int $interval, string $hook, array $args = array(), string $group = '' ): int {
+		$GLOBALS['__as_calls'][] = array( 'op' => 'schedule_recurring', 'interval' => $interval, 'hook' => $hook, 'args' => $args, 'group' => $group );
+		return 1;
+	}
 }
-function as_schedule_cron_action( int $start, string $schedule, string $hook, array $args = array(), string $group = '' ): int {
-	$GLOBALS['__as_calls'][] = array( 'op' => 'schedule_cron', 'expression' => $schedule, 'hook' => $hook, 'args' => $args, 'group' => $group );
-	return 1;
+if ( ! function_exists( 'as_schedule_cron_action' ) ) {
+	function as_schedule_cron_action( int $start, string $schedule, string $hook, array $args = array(), string $group = '' ): int {
+		$GLOBALS['__as_calls'][] = array( 'op' => 'schedule_cron', 'expression' => $schedule, 'hook' => $hook, 'args' => $args, 'group' => $group );
+		return 1;
+	}
 }
-function as_unschedule_all_actions( string $hook, array $args = array(), string $group = '' ): int {
-	$GLOBALS['__as_calls'][] = array( 'op' => 'unschedule', 'hook' => $hook, 'args' => $args, 'group' => $group );
-	return 0;
+if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
+	function as_unschedule_all_actions( string $hook, array $args = array(), string $group = '' ): int {
+		$GLOBALS['__as_calls'][] = array( 'op' => 'unschedule', 'hook' => $hook, 'args' => $args, 'group' => $group );
+		return 0;
+	}
 }
 
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
