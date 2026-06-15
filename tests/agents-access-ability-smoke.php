@@ -23,15 +23,14 @@ $GLOBALS['__agents_api_smoke_abilities']       = array();
 $GLOBALS['__agents_api_smoke_categories']      = array();
 
 /**
- * Switch the acting user for both backends: the pure-PHP shim reads the smoke
- * global; under real WordPress we also pin the real current user so that the
- * native get_current_user_id() / is_user_logged_in() agree with the test.
+ * Switch the acting user for both backends. The pure-PHP shim reads the smoke
+ * global directly. Under real WordPress get_current_user_id() can only return a
+ * real user, so instead of inventing a user row we synthesize the execution
+ * principal from this smoke user id through the agents_api_execution_principal
+ * filter registered below — environment-independent and Playground-safe.
  */
 function agents_access_smoke_set_user( int $user_id ): void {
 	$GLOBALS['__agents_api_smoke_current_user_id'] = $user_id;
-	if ( function_exists( 'wp_set_current_user' ) ) {
-		wp_set_current_user( $user_id );
-	}
 }
 
 if ( ! function_exists( 'get_current_user_id' ) ) {
@@ -73,6 +72,33 @@ if ( ! function_exists( 'wp_register_ability' ) ) {
 agents_access_smoke_set_user( 7 );
 
 agents_api_smoke_require_module();
+
+// Under real WordPress get_current_user_id() cannot conjure the smoke user, so
+// synthesize a user-session execution principal for the active smoke user id
+// (when > 0) through the resolution filter. The later audience filter handles
+// the anonymous (user id 0) case.
+if ( ! function_exists( 'get_current_user_id' ) || function_exists( 'wp_set_current_user' ) ) {
+	add_filter(
+		'agents_api_execution_principal',
+		static function ( $principal, array $context ) {
+			$smoke_user = (int) ( $GLOBALS['__agents_api_smoke_current_user_id'] ?? 0 );
+			if ( $smoke_user <= 0 ) {
+				return $principal;
+			}
+
+			return AgentsAPI\AI\WP_Agent_Execution_Principal::user_session(
+				$smoke_user,
+				'current-user',
+				$context['request_context'] ?? AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+				array( 'source' => 'smoke-test' ),
+				$context['workspace_id'] ?? null,
+				$context['client_id'] ?? null
+			);
+		},
+		5,
+		2
+	);
+}
 
 add_action(
 	'wp_agents_api_init',
