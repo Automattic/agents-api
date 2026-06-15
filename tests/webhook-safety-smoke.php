@@ -17,31 +17,39 @@ echo "agents-api-webhook-safety-smoke\n";
 $GLOBALS['__webhook_safety_transients'] = array();
 $GLOBALS['__webhook_safety_now']        = 1000;
 
-function get_transient( string $key ) {
-	$entry = $GLOBALS['__webhook_safety_transients'][ $key ] ?? null;
-	if ( null === $entry ) {
-		return false;
+// When the real WordPress transient API is present we use it (so the real
+// transient-backed store is exercised); otherwise we fall back to an in-memory
+// store with a controllable virtual clock. TTL expiry is therefore simulated
+// differently per backend (see the marker-expiry assertion below).
+$webhook_safety_real_transients = function_exists( 'get_transient' );
+
+if ( ! $webhook_safety_real_transients ) {
+	function get_transient( string $key ) {
+		$entry = $GLOBALS['__webhook_safety_transients'][ $key ] ?? null;
+		if ( null === $entry ) {
+			return false;
+		}
+
+		if ( 0 !== $entry['expires'] && $entry['expires'] <= $GLOBALS['__webhook_safety_now'] ) {
+			unset( $GLOBALS['__webhook_safety_transients'][ $key ] );
+			return false;
+		}
+
+		return $entry['value'];
 	}
 
-	if ( 0 !== $entry['expires'] && $entry['expires'] <= $GLOBALS['__webhook_safety_now'] ) {
+	function set_transient( string $key, $value, int $expiration = 0 ): bool {
+		$GLOBALS['__webhook_safety_transients'][ $key ] = array(
+			'value'   => $value,
+			'expires' => 0 < $expiration ? $GLOBALS['__webhook_safety_now'] + $expiration : 0,
+		);
+		return true;
+	}
+
+	function delete_transient( string $key ): bool {
 		unset( $GLOBALS['__webhook_safety_transients'][ $key ] );
-		return false;
+		return true;
 	}
-
-	return $entry['value'];
-}
-
-function set_transient( string $key, $value, int $expiration = 0 ): bool {
-	$GLOBALS['__webhook_safety_transients'][ $key ] = array(
-		'value'   => $value,
-		'expires' => 0 < $expiration ? $GLOBALS['__webhook_safety_now'] + $expiration : 0,
-	);
-	return true;
-}
-
-function delete_transient( string $key ): bool {
-	unset( $GLOBALS['__webhook_safety_transients'][ $key ] );
-	return true;
 }
 
 function webhook_safety_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {
@@ -79,6 +87,15 @@ webhook_safety_assert( false, WP_Agent_Webhook_Signature::verify_hmac_sha256( $b
 webhook_safety_assert( false, WP_Agent_Webhook_Signature::verify_hmac_sha256( $body, 'sha256=' . $signature, '' ), 'hmac_empty_secret_rejected', $failures, $passes );
 webhook_safety_assert( false, WP_Agent_Webhook_Signature::verify_hmac_sha256( $body, 'sha256=not-hex', $secret ), 'hmac_malformed_signature_rejected', $failures, $passes );
 
+// Clear any markers left over from a prior run so real-transient persistence
+// does not leak state between runs.
+if ( $webhook_safety_real_transients ) {
+	$reset_store = new AgentsAPI\AI\Channels\WP_Agent_Transient_Message_Idempotency_Store();
+	foreach ( array( array( 'whatsapp', 'wamid.1' ), array( 'whatsapp', 'wamid.2' ), array( 'whatsapp', 'wamid.3' ) ) as $reset_target ) {
+		$reset_store->forget( $reset_target[0], $reset_target[1] );
+	}
+}
+
 webhook_safety_assert( false, WP_Agent_Message_Idempotency::seen( 'whatsapp', 'wamid.1' ), 'idempotency_unseen_by_default', $failures, $passes );
 WP_Agent_Message_Idempotency::mark_seen( 'whatsapp', 'wamid.1', 604800 );
 webhook_safety_assert( true, WP_Agent_Message_Idempotency::seen( 'whatsapp', 'wamid.1' ), 'idempotency_seen_after_mark', $failures, $passes );
@@ -87,7 +104,17 @@ WP_Agent_Message_Idempotency::forget( 'whatsapp', 'wamid.1' );
 webhook_safety_assert( false, WP_Agent_Message_Idempotency::seen( 'whatsapp', 'wamid.1' ), 'idempotency_forget_removes_marker', $failures, $passes );
 
 WP_Agent_Message_Idempotency::mark_seen( 'whatsapp', 'wamid.2', 10 );
-$GLOBALS['__webhook_safety_now'] += 11;
+if ( $webhook_safety_real_transients ) {
+	// Real transients: simulate TTL expiry by removing the underlying transient
+	// rather than waiting out the clock.
+	$expiry_store = new AgentsAPI\AI\Channels\WP_Agent_Transient_Message_Idempotency_Store();
+	$expiry_key   = $expiry_store->storage_key( 'whatsapp', 'wamid.2' );
+	if ( null !== $expiry_key ) {
+		delete_transient( $expiry_key );
+	}
+} else {
+	$GLOBALS['__webhook_safety_now'] += 11;
+}
 webhook_safety_assert( false, WP_Agent_Message_Idempotency::seen( 'whatsapp', 'wamid.2' ), 'idempotency_marker_expires_after_ttl', $failures, $passes );
 
 WP_Agent_Message_Idempotency::mark_seen( 'whatsapp', 'wamid.3', 0 );

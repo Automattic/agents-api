@@ -16,13 +16,25 @@ echo "pending-action-abilities-smoke\n";
 
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private $data = null ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-	public function get_error_data() { return $this->data; }
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '', private $data = null ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+		public function get_error_data() { return $this->data; }
+	}
 }
-function current_user_can( string $cap ): bool { unset( $cap ); return $GLOBALS['__can'] ?? false; }
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $cap ): bool { unset( $cap ); return $GLOBALS['__can'] ?? false; }
+} else {
+	add_filter(
+		'user_has_cap',
+		static function ( array $allcaps ): array {
+			$allcaps['manage_options'] = (bool) ( $GLOBALS['__can'] ?? false );
+			return $allcaps;
+		}
+	);
+}
 
 require_once __DIR__ . '/../src/Workspace/class-wp-agent-workspace-scope.php';
 require_once __DIR__ . '/../src/Approvals/class-wp-agent-pending-action-store.php';
@@ -132,7 +144,12 @@ $invalid_decision = agents_resolve_pending_action( array( 'action_id' => 'pa_123
 agents_api_smoke_assert_equals( true, $invalid_decision instanceof WP_Error, 'invalid decision returns WP_Error', $failures, $passes );
 agents_api_smoke_assert_equals( 'agents_pending_action_invalid_decision', $invalid_decision instanceof WP_Error ? $invalid_decision->get_error_code() : '', 'invalid decision error code', $failures, $passes );
 
-$GLOBALS['__agents_api_smoke_actions'] = array();
+if ( function_exists( 'remove_all_filters' ) ) {
+	remove_all_filters( 'wp_agent_pending_action_store' );
+	remove_all_filters( 'wp_agent_pending_action_resolver' );
+} else {
+	$GLOBALS['__agents_api_smoke_actions'] = array();
+}
 $no_store = agents_list_pending_actions( array() );
 agents_api_smoke_assert_equals( true, $no_store instanceof WP_Error, 'missing store returns WP_Error', $failures, $passes );
 agents_api_smoke_assert_equals( 'agents_pending_action_no_store', $no_store instanceof WP_Error ? $no_store->get_error_code() : '', 'missing store error code', $failures, $passes );

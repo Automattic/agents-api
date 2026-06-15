@@ -24,18 +24,41 @@ $GLOBALS['__remote_bridge_connectors'] = array(
 	),
 );
 
-function get_option( string $key, $default = '' ) {
-	return $GLOBALS['__remote_bridge_options'][ $key ] ?? $default;
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $key, $default = '' ) {
+		return $GLOBALS['__remote_bridge_options'][ $key ] ?? $default;
+	}
 }
 
-function update_option( string $key, $value, $autoload = null ): bool {
-	unset( $autoload );
-	$GLOBALS['__remote_bridge_options'][ $key ] = $value;
-	return true;
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $key, $value, $autoload = null ): bool {
+		unset( $autoload );
+		$GLOBALS['__remote_bridge_options'][ $key ] = $value;
+		return true;
+	}
 }
 
-function wp_get_connector( string $id ): ?array {
-	return $GLOBALS['__remote_bridge_connectors'][ $id ] ?? null;
+// `wp_get_connector` may be supplied by the WordPress Connector Registry (real
+// backend) or be absent (pure-PHP). When the real registry is present, register
+// the test connector with it so wp_get_connector() resolves the metadata; when
+// it is absent, shim the lookup against the smoke fixture.
+if ( ! function_exists( 'wp_get_connector' ) ) {
+	function wp_get_connector( string $id ): ?array {
+		return $GLOBALS['__remote_bridge_connectors'][ $id ] ?? null;
+	}
+} elseif ( class_exists( 'WP_Connector_Registry' ) ) {
+	foreach ( $GLOBALS['__remote_bridge_connectors'] as $connector_id => $connector_args ) {
+		if ( ! WP_Connector_Registry::get_instance()->is_registered( $connector_id ) ) {
+			WP_Connector_Registry::get_instance()->register( $connector_id, $connector_args );
+		}
+	}
+}
+
+// Start from a clean bridge store so prior runs (real option persistence in the
+// host backend) do not leak queue/client state into this run.
+if ( function_exists( 'delete_option' ) ) {
+	delete_option( 'wp_agent_bridge_clients' );
+	delete_option( 'wp_agent_bridge_queue' );
 }
 
 function remote_bridge_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {

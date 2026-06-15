@@ -93,13 +93,13 @@ $registry->registerSource(
 	static function (
 		array $context,
 		AgentsAPI\AI\Tools\WP_Agent_Tool_Source_Registry $source_registry
-	) use ( $registry ): array {
+	) use ( $registry, &$failures, &$passes ): array {
 		agents_api_smoke_assert_equals(
 			$registry,
 			$source_registry,
 			'source callbacks receive the active registry',
-			$GLOBALS['failures'],
-			$GLOBALS['passes']
+			$failures,
+			$passes
 		);
 
 		return array(
@@ -151,20 +151,20 @@ add_filter(
 		array $context,
 		AgentsAPI\AI\Tools\WP_Agent_Tool_Source_Registry $source_registry,
 		array $sources
-	) use ( $registry ): array {
+	) use ( $registry, &$failures, &$passes ): array {
 		agents_api_smoke_assert_equals(
 			$registry,
 			$source_registry,
 			'source order filters receive the active registry',
-			$GLOBALS['failures'],
-			$GLOBALS['passes']
+			$failures,
+			$passes
 		);
 		agents_api_smoke_assert_equals(
 			true,
 			isset( $sources['runtime'], $sources['static'] ),
 			'source order filters receive registered sources',
-			$GLOBALS['failures'],
-			$GLOBALS['passes']
+			$failures,
+			$passes
 		);
 
 		$modes = is_array( $context['modes'] ?? null ) ? $context['modes'] : array();

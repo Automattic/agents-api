@@ -22,42 +22,87 @@ $GLOBALS['__agents_api_smoke_abilities']  = array();
 $GLOBALS['__agents_api_smoke_categories'] = array();
 $GLOBALS['__agents_api_smoke_options']    = array();
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private array $data = array() ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-	public function get_error_data(): array { return $this->data; }
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '', private array $data = array() ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+		public function get_error_data(): array { return $this->data; }
+	}
 }
 
-function current_user_can( string $capability ): bool {
-	unset( $capability );
-	return true;
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $capability ): bool {
+		unset( $capability );
+		return true;
+	}
+} else {
+	add_filter(
+		'user_has_cap',
+		static function ( array $allcaps ): array {
+			$allcaps['manage_options'] = true;
+			return $allcaps;
+		}
+	);
 }
 
-function wp_has_ability_category( string $category ): bool {
-	return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+if ( ! function_exists( 'wp_has_ability_category' ) ) {
+	function wp_has_ability_category( string $category ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+	}
 }
 
-function wp_register_ability_category( string $category, array $args ): void {
-	$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+if ( ! function_exists( 'wp_register_ability_category' ) ) {
+	function wp_register_ability_category( string $category, array $args ): void {
+		$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+	}
 }
 
-function wp_has_ability( string $ability ): bool {
-	return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+if ( ! function_exists( 'wp_has_ability' ) ) {
+	function wp_has_ability( string $ability ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+	}
 }
 
-function wp_register_ability( string $ability, array $args ): void {
-	$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+if ( ! function_exists( 'wp_register_ability' ) ) {
+	function wp_register_ability( string $ability, array $args ): void {
+		$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+	}
 }
 
-function get_option( string $option, $default = false ) {
-	return $GLOBALS['__agents_api_smoke_options'][ $option ] ?? $default;
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $option, $default = false ) {
+		return $GLOBALS['__agents_api_smoke_options'][ $option ] ?? $default;
+	}
 }
 
-function update_option( string $option, $value, $autoload = null ): bool {
-	unset( $autoload );
-	$GLOBALS['__agents_api_smoke_options'][ $option ] = $value;
-	return true;
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $option, $value, $autoload = null ): bool {
+		unset( $autoload );
+		$GLOBALS['__agents_api_smoke_options'][ $option ] = $value;
+		return true;
+	}
+}
+
+/**
+ * Resolve a registered ability's output schema in either backend.
+ *
+ * @param string $ability Ability slug.
+ * @return array Output schema, or empty array when unavailable.
+ */
+function task_execution_smoke_output_schema( string $ability ): array {
+	if ( isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ]['output_schema'] ) ) {
+		return (array) $GLOBALS['__agents_api_smoke_abilities'][ $ability ]['output_schema'];
+	}
+
+	if ( function_exists( 'wp_get_ability' ) ) {
+		$resolved = wp_get_ability( $ability );
+		if ( null !== $resolved ) {
+			return (array) $resolved->get_output_schema();
+		}
+	}
+
+	return array();
 }
 
 agents_api_smoke_require_module();
@@ -65,10 +110,10 @@ agents_api_smoke_require_module();
 do_action( 'wp_abilities_api_categories_init' );
 do_action( 'wp_abilities_api_init' );
 
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Tasks\AGENTS_RUN_TASK_ABILITY ] ), 'run-task ability registers', $failures, $passes );
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Tasks\AGENTS_LIST_EXECUTION_TARGETS_ABILITY ] ), 'list-execution-targets ability registers', $failures, $passes );
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Tasks\AGENTS_GET_TASK_RUN_ABILITY ] ), 'get-task-run ability registers', $failures, $passes );
-agents_api_smoke_assert_equals( true, isset( $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Tasks\AGENTS_CANCEL_TASK_RUN_ABILITY ] ), 'cancel-task-run ability registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Tasks\AGENTS_RUN_TASK_ABILITY ), 'run-task ability registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Tasks\AGENTS_LIST_EXECUTION_TARGETS_ABILITY ), 'list-execution-targets ability registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Tasks\AGENTS_GET_TASK_RUN_ABILITY ), 'get-task-run ability registers', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Tasks\AGENTS_CANCEL_TASK_RUN_ABILITY ), 'cancel-task-run ability registers', $failures, $passes );
 
 $no_executor = AgentsAPI\AI\Tasks\agents_run_task(
 	array(
@@ -178,7 +223,7 @@ agents_api_smoke_assert_equals( 'fake-executor', $captured_target['id'] ?? null,
 agents_api_smoke_assert_equals( 'agents-api/task-result/v1', $result['schema'] ?? null, 'run-task returns result envelope schema', $failures, $passes );
 agents_api_smoke_assert_equals( 'succeeded', $result['status'] ?? null, 'run-task normalizes task result status', $failures, $passes );
 agents_api_smoke_assert_equals( 'fake-executor', $result['executor_id'] ?? null, 'run-task preserves executor id', $failures, $passes );
-agents_api_smoke_assert_equals( 'object', $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Tasks\AGENTS_RUN_TASK_ABILITY ]['output_schema']['properties']['execution_metrics']['type'] ?? null, 'run-task result schema allows execution metrics', $failures, $passes );
+agents_api_smoke_assert_equals( 'object', task_execution_smoke_output_schema( AgentsAPI\AI\Tasks\AGENTS_RUN_TASK_ABILITY )['properties']['execution_metrics']['type'] ?? null, 'run-task result schema allows execution metrics', $failures, $passes );
 agents_api_smoke_assert_equals( 'agents-api/execution-metrics/v1', $result['execution_metrics']['schema'] ?? null, 'run-task normalizes execution metrics schema', $failures, $passes );
 agents_api_smoke_assert_equals( 'test', $result['execution_metrics']['environment'] ?? null, 'run-task preserves metrics environment', $failures, $passes );
 agents_api_smoke_assert_equals( 'fake-executor', $result['execution_metrics']['executor_id'] ?? null, 'run-task fills metrics executor id', $failures, $passes );
