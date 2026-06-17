@@ -26,6 +26,7 @@ add_action(
 				'input_schema'     => agents_chat_run_events_input_schema(),
 				'output_schema'    => agents_chat_run_events_output_schema(),
 				'execute_callback' => __NAMESPACE__ . '\\agents_list_chat_run_events',
+				'permission'       => __NAMESPACE__ . '\\agents_chat_run_read_permission',
 				'annotations'      => array( 'idempotent' => true ),
 			),
 			AGENTS_GET_CHAT_RUN_ABILITY         => array(
@@ -34,6 +35,7 @@ add_action(
 				'input_schema'     => agents_chat_run_id_input_schema(),
 				'output_schema'    => agents_chat_run_output_schema(),
 				'execute_callback' => __NAMESPACE__ . '\\agents_get_chat_run',
+				'permission'       => __NAMESPACE__ . '\\agents_chat_run_read_permission',
 				'annotations'      => array( 'idempotent' => true ),
 			),
 			AGENTS_CANCEL_CHAT_RUN_ABILITY      => array(
@@ -42,6 +44,7 @@ add_action(
 				'input_schema'     => agents_chat_run_id_input_schema(),
 				'output_schema'    => agents_cancel_chat_run_output_schema(),
 				'execute_callback' => __NAMESPACE__ . '\\agents_cancel_chat_run',
+				'permission'       => __NAMESPACE__ . '\\agents_chat_run_cancel_permission',
 				'annotations'      => array(
 					'destructive' => true,
 					'idempotent'  => true,
@@ -53,6 +56,7 @@ add_action(
 				'input_schema'     => agents_queue_chat_message_input_schema(),
 				'output_schema'    => agents_queue_chat_message_output_schema(),
 				'execute_callback' => __NAMESPACE__ . '\\agents_queue_chat_message',
+				'permission'       => __NAMESPACE__ . '\\agents_chat_run_enqueue_permission',
 				'annotations'      => array(
 					'destructive' => true,
 					'idempotent'  => false,
@@ -74,7 +78,7 @@ add_action(
 					'input_schema'        => $args['input_schema'],
 					'output_schema'       => $args['output_schema'],
 					'execute_callback'    => $args['execute_callback'],
-					'permission_callback' => __NAMESPACE__ . '\\agents_chat_run_control_permission',
+					'permission_callback' => $args['permission'],
 					'meta'                => array(
 						'show_in_rest' => true,
 						'annotations'  => $args['annotations'],
@@ -197,7 +201,7 @@ function agents_queue_chat_message( array $input ) {
 /**
  * @param array<string, mixed> $input Ability input.
  */
-function agents_chat_run_control_permission( array $input ): bool {
+function agents_chat_run_read_permission( array $input ): bool {
 	$agent = sanitize_title( agents_chat_run_control_string( $input['agent'] ?? '' ) );
 	if ( '' !== $agent && class_exists( '\WP_Agent_Access' ) && class_exists( '\WP_Agent_Access_Grant' ) ) {
 		$allowed = \WP_Agent_Access::can_current_principal_access_agent(
@@ -209,7 +213,48 @@ function agents_chat_run_control_permission( array $input ): bool {
 		$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'read' ) : false;
 	}
 
+	$allowed = (bool) apply_filters( 'agents_chat_run_read_permission', $allowed, $input );
 	return (bool) apply_filters( 'agents_chat_run_control_permission', $allowed, $input );
+}
+
+/** @param array<string, mixed> $input Ability input. */
+function agents_chat_run_enqueue_permission( array $input ): bool {
+	$allowed = agents_chat_run_write_permission( $input );
+	$allowed = (bool) apply_filters( 'agents_chat_run_enqueue_permission', $allowed, $input );
+	return (bool) apply_filters( 'agents_chat_run_control_permission', $allowed, $input );
+}
+
+/** @param array<string, mixed> $input Ability input. */
+function agents_chat_run_cancel_permission( array $input ): bool {
+	$allowed = agents_chat_run_write_permission( $input );
+	$allowed = (bool) apply_filters( 'agents_chat_run_cancel_permission', $allowed, $input );
+	return (bool) apply_filters( 'agents_chat_run_control_permission', $allowed, $input );
+}
+
+/** @param array<string, mixed> $input Ability input. */
+function agents_chat_run_write_permission( array $input ): bool {
+	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
+	$agent = sanitize_title( agents_chat_run_control_string( $input['agent'] ?? '' ) );
+	if ( '' !== $agent && class_exists( '\WP_Agent_Access' ) && class_exists( '\WP_Agent_Access_Grant' ) ) {
+		$allowed = $allowed || \WP_Agent_Access::can_current_principal_access_agent(
+			$agent,
+			\WP_Agent_Access_Grant::ROLE_OPERATOR,
+			agents_chat_run_control_request_scope( $input )
+		);
+	}
+
+	return $allowed || agents_chat_run_current_user_owns_session( $input );
+}
+
+/** @param array<string, mixed> $input Ability input. */
+function agents_chat_run_current_user_owns_session( array $input ): bool {
+	$owner = is_array( $input['session_owner'] ?? null ) ? agents_chat_run_control_string_keyed_array( $input['session_owner'] ) : array();
+	if ( 'user' !== agents_chat_run_control_string( $owner['type'] ?? '' ) ) {
+		return false;
+	}
+
+	$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
+	return $user_id > 0 && (string) $user_id === agents_chat_run_control_string( $owner['key'] ?? '' );
 }
 
 /**

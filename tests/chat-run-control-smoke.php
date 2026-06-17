@@ -33,8 +33,13 @@ if ( ! class_exists( 'WP_Error' ) ) {
 
 if ( ! function_exists( 'current_user_can' ) ) {
 	function current_user_can( string $capability ): bool {
-		unset( $capability );
-		return true;
+		return ! empty( $GLOBALS['__agents_api_smoke_caps'][ $capability ] );
+	}
+}
+
+if ( ! function_exists( 'get_current_user_id' ) ) {
+	function get_current_user_id(): int {
+		return (int) ( $GLOBALS['__agents_api_smoke_user_id'] ?? 0 );
 	}
 }
 
@@ -80,6 +85,21 @@ agents_api_smoke_require_module();
 
 do_action( 'wp_abilities_api_categories_init' );
 do_action( 'wp_abilities_api_init' );
+
+$GLOBALS['__agents_api_smoke_caps']    = array( 'read' => true );
+$GLOBALS['__agents_api_smoke_user_id'] = 123;
+$chat_read_permission                  = $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_GET_CHAT_RUN_ABILITY ]['permission_callback'];
+$chat_cancel_permission                = $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_CANCEL_CHAT_RUN_ABILITY ]['permission_callback'];
+$chat_queue_permission                 = $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_QUEUE_CHAT_MESSAGE_ABILITY ]['permission_callback'];
+
+agents_api_smoke_assert_equals( true, call_user_func( $chat_read_permission, array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) ), 'read-only user can read chat run status', $failures, $passes );
+agents_api_smoke_assert_equals( false, call_user_func( $chat_cancel_permission, array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) ), 'read-only user cannot cancel chat run by id alone', $failures, $passes );
+agents_api_smoke_assert_equals( false, call_user_func( $chat_queue_permission, array( 'agent' => 'demo-agent', 'session_id' => 'session-1', 'message' => 'Next' ) ), 'read-only user cannot queue chat message by session id alone', $failures, $passes );
+agents_api_smoke_assert_equals( true, call_user_func( $chat_cancel_permission, array( 'session_id' => 'session-1', 'run_id' => 'run-1', 'session_owner' => array( 'type' => 'user', 'key' => '123' ) ) ), 'session owner can cancel chat run', $failures, $passes );
+agents_api_smoke_assert_equals( true, call_user_func( $chat_queue_permission, array( 'agent' => 'demo-agent', 'session_id' => 'session-1', 'message' => 'Next', 'session_owner' => array( 'type' => 'user', 'key' => '123' ) ) ), 'session owner can queue chat message', $failures, $passes );
+$GLOBALS['__agents_api_smoke_caps']['manage_options'] = true;
+agents_api_smoke_assert_equals( true, call_user_func( $chat_cancel_permission, array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) ), 'manager can cancel chat run without owner claim', $failures, $passes );
+agents_api_smoke_assert_equals( true, call_user_func( $chat_queue_permission, array( 'agent' => 'demo-agent', 'session_id' => 'session-1', 'message' => 'Next' ) ), 'manager can queue chat message without owner claim', $failures, $passes );
 
 agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Channels\AGENTS_GET_CHAT_RUN_ABILITY ), 'get-run ability registers', $failures, $passes );
 agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Channels\AGENTS_CANCEL_CHAT_RUN_ABILITY ), 'cancel-run ability registers', $failures, $passes );
