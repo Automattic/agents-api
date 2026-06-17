@@ -1,6 +1,6 @@
 <?php
 /**
- * Generic agent memory/context source registry.
+ * Canonical generic agent memory/context source registry.
  *
  * @package AgentsAPI
  */
@@ -10,6 +10,11 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 	/**
 	 * Registers memory and context sources without prescribing storage shape.
+	 *
+	 * Hosts and adapters should register their available sources here, then map the
+	 * normalized metadata to their own storage, filesystem, retrieval, or projection
+	 * layers. The registry is the portable source contract; persistence remains the
+	 * responsibility of memory stores or host-owned adapters.
 	 */
 	final class WP_Agent_Memory_Registry {
 
@@ -32,8 +37,12 @@ if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 		/**
 		 * Register a memory or context source.
 		 *
-		 * @param string $source_id Source identifier, e.g. `workspace/instructions`.
-		 * @param array<mixed>  $args      Registration metadata.
+		 * @param string       $source_id Source identifier, e.g. `workspace/instructions`.
+		 * @param array<mixed> $args      Registration metadata. Adapter hints such as
+		 *                                `convention_path` and
+		 *                                `external_projection_target` describe how a host
+		 *                                may project the source; they are not source
+		 *                                identity and do not imply file-backed storage.
 		 * @return array<string, mixed>|null Normalized source metadata, or null on invalid ID.
 		 */
 		public static function register( string $source_id, array $args = array() ): ?array {
@@ -186,6 +195,15 @@ if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 		private static function get_resolved(): array {
 			if ( ! self::$hooks_fired ) {
 				if ( function_exists( 'do_action' ) ) {
+					/**
+					 * Fires before memory/context sources are resolved.
+					 *
+					 * Extensions should call {@see WP_Agent_Memory_Registry::register()} from
+					 * this hook to add sources lazily. The hook argument is a snapshot for
+					 * inspection, not a mutable source of truth.
+					 *
+					 * @param array<string, array<string, mixed>> $sources Registered source snapshot.
+					 */
 					do_action( 'agents_api_memory_sources', self::$sources );
 				}
 				self::$hooks_fired = true;

@@ -50,6 +50,25 @@ $manual_source = WP_Agent_Memory_Registry::register(
 	)
 );
 
+add_action(
+	'agents_api_memory_sources',
+	static function ( array $sources ): void {
+		$sources['local-only/mutation'] = array( 'id' => 'local-only/mutation' );
+
+		WP_Agent_Memory_Registry::register(
+			'shared/runtime-briefing',
+			array(
+				'layer'                      => 'shared',
+				'priority'                   => 30,
+				'modes'                      => array( 'chat' ),
+				'retrieval_policy'           => 'on_intent',
+				'convention_path'            => '/contexts/runtime.md',
+				'external_projection_target' => 'guideline:runtime-briefing',
+			)
+		);
+	}
+);
+
 agents_api_smoke_assert_equals( 'workspace', $workspace_source['layer'] ?? null, 'workspace is the generic layer vocabulary', $failures, $passes );
 agents_api_smoke_assert_equals( false, $workspace_source['editable'] ?? null, 'composable sources are not hand editable', $failures, $passes );
 agents_api_smoke_assert_equals( 'AGENTS.md', $workspace_source['convention_path'] ?? null, 'convention path is metadata, not identity', $failures, $passes );
@@ -57,7 +76,11 @@ agents_api_smoke_assert_equals( 'manual', $manual_source['retrieval_policy'] ?? 
 agents_api_smoke_assert_equals( array( 'always', 'on_intent', 'on_tool_need', 'manual', 'never' ), WP_Agent_Context_Injection_Policy::values(), 'policy vocabulary covers accepted values', $failures, $passes );
 
 $all_sources = WP_Agent_Memory_Registry::get_all();
-agents_api_smoke_assert_equals( array( 'workspace/instructions', 'user/project-notes' ), array_keys( $all_sources ), 'sources sort by priority', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'workspace/instructions', 'shared/runtime-briefing', 'user/project-notes' ), array_keys( $all_sources ), 'sources sort by priority', $failures, $passes );
+agents_api_smoke_assert_equals( false, isset( $all_sources['local-only/mutation'] ), 'hook snapshot mutation does not become source truth', $failures, $passes );
+agents_api_smoke_assert_equals( 1, did_action( 'agents_api_memory_sources' ), 'lazy source hook fires once during resolution', $failures, $passes );
+agents_api_smoke_assert_equals( 'contexts/runtime.md', $all_sources['shared/runtime-briefing']['convention_path'] ?? null, 'filesystem paths are adapter hints', $failures, $passes );
+agents_api_smoke_assert_equals( 'guideline:runtime-briefing', $all_sources['shared/runtime-briefing']['external_projection_target'] ?? null, 'external projections are adapter hints', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'workspace/instructions' ), array_keys( WP_Agent_Memory_Registry::get_by_layer( 'workspace' ) ), 'sources filter by layer', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'workspace/instructions' ), array_keys( WP_Agent_Memory_Registry::get_always_injected( 'pipeline' ) ), 'always-injected sources filter by mode and policy', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'workspace/instructions' ), array_keys( WP_Agent_Memory_Registry::get_composable() ), 'composable sources are discoverable', $failures, $passes );
