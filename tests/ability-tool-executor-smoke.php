@@ -99,6 +99,10 @@ function agents_api_smoke_ability_args( string $name, callable $callback ): arra
 		'category'            => 'agents-api-smoke',
 		'execute_callback'    => $callback,
 		'permission_callback' => '__return_true',
+		'input_schema'        => array(
+			'type'                 => 'object',
+			'additionalProperties' => true,
+		),
 	);
 }
 
