@@ -85,6 +85,59 @@ function agents_api_smoke_create_ability( string $name, callable $callback ): WP
 	return new WP_Ability( $name, $callback );
 }
 
+/**
+ * Build runtime ability arguments for the WordPress Abilities API.
+ *
+ * @param string   $name     Ability name.
+ * @param callable $callback Ability execution callback.
+ * @return array<string, mixed> Ability registration arguments.
+ */
+function agents_api_smoke_ability_args( string $name, callable $callback ): array {
+	return array(
+		'label'               => $name,
+		'description'         => 'Smoke test ability.',
+		'category'            => 'agents-api-smoke',
+		'execute_callback'    => $callback,
+		'permission_callback' => '__return_true',
+	);
+}
+
+/**
+ * Register smoke abilities through the loaded runtime when available.
+ *
+ * @param array<string, callable> $definitions Ability callbacks keyed by ability name.
+ */
+function agents_api_smoke_register_abilities( array $definitions ): void {
+	if ( class_exists( 'WP_Abilities_Registry' ) && class_exists( 'WP_Ability_Categories_Registry' ) ) {
+		$category_registry = WP_Ability_Categories_Registry::get_instance();
+		if ( null !== $category_registry && ! $category_registry->is_registered( 'agents-api-smoke' ) ) {
+			$category_registry->register(
+				'agents-api-smoke',
+				array(
+					'label'       => 'Agents API smoke',
+					'description' => 'Smoke test abilities.',
+				)
+			);
+		}
+
+		$ability_registry = WP_Abilities_Registry::get_instance();
+		if ( null !== $ability_registry ) {
+			foreach ( $definitions as $name => $callback ) {
+				if ( ! $ability_registry->is_registered( $name ) ) {
+					$ability_registry->register( $name, agents_api_smoke_ability_args( $name, $callback ) );
+				}
+			}
+
+			return;
+		}
+	}
+
+	$GLOBALS['__agents_api_smoke_abilities'] = array();
+	foreach ( $definitions as $name => $callback ) {
+		$GLOBALS['__agents_api_smoke_abilities'][ $name ] = agents_api_smoke_create_ability( $name, $callback );
+	}
+}
+
 $failures = array();
 $passes   = 0;
 
@@ -93,22 +146,19 @@ echo "agents-api-ability-tool-executor-smoke\n";
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
-$GLOBALS['__agents_api_smoke_abilities'] = array(
-	'local/search-posts' => agents_api_smoke_create_ability(
-		'local/search-posts',
-		static function ( array $input ): array {
+
+agents_api_smoke_register_abilities(
+	array(
+		'local/search-posts' => static function ( array $input ): array {
 			return array(
 				'query' => $input['query'] ?? '',
 				'limit' => $input['limit'] ?? 10,
 			);
-		}
-	),
-	'local/fail'         => agents_api_smoke_create_ability(
-		'local/fail',
-		static function (): WP_Error {
+		},
+		'local/fail'         => static function (): WP_Error {
 			return new WP_Error( 'local_failed', 'The local ability failed.' );
-		}
-	),
+		},
+	)
 );
 
 $executor = new AgentsAPI\AI\Tools\WP_Agent_Ability_Tool_Executor();
