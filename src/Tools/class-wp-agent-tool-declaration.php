@@ -115,6 +115,11 @@ class WP_Agent_Tool_Declaration {
 			'scope'       => self::SCOPE_RUN,
 		);
 
+		$provider_safe_name = self::providerSafeName( $name );
+		if ( $provider_safe_name !== $name ) {
+			$normalized['provider_safe_name'] = $provider_safe_name;
+		}
+
 		$runtime = self::normalizeRuntimeMetadata( $declaration['runtime'] ?? array() );
 		if ( ! empty( $runtime ) ) {
 			$normalized['runtime'] = $runtime;
@@ -191,6 +196,11 @@ class WP_Agent_Tool_Declaration {
 			'executor'    => self::EXECUTOR_HOST,
 			'scope'       => self::SCOPE_RUN,
 		);
+
+		$provider_safe_name = self::providerSafeName( $name );
+		if ( $provider_safe_name !== $name ) {
+			$normalized['provider_safe_name'] = $provider_safe_name;
+		}
 
 		$runtime = self::normalizeRuntimeMetadata( $declaration['runtime'] ?? array() );
 		if ( ! empty( $runtime ) ) {
@@ -474,6 +484,58 @@ class WP_Agent_Tool_Declaration {
 	 */
 	public static function namespacedName( string $source, string $tool_slug ): string {
 		return $source . '/' . $tool_slug;
+	}
+
+	/**
+	 * Build a provider-safe alias for a canonical tool name.
+	 *
+	 * Some provider APIs reject namespaced names containing `/`. The alias is not
+	 * canonical; it is a transport-safe identifier that callers can map back to the
+	 * normalized declaration before executing a tool.
+	 *
+	 * @param string $name Canonical tool name.
+	 * @return string Provider-safe tool alias.
+	 */
+	public static function providerSafeName( string $name ): string {
+		$alias = preg_replace( '/[^A-Za-z0-9_]+/', '__', trim( $name ) );
+		$alias = is_string( $alias ) ? trim( $alias, '_' ) : '';
+		if ( '' === $alias ) {
+			return 'tool';
+		}
+
+		return 1 === preg_match( '/^[A-Za-z]/', $alias ) ? $alias : 'tool_' . $alias;
+	}
+
+	/**
+	 * Resolve a provider-emitted tool name to the canonical declaration name.
+	 *
+	 * @param string       $tool_name Tool name from the provider or caller.
+	 * @param array<mixed> $available_tools Normalized tool declarations keyed by canonical name.
+	 * @return string Canonical tool name when found, otherwise the original name.
+	 */
+	public static function canonicalNameForProviderToolName( string $tool_name, array $available_tools ): string {
+		if ( isset( $available_tools[ $tool_name ] ) && is_array( $available_tools[ $tool_name ] ) ) {
+			return $tool_name;
+		}
+
+		foreach ( $available_tools as $canonical_name => $tool_definition ) {
+			if ( ! is_string( $canonical_name ) || ! is_array( $tool_definition ) ) {
+				continue;
+			}
+
+			$aliases = array( $tool_definition['provider_safe_name'] ?? self::providerSafeName( $canonical_name ) );
+			if ( is_array( $tool_definition['provider_aliases'] ?? null ) ) {
+				$aliases = array_merge( $aliases, $tool_definition['provider_aliases'] );
+			}
+
+			foreach ( $aliases as $alias ) {
+				if ( is_string( $alias ) && $tool_name === $alias ) {
+					return $canonical_name;
+				}
+			}
+		}
+
+		return $tool_name;
 	}
 
 	/**
