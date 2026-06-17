@@ -58,6 +58,33 @@ if ( ! function_exists( 'wp_get_ability' ) ) {
 	}
 }
 
+/**
+ * Create an ability using the loaded runtime contract or the local smoke stub.
+ *
+ * @param string   $name     Ability name.
+ * @param callable $callback Ability execution callback.
+ * @return WP_Ability Ability instance.
+ */
+function agents_api_smoke_create_ability( string $name, callable $callback ): WP_Ability {
+	$constructor = new ReflectionMethod( WP_Ability::class, '__construct' );
+	$parameters  = $constructor->getParameters();
+
+	if ( isset( $parameters[1] ) && $parameters[1]->hasType() && 'array' === (string) $parameters[1]->getType() ) {
+		return new WP_Ability(
+			$name,
+			array(
+				'label'               => $name,
+				'description'         => 'Smoke test ability.',
+				'category'            => 'agents-api-smoke',
+				'execute_callback'    => $callback,
+				'permission_callback' => '__return_true',
+			)
+		);
+	}
+
+	return new WP_Ability( $name, $callback );
+}
+
 $failures = array();
 $passes   = 0;
 
@@ -67,7 +94,7 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 $GLOBALS['__agents_api_smoke_abilities'] = array(
-	'local/search-posts' => new WP_Ability(
+	'local/search-posts' => agents_api_smoke_create_ability(
 		'local/search-posts',
 		static function ( array $input ): array {
 			return array(
@@ -76,7 +103,7 @@ $GLOBALS['__agents_api_smoke_abilities'] = array(
 			);
 		}
 	),
-	'local/fail'         => new WP_Ability(
+	'local/fail'         => agents_api_smoke_create_ability(
 		'local/fail',
 		static function (): WP_Error {
 			return new WP_Error( 'local_failed', 'The local ability failed.' );
