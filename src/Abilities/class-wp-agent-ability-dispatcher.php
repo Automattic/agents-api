@@ -169,7 +169,7 @@ class WP_Agent_Ability_Dispatcher {
 
 		$redacted = array();
 		foreach ( $value as $item_key => $item_value ) {
-			$segment  = is_string( $item_key ) ? $item_key : '*';
+			$segment   = is_string( $item_key ) ? $item_key : '*';
 			$next_path = '' === $path ? $segment : $path . '.' . $segment;
 			if ( ! isset( $paths[ $next_path ] ) && '*' !== $segment ) {
 				$wildcard_path = '' === $path ? '*' : $path . '.*';

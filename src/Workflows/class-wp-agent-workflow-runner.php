@@ -343,8 +343,8 @@ class WP_Agent_Workflow_Runner {
 	public static function default_ability_handler( array $step, array $context ) {
 		unset( $context );
 		$ability_name = self::string_value( $step['ability'] ?? null );
-		$args   = (array) ( $step['args'] ?? array() );
-		$result = WP_Agent_Ability_Dispatcher::dispatch( $ability_name, $args );
+		$args         = (array) ( $step['args'] ?? array() );
+		$result       = WP_Agent_Ability_Dispatcher::dispatch( $ability_name, $args );
 		if ( is_wp_error( $result ) && 'ability_not_found' === $result->get_error_code() ) {
 			return new \WP_Error(
 				'unknown_ability',
