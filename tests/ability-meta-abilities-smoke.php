@@ -157,6 +157,9 @@ add_action(
 				'permission_callback' => static function (): bool {
 					return true;
 				},
+				'meta'                => array(
+					'sensitive_parameters' => array( 'token' ),
+				),
 			)
 		);
 
@@ -206,11 +209,16 @@ echo "\n[3] ability-call dispatches through the registered target ability:\n";
 $call = AgentsAPI\AI\Tools\agents_ability_call(
 	array(
 		'name'       => 'demo/weather-forecast',
-		'parameters' => array( 'city' => 'Portland' ),
+		'parameters' => array(
+			'city'  => 'Portland',
+			'token' => 'secret-token',
+		),
 	)
 );
 agents_api_smoke_assert_equals( 'demo/weather-forecast', $call['name'] ?? '', 'ability-call returns target ability name', $failures, $passes );
 agents_api_smoke_assert_equals( 'sunny in Portland', $call['result']['forecast'] ?? '', 'ability-call returns target result', $failures, $passes );
+agents_api_smoke_assert_equals( '[redacted]', $call['parameters']['token'] ?? '', 'ability-call redacts sensitive parameters in its response envelope', $failures, $passes );
+agents_api_smoke_assert_equals( true, $call['parameters_redacted'] ?? false, 'ability-call marks response parameters redacted', $failures, $passes );
 
 $missing = AgentsAPI\AI\Tools\agents_ability_call( array( 'name' => 'demo/missing' ) );
 agents_api_smoke_assert_equals( true, $missing instanceof WP_Error, 'missing ability returns WP_Error', $failures, $passes );

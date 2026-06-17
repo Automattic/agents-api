@@ -7,6 +7,8 @@
 
 namespace AgentsAPI\AI\Tools;
 
+use AgentsAPI\AI\Abilities\WP_Agent_Ability_Dispatcher;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -31,6 +33,7 @@ class WP_Agent_Ability_Tool_Executor implements WP_Agent_Tool_Executor {
 
 		$tool_call    = WP_Agent_Tool_Call::normalize( $tool_call );
 		$tool_name    = is_string( $tool_call['tool_name'] ?? null ) ? $tool_call['tool_name'] : '';
+		$parameters   = isset( $tool_call['parameters'] ) && is_array( $tool_call['parameters'] ) ? $tool_call['parameters'] : array();
 		$ability_name = $this->ability_name( $tool_call, $tool_definition );
 
 		if ( '' === $ability_name ) {
@@ -41,38 +44,17 @@ class WP_Agent_Ability_Tool_Executor implements WP_Agent_Tool_Executor {
 			);
 		}
 
-		if ( ! function_exists( 'wp_get_ability' ) ) {
-			return WP_Agent_Tool_Result::error(
-				$tool_name,
-				'WordPress Abilities API is not available.',
-				array(
-					'ability_name' => $ability_name,
-					'error_type'   => 'abilities_api_unavailable',
-				)
-			);
-		}
-
-		$ability = wp_get_ability( $ability_name );
-		if ( ! $ability instanceof \WP_Ability ) {
-			return WP_Agent_Tool_Result::error(
-				$tool_name,
-				'Ability is not registered.',
-				array(
-					'ability_name' => $ability_name,
-					'error_type'   => 'ability_not_found',
-				)
-			);
-		}
-
-		$result = $ability->execute( $tool_call['parameters'] );
+		$result = WP_Agent_Ability_Dispatcher::dispatch( $ability_name, $parameters );
 		if ( function_exists( 'is_wp_error' ) && is_wp_error( $result ) ) {
 			return WP_Agent_Tool_Result::error(
 				$tool_name,
 				$this->wp_error_message( $result ),
 				array(
-					'ability_name' => $ability_name,
-					'error_code'   => $result->get_error_code(),
-					'error_type'   => 'ability_error',
+					'ability_name'        => $ability_name,
+					'error_code'          => $result->get_error_code(),
+					'error_type'          => $this->error_type( $result ),
+					'parameters'          => WP_Agent_Ability_Dispatcher::redacted_parameters( $ability_name, $parameters ),
+					'parameters_redacted' => true,
 				)
 			);
 		}
@@ -80,7 +62,11 @@ class WP_Agent_Ability_Tool_Executor implements WP_Agent_Tool_Executor {
 		return WP_Agent_Tool_Result::success(
 			$tool_name,
 			$result,
-			array( 'ability_name' => $ability_name )
+			array(
+				'ability_name'        => $ability_name,
+				'parameters'          => WP_Agent_Ability_Dispatcher::redacted_parameters( $ability_name, $parameters ),
+				'parameters_redacted' => true,
+			)
 		);
 	}
 
@@ -125,5 +111,22 @@ class WP_Agent_Ability_Tool_Executor implements WP_Agent_Tool_Executor {
 		}
 
 		return 'Ability execution failed.';
+	}
+
+	/**
+	 * Normalize dispatcher/core WP_Error codes to executor error types.
+	 *
+	 * @param mixed $error WP_Error-like value.
+	 * @return string Error type.
+	 */
+	private function error_type( $error ): string {
+		$code = is_object( $error ) && method_exists( $error, 'get_error_code' ) ? $error->get_error_code() : '';
+
+		return match ( $code ) {
+			'abilities_api_missing' => 'abilities_api_unavailable',
+			'ability_not_found'     => 'ability_not_found',
+			'ability_name_missing'  => 'ability_name_missing',
+			default                 => 'ability_error',
+		};
 	}
 }

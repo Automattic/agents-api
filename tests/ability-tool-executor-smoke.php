@@ -46,6 +46,23 @@ if ( ! class_exists( 'WP_Ability' ) ) {
 			return $this->name;
 		}
 
+		public function get_input_schema(): array {
+			return array(
+				'type'       => 'object',
+				'properties' => array(
+					'api_key' => array( 'type' => 'string' ),
+					'token'   => array(
+						'type'        => 'string',
+						'x-sensitive' => true,
+					),
+				),
+			);
+		}
+
+		public function get_meta_item( string $key, $default = null ) {
+			return $default;
+		}
+
 		public function execute( $input = null ) {
 			return call_user_func( $this->callback, $input );
 		}
@@ -189,7 +206,11 @@ $tools = array(
 
 $result = $core->executeTool(
 	'host/search',
-	array( 'query' => 'agents api' ),
+	array(
+		'query'   => 'agents api',
+		'api_key' => 'secret-key',
+		'token'   => 'secret-token',
+	),
 	$tools,
 	$executor,
 	array( 'tool_call_id' => 'call-ability-1' )
@@ -200,6 +221,9 @@ agents_api_smoke_assert_equals( 'host/search', $result['tool_name'] ?? '', 'resu
 agents_api_smoke_assert_equals( 'local/search-posts', $result['metadata']['ability_name'] ?? '', 'result records invoked ability name', $failures, $passes );
 agents_api_smoke_assert_equals( 'agents api', $result['result']['query'] ?? '', 'ability receives prepared tool parameters', $failures, $passes );
 agents_api_smoke_assert_equals( 10, $result['result']['limit'] ?? null, 'ability result payload is preserved', $failures, $passes );
+agents_api_smoke_assert_equals( '[redacted]', $result['metadata']['parameters']['api_key'] ?? '', 'ability executor redacts sensitive key-name parameters', $failures, $passes );
+agents_api_smoke_assert_equals( '[redacted]', $result['metadata']['parameters']['token'] ?? '', 'ability executor redacts schema-sensitive parameters', $failures, $passes );
+agents_api_smoke_assert_equals( true, $result['metadata']['parameters_redacted'] ?? false, 'ability executor marks metadata parameters redacted', $failures, $passes );
 
 echo "\n[1b] Provider-safe tool aliases resolve back to canonical tool declarations:\n";
 $normalized_tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest( $tools['host/search'] );
