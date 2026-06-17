@@ -165,6 +165,7 @@ require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-call.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-parameters.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-result.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-executor.php';
+require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-ability-tool-executor.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-execution-core.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-source-registry.php';
 require_once AGENTS_API_PATH . 'src/Context/class-wp-agent-context-authority-tier.php';
