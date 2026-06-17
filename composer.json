@@ -89,6 +89,7 @@
       "php tests/task-execution-smoke.php",
       "php tests/frontend-chat-rest-smoke.php",
       "php tests/agents-chat-jsonrpc-route-smoke.php",
+      "php tests/response-and-input-primitives-smoke.php",
       "php tests/agents-dispatch-message-ability-smoke.php",
       "php tests/webhook-safety-smoke.php",
       "php tests/remote-bridge-smoke.php",

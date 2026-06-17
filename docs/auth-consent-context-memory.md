@@ -130,7 +130,9 @@ Products should persist consent decision arrays beside memory writes, transcript
 
 ## Memory and context source registry
 
-`WP_Agent_Memory_Registry` registers memory/context sources without assuming those sources are files. Its normalized metadata includes:
+`WP_Agent_Memory_Registry` is the canonical generic registry for memory/context sources. Hosts and adapters register source availability here, then project the normalized metadata into their own filesystem, database, retrieval, or runtime layers. The registry is portable source truth; memory stores and host adapters remain responsible for persistence and physical paths.
+
+The registry does not assume sources are files. Its normalized metadata includes:
 
 | Field | Purpose |
 | --- | --- |
@@ -141,11 +143,13 @@ Products should persist consent decision arrays beside memory writes, transcript
 | `modes` | Eligible runtime modes, or `all`. |
 | `retrieval_policy` | `always`, `on_intent`, `on_tool_need`, `manual`, or `never`. |
 | `composable`, `context_slug` | Whether this source contributes to composable context. |
-| `convention_path` | Optional adapter hint such as `AGENTS.md`; not storage identity. |
-| `external_projection_target` | Optional adapter projection hint. |
+| `convention_path` | Optional adapter hint such as `AGENTS.md`; not source identity or storage identity. |
+| `external_projection_target` | Optional adapter projection hint, such as a guideline id or host-owned destination. |
 | `label`, `description`, `meta` | Display and extension metadata. |
 
-`agents_api_memory_sources` lets extensions register sources lazily when sources are first resolved.
+`agents_api_memory_sources` lets extensions register sources lazily when sources are first resolved. Hook callbacks should call `WP_Agent_Memory_Registry::register()`; the hook argument is an inspection snapshot, not a mutable source of truth.
+
+Filesystem-backed systems can use `convention_path` to map a registered source to a relative file and `external_projection_target` to map it to another host concept. They should avoid maintaining a second source registry with independent layer, mode, editability, or retrieval-policy truth.
 
 `WP_Agent_Context_Section_Registry` composes ordered context sections. `WP_Agent_Composable_Context` carries assembled context output.
 

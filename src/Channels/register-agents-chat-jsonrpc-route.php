@@ -107,7 +107,7 @@ function register_chat_stream_handler( callable $handler, int $priority = 10 ): 
  * @param \WP_REST_Request $request REST request.
  */
 function agents_chat_jsonrpc_permission( \WP_REST_Request $request ): bool|\WP_Error {
-	$agent = sanitize_title( agents_chat_jsonrpc_string( $request->get_param( 'agent_id' ) ) );
+	$agent = sanitize_title( \AgentsAPI\AI\agents_api_scalar_to_string( $request->get_param( 'agent_id' ) ) );
 	if ( '' === $agent ) {
 		return new \WP_Error(
 			'agents_chat_jsonrpc_forbidden',
@@ -155,7 +155,7 @@ function agents_chat_jsonrpc_permission( \WP_REST_Request $request ): bool|\WP_E
  * @return \WP_REST_Response
  */
 function agents_chat_jsonrpc_dispatch( \WP_REST_Request $request ): \WP_REST_Response {
-	$agent  = sanitize_title( agents_chat_jsonrpc_string( $request->get_param( 'agent_id' ) ) );
+	$agent  = sanitize_title( \AgentsAPI\AI\agents_api_scalar_to_string( $request->get_param( 'agent_id' ) ) );
 	$body   = $request->get_json_params();
 	$rpc_id = agents_chat_jsonrpc_request_id( $body );
 	$method = isset( $body['method'] ) && is_string( $body['method'] ) ? $body['method'] : '';
@@ -215,7 +215,7 @@ function agents_chat_jsonrpc_run_sync( array $input ) {
 		return $result;
 	}
 
-	return agents_chat_jsonrpc_string_keyed_array( is_array( $result ) ? $result : array() );
+	return \AgentsAPI\AI\agents_api_string_keyed_array( is_array( $result ) ? $result : array() );
 }
 
 /**
@@ -232,9 +232,9 @@ function agents_chat_jsonrpc_run_sync( array $input ) {
  * @return void
  */
 function agents_chat_jsonrpc_stream( $rpc_id, array $input ): void {
-	agents_chat_jsonrpc_open_sse_stream();
+	\AgentsAPI\AI\agents_api_open_sse_response();
 
-	$task_id = agents_chat_jsonrpc_string( $input['run_id'] ?? null );
+	$task_id = \AgentsAPI\AI\agents_api_scalar_to_string( $input['run_id'] ?? null );
 	if ( '' === $task_id ) {
 		$task_id         = WP_Agent_Chat_Run_Control::generate_run_id();
 		$input['run_id'] = $task_id;
@@ -247,8 +247,8 @@ function agents_chat_jsonrpc_stream( $rpc_id, array $input ): void {
 		 * @param array<string,mixed> $delta Canonical delta emitted by the runtime.
 		 */
 		$emit = static function ( array $delta ) use ( $task_id ): void {
-			agents_chat_jsonrpc_send_sse_frame(
-				agents_chat_jsonrpc_delta_frame( $task_id, agents_chat_jsonrpc_string_keyed_array( $delta ) )
+			\AgentsAPI\AI\agents_api_emit_sse_json_frame(
+				agents_chat_jsonrpc_delta_frame( $task_id, \AgentsAPI\AI\agents_api_string_keyed_array( $delta ) )
 			);
 		};
 
@@ -259,18 +259,18 @@ function agents_chat_jsonrpc_stream( $rpc_id, array $input ): void {
 	}
 
 	if ( is_wp_error( $output ) ) {
-		agents_chat_jsonrpc_send_sse_frame(
+		\AgentsAPI\AI\agents_api_emit_sse_json_frame(
 			agents_chat_jsonrpc_error_frame( $rpc_id, AGENTS_CHAT_JSONRPC_ERR_INTERNAL, $output->get_error_message() )
 		);
 		return;
 	}
 
-	$output = agents_chat_jsonrpc_string_keyed_array( is_array( $output ) ? $output : array() );
-	if ( '' === agents_chat_jsonrpc_string( $output['run_id'] ?? null ) ) {
+	$output = \AgentsAPI\AI\agents_api_string_keyed_array( is_array( $output ) ? $output : array() );
+	if ( '' === \AgentsAPI\AI\agents_api_scalar_to_string( $output['run_id'] ?? null ) ) {
 		$output['run_id'] = $task_id;
 	}
 
-	agents_chat_jsonrpc_send_sse_frame(
+	\AgentsAPI\AI\agents_api_emit_sse_json_frame(
 		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ) )
 	);
 }
@@ -293,8 +293,8 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent ) {
 		return new \WP_Error( 'agents_chat_jsonrpc_invalid_params', 'params.message must contain non-empty text.' );
 	}
 
-	$session_id = agents_chat_jsonrpc_string( $params['sessionId'] ?? null );
-	$run_id     = agents_chat_jsonrpc_string( $params['id'] ?? null );
+	$session_id = \AgentsAPI\AI\agents_api_scalar_to_string( $params['sessionId'] ?? null );
+	$run_id     = \AgentsAPI\AI\agents_api_scalar_to_string( $params['id'] ?? null );
 
 	$client_context = array(
 		'source'      => 'jsonrpc',
@@ -323,7 +323,7 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent ) {
 	/** @var mixed $filtered Hosts may return invalid values from this filter. */
 	$filtered = apply_filters( 'agents_chat_jsonrpc_input', $input, $params, $agent );
 
-	return is_array( $filtered ) ? agents_chat_jsonrpc_string_keyed_array( $filtered ) : $input;
+	return is_array( $filtered ) ? \AgentsAPI\AI\agents_api_string_keyed_array( $filtered ) : $input;
 }
 
 /**
@@ -333,9 +333,9 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent ) {
  * @return array<string,mixed> Task.
  */
 function agents_chat_jsonrpc_task_from_output( array $output ): array {
-	$run_id     = agents_chat_jsonrpc_string( $output['run_id'] ?? null );
-	$session_id = agents_chat_jsonrpc_string( $output['session_id'] ?? null );
-	$reply      = agents_chat_jsonrpc_string( $output['reply'] ?? null );
+	$run_id     = \AgentsAPI\AI\agents_api_scalar_to_string( $output['run_id'] ?? null );
+	$session_id = \AgentsAPI\AI\agents_api_scalar_to_string( $output['session_id'] ?? null );
+	$reply      = \AgentsAPI\AI\agents_api_scalar_to_string( $output['reply'] ?? null );
 
 	// `completed` defaults to true when absent (mirrors run-control in agents_chat_dispatch).
 	$completed = ! array_key_exists( 'completed', $output ) || ! empty( $output['completed'] );
@@ -443,31 +443,31 @@ function agents_chat_jsonrpc_delta_frame( string $task_id, array $delta ): array
  * @return array<string,mixed> Wire StreamDelta.
  */
 function agents_chat_jsonrpc_delta_to_wire( array $delta ): array {
-	$type = agents_chat_jsonrpc_string( $delta['type'] ?? null );
+	$type = \AgentsAPI\AI\agents_api_scalar_to_string( $delta['type'] ?? null );
 
 	if ( 'tool_call' === $type ) {
 		return array(
 			'deltaType'     => 'tool_name',
-			'content'       => agents_chat_jsonrpc_string( $delta['tool_name'] ?? null ),
-			'toolCallId'    => agents_chat_jsonrpc_string( $delta['tool_call_id'] ?? null ),
-			'toolCallName'  => agents_chat_jsonrpc_string( $delta['tool_name'] ?? null ),
-			'toolCallIndex' => agents_chat_jsonrpc_int( $delta['index'] ?? null ),
+			'content'       => \AgentsAPI\AI\agents_api_scalar_to_string( $delta['tool_name'] ?? null ),
+			'toolCallId'    => \AgentsAPI\AI\agents_api_scalar_to_string( $delta['tool_call_id'] ?? null ),
+			'toolCallName'  => \AgentsAPI\AI\agents_api_scalar_to_string( $delta['tool_name'] ?? null ),
+			'toolCallIndex' => \AgentsAPI\AI\agents_api_numeric_to_int( $delta['index'] ?? null ),
 		);
 	}
 
 	if ( 'tool_argument' === $type ) {
 		return array(
 			'deltaType'     => 'tool_argument',
-			'content'       => agents_chat_jsonrpc_string( $delta['text'] ?? null ),
-			'toolCallId'    => agents_chat_jsonrpc_string( $delta['tool_call_id'] ?? null ),
-			'toolCallIndex' => agents_chat_jsonrpc_int( $delta['index'] ?? null ),
+			'content'       => \AgentsAPI\AI\agents_api_scalar_to_string( $delta['text'] ?? null ),
+			'toolCallId'    => \AgentsAPI\AI\agents_api_scalar_to_string( $delta['tool_call_id'] ?? null ),
+			'toolCallIndex' => \AgentsAPI\AI\agents_api_numeric_to_int( $delta['index'] ?? null ),
 		);
 	}
 
 	// Default: content delta.
 	return array(
 		'deltaType' => 'content',
-		'content'   => agents_chat_jsonrpc_string( $delta['text'] ?? ( $delta['content'] ?? null ) ),
+		'content'   => \AgentsAPI\AI\agents_api_scalar_to_string( $delta['text'] ?? ( $delta['content'] ?? null ) ),
 	);
 }
 
@@ -489,7 +489,7 @@ function agents_chat_jsonrpc_extract_text( array $message ): string {
 		if ( 'context' === ( $part['contentType'] ?? null ) ) {
 			continue;
 		}
-		$texts[] = agents_chat_jsonrpc_string( $part['text'] ?? null );
+		$texts[] = \AgentsAPI\AI\agents_api_scalar_to_string( $part['text'] ?? null );
 	}
 
 	return trim( implode( '', $texts ) );
@@ -510,7 +510,7 @@ function agents_chat_jsonrpc_attachments( array $message ): array {
 			continue;
 		}
 		$file          = isset( $part['file'] ) && is_array( $part['file'] ) ? $part['file'] : array();
-		$attachments[] = agents_chat_jsonrpc_string_keyed_array( $file );
+		$attachments[] = \AgentsAPI\AI\agents_api_string_keyed_array( $file );
 	}
 
 	return $attachments;
@@ -545,77 +545,8 @@ function agents_chat_jsonrpc_scope( \WP_REST_Request $request ): array {
 		)
 	);
 	$scope['request_metadata'] = array(
-		'rest_route' => AGENTS_CHAT_JSONRPC_NAMESPACE . '/agent/' . sanitize_title( agents_chat_jsonrpc_string( $request->get_param( 'agent_id' ) ) ),
+		'rest_route' => AGENTS_CHAT_JSONRPC_NAMESPACE . '/agent/' . sanitize_title( \AgentsAPI\AI\agents_api_scalar_to_string( $request->get_param( 'agent_id' ) ) ),
 	);
 
 	return $scope;
-}
-
-/**
- * Open an SSE response: send headers and disable output buffering/compression.
- *
- * @return void
- */
-function agents_chat_jsonrpc_open_sse_stream(): void {
-	if ( ! headers_sent() ) {
-		header( 'Content-Type: text/event-stream; charset=utf-8' );
-		header( 'Cache-Control: no-cache, no-store, must-revalidate' );
-		header( 'Connection: keep-alive' );
-		header( 'X-Accel-Buffering: no' ); // Disable nginx proxy buffering.
-	}
-
-	// Discard any output buffering so frames flush immediately.
-	while ( ob_get_level() > 0 ) {
-		ob_end_flush();
-	}
-}
-
-/**
- * Write one SSE `data:` frame and flush.
- *
- * @param array<string,mixed> $frame JSON-RPC frame.
- * @return void
- */
-function agents_chat_jsonrpc_send_sse_frame( array $frame ): void {
-	echo 'data: ' . wp_json_encode( $frame ) . "\n\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- SSE payload is JSON, not HTML.
-	flush();
-}
-
-/**
- * Coerce a value to string only when it is safely representable as text.
- *
- * @param mixed $value Value to normalize.
- */
-function agents_chat_jsonrpc_string( $value ): string {
-	if ( is_scalar( $value ) || $value instanceof \Stringable ) {
-		return (string) $value;
-	}
-
-	return '';
-}
-
-/**
- * Coerce a value to int only when it is numeric, defaulting to 0.
- *
- * @param mixed $value Value to normalize.
- */
-function agents_chat_jsonrpc_int( $value ): int {
-	return is_numeric( $value ) ? (int) $value : 0;
-}
-
-/**
- * Keep only string-keyed entries for canonical associative arrays.
- *
- * @param array<mixed> $value Input array.
- * @return array<string,mixed>
- */
-function agents_chat_jsonrpc_string_keyed_array( array $value ): array {
-	$result = array();
-	foreach ( $value as $key => $item ) {
-		if ( is_string( $key ) ) {
-			$result[ $key ] = $item;
-		}
-	}
-
-	return $result;
 }
