@@ -26,11 +26,13 @@ class WP_Agent_Tool_Execution_Core {
 	 * @return array<string, mixed> Prepared call or normalized error result.
 	 */
 	public function prepareWP_Agent_Tool_Call( string $tool_name, array $tool_parameters, array $available_tools, array $context = array() ): array {
+		$provider_tool_name = $tool_name;
+		$tool_name          = WP_Agent_Tool_Declaration::canonicalNameForProviderToolName( $tool_name, $available_tools );
 		$tool_definition = $available_tools[ $tool_name ] ?? null;
 		if ( ! is_array( $tool_definition ) ) {
 			return array_merge(
 				array( 'ready' => false ),
-				WP_Agent_Tool_Result::error( $tool_name, "Tool '{$tool_name}' not found", array( 'error_type' => 'tool_not_found' ) )
+				WP_Agent_Tool_Result::error( $provider_tool_name, "Tool '{$provider_tool_name}' not found", array( 'error_type' => 'tool_not_found' ) )
 			);
 		}
 
@@ -57,7 +59,8 @@ class WP_Agent_Tool_Execution_Core {
 			'tool_name'  => $tool_name,
 			'parameters' => $parameters,
 			'metadata'   => array(
-				'source' => $tool_definition['source'] ?? WP_Agent_Tool_Declaration::sourceFromName( $tool_name ),
+				'source'             => $tool_definition['source'] ?? WP_Agent_Tool_Declaration::sourceFromName( $tool_name ),
+				'provider_tool_name' => $provider_tool_name,
 			),
 		);
 

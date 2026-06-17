@@ -171,11 +171,12 @@ $core     = new AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core();
 echo "\n[1] Ability executor invokes mapped abilities through the generic tool core:\n";
 $tools = array(
 	'host/search' => array(
-		'name'       => 'host/search',
-		'source'     => 'ability',
-		'executor'   => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::EXECUTOR_HOST,
-		'ability'    => 'local/search-posts',
-		'parameters' => array(
+		'name'        => 'host/search',
+		'source'      => 'ability',
+		'description' => 'Search posts through the host runtime.',
+		'executor'    => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::EXECUTOR_HOST,
+		'ability'     => 'local/search-posts',
+		'parameters'  => array(
 			'type'       => 'object',
 			'required'   => array( 'query' ),
 			'properties' => array(
@@ -199,6 +200,22 @@ agents_api_smoke_assert_equals( 'host/search', $result['tool_name'] ?? '', 'resu
 agents_api_smoke_assert_equals( 'local/search-posts', $result['metadata']['ability_name'] ?? '', 'result records invoked ability name', $failures, $passes );
 agents_api_smoke_assert_equals( 'agents api', $result['result']['query'] ?? '', 'ability receives prepared tool parameters', $failures, $passes );
 agents_api_smoke_assert_equals( 10, $result['result']['limit'] ?? null, 'ability result payload is preserved', $failures, $passes );
+
+echo "\n[1b] Provider-safe tool aliases resolve back to canonical tool declarations:\n";
+$normalized_tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest( $tools['host/search'] );
+$alias_tools     = array( 'host/search' => $normalized_tool );
+$alias_result    = $core->executeTool(
+	(string) $normalized_tool['provider_safe_name'],
+	array( 'query' => 'safe alias' ),
+	$alias_tools,
+	$executor,
+	array( 'tool_call_id' => 'call-ability-alias-1' )
+);
+
+agents_api_smoke_assert_equals( 'host__search', $normalized_tool['provider_safe_name'] ?? '', 'namespaced tool has provider-safe alias', $failures, $passes );
+agents_api_smoke_assert_equals( true, $alias_result['success'] ?? false, 'provider-safe alias executes canonical tool', $failures, $passes );
+agents_api_smoke_assert_equals( 'host/search', $alias_result['tool_name'] ?? '', 'alias result reports canonical tool name', $failures, $passes );
+agents_api_smoke_assert_equals( 'safe alias', $alias_result['result']['query'] ?? '', 'alias execution preserves parameters', $failures, $passes );
 
 echo "\n[2] Ability executor reports registered ability failures without throwing:\n";
 $error_result = $executor->executeWP_Agent_Tool_Call(
