@@ -7,6 +7,8 @@
 
 namespace AgentsAPI\AI\Tools;
 
+use AgentsAPI\AI\Abilities\WP_Agent_Ability_Dispatcher;
+
 defined( 'ABSPATH' ) || exit;
 
 const AGENTS_ABILITY_SEARCH_ABILITY = 'agents/ability-search';
@@ -131,19 +133,19 @@ function agents_ability_call( array $input ) {
 		return new \WP_Error( 'agents_ability_call_recursion', 'agents/ability-call cannot call itself.' );
 	}
 
-	$ability = wp_get_ability( $name );
-	if ( ! $ability instanceof \WP_Ability ) {
+	$result = WP_Agent_Ability_Dispatcher::dispatch( $name, $parameters );
+	if ( is_wp_error( $result ) && 'ability_not_found' === $result->get_error_code() ) {
 		return new \WP_Error( 'agents_ability_call_not_found', 'Ability is not registered.' );
 	}
-
-	$result = $ability->execute( $parameters );
 	if ( is_wp_error( $result ) ) {
 		return $result;
 	}
 
 	return array(
-		'name'   => $name,
-		'result' => $result,
+		'name'                => $name,
+		'parameters'          => WP_Agent_Ability_Dispatcher::redacted_parameters( $name, $parameters ),
+		'parameters_redacted' => true,
+		'result'              => $result,
 	);
 }
 
@@ -385,8 +387,13 @@ function agents_ability_call_output_schema(): array {
 		'type'       => 'object',
 		'required'   => array( 'name', 'result' ),
 		'properties' => array(
-			'name'   => array( 'type' => 'string' ),
-			'result' => array( 'type' => array( 'object', 'array', 'string', 'number', 'boolean', 'null' ) ),
+			'name'                => array( 'type' => 'string' ),
+			'parameters'          => array(
+				'type'        => 'object',
+				'description' => 'Target ability parameters with sensitive values redacted.',
+			),
+			'parameters_redacted' => array( 'type' => 'boolean' ),
+			'result'              => array( 'type' => array( 'object', 'array', 'string', 'number', 'boolean', 'null' ) ),
 		),
 	);
 }

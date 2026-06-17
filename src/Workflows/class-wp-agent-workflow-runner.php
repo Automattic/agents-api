@@ -39,6 +39,7 @@
 
 namespace AgentsAPI\AI\Workflows;
 
+use AgentsAPI\AI\Abilities\WP_Agent_Ability_Dispatcher;
 use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
@@ -341,22 +342,15 @@ class WP_Agent_Workflow_Runner {
 	 */
 	public static function default_ability_handler( array $step, array $context ) {
 		unset( $context );
-		if ( ! function_exists( 'wp_get_ability' ) ) {
-			return new \WP_Error(
-				'abilities_api_missing',
-				'Abilities API is not loaded; cannot dispatch ability step.'
-			);
-		}
 		$ability_name = self::string_value( $step['ability'] ?? null );
-		$ability      = wp_get_ability( $ability_name );
-		if ( null === $ability ) {
+		$args   = (array) ( $step['args'] ?? array() );
+		$result = WP_Agent_Ability_Dispatcher::dispatch( $ability_name, $args );
+		if ( is_wp_error( $result ) && 'ability_not_found' === $result->get_error_code() ) {
 			return new \WP_Error(
 				'unknown_ability',
 				sprintf( 'no ability registered as `%s`', $ability_name )
 			);
 		}
-		$args   = (array) ( $step['args'] ?? array() );
-		$result = $ability->execute( $args );
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}

@@ -32,6 +32,19 @@ if ( ! function_exists( 'is_wp_error' ) ) {
 	}
 }
 
+if ( ! class_exists( 'WP_Ability' ) ) {
+	class WP_Ability {
+		public function __construct( private string $name, private array $args ) {}
+		public function get_name(): string { return $this->name; }
+		public function get_input_schema(): array { return isset( $this->args['input_schema'] ) && is_array( $this->args['input_schema'] ) ? $this->args['input_schema'] : array(); }
+		public function get_meta_item( string $key, $default = null ) { return $this->args['meta'][ $key ] ?? $default; }
+		public function execute( $input = null ) {
+			$callback = $this->args['execute_callback'] ?? null;
+			return is_callable( $callback ) ? call_user_func( $callback, is_array( $input ) ? $input : array() ) : null;
+		}
+	}
+}
+
 $GLOBALS['__filters']    = array();
 $GLOBALS['__abilities']  = array();
 
@@ -75,13 +88,6 @@ if ( ! function_exists( 'wp_get_ability' ) ) {
 	}
 }
 
-class Stub_Ability {
-	public function __construct( private \Closure $handler ) {}
-	public function execute( array $input ) {
-		return ( $this->handler )( $input );
-	}
-}
-
 /**
  * Register a stub ability so the runner can resolve it through wp_get_ability()
  * in either backend: pure-PHP keeps the Stub_Ability in an in-memory registry;
@@ -90,7 +96,13 @@ class Stub_Ability {
  */
 $GLOBALS['__workflow_runner_smoke_pending'] = array();
 function workflow_runner_smoke_register_ability( string $name, \Closure $handler ): void {
-	$GLOBALS['__abilities'][ $name ] = new Stub_Ability( $handler );
+	$GLOBALS['__abilities'][ $name ] = new WP_Ability(
+		$name,
+		array(
+			'input_schema'     => array( 'type' => 'object' ),
+			'execute_callback' => $handler,
+		)
+	);
 
 	// Defer real Abilities API registration to the init action (fired once after
 	// all stubs are queued); core rejects registration outside that window.
@@ -155,6 +167,7 @@ require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-result.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-store.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-recorder.php';
+require_once __DIR__ . '/../src/Abilities/class-wp-agent-ability-dispatcher.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-runner.php';
 
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
