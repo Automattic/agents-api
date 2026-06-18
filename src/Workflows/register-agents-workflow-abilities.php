@@ -350,9 +350,9 @@ function agents_run_workflow_output_schema(): array {
 		'type'       => 'object',
 		'required'   => array( 'run_id', 'workflow_id', 'status' ),
 		'properties' => array(
-			'run_id'      => array( 'type' => 'string' ),
-			'workflow_id' => array( 'type' => 'string' ),
-			'status'      => array(
+			'run_id'        => array( 'type' => 'string' ),
+			'workflow_id'   => array( 'type' => 'string' ),
+			'status'        => array(
 				'type' => 'string',
 				'enum' => array( 'pending', 'running', 'succeeded', 'failed', 'skipped' ),
 			),

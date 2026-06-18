@@ -49,12 +49,13 @@ class WP_Agent_Workflow_Step_Executor {
 			return $record;
 		}
 
-		$context_array = $context->to_array();
-		$resolved      = 'foreach' === $type
+		$context_array           = $context->to_array();
+		$resolved                = 'foreach' === $type
 			? self::expand_foreach_outer_step( $step, $context_array )
 			: WP_Agent_Workflow_Bindings::expand( $step, $context_array );
 		$record['resolved_step'] = is_array( $resolved ) ? $resolved : array();
-		$step_output   = call_user_func( $handler, $resolved, $context_array );
+
+		$step_output = call_user_func( $handler, $resolved, $context_array );
 
 		if ( is_wp_error( $step_output ) ) {
 			$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_FAILED;

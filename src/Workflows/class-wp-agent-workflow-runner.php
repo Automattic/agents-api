@@ -275,7 +275,9 @@ class WP_Agent_Workflow_Runner {
 	 */
 	private static function canonical_json( $value ): string {
 		$normalized = self::sort_recursive( $value );
-		$encoded    = function_exists( 'wp_json_encode' ) ? wp_json_encode( $normalized ) : json_encode( $normalized );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- Pure-PHP smoke tests run without WordPress loaded.
+		$encoded = function_exists( 'wp_json_encode' ) ? wp_json_encode( $normalized ) : json_encode( $normalized );
 
 		if ( false === $encoded ) {
 			return '';
