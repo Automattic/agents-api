@@ -464,7 +464,8 @@ $runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_
 	}
 
 	public function complete( string $request_id, array $result ): void {
-		$this->requests[ $request_id ]['status'] = 'completed';
+		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED;
+		$this->requests[ $request_id ]['result'] = $result;
 		$this->results[ $request_id ]            = $result;
 	}
 
@@ -506,6 +507,70 @@ agents_api_smoke_assert_equals( 'client/choose_post', $submission['result']['too
 agents_api_smoke_assert_equals( 456, $submission['tool_result_message']['result']['result']['post_id'] ?? null, 'lifecycle creates transcript-compatible tool result message payload', $failures, $passes );
 agents_api_smoke_assert_equals( true, $submission['continuation_result']['resumed'] ?? false, 'lifecycle invokes continuation callback after submission', $failures, $passes );
 agents_api_smoke_assert_equals( 'smoke', $continuation_calls[0]['context']['resume_source'] ?? '', 'continuation receives caller context', $failures, $passes );
+
+$duplicate_submission = AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::submit_result(
+	$runtime_tool_store,
+	array(
+		'request_id' => $pending_request['request_id'],
+		'success'    => true,
+		'result'     => array( 'post_id' => 999 ),
+	),
+	static function ( array $request, array $result, array $context ) use ( &$continuation_calls ): array {
+		$continuation_calls[] = compact( 'request', 'result', 'context' );
+		return array( 'resumed' => true );
+	}
+);
+agents_api_smoke_assert_equals( true, $duplicate_submission['duplicate'] ?? false, 'duplicate runtime tool completion is reported as duplicate', $failures, $passes );
+agents_api_smoke_assert_equals( 456, $duplicate_submission['result']['result']['post_id'] ?? null, 'duplicate runtime tool completion returns prior result', $failures, $passes );
+agents_api_smoke_assert_equals( 456, $runtime_tool_store->requests[ $pending_request['request_id'] ]['result']['result']['post_id'] ?? null, 'duplicate runtime tool completion does not overwrite stored result', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $continuation_calls ), 'duplicate runtime tool completion does not resume again', $failures, $passes );
+
+$terminal_without_result_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+	public array $requests       = array();
+	public int $complete_calls   = 0;
+	public array $attempted_data = array();
+
+	public function create( array $request ): void {
+		$request['status']                         = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED;
+		$this->requests[ $request['request_id'] ] = $request;
+	}
+
+	public function get( string $request_id ): ?array {
+		return $this->requests[ $request_id ] ?? null;
+	}
+
+	public function complete( string $request_id, array $result ): void {
+		++$this->complete_calls;
+		$this->attempted_data = compact( 'request_id', 'result' );
+	}
+
+	public function timeout( string $request_id ): void {
+		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT;
+	}
+
+	public function recent_pending( array $query = array() ): array {
+		unset( $query );
+		return array();
+	}
+};
+
+$terminal_without_result_request = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::from_tool_call( 'client/choose_post', 'call_terminal', array(), array( 'run_id' => 'run-terminal' ) );
+$terminal_without_result_store->create( $terminal_without_result_request );
+$duplicate_refused = false;
+try {
+	AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::submit_result(
+		$terminal_without_result_store,
+		array(
+			'request_id' => $terminal_without_result_request['request_id'],
+			'success'    => true,
+			'result'     => array( 'post_id' => 789 ),
+		)
+	);
+} catch ( InvalidArgumentException $e ) {
+	$duplicate_refused = 'invalid_runtime_tool_result: request is not pending' === $e->getMessage();
+}
+agents_api_smoke_assert_equals( true, $duplicate_refused, 'duplicate runtime tool completion without prior result is refused', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $terminal_without_result_store->complete_calls, 'refused duplicate runtime tool completion does not write', $failures, $passes );
 
 $timeout_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
 	public array $requests = array();
