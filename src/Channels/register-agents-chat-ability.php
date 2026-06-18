@@ -41,11 +41,17 @@ namespace AgentsAPI\AI\Channels;
 
 use AgentsAPI\AI\WP_Agent_Chat_Run_Control;
 use AgentsAPI\AI\WP_Agent_Execution_Principal;
+use AgentsAPI\AI\WP_Agent_Run_Outcome;
 
 defined( 'ABSPATH' ) || exit;
 
 if ( ! class_exists( WP_Agent_Chat_Run_Control::class ) ) {
 	require_once dirname( __DIR__ ) . '/Runtime/class-wp-agent-chat-run-control.php';
+}
+
+if ( ! class_exists( WP_Agent_Run_Outcome::class ) ) {
+	require_once dirname( __DIR__ ) . '/Runtime/class-wp-agent-run-control.php';
+	require_once dirname( __DIR__ ) . '/Runtime/class-wp-agent-run-outcome.php';
 }
 
 /**
@@ -205,23 +211,7 @@ function agents_chat_dispatch( array $input ) {
 			WP_Agent_Chat_Run_Control::start_run( $result_run_id, $resolved_session_id, array( 'agent' => $agent ) );
 		}
 
-		$result_status = WP_Agent_Chat_Run_Control::normalize_status( $result['status'] ?? '' );
-		if ( WP_Agent_Chat_Run_Control::STATUS_FAILED === $result_status ) {
-			$status = WP_Agent_Chat_Run_Control::STATUS_FAILED;
-		} elseif ( ! empty( $result['completed'] ) || ! array_key_exists( 'completed', $result ) ) {
-			$status = WP_Agent_Chat_Run_Control::STATUS_COMPLETED;
-		} elseif ( in_array(
-			$result_status,
-			array(
-				WP_Agent_Chat_Run_Control::STATUS_RUNTIME_TOOL_PENDING,
-				WP_Agent_Chat_Run_Control::STATUS_APPROVAL_REQUIRED,
-			),
-			true
-		) ) {
-			$status = $result_status;
-		} else {
-			$status = WP_Agent_Chat_Run_Control::STATUS_RUNNING;
-		}
+		$status = WP_Agent_Run_Outcome::run_control_status( $result );
 		WP_Agent_Chat_Run_Control::finish_run( $result_run_id, $status );
 	}
 
