@@ -134,6 +134,31 @@ Normalized package fields:
 
 Construct from a manifest with `WP_Agent_Package::from_array( $manifest )`.
 
+Example package artifacts should use neutral package-relative names. A package can describe workspace context that a host may preload later without Agents API knowing how that host stores, renders, or materializes it:
+
+```php
+$package = WP_Agent_Package::from_array(
+	array(
+		'slug'      => 'example-assistant-package',
+		'version'   => '1.2.3',
+		'agent'     => array(
+			'slug'  => 'example-assistant',
+			'label' => 'Example Assistant',
+		),
+		'artifacts' => array(
+			array(
+				'type'        => 'example/context',
+				'slug'        => 'workspace-context',
+				'label'       => 'Workspace Context',
+				'description' => 'Context payload available to host-owned workspace preload flows.',
+				'source'      => 'artifacts/workspace/context.md',
+				'requires'    => array( 'workspace.context' ),
+			),
+		),
+	)
+);
+```
+
 ## Package artifacts
 
 `WP_Agent_Package_Artifact` records identity and payload location only. Consumers own interpretation, install/update behavior, and review UI.
@@ -152,6 +177,32 @@ Core fields:
 | `meta` | Optional metadata. |
 
 Package artifacts can describe diff callbacks through registered artifact types, which supports human-reviewable adoption/update flows without tying package review to live runtime pending-action approval.
+
+Artifact type registrations can include `example_artifacts` so hosts, docs, and validators can publish canonical examples for a type. Examples are normalized through `WP_Agent_Package_Artifact`, must use the registered type, and follow the same package-relative source validation as real package artifacts:
+
+```php
+add_action(
+	'wp_agent_package_artifacts_init',
+	static function (): void {
+		wp_register_agent_package_artifact_type(
+			'example/context',
+			array(
+				'label'             => 'Context Artifact',
+				'description'       => 'Package-relative context payload consumed by host-owned materializers.',
+				'example_artifacts' => array(
+					array(
+						'slug'     => 'workspace-context',
+						'source'   => 'artifacts/workspace/context.md',
+						'requires' => array( 'workspace.context' ),
+					),
+				),
+			)
+		);
+	}
+);
+```
+
+Agents API does not implement a workspace preload primitive. It only preserves package artifact identity, source, requirements, and registered type metadata so a host adapter can decide whether to preload, skip, diff, approve, or materialize the artifact.
 
 ## Package lifecycle primitives
 

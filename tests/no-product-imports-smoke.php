@@ -22,6 +22,11 @@ $production_paths = array(
 	'src'            => $agents_api_dir . '/src',
 );
 
+$package_example_paths = array(
+	'README.md'                      => $agents_api_dir . '/README.md',
+	'docs/registry-and-packages.md'  => $agents_api_dir . '/docs/registry-and-packages.md',
+);
+
 $forbidden_namespaces = array(
 	'ExampleProduct\\Core\\Steps',
 	'ExampleProduct\\Core\\Database\\Jobs',
@@ -146,6 +151,22 @@ foreach ( $files as $file ) {
 }
 
 agents_api_smoke_assert_equals( array(), $matches, 'agents-api production source has no product imports, product vocabulary, admin UI registrations, or table ownership', $failures, $passes );
+
+$package_example_matches = array();
+foreach ( $package_example_paths as $relative_path => $path ) {
+	if ( ! is_file( $path ) ) {
+		continue;
+	}
+
+	$source = (string) file_get_contents( $path );
+	foreach ( $forbidden_product_vocabulary as $term ) {
+		if ( preg_match( '/(?<![A-Za-z0-9_])' . preg_quote( $term, '/' ) . '(?![A-Za-z0-9_])/i', $source ) ) {
+			$package_example_matches[] = $relative_path . ' package examples contain downstream product vocabulary: ' . $term;
+		}
+	}
+}
+
+agents_api_smoke_assert_equals( array(), $package_example_matches, 'package documentation examples use neutral artifact and package vocabulary', $failures, $passes );
 agents_api_smoke_assert_equals( $forbidden_namespaces, array_values( array_unique( $forbidden_namespaces ) ), 'forbidden namespace list has no duplicates', $failures, $passes );
 agents_api_smoke_assert_equals( $forbidden_product_vocabulary, array_values( array_unique( $forbidden_product_vocabulary ) ), 'forbidden product vocabulary list has no duplicates', $failures, $passes );
 agents_api_smoke_assert_equals( $forbidden_admin_apis, array_values( array_unique( $forbidden_admin_apis ) ), 'forbidden admin API list has no duplicates', $failures, $passes );
