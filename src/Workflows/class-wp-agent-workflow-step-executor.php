@@ -52,7 +52,9 @@ class WP_Agent_Workflow_Step_Executor {
 		$resolved      = 'foreach' === $type
 			? self::expand_foreach_outer_step( $step, $context_array )
 			: WP_Agent_Workflow_Bindings::expand( $step, $context_array );
-		$step_output   = call_user_func( $handler, $resolved, $context_array );
+		$handler_context                            = $context_array;
+		$handler_context['_workflow_step_handlers'] = $this->handlers;
+		$step_output                                = call_user_func( $handler, $resolved, $handler_context );
 
 		if ( is_wp_error( $step_output ) ) {
 			$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_FAILED;

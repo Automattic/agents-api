@@ -340,7 +340,10 @@ class WP_Agent_Workflow_Runner {
 		$as                = '' !== $as_value ? $as_value : 'item';
 		$index_as          = '' !== $index_as_value ? $index_as_value : 'index';
 		$continue_on_error = ! empty( $step['continue_on_error'] );
-		$handlers          = self::default_step_handlers();
+		$handlers          = is_array( $context['_workflow_step_handlers'] ?? null )
+			? $context['_workflow_step_handlers']
+			: self::default_step_handlers();
+		/** @var array<string,mixed> $handlers */
 		$executor          = new WP_Agent_Workflow_Step_Executor( $handlers );
 		$iterations        = array();
 
