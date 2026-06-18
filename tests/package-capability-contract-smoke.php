@@ -36,7 +36,7 @@ $package = WP_Agent_Package::from_array(
 				'requires' => array( 'prompt/text' ),
 			),
 			array(
-				'type'     => 'datamachine/flow',
+				'type'     => 'scheduler/job',
 				'slug'     => 'daily-fetch',
 				'source'   => 'flows/daily-fetch.json',
 				'requires' => array( 'schedule/cron', 'queue/actions' ),
@@ -55,7 +55,7 @@ echo "\n[1] Host capability reports unsupported runtime needs without applying a
 $report = WP_Agent_Package_Capability_Checker::check(
 	$package,
 	array( 'chat', 'prompt/text', 'queue/actions' ),
-	array( 'known_artifact_types' => array( 'agents/prompt', 'datamachine/flow' ) )
+	array( 'known_artifact_types' => array( 'agents/prompt', 'scheduler/job' ) )
 );
 $report_array = $report->to_array();
 
@@ -70,14 +70,14 @@ foreach ( $report->get_unsupported_artifacts() as $artifact_report ) {
 	$unsupported_by_key[ $artifact_report['artifact_key'] ] = $artifact_report;
 }
 
-agents_api_smoke_assert_equals( array( 'schedule/cron' ), $unsupported_by_key['datamachine/flow:daily-fetch']['unsupported_capabilities'], 'artifact-level report keeps missing capability scoped to the artifact', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'schedule/cron' ), $unsupported_by_key['scheduler/job:daily-fetch']['unsupported_capabilities'], 'artifact-level report keeps missing capability scoped to the artifact', $failures, $passes );
 agents_api_smoke_assert_equals( true, $unsupported_by_key['vendor/custom:custom-shape']['unknown_artifact_type'], 'artifact-level report flags unknown type', $failures, $passes );
 
 echo "\n[2] A fully capable host reports compatibility:\n";
 $compatible = WP_Agent_Package_Capability_Checker::check(
 	$package,
 	array( 'chat', 'memory/files', 'prompt/text', 'queue/actions', 'schedule/cron', 'vendor/custom-runtime' ),
-	array( 'known_artifact_types' => array( 'agents/prompt', 'datamachine/flow', 'vendor/custom' ) )
+	array( 'known_artifact_types' => array( 'agents/prompt', 'scheduler/job', 'vendor/custom' ) )
 );
 
 agents_api_smoke_assert_equals( true, $compatible->is_compatible(), 'all declared needs are supported', $failures, $passes );

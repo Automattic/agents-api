@@ -61,6 +61,6 @@ agents_api_smoke_assert_equals( array( 'temperature' => 0.2 ), $identity->config
 
 echo "\n[3] Identity store contract is available without a concrete backend:\n";
 agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\Core\\Identity\\WP_Agent_Identity_Store' ), 'materialized identity store interface is available', $failures, $passes );
-agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Core\\Identity\\WP_Agent_Identity_Store', false ) || interface_exists( 'DataMachine\\Core\\Identity\\WP_Agent_Identity_Store', false ), 'Data Machine identity store alias is not loaded', $failures, $passes );
+agents_api_smoke_assert_equals( false, class_exists( 'LegacyProduct\\Core\\Identity\\WP_Agent_Identity_Store', false ) || interface_exists( 'LegacyProduct\\Core\\Identity\\WP_Agent_Identity_Store', false ), 'product identity store alias is not loaded', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API materialized identity', $failures, $passes );

@@ -24,7 +24,7 @@ Rationale:
   core-review concern than a mandatory session post type.
 - **Fallback only.** When enabled, the store registers on `wp_agent_conversation_store`
   at low priority (5), so any host store registered at the default priority wins.
-  Data Machine and WordPress.com keep their own custom backends and never enable this.
+  Products with custom backends can keep their own stores and never enable this.
 
 Implementation: `WP_Agent_Cpt_Conversation_Store`
 (`src/Transcripts/class-wp-agent-cpt-conversation-store.php`), wired by

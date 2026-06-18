@@ -18,17 +18,17 @@ $agents_api_dir = realpath( __DIR__ . '/..' );
 agents_api_smoke_assert_equals( true, is_string( $agents_api_dir ), 'agents-api directory exists', $failures, $passes );
 
 $forbidden_namespaces = array(
-	'DataMachine\\Core\\Steps',
-	'DataMachine\\Core\\Database\\Jobs',
-	'DataMachine\\Core\\Admin',
-	'DataMachine\\Core\\Assets',
-	'DataMachine\\Engine\\Handlers',
-	'DataMachine\\Core\\ActionScheduler',
-	'DataMachine\\Engine\\AI\\System\\Tasks\\Retention',
-	'DataMachine\\Engine\\Pipelines',
-	'DataMachine\\Engine\\Flows',
-	'DataMachine\\Engine\\Queue',
-	'DataMachine\\Core\\Content',
+	'ExampleProduct\\Core\\Steps',
+	'ExampleProduct\\Core\\Database\\Jobs',
+	'ExampleProduct\\Core\\Admin',
+	'ExampleProduct\\Core\\Assets',
+	'ExampleProduct\\Engine\\Handlers',
+	'ExampleProduct\\Core\\ActionScheduler',
+	'ExampleProduct\\Engine\\AI\\System\\Tasks\\Retention',
+	'ExampleProduct\\Engine\\Pipelines',
+	'ExampleProduct\\Engine\\Flows',
+	'ExampleProduct\\Engine\\Queue',
+	'ExampleProduct\\Core\\Content',
 );
 
 $forbidden_admin_apis = array(
@@ -71,8 +71,8 @@ foreach ( $iterator as $file ) {
 		}
 	}
 
-	if ( preg_match( '/(?:use\s+|new\s+|extends\s+|implements\s+|instanceof\s+)\\?DataMachine\\\\/', $source ) ) {
-		$matches[] = str_replace( (string) $agents_api_dir . '/', '', $file->getPathname() ) . ' imports a DataMachine namespace';
+	if ( preg_match( '/(?:use\s+|new\s+|extends\s+|implements\s+|instanceof\s+)\\?ExampleProduct\\\\/', $source ) ) {
+		$matches[] = str_replace( (string) $agents_api_dir . '/', '', $file->getPathname() ) . ' imports an ExampleProduct namespace';
 	}
 
 	foreach ( $forbidden_admin_apis as $function_name ) {
@@ -88,7 +88,7 @@ foreach ( $iterator as $file ) {
 	}
 }
 
-agents_api_smoke_assert_equals( array(), $matches, 'agents-api has no Data Machine product imports or admin UI registrations', $failures, $passes );
+agents_api_smoke_assert_equals( array(), $matches, 'agents-api has no product imports or admin UI registrations', $failures, $passes );
 agents_api_smoke_assert_equals( $forbidden_namespaces, array_values( array_unique( $forbidden_namespaces ) ), 'forbidden namespace list has no duplicates', $failures, $passes );
 agents_api_smoke_assert_equals( $forbidden_admin_apis, array_values( array_unique( $forbidden_admin_apis ) ), 'forbidden admin API list has no duplicates', $failures, $passes );
 agents_api_smoke_assert_equals( $forbidden_admin_hooks, array_values( array_unique( $forbidden_admin_hooks ) ), 'forbidden admin hook list has no duplicates', $failures, $passes );

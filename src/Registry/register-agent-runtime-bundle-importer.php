@@ -180,7 +180,7 @@ add_filter(
 			return null;
 		}
 
-		$slug = sanitize_title( $string_value( $input['slug'] ?? null, $spec['slug'] ?? null, $agent['agent_slug'] ?? null, $bundle['bundle_slug'] ?? null ) );
+		$slug = sanitize_title( $string_value( $input['slug'] ?? null, $spec['slug'] ?? null, $agent['agent_slug'] ?? null, $bundle['package_slug'] ?? null, $bundle['bundle_slug'] ?? null ) );
 		if ( '' === $slug ) {
 			return new WP_Error(
 				'wp_agent_runtime_bundle_missing_agent_slug',
@@ -228,14 +228,15 @@ add_filter(
 
 		$config = is_array( $agent['agent_config'] ?? null ) ? $agent['agent_config'] : array();
 		$meta   = is_array( $agent['meta'] ?? null ) ? $agent['meta'] : array();
-		$bundle_slug    = $string_value( $bundle['bundle_slug'] ?? null );
-		$bundle_version = $string_value( $bundle['bundle_version'] ?? null );
-		if ( '' !== $bundle_slug || '' !== $bundle_version ) {
+		$source_type    = $string_value( $bundle['source_type'] ?? null, $spec['source_type'] ?? null, 'runtime-agent-package' );
+		$source_package = $string_value( $bundle['source_package'] ?? null, $spec['source_package'] ?? null, $bundle['package_slug'] ?? null, $spec['package_slug'] ?? null, $bundle['bundle_slug'] ?? null );
+		$source_version = $string_value( $bundle['source_version'] ?? null, $spec['source_version'] ?? null, $bundle['package_version'] ?? null, $spec['package_version'] ?? null, $bundle['bundle_version'] ?? null );
+		if ( '' !== $source_package || '' !== $source_version ) {
 			$meta = array_merge(
 				array(
-					'source_type'    => 'runtime-agent-bundle',
-					'source_package' => $bundle_slug,
-					'source_version' => $bundle_version,
+					'source_type'    => $source_type,
+					'source_package' => $source_package,
+					'source_version' => $source_version,
 				),
 				$meta
 			);

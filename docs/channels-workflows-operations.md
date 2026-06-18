@@ -223,7 +223,7 @@ Canonical session rows should expose stable generic fields when available: `sess
 
 Principal-aware stores should implement `WP_Agent_Principal_Conversation_Store` for non-user owners such as browser sessions, external channels, tokens, or system principals. Stores that hash or hide owner keys should also implement `WP_Agent_Principal_Conversation_Session_Reader` so `get`, `update-title`, and `delete` can verify ownership without exposing raw owner keys in generic rows.
 
-Product-specific state belongs in `metadata` under namespaced keys. For example, Data Machine can keep read/progress/reporting fields under `metadata['data_machine']` while exposing the canonical Agents API fields to channel clients. Data Machine `datamachine/*chat-session*` abilities, REST routes, and CLI commands can then become compatibility/product aliases over its adapter instead of a parallel generic contract.
+Product-specific state belongs in `metadata` under namespaced keys. For example, a consumer plugin can keep read/progress/reporting fields under `metadata['example_vendor']` while exposing the canonical Agents API fields to channel clients. Consumer-specific abilities, REST routes, and CLI commands can then become compatibility/product aliases over its adapter instead of a parallel generic contract.
 
 Approval primitives live in `src/Approvals/`:
 
