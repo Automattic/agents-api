@@ -49,12 +49,27 @@ class WP_Agent_Workflow_Step_Executor {
 		}
 
 		$context_array = $context->to_array();
-		$resolved      = 'foreach' === $type
-			? self::expand_foreach_outer_step( $step, $context_array )
-			: WP_Agent_Workflow_Bindings::expand( $step, $context_array );
-		$handler_context                            = $context_array;
-		$handler_context['_workflow_step_handlers'] = $this->handlers;
-		$step_output                                = call_user_func( $handler, $resolved, $handler_context );
+		try {
+			$resolved                                   = 'foreach' === $type
+				? self::expand_foreach_outer_step( $step, $context_array )
+				: WP_Agent_Workflow_Bindings::expand( $step, $context_array );
+			$handler_context                            = $context_array;
+			$handler_context['_workflow_step_handlers'] = $this->handlers;
+			$step_output                                = call_user_func( $handler, $resolved, $handler_context );
+		} catch ( \Throwable $throwable ) {
+			$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_FAILED;
+			$record['ended_at'] = time();
+			$record['error']    = array(
+				'code'       => 'handler_exception',
+				'error_type' => 'handler_exception',
+				'message'    => $throwable->getMessage(),
+				'data'       => array(
+					'exception' => get_class( $throwable ),
+				),
+			);
+
+			return $record;
+		}
 
 		if ( is_wp_error( $step_output ) ) {
 			$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_FAILED;

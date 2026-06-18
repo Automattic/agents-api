@@ -139,6 +139,62 @@ agents_api_smoke_assert_equals( $captured_chat_input['run_id'], $chat['run_id'] 
 $stored = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-1', 'run_id' => $chat['run_id'] ) );
 agents_api_smoke_assert_equals( 'completed', $stored['status'] ?? null, 'chat dispatch records completed run by default', $failures, $passes );
 
+add_filter(
+	'wp_agent_chat_handler',
+	static fn() => static fn( array $runtime_input ): array => array(
+		'session_id'           => $runtime_input['session_id'],
+		'run_id'               => $runtime_input['run_id'],
+		'reply'                => '',
+		'completed'            => false,
+		'status'               => 'runtime_tool_pending',
+		'runtime_tool_pending' => array(
+			'tool_name'    => 'client/summarize',
+			'tool_call_id' => 'call-pending-1',
+		),
+	),
+	20,
+	2
+);
+
+$pending_chat = AgentsAPI\AI\Channels\agents_chat_dispatch(
+	array(
+		'agent'      => 'demo-agent',
+		'message'    => 'Needs runtime tool',
+		'session_id' => 'session-pending',
+	)
+);
+$pending_stored = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-pending', 'run_id' => $pending_chat['run_id'] ) );
+agents_api_smoke_assert_equals( 'runtime_tool_pending', $pending_stored['status'] ?? null, 'chat dispatch keeps runtime-tool pending run addressable', $failures, $passes );
+agents_api_smoke_assert_equals( false, 'completed' === ( $pending_stored['status'] ?? null ), 'runtime-tool pending run is not marked completed', $failures, $passes );
+
+add_filter(
+	'wp_agent_chat_handler',
+	static fn() => static fn( array $runtime_input ): array => array(
+		'session_id'        => $runtime_input['session_id'],
+		'run_id'            => $runtime_input['run_id'],
+		'reply'             => '',
+		'completed'         => false,
+		'status'            => 'approval_required',
+		'approval_required' => array(
+			'type'    => 'approval_required',
+			'payload' => array( 'action_id' => 'approve-1' ),
+		),
+	),
+	30,
+	2
+);
+
+$approval_chat = AgentsAPI\AI\Channels\agents_chat_dispatch(
+	array(
+		'agent'      => 'demo-agent',
+		'message'    => 'Needs approval',
+		'session_id' => 'session-approval',
+	)
+);
+$approval_stored = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-approval', 'run_id' => $approval_chat['run_id'] ) );
+agents_api_smoke_assert_equals( 'approval_required', $approval_stored['status'] ?? null, 'chat dispatch keeps approval-required run addressable', $failures, $passes );
+agents_api_smoke_assert_equals( false, 'completed' === ( $approval_stored['status'] ?? null ), 'approval-required run is not marked completed', $failures, $passes );
+
 AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-default-cancel', 'session-1' );
 $default_cancelled = AgentsAPI\AI\Channels\agents_cancel_chat_run( array( 'session_id' => 'session-1', 'run_id' => 'run-default-cancel' ) );
 agents_api_smoke_assert_equals( 'cancelling', $default_cancelled['status'] ?? null, 'default cancel marks running runs as cancelling', $failures, $passes );
