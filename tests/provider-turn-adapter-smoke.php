@@ -181,7 +181,7 @@ $deduped_turn = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize(
 );
 agents_api_smoke_assert_equals( 1, count( $deduped_turn['tool_calls'] ), 'fallback parser overlap is deduplicated', $failures, $passes );
 
-echo "\n[2] Conversation loop can run through a fake provider-turn adapter without Data Machine:\n";
+echo "\n[2] Conversation loop can run through a fake provider-turn adapter without product runtime coupling:\n";
 $adapter_calls = array();
 $adapter       = new class( $adapter_calls ) implements AgentsAPI\AI\WP_Agent_Provider_Turn_Adapter {
 	/** @var array<int, array<string, mixed>> Captured requests. */

@@ -189,9 +189,9 @@ smoke_reset_chat_filters();
 $runtime_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::runtime(
 	'runtime-session-1',
 	'sandbox-agent',
-	array( 'source' => 'wp-codebox' ),
+	array( 'source' => 'example-runtime' ),
 	'workspace:demo',
-	'wp-codebox-cli',
+	'example-runtime-cli',
 	array( AgentsAPI\AI\WP_Agent_Execution_Principal::AUDIENCE_CLAIM_RUNTIME_TYPE => 'wordpress-playground' )
 )->to_array();
 $captured_principal = array();

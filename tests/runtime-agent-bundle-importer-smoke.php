@@ -48,13 +48,14 @@ agents_api_smoke_require_module();
 do_action( 'init' );
 
 $bundle = array(
-	'bundle_version' => '1.2.3',
-	'bundle_slug'    => 'studio-web-static-site-generator',
+	'source_type'    => 'runtime-agent-package',
+	'source_package' => 'example-site-builder',
+	'source_version' => '1.2.3',
 	'agent'          => array(
-		'agent_slug'   => 'studio-web-static-site-generator',
-		'agent_name'   => 'Static Site Generator',
+		'agent_slug'   => 'example-site-builder',
+		'agent_name'   => 'Example Site Builder',
 		'agent_config' => array(
-			'studio_web' => array( 'prompt' => 'Cook a site.' ),
+			'site_builder' => array( 'prompt' => 'Cook a site.' ),
 		),
 	),
 );
@@ -70,9 +71,10 @@ $result = apply_filters(
 
 agents_api_smoke_assert_equals( true, is_array( $result ) && true === ( $result['success'] ?? false ), 'inline bundle import succeeds', $failures, $passes );
 agents_api_smoke_assert_equals( 'registered', $result['status'] ?? '', 'inline bundle reports registered status', $failures, $passes );
-agents_api_smoke_assert_equals( true, wp_has_agent( 'studio-web-static-site-generator' ), 'runtime agent is registered', $failures, $passes );
-agents_api_smoke_assert_equals( 'Cook a site.', wp_get_agent( 'studio-web-static-site-generator' )->get_default_config()['studio_web']['prompt'] ?? null, 'agent default config is preserved', $failures, $passes );
-agents_api_smoke_assert_equals( 'runtime-agent-bundle', wp_get_agent( 'studio-web-static-site-generator' )->get_meta()['source_type'] ?? null, 'bundle provenance is recorded', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_agent( 'example-site-builder' ), 'runtime agent is registered', $failures, $passes );
+agents_api_smoke_assert_equals( 'Cook a site.', wp_get_agent( 'example-site-builder' )->get_default_config()['site_builder']['prompt'] ?? null, 'agent default config is preserved', $failures, $passes );
+agents_api_smoke_assert_equals( 'runtime-agent-package', wp_get_agent( 'example-site-builder' )->get_meta()['source_type'] ?? null, 'source provenance is recorded', $failures, $passes );
+agents_api_smoke_assert_equals( 'example-site-builder', wp_get_agent( 'example-site-builder' )->get_meta()['source_package'] ?? null, 'source package provenance is recorded', $failures, $passes );
 
 echo "\n[2] Conflict policy is enforced:\n";
 $skipped = apply_filters( 'wp_agent_runtime_import_bundle', null, array( 'bundle' => $bundle ), array( 'on_conflict' => 'skip' ), 1 );
@@ -88,8 +90,8 @@ agents_api_smoke_assert_equals( null, $unclaimed, 'non-agent bundle is not claim
 
 echo "\n[4] Source bundle files and list helper use the generic importer:\n";
 $source_bundle = array(
-	'bundle_version' => '1.0.0',
-	'bundle_slug'    => 'runtime-source-agent',
+	'package_version' => '1.0.0',
+	'package_slug'    => 'runtime-source-agent',
 	'agent'          => array(
 		'agent_slug'   => 'runtime-source-agent',
 		'agent_name'   => 'Runtime Source Agent',
@@ -105,7 +107,7 @@ agents_api_smoke_assert_equals( true, wp_has_agent( 'runtime-source-agent' ), 's
 $helper_results = wp_agent_import_runtime_bundles(
 	array(
 		array( 'bundle' => array(
-			'bundle_slug' => 'runtime-helper-agent',
+			'package_slug' => 'runtime-helper-agent',
 			'agent'       => array(
 				'agent_slug'   => 'runtime-helper-agent',
 				'agent_name'   => 'Runtime Helper Agent',

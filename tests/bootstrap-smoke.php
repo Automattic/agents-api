@@ -20,34 +20,34 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
 
 $namespace_map = array(
-	'DataMachine\\Engine\\AI\\WP_Agent_Message'                         => 'AgentsAPI\\AI\\WP_Agent_Message',
-	'DataMachine\\Engine\\AI\\WP_Agent_Execution_Principal'                      => 'AgentsAPI\\AI\\WP_Agent_Execution_Principal',
-	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Request'                    => 'AgentsAPI\\AI\\WP_Agent_Conversation_Request',
-	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Runner'            => 'AgentsAPI\\AI\\WP_Agent_Conversation_Runner',
-	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Completion_Decision'         => 'AgentsAPI\\AI\\WP_Agent_Conversation_Completion_Decision',
-	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Completion_Policy'  => 'AgentsAPI\\AI\\WP_Agent_Conversation_Completion_Policy',
-	'DataMachine\\Engine\\AI\\WP_Agent_Transcript_Persister' => 'AgentsAPI\\AI\\WP_Agent_Transcript_Persister',
-	'DataMachine\\Engine\\AI\\WP_Agent_Null_Transcript_Persister'     => 'AgentsAPI\\AI\\WP_Agent_Null_Transcript_Persister',
-	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Compaction'                  => 'AgentsAPI\\AI\\WP_Agent_Conversation_Compaction',
-	'DataMachine\\Engine\\AI\\WP_Agent_Conversation_Result'                      => 'AgentsAPI\\AI\\WP_Agent_Conversation_Result',
-	'DataMachine\\Core\\Database\\Chat\\WP_Agent_Conversation_Lock' => 'AgentsAPI\\Core\\Database\\Chat\\WP_Agent_Conversation_Lock',
-	'DataMachine\\Engine\\AI\\Tools\\WP_Agent_Tool_Declaration'                => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Declaration',
-	'DataMachine\\Engine\\AI\\Tools\\WP_Agent_Tool_Call'                              => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Call',
-	'DataMachine\\Engine\\AI\\Tools\\WP_Agent_Tool_Parameters'                         => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Parameters',
-	'DataMachine\\Engine\\AI\\Tools\\Execution\\WP_Agent_Tool_Execution_Core'           => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Execution_Core',
-	'DataMachine\\Engine\\AI\\Tools\\Execution\\WP_Agent_Tool_Executor'      => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Executor',
-	'DataMachine\\Engine\\AI\\Tools\\WP_Agent_Tool_Source_Registry'                     => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Source_Registry',
-	'DataMachine\\Core\\Database\\Chat\\WP_Agent_Conversation_Store' => 'AgentsAPI\\Core\\Database\\Chat\\WP_Agent_Conversation_Store',
-	'DataMachine\\Core\\Identity\\WP_Agent_Identity_Scope'                         => 'AgentsAPI\\Core\\Identity\\WP_Agent_Identity_Scope',
-	'DataMachine\\Core\\Identity\\WP_Agent_Materialized_Identity'                  => 'AgentsAPI\\Core\\Identity\\WP_Agent_Materialized_Identity',
-	'DataMachine\\Core\\Identity\\WP_Agent_Identity_Store'     => 'AgentsAPI\\Core\\Identity\\WP_Agent_Identity_Store',
-	'DataMachine\\Core\\Workspace\\WP_Agent_Workspace_Scope'                       => 'AgentsAPI\\Core\\Workspace\\WP_Agent_Workspace_Scope',
-	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Store'           => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Store',
-	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Scope'                    => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Scope',
-	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Metadata'                 => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Metadata',
-	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Query'                    => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Query',
-	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Store_Capabilities'        => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Store_Capabilities',
-	'DataMachine\\Core\\FilesRepository\\WP_Agent_Memory_Validator'        => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Validator',
+	'LegacyProduct\\Engine\\AI\\WP_Agent_Message'                       => 'AgentsAPI\\AI\\WP_Agent_Message',
+	'LegacyProduct\\Engine\\AI\\WP_Agent_Execution_Principal'            => 'AgentsAPI\\AI\\WP_Agent_Execution_Principal',
+	'LegacyProduct\\Engine\\AI\\WP_Agent_Conversation_Request'           => 'AgentsAPI\\AI\\WP_Agent_Conversation_Request',
+	'LegacyProduct\\Engine\\AI\\WP_Agent_Conversation_Runner'            => 'AgentsAPI\\AI\\WP_Agent_Conversation_Runner',
+	'LegacyProduct\\Engine\\AI\\WP_Agent_Conversation_Completion_Decision' => 'AgentsAPI\\AI\\WP_Agent_Conversation_Completion_Decision',
+	'LegacyProduct\\Engine\\AI\\WP_Agent_Conversation_Completion_Policy' => 'AgentsAPI\\AI\\WP_Agent_Conversation_Completion_Policy',
+	'LegacyProduct\\Engine\\AI\\WP_Agent_Transcript_Persister'           => 'AgentsAPI\\AI\\WP_Agent_Transcript_Persister',
+	'LegacyProduct\\Engine\\AI\\WP_Agent_Null_Transcript_Persister'      => 'AgentsAPI\\AI\\WP_Agent_Null_Transcript_Persister',
+	'LegacyProduct\\Engine\\AI\\WP_Agent_Conversation_Compaction'        => 'AgentsAPI\\AI\\WP_Agent_Conversation_Compaction',
+	'LegacyProduct\\Engine\\AI\\WP_Agent_Conversation_Result'            => 'AgentsAPI\\AI\\WP_Agent_Conversation_Result',
+	'LegacyProduct\\Core\\Database\\Chat\\WP_Agent_Conversation_Lock'   => 'AgentsAPI\\Core\\Database\\Chat\\WP_Agent_Conversation_Lock',
+	'LegacyProduct\\Engine\\AI\\Tools\\WP_Agent_Tool_Declaration'       => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Declaration',
+	'LegacyProduct\\Engine\\AI\\Tools\\WP_Agent_Tool_Call'              => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Call',
+	'LegacyProduct\\Engine\\AI\\Tools\\WP_Agent_Tool_Parameters'        => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Parameters',
+	'LegacyProduct\\Engine\\AI\\Tools\\Execution\\WP_Agent_Tool_Execution_Core' => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Execution_Core',
+	'LegacyProduct\\Engine\\AI\\Tools\\Execution\\WP_Agent_Tool_Executor' => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Executor',
+	'LegacyProduct\\Engine\\AI\\Tools\\WP_Agent_Tool_Source_Registry'    => 'AgentsAPI\\AI\\Tools\\WP_Agent_Tool_Source_Registry',
+	'LegacyProduct\\Core\\Database\\Chat\\WP_Agent_Conversation_Store'  => 'AgentsAPI\\Core\\Database\\Chat\\WP_Agent_Conversation_Store',
+	'LegacyProduct\\Core\\Identity\\WP_Agent_Identity_Scope'              => 'AgentsAPI\\Core\\Identity\\WP_Agent_Identity_Scope',
+	'LegacyProduct\\Core\\Identity\\WP_Agent_Materialized_Identity'       => 'AgentsAPI\\Core\\Identity\\WP_Agent_Materialized_Identity',
+	'LegacyProduct\\Core\\Identity\\WP_Agent_Identity_Store'              => 'AgentsAPI\\Core\\Identity\\WP_Agent_Identity_Store',
+	'LegacyProduct\\Core\\Workspace\\WP_Agent_Workspace_Scope'            => 'AgentsAPI\\Core\\Workspace\\WP_Agent_Workspace_Scope',
+	'LegacyProduct\\Core\\FilesRepository\\WP_Agent_Memory_Store'         => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Store',
+	'LegacyProduct\\Core\\FilesRepository\\WP_Agent_Memory_Scope'         => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Scope',
+	'LegacyProduct\\Core\\FilesRepository\\WP_Agent_Memory_Metadata'      => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Metadata',
+	'LegacyProduct\\Core\\FilesRepository\\WP_Agent_Memory_Query'         => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Query',
+	'LegacyProduct\\Core\\FilesRepository\\WP_Agent_Memory_Store_Capabilities' => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Store_Capabilities',
+	'LegacyProduct\\Core\\FilesRepository\\WP_Agent_Memory_Validator'     => 'AgentsAPI\\Core\\FilesRepository\\WP_Agent_Memory_Validator',
 );
 
 $context_contracts = array(
@@ -59,7 +59,7 @@ $context_contracts = array(
 	'AgentsAPI\\AI\\Context\\WP_Agent_Default_Context_Conflict_Resolver',
 );
 
-echo "\n[1] Module bootstrap exposes registration facade without Data Machine product code:\n";
+echo "\n[1] Module bootstrap exposes registration facade without product code:\n";
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_LOADED' ), 'module marks itself loaded', $failures, $passes );
 agents_api_smoke_assert_equals( true, defined( 'AGENTS_API_PATH' ), 'module path constant is available', $failures, $passes );
 agents_api_smoke_assert_equals( realpath( __DIR__ . '/..' ) . '/', AGENTS_API_PATH, 'module path points at plugin root directory', $failures, $passes );
@@ -135,13 +135,13 @@ foreach ( $namespace_map as $source_class => $target_class ) {
 foreach ( $context_contracts as $context_contract ) {
 	agents_api_smoke_assert_equals( true, class_exists( $context_contract ) || interface_exists( $context_contract ), $context_contract . ' contract is available', $failures, $passes );
 }
-agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Engine\\Agents\\AgentRegistry', false ), 'Data Machine registry is not loaded by module bootstrap', $failures, $passes );
-agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Core\\Database\\Jobs\\Jobs', false ), 'Data Machine jobs repository is not loaded by module bootstrap', $failures, $passes );
-agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Engine\\AI\\AIConversationLoop', false ), 'Data Machine compatibility loop is not loaded by module bootstrap', $failures, $passes );
-agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Engine\\AI\\BuiltInAgentConversationRunner', false ), 'Data Machine built-in runner is not loaded by module bootstrap', $failures, $passes );
-agents_api_smoke_assert_equals( false, class_exists( 'DataMachine\\Core\\FilesRepository\\DiskAgentMemoryStore', false ), 'Data Machine disk memory store is not loaded by module bootstrap', $failures, $passes );
+agents_api_smoke_assert_equals( false, class_exists( 'LegacyProduct\\Engine\\Agents\\AgentRegistry', false ), 'product registry is not loaded by module bootstrap', $failures, $passes );
+agents_api_smoke_assert_equals( false, class_exists( 'LegacyProduct\\Core\\Database\\Jobs\\Jobs', false ), 'product jobs repository is not loaded by module bootstrap', $failures, $passes );
+agents_api_smoke_assert_equals( false, class_exists( 'LegacyProduct\\Engine\\AI\\AIConversationLoop', false ), 'product compatibility loop is not loaded by module bootstrap', $failures, $passes );
+agents_api_smoke_assert_equals( false, class_exists( 'LegacyProduct\\Engine\\AI\\BuiltInAgentConversationRunner', false ), 'product built-in runner is not loaded by module bootstrap', $failures, $passes );
+agents_api_smoke_assert_equals( false, class_exists( 'LegacyProduct\\Core\\FilesRepository\\DiskAgentMemoryStore', false ), 'product disk memory store is not loaded by module bootstrap', $failures, $passes );
 
-echo "\n[2] Module source keeps Data Machine vocabulary out of agents-api contracts:\n";
+echo "\n[2] Module source keeps product vocabulary out of agents-api contracts:\n";
 $agents_api_files = new RecursiveIteratorIterator(
 	new RecursiveDirectoryIterator( AGENTS_API_PATH . 'src', FilesystemIterator::SKIP_DOTS )
 );
@@ -153,23 +153,23 @@ foreach ( $agents_api_files as $file ) {
 	$contents = file_get_contents( $file->getPathname() );
 	agents_api_smoke_assert_equals(
 		0,
-		preg_match( '/^\s*(namespace|use)\s+DataMachine\\\\/m', is_string( $contents ) ? $contents : '' ),
-		'agents-api source has no Data Machine namespace declaration/import: ' . str_replace( AGENTS_API_PATH, '', $file->getPathname() ),
+		preg_match( '/^\s*(namespace|use)\s+LegacyProduct\\\\/m', is_string( $contents ) ? $contents : '' ),
+		'agents-api source has no product namespace declaration/import: ' . str_replace( AGENTS_API_PATH, '', $file->getPathname() ),
 		$failures,
 		$passes
 	);
 	agents_api_smoke_assert_equals(
 		false,
-		false !== strpos( is_string( $contents ) ? $contents : '', 'Data Machine' ),
-		'agents-api source has no Data Machine prose coupling: ' . str_replace( AGENTS_API_PATH, '', $file->getPathname() ),
+		false !== strpos( is_string( $contents ) ? $contents : '', 'LegacyProduct' ),
+		'agents-api source has no product prose coupling: ' . str_replace( AGENTS_API_PATH, '', $file->getPathname() ),
 		$failures,
 		$passes
 	);
 }
 
 $bootstrap_source = (string) file_get_contents( AGENTS_API_PLUGIN_FILE );
-agents_api_smoke_assert_equals( 0, preg_match( '/^\s*(namespace|use)\s+DataMachine\\\\/m', $bootstrap_source ), 'plugin bootstrap has no Data Machine namespace declaration/import', $failures, $passes );
-agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'Data Machine' ), 'plugin bootstrap has no Data Machine prose coupling', $failures, $passes );
+agents_api_smoke_assert_equals( 0, preg_match( '/^\s*(namespace|use)\s+LegacyProduct\\\\/m', $bootstrap_source ), 'plugin bootstrap has no product namespace declaration/import', $failures, $passes );
+agents_api_smoke_assert_equals( false, false !== strpos( $bootstrap_source, 'LegacyProduct' ), 'plugin bootstrap has no product prose coupling', $failures, $passes );
 
 echo "\n[3] Module source tree uses Agents API vocabulary:\n";
 $expected_source_directories = array(

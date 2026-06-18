@@ -129,6 +129,6 @@ $identities = wp_materialize_registered_agent_identities(
 agents_api_smoke_assert_equals( array( 'kitchen-agent', 'pantry-agent' ), array_keys( $identities ), 'all registered agents materialize via filter-provided store', $failures, $passes );
 agents_api_smoke_assert_equals( 13, $identities['pantry-agent']->scope->normalize()->owner_user_id ?? null, 'explicit owner_user_id overrides defaults', $failures, $passes );
 agents_api_smoke_assert_equals( 'smoke', $identities['pantry-agent']->meta['materialized_by'] ?? null, 'caller metadata is merged into materialization metadata', $failures, $passes );
-agents_api_smoke_assert_equals( false, class_exists( 'DataMachine_Agent_Store', false ), 'materialization lifecycle does not load Data Machine classes', $failures, $passes );
+agents_api_smoke_assert_equals( false, class_exists( 'ExampleProduct_Agent_Store', false ), 'materialization lifecycle does not load product classes', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API identity store materialization', $failures, $passes );

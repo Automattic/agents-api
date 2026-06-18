@@ -33,18 +33,18 @@ $tools = array(
 			WP_Agent_Tool_Declaration::RUNTIME_CAPABILITY_SCOPE => WP_Agent_Tool_Declaration::CAPABILITY_SCOPE_RUNTIME_LOCAL,
 		),
 	),
-	'datamachine/workspace-git-push'   => array(
-		'name'        => 'datamachine/workspace-git-push',
-		'source'      => 'datamachine-code',
+	'control-plane/workspace-git-push' => array(
+		'name'        => 'control-plane/workspace-git-push',
+		'source'      => 'control-plane',
 		'description' => 'Push a workspace branch from the parent control plane.',
 		'runtime'     => array(
 			WP_Agent_Tool_Declaration::RUNTIME_ENVIRONMENT      => WP_Agent_Tool_Declaration::ENVIRONMENT_CONTROL_PLANE,
 			WP_Agent_Tool_Declaration::RUNTIME_CAPABILITY_SCOPE => WP_Agent_Tool_Declaration::CAPABILITY_SCOPE_CONTROL_PLANE,
 		),
 	),
-	'datamachine/workspace-read'       => array(
-		'name'        => 'datamachine/workspace-read',
-		'source'      => 'datamachine-code',
+	'control-plane/workspace-read'     => array(
+		'name'        => 'control-plane/workspace-read',
+		'source'      => 'control-plane',
 		'description' => 'Read a workspace file through the parent control plane.',
 	),
 );
@@ -86,10 +86,10 @@ agents_api_smoke_assert_equals( 'filesystem_write', $by_id['filesystem-write']['
 agents_api_smoke_assert_equals( WP_Agent_Tool_Declaration::ENVIRONMENT_RUNTIME_LOCAL, $by_id['filesystem-write']['runtime'][ WP_Agent_Tool_Declaration::RUNTIME_ENVIRONMENT ] ?? '', 'runtime-local tool records execution environment', $failures, $passes );
 agents_api_smoke_assert_equals( 'sandbox', $by_id['filesystem-write']['execution_location'] ?? '', 'runtime-local tool projects legacy sandbox location for consumers', $failures, $passes );
 
-agents_api_smoke_assert_equals( false, $by_id['datamachine/workspace-git-push']['allowed'] ?? true, 'control-plane tool is denied to runtime-local agent', $failures, $passes );
-agents_api_smoke_assert_equals( 'parent', $by_id['datamachine/workspace-git-push']['transport_visibility'] ?? '', 'control-plane tool projects parent visibility', $failures, $passes );
-agents_api_smoke_assert_equals( 'datamachine_workspace_read', $by_id['datamachine/workspace-read']['runtime_tool_id'] ?? '', 'runtime tool id defaults from tool name', $failures, $passes );
-agents_api_smoke_assert_equals( false, $by_id['datamachine/workspace-read']['allowed'] ?? true, 'tools without runtime metadata default closed', $failures, $passes );
+agents_api_smoke_assert_equals( false, $by_id['control-plane/workspace-git-push']['allowed'] ?? true, 'control-plane tool is denied to runtime-local agent', $failures, $passes );
+agents_api_smoke_assert_equals( 'parent', $by_id['control-plane/workspace-git-push']['transport_visibility'] ?? '', 'control-plane tool projects parent visibility', $failures, $passes );
+agents_api_smoke_assert_equals( 'control_plane_workspace_read', $by_id['control-plane/workspace-read']['runtime_tool_id'] ?? '', 'runtime tool id defaults from tool name', $failures, $passes );
+agents_api_smoke_assert_equals( false, $by_id['control-plane/workspace-read']['allowed'] ?? true, 'tools without runtime metadata default closed', $failures, $passes );
 
 add_filter(
 	'agents_api_runtime_tool_policy',

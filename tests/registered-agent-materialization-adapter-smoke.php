@@ -185,6 +185,6 @@ $filtered_results = wp_materialize_registered_agents(
 );
 
 agents_api_smoke_assert_equals( true, isset( $filtered_results['kitchen-agent'] ), 'filter-provided adapter is used when no adapter is passed', $failures, $passes );
-agents_api_smoke_assert_equals( false, class_exists( 'DataMachine_Agent_Store', false ), 'materialization contract does not load Data Machine classes', $failures, $passes );
+agents_api_smoke_assert_equals( false, class_exists( 'ExampleProduct_Agent_Store', false ), 'materialization contract does not load product classes', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API registered-agent materialization adapter', $failures, $passes );

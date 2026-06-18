@@ -317,7 +317,7 @@ $submission = AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::submit_result(
 );
 ```
 
-Generic lifecycle events fire as WordPress actions: `agents_api_runtime_tool_request_created`, `agents_api_runtime_tool_result_submitted`, `agents_api_runtime_tool_request_timed_out`, and `agents_api_runtime_tool_request_resumed`. The event payloads contain normalized request/result envelopes plus caller-owned context. Agents API does not define Data Machine jobs, chat-session metadata, browser storage, or any other product-specific persistence shape.
+Generic lifecycle events fire as WordPress actions: `agents_api_runtime_tool_request_created`, `agents_api_runtime_tool_result_submitted`, `agents_api_runtime_tool_request_timed_out`, and `agents_api_runtime_tool_request_resumed`. The event payloads contain normalized request/result envelopes plus caller-owned context. Agents API does not define product jobs, chat-session metadata, browser storage, or any other product-specific persistence shape.
 
 ## Runtime tool declarations
 
