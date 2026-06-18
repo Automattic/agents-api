@@ -33,6 +33,7 @@ final class WP_Agent_Workflow_Run_Result {
 	public const STATUS_SUCCEEDED = 'succeeded';
 	public const STATUS_FAILED    = 'failed';
 	public const STATUS_SKIPPED   = 'skipped';
+	public const STATUS_CANCELLED = 'cancelled';
 
 	/**
 	 * @since 0.103.0

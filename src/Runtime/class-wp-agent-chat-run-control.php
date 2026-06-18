@@ -42,16 +42,7 @@ class WP_Agent_Chat_Run_Control {
 	 * Generate an opaque client-addressable run ID.
 	 */
 	public static function generate_run_id(): string {
-		if ( function_exists( 'wp_generate_uuid4' ) ) {
-			return 'run_' . str_replace( '-', '', wp_generate_uuid4() );
-		}
-
-		try {
-			return 'run_' . bin2hex( random_bytes( 16 ) );
-		} catch ( \Throwable $error ) {
-			unset( $error );
-			return 'run_' . str_replace( '.', '', uniqid( '', true ) );
-		}
+		return WP_Agent_Run_Control::generate_run_id();
 	}
 
 	/**
@@ -101,7 +92,7 @@ class WP_Agent_Chat_Run_Control {
 	 * Normalize status values while keeping the public vocabulary bounded.
 	 */
 	public static function normalize_status( mixed $status ): string {
-		$status = is_string( $status ) ? strtolower( trim( $status ) ) : '';
+		$status = WP_Agent_Run_Control::normalize_status( $status );
 		return in_array( $status, self::statuses(), true ) ? $status : self::STATUS_RUNNING;
 	}
 
@@ -114,21 +105,14 @@ class WP_Agent_Chat_Run_Control {
 	 * @return array<string,mixed> Normalized run.
 	 */
 	public static function start_run( string $run_id, string $session_id, array $metadata = array() ): array {
-		$now = self::now();
-		$run = array(
-			'run_id'     => $run_id,
-			'session_id' => $session_id,
-			'status'     => self::STATUS_RUNNING,
-			'started_at' => $metadata['started_at'] ?? $now,
-			'updated_at' => $now,
-			'metadata'   => $metadata,
-		);
-
-		$state                    = self::state();
-		$state['runs'][ $run_id ] = $run;
-		self::save_state( $state );
-
-		return self::normalize_run( $run );
+		return self::normalize_run( WP_Agent_Run_Control::start_run(
+			self::OPTION_KEY,
+			$run_id,
+			array(
+				'session_id' => $session_id,
+				'metadata'   => $metadata,
+			)
+		) );
 	}
 
 	/**
@@ -139,22 +123,8 @@ class WP_Agent_Chat_Run_Control {
 	 * @return array<string,mixed>|null Normalized run, or null when absent.
 	 */
 	public static function finish_run( string $run_id, string $status = self::STATUS_COMPLETED ): ?array {
-		$state = self::state();
-		if ( ! isset( $state['runs'][ $run_id ] ) ) {
-			return null;
-		}
-
-		$run               = $state['runs'][ $run_id ];
-		$run['status']     = self::normalize_status( $status );
-		$run['updated_at'] = self::now();
-		if ( self::STATUS_CANCELLED === $run['status'] ) {
-			$run['cancelled'] = true;
-		}
-
-		$state['runs'][ $run_id ] = $run;
-		self::save_state( $state );
-
-		return self::normalize_run( $run );
+		$run = WP_Agent_Run_Control::finish_run( self::OPTION_KEY, $run_id, $status );
+		return null === $run ? null : self::normalize_run( $run );
 	}
 
 	/**
@@ -164,9 +134,8 @@ class WP_Agent_Chat_Run_Control {
 	 * @return array<string,mixed>|null Normalized run, or null when absent.
 	 */
 	public static function get_run( string $run_id ): ?array {
-		$state = self::state();
-		$run   = $state['runs'][ $run_id ] ?? null;
-		return is_array( $run ) ? self::normalize_run( $run ) : null;
+		$run = WP_Agent_Run_Control::get_run( self::OPTION_KEY, $run_id );
+		return null === $run ? null : self::normalize_run( $run );
 	}
 
 	/**
@@ -176,21 +145,8 @@ class WP_Agent_Chat_Run_Control {
 	 * @return array<string,mixed>|null Normalized run, or null when absent.
 	 */
 	public static function request_cancel( string $run_id ): ?array {
-		$state = self::state();
-		if ( ! isset( $state['runs'][ $run_id ] ) ) {
-			return null;
-		}
-
-		$run               = $state['runs'][ $run_id ];
-		$terminal          = in_array( self::normalize_status( $run['status'] ?? '' ), array( self::STATUS_COMPLETED, self::STATUS_FAILED, self::STATUS_CANCELLED ), true );
-		$run['status']     = $terminal ? self::normalize_status( $run['status'] ?? '' ) : self::STATUS_CANCELLING;
-		$run['cancelled']  = ! $terminal;
-		$run['updated_at'] = self::now();
-
-		$state['runs'][ $run_id ] = $run;
-		self::save_state( $state );
-
-		return self::normalize_run( $run );
+		$run = WP_Agent_Run_Control::request_cancel( self::OPTION_KEY, $run_id );
+		return null === $run ? null : self::normalize_run( $run );
 	}
 
 	/**
