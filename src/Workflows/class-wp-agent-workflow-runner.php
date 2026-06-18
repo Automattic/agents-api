@@ -162,12 +162,8 @@ class WP_Agent_Workflow_Runner {
 			return $terminal;
 		}
 
-		$context = array(
-			'inputs' => $inputs,
-			// Step outputs accumulate here as the run progresses, keyed by step id.
-			'steps'  => array(),
-			'vars'   => array(),
-		);
+		$context  = WP_Agent_Workflow_Run_Context::from_inputs( $inputs );
+		$executor = new WP_Agent_Workflow_Step_Executor( $this->step_handlers );
 
 		$step_records      = array();
 		$continue_on_error = ! empty( $options['continue_on_error'] );
@@ -175,31 +171,10 @@ class WP_Agent_Workflow_Runner {
 		$failure_error     = array();
 
 		foreach ( $spec->get_steps() as $step ) {
-			$step_id  = self::string_value( $step['id'] ?? null );
-			$type     = self::string_value( $step['type'] ?? null );
-			$start_ts = time();
-			$resolved = 'foreach' === $type
-				? self::expand_foreach_outer_step( $step, $context )
-				: WP_Agent_Workflow_Bindings::expand( $step, $context );
-			$record   = array(
-				'id'         => $step_id,
-				'type'       => $type,
-				'status'     => WP_Agent_Workflow_Run_Result::STATUS_RUNNING,
-				'output'     => null,
-				'started_at' => $start_ts,
-				'ended_at'   => 0,
-			);
+			$record         = $executor->execute( $step, $context );
+			$step_records[] = $record;
 
-			$handler = $this->step_handlers[ $type ] ?? null;
-			if ( ! is_callable( $handler ) ) {
-				$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_SKIPPED;
-				$record['ended_at'] = time();
-				$record['error']    = array(
-					'code'    => 'no_step_handler',
-					'message' => sprintf( 'no handler registered for step type `%s`', $type ),
-				);
-				$step_records[]     = $record;
-
+			if ( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED !== $record['status'] ) {
 				$failed        = true;
 				$failure_error = $record['error'];
 				$result        = $result->with( array( 'steps' => $step_records ) );
@@ -211,37 +186,6 @@ class WP_Agent_Workflow_Runner {
 				}
 				continue;
 			}
-
-			$step_output = call_user_func( $handler, $resolved, $context );
-
-			if ( is_wp_error( $step_output ) ) {
-				$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_FAILED;
-				$record['ended_at'] = time();
-				$record['error']    = array(
-					'code'    => $step_output->get_error_code(),
-					'message' => $step_output->get_error_message(),
-					'data'    => $step_output->get_error_data(),
-				);
-				$step_records[]     = $record;
-
-				$failed        = true;
-				$failure_error = $record['error'];
-				$result        = $result->with( array( 'steps' => $step_records ) );
-				if ( $this->recorder ) {
-					$this->recorder->update( $result );
-				}
-				if ( ! $continue_on_error ) {
-					break;
-				}
-				continue;
-			}
-
-			$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED;
-			$record['output']   = is_array( $step_output ) ? $step_output : array( 'value' => $step_output );
-			$record['ended_at'] = time();
-			$step_records[]     = $record;
-
-			$context['steps'][ $step_id ] = array( 'output' => $record['output'] );
 
 			$result = $result->with( array( 'steps' => $step_records ) );
 			if ( $this->recorder ) {
@@ -260,7 +204,7 @@ class WP_Agent_Workflow_Runner {
 			'steps' => array(),
 		);
 		foreach ( $step_records as $rec ) {
-			$final_output['steps'][ $rec['id'] ] = $rec['output'];
+			$final_output['steps'][ self::string_value( $rec['id'] ?? null ) ] = $rec['output'] ?? null;
 		}
 		$last = end( $step_records );
 		if ( false !== $last && WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED === $last['status'] ) {
@@ -280,29 +224,6 @@ class WP_Agent_Workflow_Runner {
 			$this->recorder->update( $result );
 		}
 		return $result;
-	}
-
-	/**
-	 * Expand a foreach step's outer fields while preserving its nested step
-	 * templates for each iteration's scoped variables.
-	 *
-	 * @since 0.107.0
-	 *
-	 * @param array<mixed> $step
-	 * @param array<mixed> $context
-	 * @return array<mixed>
-	 */
-	private static function expand_foreach_outer_step( array $step, array $context ): array {
-		$nested = $step['steps'] ?? array();
-		unset( $step['steps'] );
-
-		$expanded = WP_Agent_Workflow_Bindings::expand( $step, $context );
-		if ( ! is_array( $expanded ) ) {
-			$expanded = array();
-		}
-		$expanded['steps'] = $nested;
-
-		return $expanded;
 	}
 
 	/**
@@ -369,25 +290,18 @@ class WP_Agent_Workflow_Runner {
 	 */
 	public static function default_agent_handler( array $step, array $context ) {
 		unset( $context );
-		if ( ! function_exists( 'wp_get_ability' ) ) {
-			return new \WP_Error(
-				'abilities_api_missing',
-				'Abilities API is not loaded; cannot dispatch agent step.'
-			);
-		}
-		$ability = wp_get_ability( 'agents/chat' );
-		if ( null === $ability ) {
-			return new \WP_Error(
-				'agents_chat_missing',
-				'agents/chat ability is not registered.'
-			);
-		}
 		$input  = array(
 			'agent'      => self::string_value( $step['agent'] ?? null ),
 			'message'    => self::string_value( $step['message'] ?? null ),
 			'session_id' => $step['session_id'] ?? null,
 		);
-		$result = $ability->execute( $input );
+		$result = WP_Agent_Ability_Dispatcher::dispatch( 'agents/chat', $input );
+		if ( is_wp_error( $result ) && 'ability_not_found' === $result->get_error_code() ) {
+			return new \WP_Error(
+				'agents_chat_missing',
+				'agents/chat ability is not registered.'
+			);
+		}
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}
@@ -426,30 +340,19 @@ class WP_Agent_Workflow_Runner {
 		$as                = '' !== $as_value ? $as_value : 'item';
 		$index_as          = '' !== $index_as_value ? $index_as_value : 'index';
 		$continue_on_error = ! empty( $step['continue_on_error'] );
-		$handlers          = (array) apply_filters(
-			'wp_agent_workflow_step_handlers',
-			array(
-				'ability' => array( __CLASS__, 'default_ability_handler' ),
-				'agent'   => array( __CLASS__, 'default_agent_handler' ),
-				'foreach' => array( __CLASS__, 'default_foreach_handler' ),
-			)
-		);
+		$handlers          = self::default_step_handlers();
+		$executor          = new WP_Agent_Workflow_Step_Executor( $handlers );
 		$iterations        = array();
 
 		foreach ( array_values( $items ) as $index => $item ) {
-			$iteration_context = $context;
-			if ( ! isset( $iteration_context['steps'] ) || ! is_array( $iteration_context['steps'] ) ) {
-				$iteration_context['steps'] = array();
-			}
-			$iteration_context['vars'] = array_merge(
-				(array) ( $context['vars'] ?? array() ),
+			$iteration_context = ( new WP_Agent_Workflow_Run_Context( $context ) )->with_vars(
 				array(
 					$as       => $item,
 					$index_as => $index,
 				)
 			);
-			$step_outputs              = array();
-			$last_output               = null;
+			$step_outputs      = array();
+			$last_output       = null;
 
 			foreach ( $steps as $nested_step ) {
 				if ( ! is_array( $nested_step ) ) {
@@ -479,28 +382,25 @@ class WP_Agent_Workflow_Runner {
 					continue;
 				}
 
-				$resolved      = 'foreach' === $type
-					? self::expand_foreach_outer_step( $nested_step, $iteration_context )
-					: WP_Agent_Workflow_Bindings::expand( $nested_step, $iteration_context );
-				$nested_output = call_user_func( $handler, $resolved, $iteration_context );
+				$nested_record = $executor->execute( $nested_step, $iteration_context );
 
-				if ( is_wp_error( $nested_output ) ) {
+				if ( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED !== $nested_record['status'] ) {
+					$error = is_array( $nested_record['error'] ?? null ) ? $nested_record['error'] : array();
 					if ( ! $continue_on_error ) {
-						return $nested_output;
+						return new \WP_Error(
+							self::string_value( $error['code'] ?? 'workflow_foreach_step_failed' ),
+							self::string_value( $error['message'] ?? 'foreach nested step failed.' ),
+							$error['data'] ?? null
+						);
 					}
 					$last_output = array(
-						'error' => array(
-							'code'    => $nested_output->get_error_code(),
-							'message' => $nested_output->get_error_message(),
-							'data'    => $nested_output->get_error_data(),
-						),
+						'error' => $error,
 					);
 				} else {
-					$last_output = is_array( $nested_output ) ? $nested_output : array( 'value' => $nested_output );
+					$last_output = $nested_record['output'];
 				}
 
-				$step_outputs[ $nested_id ]               = $last_output;
-				$iteration_context['steps'][ $nested_id ] = array( 'output' => $last_output );
+				$step_outputs[ $nested_id ] = $last_output;
 			}
 
 			$iterations[] = array(
@@ -515,6 +415,25 @@ class WP_Agent_Workflow_Runner {
 			'count'      => count( $iterations ),
 			'iterations' => $iterations,
 		);
+	}
+
+	/**
+	 * Return the filtered default handler map for nested step execution.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function default_step_handlers(): array {
+		/** @var array<string,mixed> $handlers */
+		$handlers = (array) apply_filters(
+			'wp_agent_workflow_step_handlers',
+			array(
+				'ability' => array( __CLASS__, 'default_ability_handler' ),
+				'agent'   => array( __CLASS__, 'default_agent_handler' ),
+				'foreach' => array( __CLASS__, 'default_foreach_handler' ),
+			)
+		);
+
+		return $handlers;
 	}
 
 	/**

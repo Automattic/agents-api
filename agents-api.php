@@ -218,6 +218,8 @@ require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-run-result
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-store.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-lifecycle.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-run-recorder.php';
+require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-run-context.php';
+require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-step-executor.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-runner.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-registry.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-action-scheduler-bridge.php';
