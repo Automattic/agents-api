@@ -47,7 +47,18 @@ $tools = array(
 			'type'       => 'object',
 			'required'   => array( 'text' ),
 			'properties' => array(
-				'text' => array( 'type' => 'string' ),
+				'text'       => array( 'type' => 'string' ),
+				'profile'    => array(
+					'type'        => 'object',
+					'properties'  => array(
+						'username' => array( 'type' => 'string' ),
+						'password' => array(
+							'type'        => 'string',
+							'x-sensitive' => true,
+						),
+					),
+				),
+				'session_id' => array( 'type' => 'string' ),
 			),
 		),
 		'executor'    => 'client',
@@ -61,6 +72,7 @@ $tools = array(
 
 echo "\n[1] Loop mediates tool calls through WP_Agent_Tool_Execution_Core when tool_executor is provided:\n";
 $executor->executed = array();
+$captured_events    = array();
 
 $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	array( array( 'role' => 'user', 'content' => 'summarize this' ) ),
@@ -69,19 +81,32 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 		return array(
 			'messages'   => $messages,
 			'content'    => 'I will summarize that for you.',
-				'tool_calls' => array(
-					array(
-						'id'         => 'call_123',
-						'name'       => 'client/summarize',
-						'parameters' => array( 'text' => 'hello world' ),
+			'tool_calls' => array(
+				array(
+					'id'         => 'call_123',
+					'name'       => 'client/summarize',
+					'parameters' => array(
+						'text'       => 'hello world',
+						'profile'    => array(
+							'username' => 'chef',
+							'password' => 'mise-en-place',
+						),
+						'session_id' => 'session-secret',
 					),
 				),
+			),
 		);
 	},
 	array(
 		'max_turns'         => 1,
 		'tool_executor'     => $executor,
 		'tool_declarations' => $tools,
+		'on_event'          => static function ( string $event, array $payload ) use ( &$captured_events ): void {
+			$captured_events[] = array(
+				'event'   => $event,
+				'payload' => $payload,
+			);
+		},
 	)
 );
 
@@ -91,9 +116,14 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	agents_api_smoke_assert_equals( 'client/summarize', $executor->executed[0]['tool_name'], 'tool executor received correct tool name', $failures, $passes );
 	agents_api_smoke_assert_equals( 'call_123', $executor->executed[0]['id'] ?? '', 'tool executor received provider tool call id', $failures, $passes );
 	agents_api_smoke_assert_equals( 'call_123', $executor->executed[0]['metadata']['tool_call_id'] ?? '', 'tool executor received provider tool call id in metadata', $failures, $passes );
+	agents_api_smoke_assert_equals( 'mise-en-place', $executor->executed[0]['parameters']['profile']['password'] ?? '', 'tool executor receives raw schema-sensitive parameters through explicit in-process call', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $result['tool_execution_results'] ), 'result contains one tool execution result', $failures, $passes );
 	agents_api_smoke_assert_equals( 'client/summarize', $result['tool_execution_results'][0]['tool_name'], 'tool execution result has correct tool name', $failures, $passes );
 	agents_api_smoke_assert_equals( 'call_123', $result['tool_execution_results'][0]['tool_call_id'] ?? '', 'tool execution result preserves provider tool call id', $failures, $passes );
+	agents_api_smoke_assert_equals( '[redacted]', $result['tool_execution_results'][0]['parameters']['profile']['password'] ?? '', 'tool execution result redacts schema-sensitive parameter paths', $failures, $passes );
+	agents_api_smoke_assert_equals( '[redacted]', $result['tool_execution_results'][0]['parameters']['session_id'] ?? '', 'tool execution result redacts non-obvious sensitive names', $failures, $passes );
+	agents_api_smoke_assert_equals( true, str_starts_with( $result['tool_execution_results'][0]['parameters_sha256'] ?? '', 'sha256:' ), 'tool execution result carries parameter hash', $failures, $passes );
+	agents_api_smoke_assert_equals( true, $result['tool_execution_results'][0]['parameters_redacted'] ?? false, 'tool execution result marks parameters redacted', $failures, $passes );
 	agents_api_smoke_assert_equals( 'HELLO WORLD', $result['tool_execution_results'][0]['result']['result']['summary'], 'tool execution result carries executor payload', $failures, $passes );
 	agents_api_smoke_assert_equals( 'repeatable', $result['tool_execution_results'][0]['runtime']['duplicate_policy'] ?? '', 'tool execution result exposes duplicate policy runtime metadata', $failures, $passes );
 	agents_api_smoke_assert_equals( 'progress', $result['tool_execution_results'][0]['result']['runtime']['completion_signal'] ?? '', 'tool result preserves completion signal runtime metadata', $failures, $passes );
@@ -106,7 +136,17 @@ agents_api_smoke_assert_equals( true, $result['tool_audit_events'][0]['success']
 agents_api_smoke_assert_equals( true, str_starts_with( $result['tool_audit_events'][0]['parameters_sha256'], 'sha256:' ), 'tool audit event hashes parameters', $failures, $passes );
 agents_api_smoke_assert_equals( true, ! array_key_exists( 'parameters', $result['tool_audit_events'][0] ), 'tool audit event omits raw parameters', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'tool_call', 'tool_result' ), array_column( $result['tool_events'], 'type' ), 'result contains canonical tool call/result events', $failures, $passes );
+agents_api_smoke_assert_equals( '[redacted]', $result['tool_events'][0]['metadata']['parameters']['profile']['password'] ?? '', 'canonical tool-call event redacts schema-sensitive parameters', $failures, $passes );
 agents_api_smoke_assert_equals( 'success', $result['tool_events'][1]['status'] ?? '', 'tool result event records status', $failures, $passes );
+$captured_tool_call_events = array_values(
+	array_filter(
+		$captured_events,
+		static function ( array $event ): bool {
+			return 'tool_call' === ( $event['event'] ?? '' );
+		}
+	)
+);
+agents_api_smoke_assert_equals( '[redacted]', $captured_tool_call_events[0]['payload']['parameters']['profile']['password'] ?? '', 'observer tool_call event redacts schema-sensitive parameters', $failures, $passes );
 
 // Messages should contain: user, assistant text, tool_call, tool_result.
 $message_count = count( $result['messages'] );
@@ -131,7 +171,9 @@ $tool_call_messages = array_values(
 	)
 );
 agents_api_smoke_assert_equals( 'call_123', $tool_call_messages[0]['metadata']['tool_call_id'] ?? '', 'tool call metadata preserves provider tool call id', $failures, $passes );
-agents_api_smoke_assert_equals( array( 'text' => 'hello world' ), $tool_call_messages[0]['payload']['parameters'] ?? array(), 'tool call payload preserves provider parameters for runtime replay', $failures, $passes );
+agents_api_smoke_assert_equals( '[redacted]', $tool_call_messages[0]['payload']['parameters']['profile']['password'] ?? '', 'tool call transcript redacts schema-sensitive parameter paths', $failures, $passes );
+agents_api_smoke_assert_equals( '[redacted]', $tool_call_messages[0]['payload']['parameters']['session_id'] ?? '', 'tool call transcript redacts sensitive-name fallback paths', $failures, $passes );
+agents_api_smoke_assert_equals( true, str_starts_with( $tool_call_messages[0]['metadata']['parameters_sha256'] ?? '', 'sha256:' ), 'tool call transcript carries parameter hash', $failures, $passes );
 
 echo "\n[Pre-tool mediator proceed/reject/replace decisions (#260):\n";
 

@@ -10,8 +10,9 @@ namespace AgentsAPI\AI;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Call;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core;
-use AgentsAPI\AI\Tools\WP_Agent_Tool_Result;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Executor;
+use AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters;
+use AgentsAPI\AI\Tools\WP_Agent_Tool_Result;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Lock;
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -569,33 +570,6 @@ class WP_Agent_Conversation_Loop {
 
 			$spin_signatures[] = new WP_Agent_Spin_Signature( $tool_name, $parameters_for_policy );
 
-			self::emit_event( $on_event, 'tool_call', array(
-				'turn'         => $turn,
-				'tool_name'    => $tool_name,
-				'tool_call_id' => $tool_call_id,
-				'parameters'   => $parameters,
-			) );
-			$tool_events[] = self::tool_event( 'tool_call', $tool_name, $tool_call_id, $turn, array( 'status' => 'called' ) );
-
-			// Add tool-call message to transcript. The structured info
-			// (tool_name + parameters) lives in metadata; `content` is
-			// intentionally empty so adapters that flatten the transcript
-			// to provider text don't end up echoing the human-readable
-			// "Calling X" debug string back to the model. When the model
-			// sees "Calling foo" as a previous assistant text turn, it
-			// pattern-matches and starts emitting that literal string as
-			// text instead of issuing real function-calls — a sneaky
-			// failure mode on long multi-tool conversations (Gemini Flash
-			// in particular). Adapters that want a user-facing label can
-			// derive it from `metadata.tool_name`.
-			$messages[] = WP_Agent_Message::toolCall(
-				'',
-				$tool_name,
-				$parameters,
-				$turn,
-				array( 'tool_call_id' => $tool_call_id )
-			);
-
 			// Prepare through WP_Agent_Tool_Execution_Core so callers can mediate
 			// with the same normalized tool-call shape the executor would receive.
 			$tool_context                 = $turn_context;
@@ -609,6 +583,33 @@ class WP_Agent_Conversation_Loop {
 			$prepared_tool_call           = self::array_or_empty( $prepared['tool_call'] ?? null );
 			$prepared_tool_def            = isset( $prepared['tool_def'] ) && is_array( $prepared['tool_def'] ) ? $prepared['tool_def'] : array();
 			$tool_definition              = self::associative_array_or_null( $prepared['tool_def'] ?? ( $declarations[ $tool_name ] ?? null ) );
+			$parameter_exposure           = self::tool_parameter_exposure( $parameters_for_policy, $tool_definition );
+
+			self::emit_event( $on_event, 'tool_call', array_merge(
+				array(
+					'turn'         => $turn,
+					'tool_name'    => $tool_name,
+					'tool_call_id' => $tool_call_id,
+				),
+				$parameter_exposure
+			) );
+			$tool_events[] = self::tool_event( 'tool_call', $tool_name, $tool_call_id, $turn, array_merge( array( 'status' => 'called' ), $parameter_exposure ) );
+
+			// Add tool-call message to transcript. The structured info lives in
+			// metadata/payload, but generic transcripts receive only the redacted
+			// parameter envelope; in-process mediators and executors still receive raw
+			// parameters explicitly through their private context.
+			$messages[] = WP_Agent_Message::toolCall(
+				'',
+				$tool_name,
+				$parameter_exposure['parameters'],
+				$turn,
+				array(
+					'tool_call_id'        => $tool_call_id,
+					'parameters_sha256'   => $parameter_exposure['parameters_sha256'],
+					'parameters_redacted' => true,
+				)
+			);
 			$mediator_complete            = false;
 			$mediation_context            = array(
 				'messages'               => $messages,
@@ -762,11 +763,13 @@ class WP_Agent_Conversation_Loop {
 
 			// Build the tool_execution_results entry.
 			$execution_result = array(
-				'tool_name'    => $tool_name,
-				'tool_call_id' => $tool_call_id,
-				'result'       => $exec_result,
-				'parameters'   => $parameters,
-				'turn_count'   => $turn,
+				'tool_name'           => $tool_name,
+				'tool_call_id'        => $tool_call_id,
+				'result'              => $exec_result,
+				'parameters'          => $parameter_exposure['parameters'],
+				'parameters_sha256'   => $parameter_exposure['parameters_sha256'],
+				'parameters_redacted' => true,
+				'turn_count'          => $turn,
 			);
 
 			$runtime = isset( $exec_result['runtime'] ) && is_array( $exec_result['runtime'] ) ? $exec_result['runtime'] : array();
@@ -784,7 +787,7 @@ class WP_Agent_Conversation_Loop {
 					'tool_declaration'  => $tool_definition,
 					'result'            => $exec_result,
 					'success'           => (bool) ( $exec_result['success'] ?? false ),
-					'parameters_sha256' => self::stable_sha256( $parameters_for_policy ),
+					'parameters_sha256' => $parameter_exposure['parameters_sha256'],
 				)
 			);
 			if ( ! empty( $diagnostics ) ) {
@@ -1849,9 +1852,9 @@ class WP_Agent_Conversation_Loop {
 	 * @return array<string, mixed> Audit event.
 	 */
 	private static function tool_audit_event( string $tool_name, string $tool_call_id, array $parameters, array $result, ?array $tool_definition, array $context, int $turn ): array {
-		$safe_parameters = self::redact_tool_audit_parameters( $parameters, $tool_name, $tool_definition, $context );
-		$metadata        = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
-		$error_type      = isset( $metadata['error_type'] ) && is_string( $metadata['error_type'] ) ? $metadata['error_type'] : '';
+		$parameter_exposure = self::tool_parameter_exposure( $parameters, $tool_definition, $tool_name, $context );
+		$metadata           = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
+		$error_type         = isset( $metadata['error_type'] ) && is_string( $metadata['error_type'] ) ? $metadata['error_type'] : '';
 
 		$audit_event = array(
 			'schema_version'      => 1,
@@ -1860,7 +1863,7 @@ class WP_Agent_Conversation_Loop {
 			'tool_name'           => $tool_name,
 			'tool_call_id'        => $tool_call_id,
 			'tool_source'         => is_array( $tool_definition ) && is_string( $tool_definition['source'] ?? null ) ? $tool_definition['source'] : '',
-			'parameters_sha256'   => self::stable_sha256( $safe_parameters ),
+			'parameters_sha256'   => $parameter_exposure['parameters_sha256'],
 			'parameters_redacted' => true,
 			'success'             => (bool) ( $result['success'] ?? false ),
 			'result_status'       => ! empty( $result['success'] ) ? 'success' : 'error',
@@ -1887,8 +1890,7 @@ class WP_Agent_Conversation_Loop {
 	 * @return array<string, mixed> Redacted parameters.
 	 */
 	private static function redact_tool_audit_parameters( array $parameters, string $tool_name, ?array $tool_definition, array $context ): array {
-		$redacted = self::redact_sensitive_values( $parameters );
-		$redacted = is_array( $redacted ) ? self::normalize_assoc_array( $redacted ) : array();
+		$redacted = WP_Agent_Tool_Parameters::redactedParameters( $parameters, is_array( $tool_definition ) ? $tool_definition : array() );
 
 		if ( function_exists( 'apply_filters' ) ) {
 			try {
@@ -1917,26 +1919,22 @@ class WP_Agent_Conversation_Loop {
 	}
 
 	/**
-	 * Redact obviously sensitive scalar fields in nested parameter arrays.
+	 * Build the generic observer-safe parameter envelope used by loop surfaces.
 	 *
-	 * @param mixed $value Value to redact.
-	 * @param string $key Current key.
-	 * @return mixed Redacted value.
+	 * @param array<string, mixed>      $parameters      Raw tool-call parameters.
+	 * @param array<string, mixed>|null $tool_definition Tool declaration, when available.
+	 * @param string                    $tool_name       Tool identifier for filters.
+	 * @param array<string, mixed>      $context         Turn context for filters.
+	 * @return array{parameters: array<string, mixed>, parameters_sha256: string, parameters_redacted: bool}
 	 */
-	private static function redact_sensitive_values( $value, string $key = '' ) {
-		if ( is_array( $value ) ) {
-			$redacted = array();
-			foreach ( $value as $item_key => $item_value ) {
-				$redacted[ $item_key ] = self::redact_sensitive_values( $item_value, is_string( $item_key ) ? $item_key : '' );
-			}
-			return $redacted;
-		}
+	private static function tool_parameter_exposure( array $parameters, ?array $tool_definition, string $tool_name = '', array $context = array() ): array {
+		$safe_parameters = self::redact_tool_audit_parameters( $parameters, $tool_name, $tool_definition, $context );
 
-		if ( '' !== $key && preg_match( '/(api[_-]?key|authorization|cookie|credential|nonce|password|secret|token)/i', $key ) ) {
-			return '[redacted]';
-		}
-
-		return $value;
+		return array(
+			'parameters'          => $safe_parameters,
+			'parameters_sha256'   => self::stable_sha256( $safe_parameters ),
+			'parameters_redacted' => true,
+		);
 	}
 
 	/**
