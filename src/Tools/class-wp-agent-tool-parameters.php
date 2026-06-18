@@ -147,11 +147,12 @@ class WP_Agent_Tool_Parameters {
 	 * @return array<string,mixed> Redacted parameters.
 	 */
 	public static function redactedParameters( array $tool_parameters, array $tool_definition = array() ): array {
-		$paths      = self::sensitiveParameterPaths( $tool_definition );
-		$redacted   = self::redactValue( $tool_parameters, '', $paths );
-		$normalized = is_array( $redacted ) ? self::stringKeyedArray( $redacted ) : array();
+		$paths           = self::sensitiveParameterPaths( $tool_definition );
+		$redacted        = self::redactValue( $tool_parameters, '', $paths );
+		$normalized      = is_array( $redacted ) ? self::stringKeyedArray( $redacted ) : array();
+		$normalized_keys = self::normalizeArrayKeys( $normalized );
 
-		return self::normalizeArrayKeys( $normalized );
+		return is_array( $normalized_keys ) ? self::stringKeyedArray( $normalized_keys ) : array();
 	}
 
 	/**

@@ -599,7 +599,7 @@ class WP_Agent_Conversation_Loop {
 			// metadata/payload, but generic transcripts receive only the redacted
 			// parameter envelope; in-process mediators and executors still receive raw
 			// parameters explicitly through their private context.
-			$messages[] = WP_Agent_Message::toolCall(
+			$messages[]        = WP_Agent_Message::toolCall(
 				'',
 				$tool_name,
 				$parameter_exposure['parameters'],
@@ -610,8 +610,8 @@ class WP_Agent_Conversation_Loop {
 					'parameters_redacted' => true,
 				)
 			);
-			$mediator_complete            = false;
-			$mediation_context            = array(
+			$mediator_complete = false;
+			$mediation_context = array(
 				'messages'               => $messages,
 				'raw_tool_call'          => $raw_call,
 				'prepared_tool_call'     => ! empty( $prepared['ready'] ) ? $prepared_tool_call : null,
@@ -624,7 +624,7 @@ class WP_Agent_Conversation_Loop {
 				'prior_tool_results'     => array_merge( $prior_tool_results, $tool_execution_results ),
 				'prior_mediated_results' => $tool_execution_results,
 			);
-			$mediator_decision            = self::pre_tool_mediation_decision(
+			$mediator_decision = self::pre_tool_mediation_decision(
 				$pre_tool_mediator,
 				$mediation_context
 			);
