@@ -14,13 +14,15 @@ defined( 'ABSPATH' ) || exit;
  */
 class WP_Agent_Chat_Run_Control {
 
-	public const STATUS_QUEUED     = 'queued';
-	public const STATUS_RUNNING    = 'running';
-	public const STATUS_CANCELLING = 'cancelling';
-	public const STATUS_CANCELLED  = 'cancelled';
-	public const STATUS_COMPLETED  = 'completed';
-	public const STATUS_FAILED     = 'failed';
-	private const OPTION_KEY       = 'agents_api_chat_run_control';
+	public const STATUS_QUEUED               = 'queued';
+	public const STATUS_RUNNING              = 'running';
+	public const STATUS_CANCELLING           = 'cancelling';
+	public const STATUS_CANCELLED            = 'cancelled';
+	public const STATUS_COMPLETED            = 'completed';
+	public const STATUS_FAILED               = 'failed';
+	public const STATUS_RUNTIME_TOOL_PENDING = 'runtime_tool_pending';
+	public const STATUS_APPROVAL_REQUIRED    = 'approval_required';
+	private const OPTION_KEY                 = 'agents_api_chat_run_control';
 
 	/** @return string[] */
 	public static function statuses(): array {
@@ -31,6 +33,8 @@ class WP_Agent_Chat_Run_Control {
 			self::STATUS_CANCELLED,
 			self::STATUS_COMPLETED,
 			self::STATUS_FAILED,
+			self::STATUS_RUNTIME_TOOL_PENDING,
+			self::STATUS_APPROVAL_REQUIRED,
 		);
 	}
 
