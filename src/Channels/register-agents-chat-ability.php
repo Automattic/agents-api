@@ -205,9 +205,23 @@ function agents_chat_dispatch( array $input ) {
 			WP_Agent_Chat_Run_Control::start_run( $result_run_id, $resolved_session_id, array( 'agent' => $agent ) );
 		}
 
-		$status = ! empty( $result['completed'] ) || ! array_key_exists( 'completed', $result )
-			? WP_Agent_Chat_Run_Control::STATUS_COMPLETED
-			: WP_Agent_Chat_Run_Control::STATUS_RUNNING;
+		$result_status = WP_Agent_Chat_Run_Control::normalize_status( $result['status'] ?? '' );
+		if ( WP_Agent_Chat_Run_Control::STATUS_FAILED === $result_status ) {
+			$status = WP_Agent_Chat_Run_Control::STATUS_FAILED;
+		} elseif ( ! empty( $result['completed'] ) || ! array_key_exists( 'completed', $result ) ) {
+			$status = WP_Agent_Chat_Run_Control::STATUS_COMPLETED;
+		} elseif ( in_array(
+			$result_status,
+			array(
+				WP_Agent_Chat_Run_Control::STATUS_RUNTIME_TOOL_PENDING,
+				WP_Agent_Chat_Run_Control::STATUS_APPROVAL_REQUIRED,
+			),
+			true
+		) ) {
+			$status = $result_status;
+		} else {
+			$status = WP_Agent_Chat_Run_Control::STATUS_RUNNING;
+		}
 		WP_Agent_Chat_Run_Control::finish_run( $result_run_id, $status );
 	}
 
