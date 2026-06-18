@@ -351,8 +351,8 @@ class WP_Agent_Workflow_Runner {
 					$index_as => $index,
 				)
 			);
-			$step_outputs = array();
-			$last_output  = null;
+			$step_outputs      = array();
+			$last_output       = null;
 
 			foreach ( $steps as $nested_step ) {
 				if ( ! is_array( $nested_step ) ) {
