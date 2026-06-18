@@ -15,6 +15,7 @@ defined( 'ABSPATH' ) || exit;
 class WP_Agent_Runtime_Tool_Request {
 
 	public const STATUS_PENDING = 'runtime_tool_pending';
+	public const STATUS_COMPLETED = 'runtime_tool_completed';
 	public const STATUS_TIMEOUT = 'runtime_tool_timeout';
 
 	/**

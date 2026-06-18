@@ -22,7 +22,12 @@ interface WP_Agent_Runtime_Tool_Request_Store {
 	public function create( array $request ): void;
 
 	/**
-	 * Read a pending runtime tool request by id.
+	 * Read a runtime tool request by id.
+	 *
+	 * Stores may retain terminal records after completion or timeout. Completed
+	 * records that can expose the prior submitted result should keep that
+	 * normalized result under `result` so duplicate submissions can return the
+	 * original completion without overwriting it.
 	 *
 	 * @param string $request_id Runtime tool request id.
 	 * @return array<string, mixed>|null Normalized request or null when absent.
@@ -31,6 +36,11 @@ interface WP_Agent_Runtime_Tool_Request_Store {
 
 	/**
 	 * Mark a pending request complete with a client-submitted result.
+	 *
+	 * Implementations should transition only pending records. Duplicate
+	 * completions for terminal records must leave existing store data unchanged;
+	 * callers use `get()` before this method to return a retained prior result or
+	 * reject the duplicate when no prior result is available.
 	 *
 	 * @param string               $request_id Runtime tool request id.
 	 * @param array<string, mixed> $result Normalized runtime tool result.
