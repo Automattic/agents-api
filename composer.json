@@ -76,6 +76,7 @@
       "php tests/conversation-loop-smoke.php",
       "php tests/provider-turn-adapter-smoke.php",
       "php tests/ability-tool-executor-smoke.php",
+      "php tests/tool-mediation-runner-smoke.php",
       "php tests/conversation-loop-tool-execution-smoke.php",
       "php tests/conversation-loop-completion-policy-smoke.php",
       "php tests/conversation-loop-transcript-persister-smoke.php",

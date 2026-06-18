@@ -291,22 +291,24 @@ class WP_Agent_Conversation_Loop {
 				// When mediation is enabled, the turn runner returns tool_calls
 				// and the loop handles execution. Otherwise, the caller-managed path applies.
 				if ( null !== $tool_executor && $mediation_enabled && isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ) {
-					$mediation_result = self::mediate_tool_calls(
+					$mediation_result = WP_Agent_Tool_Mediation_Runner::run(
+						$messages,
 						self::normalize_assoc_array( $result ),
 						$tool_executor,
 						$tool_declarations,
-						$completion_policy,
-						$turn_context,
-						$turn,
-						$on_event,
-						$budgets,
-						$failure_tracker,
-						$result_truncator,
-						$messages,
-						$pre_tool_mediator,
-						$tool_results,
-						$post_tool_diagnostics,
-						$runtime_tool_store
+						array(
+							'completion_policy'             => $completion_policy,
+							'turn_context'                  => $turn_context,
+							'turn'                          => $turn,
+							'on_event'                      => $on_event,
+							'budgets'                       => $budgets,
+							'identical_failure_tracker'     => $failure_tracker,
+							'tool_result_truncator'         => $result_truncator,
+							'pre_tool_mediator'             => $pre_tool_mediator,
+							'prior_tool_results'            => $tool_results,
+							'post_tool_result_diagnostics'  => $post_tool_diagnostics,
+							'runtime_tool_request_store'    => $runtime_tool_store,
+						)
 					);
 
 					$messages              = $mediation_result['messages'];
@@ -510,7 +512,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param WP_Agent_Runtime_Tool_Request_Store|null $runtime_tool_store Optional durable runtime tool request store.
 	 * @return array{messages: array<int, array<string, mixed>>, tool_execution_results: array<int, array<string, mixed>>, tool_events: array<int, array<string, mixed>>, tool_audit_events: array<int, array<string, mixed>>, events: array<int, array<string, mixed>>, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, runtime_tool_pending: array<string, mixed>|null, spin_signatures: array<int, WP_Agent_Spin_Signature>}
 	 */
-	private static function mediate_tool_calls(
+	public static function mediate_tool_calls(
 		array $result,
 		WP_Agent_Tool_Executor $executor,
 		array $declarations,
