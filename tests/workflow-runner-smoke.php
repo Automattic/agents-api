@@ -247,9 +247,10 @@ do_action( 'wp_abilities_api_init' );
 
 $spec = WP_Agent_Workflow_Spec::from_array(
 	array(
-		'id'    => 'demo/transform',
-		'inputs' => array( 'text' => array( 'type' => 'string', 'required' => true ) ),
-		'steps' => array(
+		'id'      => 'demo/transform',
+		'version' => '1.2.3',
+		'inputs'  => array( 'text' => array( 'type' => 'string', 'required' => true ) ),
+		'steps'  => array(
 			array(
 				'id'      => 'upper',
 				'type'    => 'ability',
@@ -277,6 +278,13 @@ smoke_assert( '<<HELLO>>', $result->get_steps()[1]['output']['wrapped'], 'step 2
 smoke_assert( '<<HELLO>>', $result->get_output()['last']['wrapped'], 'final output exposes last step', $failures, $passes );
 smoke_assert( true, count( $recorder->writes ) >= 3, 'recorder hit at least 3 times (start + per-step updates + final)', $failures, $passes );
 smoke_assert( 'start', $recorder->writes[0]['op'], 'recorder start fires first', $failures, $passes );
+smoke_assert( 'demo/uppercase', $result->get_steps()[0]['resolved_step']['ability'] ?? '', 'step record includes resolved step data', $failures, $passes );
+smoke_assert( 'HELLO', $result->get_steps()[1]['resolved_step']['args']['inner'] ?? '', 'resolved step data includes expanded bindings', $failures, $passes );
+smoke_assert( 'method', $result->get_steps()[0]['handler']['type'] ?? '', 'step record includes handler metadata', $failures, $passes );
+smoke_assert( 1, $result->get_replay_metadata()['run_record_schema_version'] ?? 0, 'replay metadata includes run record schema version', $failures, $passes );
+smoke_assert( '1.2.3', $result->get_replay_metadata()['workflow_spec_version'] ?? '', 'replay metadata includes workflow spec version', $failures, $passes );
+smoke_assert( true, 64 === strlen( $result->get_replay_metadata()['workflow_spec_hash'] ?? '' ), 'replay metadata includes sha256 spec hash', $failures, $passes );
+smoke_assert( $spec->to_array(), $result->get_replay_metadata()['workflow_spec_snapshot'] ?? array(), 'replay metadata includes workflow spec snapshot', $failures, $passes );
 
 // ─── Evidence refs stay first-class through results and recorders ─────
 
@@ -312,6 +320,7 @@ $last_write        = end( $evidence_recorder->writes );
 smoke_assert( $evidence_refs, $evidence_result->get_evidence_refs(), 'result exposes first-class evidence refs', $failures, $passes );
 smoke_assert( $evidence_result->to_array(), $roundtrip->to_array(), 'run result round-trips through to_array/from_array', $failures, $passes );
 smoke_assert( $evidence_refs, $last_write['result']['evidence_refs'] ?? array(), 'recorder update preserves evidence refs', $failures, $passes );
+smoke_assert( $spec->to_array(), $last_write['result']['replay']['workflow_spec_snapshot'] ?? array(), 'recorder update preserves replay metadata', $failures, $passes );
 smoke_assert( true, is_string( json_encode( $evidence_result->get_evidence_refs() ) ), 'evidence refs are JSON-serializable', $failures, $passes );
 
 // ─── Failed step short-circuits ───────────────────────────────────────

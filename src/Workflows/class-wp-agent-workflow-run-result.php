@@ -48,7 +48,8 @@ final class WP_Agent_Workflow_Run_Result {
 	 * @param int    $started_at  Unix timestamp.
 	 * @param int    $ended_at    Unix timestamp; 0 while running.
 	 * @param array<mixed>  $metadata      Free-form metadata for recorders / tracers (Langfuse trace ids, etc.).
-	 * @param array<mixed>  $evidence_refs Neutral JSON-serializable artifact/log references owned by the host.
+	 * @param array<mixed>  $evidence_refs   Neutral JSON-serializable artifact/log references owned by the host.
+	 * @param array<mixed>  $replay_metadata Deterministic metadata needed to replay or audit this run.
 	 */
 	public function __construct(
 		private string $run_id,
@@ -61,14 +62,15 @@ final class WP_Agent_Workflow_Run_Result {
 		private int $started_at,
 		private int $ended_at,
 		private array $metadata,
-		private array $evidence_refs = array()
+		private array $evidence_refs = array(),
+		private array $replay_metadata = array()
 	) {}
 
 	/**
 	 * @param array<mixed> $inputs
 	 */
 	public static function pending( string $run_id, string $workflow_id, array $inputs, int $started_at ): self {
-		return new self( $run_id, $workflow_id, self::STATUS_PENDING, $inputs, array(), array(), array(), $started_at, 0, array(), array() );
+		return new self( $run_id, $workflow_id, self::STATUS_PENDING, $inputs, array(), array(), array(), $started_at, 0, array(), array(), array() );
 	}
 
 	/**
@@ -91,7 +93,8 @@ final class WP_Agent_Workflow_Run_Result {
 			self::int_value( $value['started_at'] ?? 0 ),
 			self::int_value( $value['ended_at'] ?? 0 ),
 			self::array_value( $value['metadata'] ?? array() ),
-			self::array_value( $value['evidence_refs'] ?? array() )
+			self::array_value( $value['evidence_refs'] ?? array() ),
+			self::array_value( $value['replay'] ?? array() )
 		);
 	}
 
@@ -157,6 +160,13 @@ final class WP_Agent_Workflow_Run_Result {
 		return $this->evidence_refs;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
+	public function get_replay_metadata(): array {
+		return $this->replay_metadata;
+	}
+
 	public function is_succeeded(): bool {
 		return self::STATUS_SUCCEEDED === $this->status;
 	}
@@ -187,6 +197,7 @@ final class WP_Agent_Workflow_Run_Result {
 			self::int_patch_value( $patch, 'ended_at', $this->ended_at ),
 			self::array_patch_value( $patch, 'metadata', $this->metadata ),
 			self::array_patch_value( $patch, 'evidence_refs', $this->evidence_refs ),
+			self::array_patch_value( $patch, 'replay', $this->replay_metadata ),
 		);
 	}
 
@@ -249,6 +260,7 @@ final class WP_Agent_Workflow_Run_Result {
 			'ended_at'      => $this->ended_at,
 			'metadata'      => $this->metadata,
 			'evidence_refs' => $this->evidence_refs,
+			'replay'        => $this->replay_metadata,
 		);
 	}
 }
