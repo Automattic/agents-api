@@ -262,5 +262,4 @@ class WP_Agent_Run_Control {
 	private static function int_value( mixed $value ): int {
 		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (int) $value : 0;
 	}
-
 }

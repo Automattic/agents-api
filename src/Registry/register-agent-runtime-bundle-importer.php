@@ -226,8 +226,8 @@ add_filter(
 			$registry->unregister( $slug );
 		}
 
-		$config = is_array( $agent['agent_config'] ?? null ) ? $agent['agent_config'] : array();
-		$meta   = is_array( $agent['meta'] ?? null ) ? $agent['meta'] : array();
+		$config         = is_array( $agent['agent_config'] ?? null ) ? $agent['agent_config'] : array();
+		$meta           = is_array( $agent['meta'] ?? null ) ? $agent['meta'] : array();
 		$source_type    = $string_value( $bundle['source_type'] ?? null, $spec['source_type'] ?? null, 'runtime-agent-package' );
 		$source_package = $string_value( $bundle['source_package'] ?? null, $spec['source_package'] ?? null, $bundle['package_slug'] ?? null, $spec['package_slug'] ?? null, $bundle['bundle_slug'] ?? null );
 		$source_version = $string_value( $bundle['source_version'] ?? null, $spec['source_version'] ?? null, $bundle['package_version'] ?? null, $spec['package_version'] ?? null, $bundle['bundle_version'] ?? null );
