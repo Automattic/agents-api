@@ -15,6 +15,16 @@ defined( 'ABSPATH' ) || exit;
 class WP_Agent_Tool_Parameters {
 
 	/**
+	 * Context roots a tool declaration may explicitly bind from.
+	 */
+	private const ALLOWED_CONTEXT_SOURCES = array(
+		'context'         => true,
+		'client_context'  => true,
+		'caller_context'  => true,
+		'runtime_context' => true,
+	);
+
+	/**
 	 * Redacted placeholder used for sensitive parameter values.
 	 */
 	public const REDACTED_VALUE = '[redacted]';
@@ -46,11 +56,19 @@ class WP_Agent_Tool_Parameters {
 	public static function buildParameters( array $tool_parameters, array $context = array(), array $tool_definition = array() ): array {
 		$parameters = array();
 
-		foreach ( self::clientContextBindings( $tool_definition ) as $parameter_name => $context_key ) {
-			if ( ! array_key_exists( $context_key, $context ) ) {
+		foreach ( self::parameterDefaults( $tool_definition ) as $parameter_name => $value ) {
+			$parameters[ $parameter_name ] = $value;
+		}
+
+		foreach ( self::parameterBindings( $tool_definition ) as $parameter_name => $binding ) {
+			$resolved = self::resolveBindingValue( $binding, $context );
+			if ( ! $resolved['found'] ) {
+				if ( array_key_exists( 'default', $binding ) ) {
+					$parameters[ $parameter_name ] = $binding['default'];
+				}
 				continue;
 			}
-			$value = $context[ $context_key ];
+			$value = $resolved['value'];
 			if ( '' === $value || null === $value ) {
 				continue;
 			}
@@ -65,31 +83,214 @@ class WP_Agent_Tool_Parameters {
 	}
 
 	/**
-	 * Normalize the tool's `client_context_bindings` declaration into a
-	 * `parameter_name => context_key` map. Skips malformed entries silently
-	 * — the declaration is best-effort metadata, not validated input.
+	 * Normalize explicit parameter bindings, including legacy client-context bindings.
 	 *
 	 * @param array<mixed> $tool_definition Normalized tool declaration.
-	 * @return array<string, string>
+	 * @return array<string, array{source: string, path: string, sensitive?: bool, default?: mixed}>
 	 */
-	private static function clientContextBindings( array $tool_definition ): array {
-		$bindings = $tool_definition['client_context_bindings'] ?? array();
-		if ( ! is_array( $bindings ) ) {
-			return array();
+	public static function normalizeParameterBindings( array $tool_definition ): array {
+		$normalized = array();
+
+		if ( array_key_exists( 'client_context_bindings', $tool_definition ) ) {
+			$bindings = $tool_definition['client_context_bindings'];
+			if ( ! is_array( $bindings ) ) {
+				throw new \InvalidArgumentException( 'invalid_parameter_bindings: client_context_bindings' );
+			}
+
+			foreach ( $bindings as $parameter_name => $context_key ) {
+				if ( is_int( $parameter_name ) && is_string( $context_key ) && '' !== trim( $context_key ) ) {
+					$normalized[ $context_key ] = array(
+						'source' => 'context',
+						'path'   => trim( $context_key ),
+					);
+					continue;
+				}
+
+				if ( is_string( $parameter_name ) && '' !== trim( $parameter_name ) && is_string( $context_key ) && '' !== trim( $context_key ) ) {
+					$normalized[ trim( $parameter_name ) ] = array(
+						'source' => 'context',
+						'path'   => trim( $context_key ),
+					);
+					continue;
+				}
+
+				throw new \InvalidArgumentException( 'invalid_parameter_bindings: client_context_bindings' );
+			}
 		}
 
-		$normalized = array();
-		foreach ( $bindings as $parameter_name => $context_key ) {
-			if ( is_int( $parameter_name ) && is_string( $context_key ) && '' !== $context_key ) {
-				$normalized[ $context_key ] = $context_key;
-				continue;
+		if ( ! array_key_exists( 'parameter_bindings', $tool_definition ) ) {
+			return $normalized;
+		}
+
+		$bindings = $tool_definition['parameter_bindings'];
+		if ( ! is_array( $bindings ) ) {
+			throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_bindings' );
+		}
+
+		foreach ( $bindings as $parameter_name => $binding ) {
+			if ( ! is_string( $parameter_name ) || '' === trim( $parameter_name ) ) {
+				throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_bindings' );
 			}
-			if ( is_string( $parameter_name ) && '' !== $parameter_name && is_string( $context_key ) && '' !== $context_key ) {
-				$normalized[ $parameter_name ] = $context_key;
-			}
+
+			$normalized[ trim( $parameter_name ) ] = self::normalizeParameterBinding( $binding );
 		}
 
 		return $normalized;
+	}
+
+	/**
+	 * Normalize top-level parameter defaults.
+	 *
+	 * @param array<mixed> $tool_definition Normalized tool declaration.
+	 * @return array<string,mixed>
+	 */
+	public static function normalizeParameterDefaults( array $tool_definition ): array {
+		if ( ! array_key_exists( 'parameter_defaults', $tool_definition ) ) {
+			return array();
+		}
+
+		$defaults = $tool_definition['parameter_defaults'];
+		if ( ! is_array( $defaults ) ) {
+			throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_defaults' );
+		}
+
+		$normalized = array();
+		foreach ( $defaults as $parameter_name => $value ) {
+			if ( ! is_string( $parameter_name ) || '' === trim( $parameter_name ) || ! self::isJsonFriendlyValue( $value ) ) {
+				throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_defaults' );
+			}
+
+			$normalized[ trim( $parameter_name ) ] = $value;
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize parameter bindings from a declaration that has already been validated.
+	 *
+	 * @param array<mixed> $tool_definition Normalized tool declaration.
+	 * @return array<string, array{source: string, path: string, sensitive?: bool, default?: mixed}>
+	 */
+	private static function parameterBindings( array $tool_definition ): array {
+		try {
+			return self::normalizeParameterBindings( $tool_definition );
+		} catch ( \InvalidArgumentException $error ) {
+			unset( $error );
+			return array();
+		}
+	}
+
+	/**
+	 * Normalize parameter defaults from a declaration that has already been validated.
+	 *
+	 * @param array<mixed> $tool_definition Normalized tool declaration.
+	 * @return array<string,mixed>
+	 */
+	private static function parameterDefaults( array $tool_definition ): array {
+		try {
+			return self::normalizeParameterDefaults( $tool_definition );
+		} catch ( \InvalidArgumentException $error ) {
+			unset( $error );
+			return array();
+		}
+	}
+
+	/**
+	 * Normalize one parameter binding declaration.
+	 *
+	 * @param mixed $binding Raw binding declaration.
+	 * @return array{source: string, path: string, sensitive?: bool, default?: mixed}
+	 */
+	private static function normalizeParameterBinding( $binding ): array {
+		if ( is_string( $binding ) ) {
+			return self::normalizeBindingSourcePath( $binding );
+		}
+
+		if ( ! is_array( $binding ) ) {
+			throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_bindings' );
+		}
+
+		$source = $binding['source'] ?? '';
+		$path   = $binding['path'] ?? '';
+		if ( ! is_string( $source ) || ! is_string( $path ) || '' === trim( $path ) || ! isset( self::ALLOWED_CONTEXT_SOURCES[ $source ] ) ) {
+			throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_bindings' );
+		}
+
+		$normalized = array(
+			'source' => $source,
+			'path'   => trim( $path ),
+		);
+
+		if ( array_key_exists( 'sensitive', $binding ) ) {
+			if ( ! is_bool( $binding['sensitive'] ) ) {
+				throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_bindings' );
+			}
+			if ( $binding['sensitive'] ) {
+				$normalized['sensitive'] = true;
+			}
+		}
+
+		if ( array_key_exists( 'default', $binding ) ) {
+			if ( ! self::isJsonFriendlyValue( $binding['default'] ) ) {
+				throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_bindings' );
+			}
+			$normalized['default'] = $binding['default'];
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize the compact `source.dot.path` binding form.
+	 *
+	 * @param string $binding Binding expression.
+	 * @return array{source: string, path: string}
+	 */
+	private static function normalizeBindingSourcePath( string $binding ): array {
+		$binding = trim( $binding );
+		$parts   = explode( '.', $binding, 2 );
+		if ( 2 !== count( $parts ) || ! isset( self::ALLOWED_CONTEXT_SOURCES[ $parts[0] ] ) || '' === trim( $parts[1] ) ) {
+			throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_bindings' );
+		}
+
+		return array(
+			'source' => $parts[0],
+			'path'   => trim( $parts[1] ),
+		);
+	}
+
+	/**
+	 * Resolve a binding value from runtime context.
+	 *
+	 * @param array{source: string, path: string} $binding Binding declaration.
+	 * @param array<mixed>                       $context Runtime context.
+	 * @return array{found: bool, value: mixed}
+	 */
+	private static function resolveBindingValue( array $binding, array $context ): array {
+		$source = $binding['source'];
+		$value  = 'context' === $source ? $context : ( $context[ $source ] ?? null );
+		if ( ! is_array( $value ) ) {
+			return array(
+				'found' => false,
+				'value' => null,
+			);
+		}
+
+		foreach ( explode( '.', $binding['path'] ) as $segment ) {
+			if ( '' === $segment || ! is_array( $value ) || ! array_key_exists( $segment, $value ) ) {
+				return array(
+					'found' => false,
+					'value' => null,
+				);
+			}
+			$value = $value[ $segment ];
+		}
+
+		return array(
+			'found' => true,
+			'value' => $value,
+		);
 	}
 
 	/**
@@ -165,6 +366,11 @@ class WP_Agent_Tool_Parameters {
 		$paths = array();
 		self::addSensitivePaths( $paths, $tool_definition['sensitive_parameters'] ?? array() );
 		self::addSensitivePaths( $paths, $tool_definition['parameter_sensitivity'] ?? array() );
+		foreach ( self::parameterBindings( $tool_definition ) as $parameter_name => $binding ) {
+			if ( ! empty( $binding['sensitive'] ) ) {
+				$paths[ $parameter_name ] = true;
+			}
+		}
 
 		$schema = isset( $tool_definition['parameters'] ) && is_array( $tool_definition['parameters'] )
 			? $tool_definition['parameters']
@@ -329,6 +535,30 @@ class WP_Agent_Tool_Parameters {
 	private static function lastPathSegment( string $path ): string {
 		$parts = explode( '.', $path );
 		return (string) end( $parts );
+	}
+
+	/**
+	 * Determine whether a value can be safely carried in JSON-friendly metadata.
+	 *
+	 * @param mixed $value Value to inspect.
+	 * @return bool
+	 */
+	private static function isJsonFriendlyValue( $value ): bool {
+		if ( null === $value || is_string( $value ) || is_int( $value ) || is_float( $value ) || is_bool( $value ) ) {
+			return true;
+		}
+
+		if ( ! is_array( $value ) ) {
+			return false;
+		}
+
+		foreach ( $value as $item ) {
+			if ( ! self::isJsonFriendlyValue( $item ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**
