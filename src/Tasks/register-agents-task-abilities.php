@@ -481,7 +481,7 @@ function agents_task_current_user_owns_session( array $input ): bool {
 	}
 
 	$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
-	return $user_id > 0 && (string) $user_id === agents_task_string( $owner['key'] ?? '' );
+	return 0 < $user_id && agents_task_string( $owner['key'] ?? '' ) === (string) $user_id;
 }
 
 function agents_task_optional_string( mixed $value ): ?string {
@@ -680,8 +680,8 @@ function agents_task_run_id_input_schema(): array {
 		'type'       => 'object',
 		'required'   => array( 'session_id', 'run_id' ),
 		'properties' => array(
-			'session_id' => array( 'type' => 'string' ),
-			'run_id'     => array( 'type' => 'string' ),
+			'session_id'    => array( 'type' => 'string' ),
+			'run_id'        => array( 'type' => 'string' ),
 			'session_owner' => agents_task_session_owner_schema(),
 		),
 	);

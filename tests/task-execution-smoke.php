@@ -117,9 +117,9 @@ do_action( 'wp_abilities_api_init' );
 
 $GLOBALS['__agents_api_smoke_caps']    = array( 'read' => true );
 $GLOBALS['__agents_api_smoke_user_id'] = 123;
-$task_read_permission                  = $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Tasks\AGENTS_GET_TASK_RUN_ABILITY ]['permission_callback'];
-$task_run_permission                   = $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Tasks\AGENTS_RUN_TASK_ABILITY ]['permission_callback'];
-$task_cancel_permission                = $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Tasks\AGENTS_CANCEL_TASK_RUN_ABILITY ]['permission_callback'];
+$task_read_permission                  = 'AgentsAPI\AI\Tasks\agents_task_read_permission';
+$task_run_permission                   = 'AgentsAPI\AI\Tasks\agents_run_task_permission';
+$task_cancel_permission                = 'AgentsAPI\AI\Tasks\agents_cancel_task_run_permission';
 
 agents_api_smoke_assert_equals( true, call_user_func( $task_read_permission, array( 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'read-only user can read task run status', $failures, $passes );
 agents_api_smoke_assert_equals( false, call_user_func( $task_run_permission, array( 'task' => array( 'id' => 'task-1' ), 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'read-only user cannot queue task run by id alone', $failures, $passes );

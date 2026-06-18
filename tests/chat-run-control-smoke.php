@@ -88,9 +88,9 @@ do_action( 'wp_abilities_api_init' );
 
 $GLOBALS['__agents_api_smoke_caps']    = array( 'read' => true );
 $GLOBALS['__agents_api_smoke_user_id'] = 123;
-$chat_read_permission                  = $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_GET_CHAT_RUN_ABILITY ]['permission_callback'];
-$chat_cancel_permission                = $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_CANCEL_CHAT_RUN_ABILITY ]['permission_callback'];
-$chat_queue_permission                 = $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\Channels\AGENTS_QUEUE_CHAT_MESSAGE_ABILITY ]['permission_callback'];
+$chat_read_permission                  = 'AgentsAPI\AI\Channels\agents_chat_run_read_permission';
+$chat_cancel_permission                = 'AgentsAPI\AI\Channels\agents_chat_run_cancel_permission';
+$chat_queue_permission                 = 'AgentsAPI\AI\Channels\agents_chat_run_enqueue_permission';
 
 agents_api_smoke_assert_equals( true, call_user_func( $chat_read_permission, array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) ), 'read-only user can read chat run status', $failures, $passes );
 agents_api_smoke_assert_equals( false, call_user_func( $chat_cancel_permission, array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) ), 'read-only user cannot cancel chat run by id alone', $failures, $passes );

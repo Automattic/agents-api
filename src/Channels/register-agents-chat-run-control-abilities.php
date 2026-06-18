@@ -234,7 +234,7 @@ function agents_chat_run_cancel_permission( array $input ): bool {
 /** @param array<string, mixed> $input Ability input. */
 function agents_chat_run_write_permission( array $input ): bool {
 	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
-	$agent = sanitize_title( agents_chat_run_control_string( $input['agent'] ?? '' ) );
+	$agent   = sanitize_title( agents_chat_run_control_string( $input['agent'] ?? '' ) );
 	if ( '' !== $agent && class_exists( '\WP_Agent_Access' ) && class_exists( '\WP_Agent_Access_Grant' ) ) {
 		$allowed = $allowed || \WP_Agent_Access::can_current_principal_access_agent(
 			$agent,
@@ -254,7 +254,7 @@ function agents_chat_run_current_user_owns_session( array $input ): bool {
 	}
 
 	$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
-	return $user_id > 0 && (string) $user_id === agents_chat_run_control_string( $owner['key'] ?? '' );
+	return 0 < $user_id && agents_chat_run_control_string( $owner['key'] ?? '' ) === (string) $user_id;
 }
 
 /**
