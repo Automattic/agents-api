@@ -48,6 +48,7 @@ require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-typ
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifacts-registry.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-status.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-hasher.php';
+require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-workspace-preload-artifact.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-installed-artifact.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-update-plan.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-update-planner.php';
@@ -84,6 +85,7 @@ require_once AGENTS_API_PATH . 'src/Registry/class-wp-agents-registry.php';
 require_once AGENTS_API_PATH . 'src/Registry/register-agents.php';
 require_once AGENTS_API_PATH . 'src/Registry/register-agent-runtime-bundle-importer.php';
 require_once AGENTS_API_PATH . 'src/Packages/register-agent-package-artifacts.php';
+add_action( 'wp_agent_package_artifacts_init', array( 'WP_Agent_Workspace_Preload_Artifact', 'register' ) );
 require_once AGENTS_API_PATH . 'src/Workspace/class-wp-agent-workspace-scope.php';
 require_once AGENTS_API_PATH . 'src/Workspace/class-wp-agent-safe-execution-workspace.php';
 require_once AGENTS_API_PATH . 'src/Workspace/register-safe-execution-workspace.php';
