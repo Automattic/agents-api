@@ -331,6 +331,35 @@ smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $result2->get_status(
 smoke_assert( 1, count( $result2->get_steps() ), 'short-circuit stops at first failure', $failures, $passes );
 smoke_assert( 'demo_bang', $result2->get_error()['code'], 'top-level error carries failed step code', $failures, $passes );
 
+// ─── Throwing step handlers become failed terminal run records ─────────
+
+add_filter( 'wp_agent_workflow_known_step_types', static fn( $types ) => array_merge( (array) $types, array( 'throwing' ) ) );
+
+$throwing_spec = WP_Agent_Workflow_Spec::from_array(
+	array(
+		'id'    => 'demo/throwing-handler',
+		'steps' => array(
+			array( 'id' => 'explode', 'type' => 'throwing' ),
+		),
+	)
+);
+
+$throwing_recorder = new Capture_Recorder();
+$throwing_result   = ( new WP_Agent_Workflow_Runner(
+	$throwing_recorder,
+	array(
+		'throwing' => static function (): array {
+			throw new \RuntimeException( 'handler exploded' );
+		},
+	)
+) )->run( $throwing_spec );
+$throwing_last     = end( $throwing_recorder->writes );
+
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $throwing_result->get_status(), 'handler exception fails run', $failures, $passes );
+smoke_assert( 'handler_exception', $throwing_result->get_error()['code'] ?? '', 'handler exception uses expected error code', $failures, $passes );
+smoke_assert( 'handler_exception', $throwing_result->get_steps()[0]['error']['error_type'] ?? '', 'handler exception records expected error_type', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $throwing_last['status'] ?? '', 'recorder receives terminal failed update for handler exception', $failures, $passes );
+
 // ─── continue_on_error keeps running ─────────────────────────────────
 
 $result3 = ( new WP_Agent_Workflow_Runner( null ) )->run( $bad_spec, array(), array( 'continue_on_error' => true ) );
