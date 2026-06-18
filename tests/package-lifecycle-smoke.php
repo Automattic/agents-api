@@ -195,6 +195,15 @@ add_action(
 		wp_register_agent_package_artifact_type(
 			'example/prompt',
 			array(
+				'example_artifacts' => array(
+					array(
+						'slug'        => 'workspace-context',
+						'label'       => 'Workspace Context',
+						'description' => 'Package-relative context artifact for a host-owned workspace preload flow.',
+						'source'      => 'artifacts/workspace/context.md',
+						'requires'    => array( 'workspace.context' ),
+					),
+				),
 				'validate_callback' => static function ( WP_Agent_Package_Artifact $artifact, array $context ): array {
 					return array( $artifact->get_slug(), $context['phase'] ?? '' );
 				},
@@ -205,5 +214,28 @@ add_action(
 do_action( 'init' );
 $callback_result = WP_Agent_Package_Artifact_Callbacks::validate( $artifact, array( 'phase' => 'install' ) );
 agents_api_smoke_assert_equals( array( 'welcome', 'install' ), $callback_result, 'validate callback receives artifact and context', $failures, $passes );
+
+$registered_type   = wp_get_agent_package_artifact_type( 'example/prompt' );
+$example_artifacts = null === $registered_type ? array() : $registered_type->get_example_artifacts();
+agents_api_smoke_assert_equals( 'artifacts/workspace/context.md', $example_artifacts[0]['source'] ?? '', 'artifact type examples normalize package-relative workspace context sources', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'workspace.context' ), $example_artifacts[0]['requires'] ?? array(), 'artifact type examples normalize neutral workspace requirements', $failures, $passes );
+
+$invalid_example_rejected = false;
+try {
+	new WP_Agent_Package_Artifact_Type(
+		'example/context',
+		array(
+			'example_artifacts' => array(
+				array(
+					'slug'   => 'escape-package-root',
+					'source' => '../outside.md',
+				),
+			),
+		)
+	);
+} catch ( InvalidArgumentException $e ) {
+	$invalid_example_rejected = true;
+}
+agents_api_smoke_assert_equals( true, $invalid_example_rejected, 'artifact type examples reject package-escaping sources', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API package lifecycle', $failures, $passes );
