@@ -33,8 +33,7 @@ if ( ! class_exists( 'WP_Error' ) ) {
 
 if ( ! function_exists( 'current_user_can' ) ) {
 	function current_user_can( string $capability ): bool {
-		unset( $capability );
-		return true;
+		return ! empty( $GLOBALS['__agents_api_smoke_caps'][ $capability ] );
 	}
 } else {
 	add_filter(
@@ -44,6 +43,12 @@ if ( ! function_exists( 'current_user_can' ) ) {
 			return $allcaps;
 		}
 	);
+}
+
+if ( ! function_exists( 'get_current_user_id' ) ) {
+	function get_current_user_id(): int {
+		return (int) ( $GLOBALS['__agents_api_smoke_user_id'] ?? 0 );
+	}
 }
 
 if ( ! function_exists( 'wp_has_ability_category' ) ) {
@@ -109,6 +114,21 @@ agents_api_smoke_require_module();
 
 do_action( 'wp_abilities_api_categories_init' );
 do_action( 'wp_abilities_api_init' );
+
+$GLOBALS['__agents_api_smoke_caps']    = array( 'read' => true );
+$GLOBALS['__agents_api_smoke_user_id'] = 123;
+$task_read_permission                  = 'AgentsAPI\AI\Tasks\agents_task_read_permission';
+$task_run_permission                   = 'AgentsAPI\AI\Tasks\agents_run_task_permission';
+$task_cancel_permission                = 'AgentsAPI\AI\Tasks\agents_cancel_task_run_permission';
+
+agents_api_smoke_assert_equals( true, call_user_func( $task_read_permission, array( 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'read-only user can read task run status', $failures, $passes );
+agents_api_smoke_assert_equals( false, call_user_func( $task_run_permission, array( 'task' => array( 'id' => 'task-1' ), 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'read-only user cannot queue task run by id alone', $failures, $passes );
+agents_api_smoke_assert_equals( false, call_user_func( $task_cancel_permission, array( 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'read-only user cannot cancel task run by id alone', $failures, $passes );
+agents_api_smoke_assert_equals( true, call_user_func( $task_run_permission, array( 'task' => array( 'id' => 'task-1' ), 'session_id' => 'task-session-1', 'run_id' => 'task-run-1', 'session_owner' => array( 'type' => 'user', 'key' => '123' ) ) ), 'session owner can queue task run', $failures, $passes );
+agents_api_smoke_assert_equals( true, call_user_func( $task_cancel_permission, array( 'session_id' => 'task-session-1', 'run_id' => 'task-run-1', 'session_owner' => array( 'type' => 'user', 'key' => '123' ) ) ), 'session owner can cancel task run', $failures, $passes );
+$GLOBALS['__agents_api_smoke_caps']['manage_options'] = true;
+agents_api_smoke_assert_equals( true, call_user_func( $task_run_permission, array( 'task' => array( 'id' => 'task-1' ), 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'manager can queue task run without owner claim', $failures, $passes );
+agents_api_smoke_assert_equals( true, call_user_func( $task_cancel_permission, array( 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'manager can cancel task run without owner claim', $failures, $passes );
 
 agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Tasks\AGENTS_RUN_TASK_ABILITY ), 'run-task ability registers', $failures, $passes );
 agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Tasks\AGENTS_LIST_EXECUTION_TARGETS_ABILITY ), 'list-execution-targets ability registers', $failures, $passes );

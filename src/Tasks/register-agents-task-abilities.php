@@ -41,6 +41,7 @@ add_action(
 				'input_schema'     => agents_task_input_schema(),
 				'output_schema'    => agents_task_result_schema(),
 				'execute_callback' => __NAMESPACE__ . '\\agents_run_task',
+				'permission'       => __NAMESPACE__ . '\\agents_run_task_permission',
 				'annotations'      => array(
 					'destructive' => true,
 					'idempotent'  => false,
@@ -52,6 +53,7 @@ add_action(
 				'input_schema'     => agents_list_execution_targets_input_schema(),
 				'output_schema'    => agents_list_execution_targets_output_schema(),
 				'execute_callback' => __NAMESPACE__ . '\\agents_list_execution_targets',
+				'permission'       => __NAMESPACE__ . '\\agents_task_read_permission',
 				'annotations'      => array( 'idempotent' => true ),
 			),
 			AGENTS_GET_TASK_RUN_ABILITY           => array(
@@ -60,6 +62,7 @@ add_action(
 				'input_schema'     => agents_task_run_id_input_schema(),
 				'output_schema'    => agents_task_result_schema(),
 				'execute_callback' => __NAMESPACE__ . '\\agents_get_task_run',
+				'permission'       => __NAMESPACE__ . '\\agents_task_read_permission',
 				'annotations'      => array( 'idempotent' => true ),
 			),
 			AGENTS_CANCEL_TASK_RUN_ABILITY        => array(
@@ -68,6 +71,7 @@ add_action(
 				'input_schema'     => agents_task_run_id_input_schema(),
 				'output_schema'    => agents_cancel_task_run_output_schema(),
 				'execute_callback' => __NAMESPACE__ . '\\agents_cancel_task_run',
+				'permission'       => __NAMESPACE__ . '\\agents_cancel_task_run_permission',
 				'annotations'      => array(
 					'destructive' => true,
 					'idempotent'  => true,
@@ -89,7 +93,7 @@ add_action(
 					'input_schema'        => $args['input_schema'],
 					'output_schema'       => $args['output_schema'],
 					'execute_callback'    => $args['execute_callback'],
-					'permission_callback' => __NAMESPACE__ . '\\agents_task_permission',
+					'permission_callback' => $args['permission'],
 					'meta'                => array(
 						'show_in_rest' => true,
 						'annotations'  => $args['annotations'],
@@ -443,9 +447,41 @@ function agents_task_normalize_run_control_result( $result, string $error_code )
 /**
  * @param array<string,mixed> $input Ability input.
  */
-function agents_task_permission( array $input ): bool {
+function agents_task_read_permission( array $input ): bool {
 	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'read' ) : false;
+	$allowed = (bool) apply_filters( 'agents_task_read_permission', $allowed, $input );
 	return (bool) apply_filters( 'agents_task_permission', $allowed, $input );
+}
+
+/** @param array<string,mixed> $input Ability input. */
+function agents_run_task_permission( array $input ): bool {
+	$allowed = agents_task_write_permission( $input );
+	$allowed = (bool) apply_filters( 'agents_run_task_permission', $allowed, $input );
+	return (bool) apply_filters( 'agents_task_permission', $allowed, $input );
+}
+
+/** @param array<string,mixed> $input Ability input. */
+function agents_cancel_task_run_permission( array $input ): bool {
+	$allowed = agents_task_write_permission( $input );
+	$allowed = (bool) apply_filters( 'agents_cancel_task_run_permission', $allowed, $input );
+	return (bool) apply_filters( 'agents_task_permission', $allowed, $input );
+}
+
+/** @param array<string,mixed> $input Ability input. */
+function agents_task_write_permission( array $input ): bool {
+	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
+	return $allowed || agents_task_current_user_owns_session( $input );
+}
+
+/** @param array<string,mixed> $input Ability input. */
+function agents_task_current_user_owns_session( array $input ): bool {
+	$owner = is_array( $input['session_owner'] ?? null ) ? agents_task_string_keyed_array( $input['session_owner'] ) : array();
+	if ( 'user' !== agents_task_string( $owner['type'] ?? '' ) ) {
+		return false;
+	}
+
+	$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
+	return 0 < $user_id && agents_task_string( $owner['key'] ?? '' ) === (string) $user_id;
 }
 
 function agents_task_optional_string( mixed $value ): ?string {
@@ -508,6 +544,7 @@ function agents_task_input_schema(): array {
 			'instructions'   => array( 'type' => 'string' ),
 			'session_id'     => array( 'type' => array( 'string', 'null' ) ),
 			'run_id'         => array( 'type' => array( 'string', 'null' ) ),
+			'session_owner'  => agents_task_session_owner_schema(),
 			'placement'      => agents_task_placement_schema(),
 			'client_context' => array( 'type' => 'object' ),
 			'metadata'       => array( 'type' => 'object' ),
@@ -643,8 +680,20 @@ function agents_task_run_id_input_schema(): array {
 		'type'       => 'object',
 		'required'   => array( 'session_id', 'run_id' ),
 		'properties' => array(
-			'session_id' => array( 'type' => 'string' ),
-			'run_id'     => array( 'type' => 'string' ),
+			'session_id'    => array( 'type' => 'string' ),
+			'run_id'        => array( 'type' => 'string' ),
+			'session_owner' => agents_task_session_owner_schema(),
+		),
+	);
+}
+
+/** @return array<string,mixed> */
+function agents_task_session_owner_schema(): array {
+	return array(
+		'type'       => array( 'object', 'null' ),
+		'properties' => array(
+			'type' => array( 'type' => 'string' ),
+			'key'  => array( 'type' => 'string' ),
 		),
 	);
 }
