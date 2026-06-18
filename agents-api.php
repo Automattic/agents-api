@@ -120,6 +120,7 @@ require_once AGENTS_API_PATH . 'src/Transcripts/register-agents-conversation-ses
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-effective-agent-resolver.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-compaction-item.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-compaction-conservation.php';
+require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-parameters.php';
 require_once AGENTS_API_PATH . 'src/Abilities/class-wp-agent-ability-dispatcher.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-declaration.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-runtime-tool-policy.php';
@@ -165,7 +166,6 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-chat-run-control.php'
 require_once AGENTS_API_PATH . 'src/Tasks/class-wp-agent-task-run-control.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-loop.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-call.php';
-require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-parameters.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-result.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-executor.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-ability-tool-executor.php';
