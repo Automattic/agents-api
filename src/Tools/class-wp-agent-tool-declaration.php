@@ -125,7 +125,7 @@ class WP_Agent_Tool_Declaration {
 			$normalized['runtime'] = $runtime;
 		}
 
-		$normalized = array_merge( $normalized, self::normalizeExtensionFields( $declaration ) );
+		$normalized = array_merge( $normalized, self::normalizeExtensionFields( $declaration ), self::normalizeParameterBindingFields( $declaration ) );
 
 		return $normalized;
 	}
@@ -207,7 +207,7 @@ class WP_Agent_Tool_Declaration {
 			$normalized['runtime'] = $runtime;
 		}
 
-		$normalized = array_merge( $normalized, self::normalizeExtensionFields( $declaration ) );
+		$normalized = array_merge( $normalized, self::normalizeExtensionFields( $declaration ), self::normalizeParameterBindingFields( $declaration ) );
 
 		return $normalized;
 	}
@@ -268,6 +268,8 @@ class WP_Agent_Tool_Declaration {
 			$errors[] = 'runtime';
 		}
 
+		$errors = array_merge( $errors, self::validateParameterBindingFields( $declaration ) );
+
 		return array_values( array_unique( $errors ) );
 	}
 
@@ -321,6 +323,8 @@ class WP_Agent_Tool_Declaration {
 		if ( isset( $declaration['runtime'] ) && ! is_array( $declaration['runtime'] ) ) {
 			$errors[] = 'runtime';
 		}
+
+		$errors = array_merge( $errors, self::validateParameterBindingFields( $declaration ) );
 
 		return array_values( array_unique( $errors ) );
 	}
@@ -400,6 +404,9 @@ class WP_Agent_Tool_Declaration {
 			if ( ! is_string( $key ) || isset( self::CANONICAL_FIELDS[ $key ] ) ) {
 				continue;
 			}
+			if ( 'parameter_bindings' === $key || 'parameter_defaults' === $key ) {
+				continue;
+			}
 
 			$normalized_value = self::normalizeRuntimeMetadataValue( $value );
 			if ( null !== $normalized_value ) {
@@ -408,6 +415,53 @@ class WP_Agent_Tool_Declaration {
 		}
 
 		return $extensions;
+	}
+
+	/**
+	 * Validate parameter binding/default metadata.
+	 *
+	 * @param array<mixed> $declaration Raw declaration.
+	 * @return string[] Machine-readable invalid field names.
+	 */
+	private static function validateParameterBindingFields( array $declaration ): array {
+		$errors = array();
+
+		try {
+			WP_Agent_Tool_Parameters::normalizeParameterBindings( $declaration );
+		} catch ( \InvalidArgumentException $error ) {
+			unset( $error );
+			$errors[] = array_key_exists( 'parameter_bindings', $declaration ) ? 'parameter_bindings' : 'client_context_bindings';
+		}
+
+		try {
+			WP_Agent_Tool_Parameters::normalizeParameterDefaults( $declaration );
+		} catch ( \InvalidArgumentException $error ) {
+			unset( $error );
+			$errors[] = 'parameter_defaults';
+		}
+
+		return $errors;
+	}
+
+	/**
+	 * Normalize validated parameter binding/default metadata.
+	 *
+	 * @param array<mixed> $declaration Raw declaration.
+	 * @return array<string,mixed> Normalized parameter metadata.
+	 */
+	private static function normalizeParameterBindingFields( array $declaration ): array {
+		$fields   = array();
+		$bindings = WP_Agent_Tool_Parameters::normalizeParameterBindings( $declaration );
+		if ( ! empty( $bindings ) ) {
+			$fields['parameter_bindings'] = $bindings;
+		}
+
+		$defaults = WP_Agent_Tool_Parameters::normalizeParameterDefaults( $declaration );
+		if ( ! empty( $defaults ) ) {
+			$fields['parameter_defaults'] = $defaults;
+		}
+
+		return $fields;
 	}
 
 	/**

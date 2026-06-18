@@ -78,6 +78,7 @@ agents_api_smoke_assert_equals( 'host', $server_declaration['executor'], 'server
 agents_api_smoke_assert_equals( 'run', $server_declaration['scope'], 'server declaration defaults to run scope', $failures, $passes );
 agents_api_smoke_assert_equals( array(), $server_declaration['parameters'], 'server declaration defaults missing parameters to an array', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'query' => 'search_query' ), $server_declaration['client_context_bindings'] ?? null, 'server declaration preserves generic execution extension fields', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'source' => 'context', 'path' => 'search_query' ), $server_declaration['parameter_bindings']['query'] ?? null, 'legacy client context bindings normalize into parameter bindings', $failures, $passes );
 agents_api_smoke_assert_equals( 'control_plane', $server_declaration['runtime']['capability_scope'] ?? '', 'server declaration preserves product-neutral runtime metadata', $failures, $passes );
 
 $host_declaration = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(
@@ -230,6 +231,82 @@ $renamed = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
 );
 agents_api_smoke_assert_equals( 'whatsapp:+1', $renamed['user_phone'] ?? null, 'binding can rename context_key → parameter_name', $failures, $passes );
 agents_api_smoke_assert_equals( false, array_key_exists( 'sender_id', $renamed ), 'rename binding does not also expose the source key', $failures, $passes );
+
+$dot_path_definition = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForServer(
+	array(
+		'name'               => 'ability/inspect_selection',
+		'source'             => 'abilities',
+		'description'        => 'Inspect selected client state.',
+		'parameter_bindings' => array(
+			'post_id' => 'client_context.selection.post_id',
+		),
+	)
+);
+$dot_path_parameters = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array(),
+	array(
+		'client_context' => array(
+			'selection' => array(
+				'post_id' => 42,
+			),
+		),
+	),
+	$dot_path_definition
+);
+agents_api_smoke_assert_equals( 42, $dot_path_parameters['post_id'] ?? null, 'parameter bindings read values from allowed dot-path context sources', $failures, $passes );
+
+$default_definition = array(
+	'parameter_defaults' => array( 'query' => 'top-level-default' ),
+	'parameter_bindings' => array(
+		'query' => array(
+			'source'  => 'client_context',
+			'path'    => 'search.query',
+			'default' => 'binding-default',
+		),
+	),
+);
+$defaulted = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters( array(), array(), $default_definition );
+agents_api_smoke_assert_equals( 'binding-default', $defaulted['query'] ?? null, 'binding defaults override top-level parameter defaults', $failures, $passes );
+$default_context = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array(),
+	array( 'client_context' => array( 'search' => array( 'query' => 'bound-context' ) ) ),
+	$default_definition
+);
+agents_api_smoke_assert_equals( 'bound-context', $default_context['query'] ?? null, 'context bindings override defaults', $failures, $passes );
+$default_explicit = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array( 'query' => 'explicit' ),
+	array( 'client_context' => array( 'search' => array( 'query' => 'bound-context' ) ) ),
+	$default_definition
+);
+agents_api_smoke_assert_equals( 'explicit', $default_explicit['query'] ?? null, 'explicit runtime parameters override bindings and defaults', $failures, $passes );
+
+$malformed_rejected = false;
+try {
+	AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForServer(
+		array(
+			'name'               => 'ability/bad_binding',
+			'source'             => 'abilities',
+			'description'        => 'Bad binding.',
+			'parameter_bindings' => array(
+				'query' => array( 'source' => 'ambient', 'path' => 'query' ),
+			),
+		)
+	);
+} catch ( InvalidArgumentException $error ) {
+	$malformed_rejected = false !== strpos( $error->getMessage(), 'parameter_bindings' );
+}
+agents_api_smoke_assert_equals( true, $malformed_rejected, 'malformed parameter bindings are rejected with field-scoped errors', $failures, $passes );
+
+$sensitive_definition = array(
+	'parameter_bindings' => array(
+		'api_key' => array(
+			'source'    => 'client_context',
+			'path'      => 'secrets.api_key',
+			'sensitive' => true,
+		),
+	),
+);
+agents_api_smoke_assert_equals( array( 'api_key' => AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::REDACTED_VALUE ), AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::redactedParameters( array( 'api_key' => 'secret' ), $sensitive_definition ), 'sensitive parameter binding metadata participates in redaction', $failures, $passes );
 
 $undeclared = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
 	array(),
