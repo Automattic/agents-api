@@ -297,17 +297,17 @@ class WP_Agent_Conversation_Loop {
 						$tool_executor,
 						$tool_declarations,
 						array(
-							'completion_policy'             => $completion_policy,
-							'turn_context'                  => $turn_context,
-							'turn'                          => $turn,
-							'on_event'                      => $on_event,
-							'budgets'                       => $budgets,
-							'identical_failure_tracker'     => $failure_tracker,
-							'tool_result_truncator'         => $result_truncator,
-							'pre_tool_mediator'             => $pre_tool_mediator,
-							'prior_tool_results'            => $tool_results,
-							'post_tool_result_diagnostics'  => $post_tool_diagnostics,
-							'runtime_tool_request_store'    => $runtime_tool_store,
+							'completion_policy'            => $completion_policy,
+							'turn_context'                 => $turn_context,
+							'turn'                         => $turn,
+							'on_event'                     => $on_event,
+							'budgets'                      => $budgets,
+							'identical_failure_tracker'    => $failure_tracker,
+							'tool_result_truncator'        => $result_truncator,
+							'pre_tool_mediator'            => $pre_tool_mediator,
+							'prior_tool_results'           => $tool_results,
+							'post_tool_result_diagnostics' => $post_tool_diagnostics,
+							'runtime_tool_request_store'   => $runtime_tool_store,
 						)
 					);
 

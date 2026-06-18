@@ -29,13 +29,13 @@ class WP_Agent_Tool_Mediation_Runner {
 	 * @return array{messages: array<int, array<string, mixed>>, tool_execution_results: array<int, array<string, mixed>>, tool_events: array<int, array<string, mixed>>, tool_audit_events: array<int, array<string, mixed>>, events: array<int, array<string, mixed>>, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, runtime_tool_pending: array<string, mixed>|null, spin_signatures: array<int, WP_Agent_Spin_Signature>}
 	 */
 	public static function run( array $transcript, array $turn_result, WP_Agent_Tool_Executor $executor, array $declarations, array $options = array() ): array {
-		$turn_context        = isset( $options['turn_context'] ) && is_array( $options['turn_context'] ) ? self::normalize_assoc_array( $options['turn_context'] ) : array();
-		$turn                = isset( $options['turn'] ) && is_int( $options['turn'] ) ? $options['turn'] : 1;
-		$completion_policy   = $options['completion_policy'] ?? null;
-		$failure_tracker     = $options['identical_failure_tracker'] ?? null;
-		$result_truncator    = $options['tool_result_truncator'] ?? null;
-		$runtime_tool_store  = $options['runtime_tool_request_store'] ?? null;
-		$budgets             = self::normalize_budgets( $options['budgets'] ?? array() );
+		$turn_context       = isset( $options['turn_context'] ) && is_array( $options['turn_context'] ) ? self::normalize_assoc_array( $options['turn_context'] ) : array();
+		$turn               = isset( $options['turn'] ) && is_int( $options['turn'] ) ? $options['turn'] : 1;
+		$completion_policy  = $options['completion_policy'] ?? null;
+		$failure_tracker    = $options['identical_failure_tracker'] ?? null;
+		$result_truncator   = $options['tool_result_truncator'] ?? null;
+		$runtime_tool_store = $options['runtime_tool_request_store'] ?? null;
+		$budgets            = self::normalize_budgets( $options['budgets'] ?? array() );
 
 		return WP_Agent_Conversation_Loop::mediate_tool_calls(
 			self::normalize_assoc_array( $turn_result ),
