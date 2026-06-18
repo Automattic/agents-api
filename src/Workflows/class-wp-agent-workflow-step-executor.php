@@ -1,0 +1,109 @@
+<?php
+/**
+ * Deterministic execution for a single workflow step.
+ *
+ * @package AgentsAPI
+ */
+
+namespace AgentsAPI\AI\Workflows;
+
+defined( 'ABSPATH' ) || exit;
+
+class WP_Agent_Workflow_Step_Executor {
+
+	/**
+	 * @param array<string,mixed> $handlers Step type handler candidates.
+	 */
+	public function __construct( private array $handlers ) {}
+
+	/**
+	 * Resolve, dispatch, normalize, and record one step.
+	 *
+	 * @param array<mixed> $step    Raw workflow step.
+	 * @param WP_Agent_Workflow_Run_Context $context Mutable run context.
+	 * @return array<mixed> Step record.
+	 */
+	public function execute( array $step, WP_Agent_Workflow_Run_Context $context ): array {
+		$step_id  = self::string_value( $step['id'] ?? null );
+		$type     = self::string_value( $step['type'] ?? null );
+		$start_ts = time();
+		$record   = array(
+			'id'         => $step_id,
+			'type'       => $type,
+			'status'     => WP_Agent_Workflow_Run_Result::STATUS_RUNNING,
+			'output'     => null,
+			'started_at' => $start_ts,
+			'ended_at'   => 0,
+		);
+
+		$handler = $this->handlers[ $type ] ?? null;
+		if ( ! is_callable( $handler ) ) {
+			$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_SKIPPED;
+			$record['ended_at'] = time();
+			$record['error']    = array(
+				'code'    => 'no_step_handler',
+				'message' => sprintf( 'no handler registered for step type `%s`', $type ),
+			);
+
+			return $record;
+		}
+
+		$context_array = $context->to_array();
+		$resolved      = 'foreach' === $type
+			? self::expand_foreach_outer_step( $step, $context_array )
+			: WP_Agent_Workflow_Bindings::expand( $step, $context_array );
+		$step_output   = call_user_func( $handler, $resolved, $context_array );
+
+		if ( is_wp_error( $step_output ) ) {
+			$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_FAILED;
+			$record['ended_at'] = time();
+			$record['error']    = array(
+				'code'    => $step_output->get_error_code(),
+				'message' => $step_output->get_error_message(),
+				'data'    => $step_output->get_error_data(),
+			);
+
+			return $record;
+		}
+
+		$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED;
+		$record['output']   = is_array( $step_output ) ? $step_output : array( 'value' => $step_output );
+		$record['ended_at'] = time();
+		$context->set_step_output( $step_id, $record['output'] );
+
+		return $record;
+	}
+
+	/**
+	 * Expand a foreach step's outer fields while preserving nested step templates.
+	 *
+	 * @param array<mixed> $step
+	 * @param array<mixed> $context
+	 * @return array<mixed>
+	 */
+	private static function expand_foreach_outer_step( array $step, array $context ): array {
+		$nested = $step['steps'] ?? array();
+		unset( $step['steps'] );
+
+		$expanded = WP_Agent_Workflow_Bindings::expand( $step, $context );
+		if ( ! is_array( $expanded ) ) {
+			$expanded = array();
+		}
+		$expanded['steps'] = $nested;
+
+		return $expanded;
+	}
+
+	/**
+	 * Return a string only for values that can safely be represented as text.
+	 *
+	 * @param mixed $value Value to normalize.
+	 */
+	private static function string_value( $value ): string {
+		if ( is_scalar( $value ) || $value instanceof \Stringable ) {
+			return (string) $value;
+		}
+
+		return '';
+	}
+}

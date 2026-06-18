@@ -168,6 +168,8 @@ require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-result.php
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-store.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-recorder.php';
 require_once __DIR__ . '/../src/Abilities/class-wp-agent-ability-dispatcher.php';
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-context.php';
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-executor.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-runner.php';
 
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
@@ -227,6 +229,13 @@ workflow_runner_smoke_register_ability(
 	static function ( array $input ): \WP_Error {
 		unset( $input );
 		return new \WP_Error( 'demo_bang', 'something broke' );
+	}
+);
+workflow_runner_smoke_register_ability(
+	'agents/chat',
+	static function ( array $input ): \WP_Error {
+		unset( $input );
+		return new \WP_Error( 'agent_dispatch_failed', 'agent step failed' );
 	}
 );
 
@@ -327,6 +336,27 @@ smoke_assert( 'demo_bang', $result2->get_error()['code'], 'top-level error carri
 $result3 = ( new WP_Agent_Workflow_Runner( null ) )->run( $bad_spec, array(), array( 'continue_on_error' => true ) );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $result3->get_status(), 'continue_on_error still surfaces failure', $failures, $passes );
 smoke_assert( 2, count( $result3->get_steps() ), 'continue_on_error executes the second step too', $failures, $passes );
+
+// ─── Agent step errors use the shared ability dispatcher path ─────────
+
+$agent_error_spec = WP_Agent_Workflow_Spec::from_array(
+	array(
+		'id'    => 'demo/agent-error',
+		'steps' => array(
+			array(
+				'id'      => 'ask_agent',
+				'type'    => 'agent',
+				'agent'   => 'demo-agent',
+				'message' => 'please fail',
+			),
+		),
+	)
+);
+
+$agent_error_result = ( new WP_Agent_Workflow_Runner( null ) )->run( $agent_error_spec );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $agent_error_result->get_status(), 'agent step error fails run', $failures, $passes );
+smoke_assert( 'agent_dispatch_failed', $agent_error_result->get_error()['code'], 'agent step surfaces dispatcher error code', $failures, $passes );
+smoke_assert( 'ask_agent', $agent_error_result->get_steps()[0]['id'] ?? '', 'agent step error records step id', $failures, $passes );
 
 // ─── Required-input check ────────────────────────────────────────────
 
