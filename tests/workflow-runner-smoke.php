@@ -99,6 +99,8 @@ function workflow_runner_smoke_register_ability( string $name, \Closure $handler
 	$GLOBALS['__abilities'][ $name ] = new WP_Ability(
 		$name,
 		array(
+			'label'            => $name,
+			'description'      => 'Workflow runner smoke stub.',
 			'input_schema'     => array( 'type' => 'object' ),
 			'execute_callback' => $handler,
 		)
