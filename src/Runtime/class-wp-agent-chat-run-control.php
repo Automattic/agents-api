@@ -22,6 +22,9 @@ class WP_Agent_Chat_Run_Control {
 	public const STATUS_FAILED               = 'failed';
 	public const STATUS_RUNTIME_TOOL_PENDING = 'runtime_tool_pending';
 	public const STATUS_APPROVAL_REQUIRED    = 'approval_required';
+	public const STATUS_BUDGET_EXCEEDED      = 'budget_exceeded';
+	public const STATUS_STALLED              = 'stalled';
+	public const STATUS_INTERRUPTED          = 'interrupted';
 	private const OPTION_KEY                 = 'agents_api_chat_run_control';
 
 	/** @return string[] */
@@ -35,6 +38,9 @@ class WP_Agent_Chat_Run_Control {
 			self::STATUS_FAILED,
 			self::STATUS_RUNTIME_TOOL_PENDING,
 			self::STATUS_APPROVAL_REQUIRED,
+			self::STATUS_BUDGET_EXCEEDED,
+			self::STATUS_STALLED,
+			self::STATUS_INTERRUPTED,
 		);
 	}
 

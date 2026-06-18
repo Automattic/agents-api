@@ -463,10 +463,7 @@ class WP_Agent_Conversation_Loop {
 			$final_result = self::normalize_conversation_result( $final_result_data );
 
 			if ( '' !== $run_id && '' !== $lock_session_id ) {
-				WP_Agent_Chat_Run_Control::finish_run(
-					$run_id,
-					null !== $interrupted ? WP_Agent_Chat_Run_Control::STATUS_CANCELLED : WP_Agent_Chat_Run_Control::STATUS_COMPLETED
-				);
+				WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Run_Outcome::run_control_status( $final_result ) );
 			}
 
 			self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
