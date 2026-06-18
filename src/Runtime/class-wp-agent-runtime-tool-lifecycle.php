@@ -43,32 +43,82 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 	 */
 	public static function submit_result( WP_Agent_Runtime_Tool_Request_Store $store, array $result, $continuation = null, array $context = array() ): array {
 		$request_id = self::request_id_from_payload( $result, 'invalid_runtime_tool_result: request_id must be a non-empty string' );
-		$request    = $store->get( $request_id );
+		$completion = self::complete_if_pending( $store, $request_id, $result );
 
-		if ( null === $request ) {
-			throw new \InvalidArgumentException( 'invalid_runtime_tool_result: request not found' );
+		$normalized_request = $completion['request'];
+		$normalized_result  = $completion['result'];
+		$is_duplicate       = $completion['duplicate'];
+
+		if ( ! $is_duplicate ) {
+			do_action( 'agents_api_runtime_tool_result_submitted', $normalized_request, $normalized_result, $context );
 		}
-
-		$normalized_request = WP_Agent_Runtime_Tool_Request::normalize( $request );
-		$normalized_result  = WP_Agent_Runtime_Tool_Result::from_request( $normalized_request, $result );
-		$store->complete( self::string_field( $normalized_request, 'request_id' ), $normalized_result );
-
-		do_action( 'agents_api_runtime_tool_result_submitted', $normalized_request, $normalized_result, $context );
 
 		$envelope = array(
 			'status'                => WP_Agent_Runtime_Tool_Result::STATUS_SUBMITTED,
 			'request'               => $normalized_request,
 			'result'                => $normalized_result,
+			'duplicate'             => $is_duplicate,
 			'tool_result_message'   => self::tool_result_message_payload( $normalized_request, $normalized_result ),
 			'tool_execution_result' => self::tool_execution_result_payload( $normalized_request, $normalized_result ),
 			'continuation_result'   => null,
 		);
 
-		if ( null !== $continuation ) {
+		if ( null !== $continuation && ! $is_duplicate ) {
 			$envelope['continuation_result'] = self::resume( $continuation, $normalized_request, $normalized_result, $context );
 		}
 
 		return $envelope;
+	}
+
+	/**
+	 * Complete a pending runtime tool request once, or return a retained result.
+	 *
+	 * Duplicate submissions for terminal records are idempotent only when the
+	 * store can return the original submitted result from `get()` under `result`.
+	 * Otherwise the duplicate is refused before any overwrite can occur.
+	 *
+	 * @param WP_Agent_Runtime_Tool_Request_Store $store Request store.
+	 * @param string                              $request_id Runtime tool request id.
+	 * @param array<string, mixed>                $result Raw submitted result.
+	 * @return array{request: array<string, mixed>, result: array<string, mixed>, completed: bool, duplicate: bool} Completion envelope.
+	 */
+	public static function complete_if_pending( WP_Agent_Runtime_Tool_Request_Store $store, string $request_id, array $result ): array {
+		$request_id = trim( $request_id );
+		if ( '' === $request_id ) {
+			throw new \InvalidArgumentException( 'invalid_runtime_tool_result: request_id must be a non-empty string' );
+		}
+
+		$request = $store->get( $request_id );
+		if ( null === $request ) {
+			throw new \InvalidArgumentException( 'invalid_runtime_tool_result: request not found' );
+		}
+
+		$status             = is_string( $request['status'] ?? null ) ? $request['status'] : '';
+		$normalized_request = WP_Agent_Runtime_Tool_Request::normalize( $request );
+
+		if ( '' !== $status && WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== $status ) {
+			$stored_result = self::stored_completion_result( $request, $normalized_request );
+			if ( null === $stored_result ) {
+				throw new \InvalidArgumentException( 'invalid_runtime_tool_result: request is not pending' );
+			}
+
+			return array(
+				'request'   => $normalized_request,
+				'result'    => $stored_result,
+				'completed' => false,
+				'duplicate' => true,
+			);
+		}
+
+		$normalized_result = WP_Agent_Runtime_Tool_Result::from_request( $normalized_request, $result );
+		$store->complete( self::string_field( $normalized_request, 'request_id' ), $normalized_result );
+
+		return array(
+			'request'   => $normalized_request,
+			'result'    => $normalized_result,
+			'completed' => true,
+			'duplicate' => false,
+		);
 	}
 
 	/**
@@ -165,6 +215,24 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 		do_action( 'agents_api_runtime_tool_request_resumed', $request, $result, $resume_result, $context );
 
 		return $resume_result;
+	}
+
+	/**
+	 * Return a retained normalized completion result from a terminal request.
+	 *
+	 * @param array<string, mixed> $request Raw stored request.
+	 * @param array<string, mixed> $normalized_request Normalized request identity.
+	 * @return array<string, mixed>|null Normalized prior result when available.
+	 */
+	private static function stored_completion_result( array $request, array $normalized_request ): ?array {
+		if ( ! isset( $request['result'] ) || ! is_array( $request['result'] ) ) {
+			return null;
+		}
+
+		/** @var array<string, mixed> $stored_result */
+		$stored_result = $request['result'];
+
+		return WP_Agent_Runtime_Tool_Result::from_request( $normalized_request, $stored_result );
 	}
 
 	/**

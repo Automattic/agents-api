@@ -526,5 +526,54 @@ smoke_assert( 2, $result8->get_output()['last']['count'] ?? 0, 'foreach reports 
 smoke_assert( 10, $result8->get_output()['last']['iterations'][0]['last']['id'] ?? 0, 'foreach first iteration receives scoped item', $failures, $passes );
 smoke_assert( 1, $result8->get_output()['last']['iterations'][1]['last']['points'] ?? 0, 'foreach second iteration receives scoped item', $failures, $passes );
 
+// ─── foreach reuses constructor-injected handlers for nested steps ────
+
+add_filter( 'wp_agent_workflow_known_step_types', static fn( $types ) => array_merge( (array) $types, array( 'custom_nested' ) ) );
+
+$custom_foreach_spec = WP_Agent_Workflow_Spec::from_array(
+	array(
+		'id'    => 'demo/foreach-custom-handler',
+		'inputs' => array(
+			'items' => array( 'type' => 'array', 'required' => true ),
+		),
+		'steps' => array(
+			array(
+				'id'    => 'custom_each',
+				'type'  => 'foreach',
+				'items' => '${inputs.items}',
+				'as'    => 'item',
+				'steps' => array(
+					array(
+						'id'     => 'custom',
+						'type'   => 'custom_nested',
+						'prefix' => 'item',
+						'value'  => '${vars.item.id}',
+					),
+				),
+			),
+		),
+	)
+);
+
+$custom_result = ( new WP_Agent_Workflow_Runner(
+	null,
+	array(
+		'custom_nested' => static function ( array $step, array $context ): array {
+			unset( $context );
+			return array( 'label' => (string) ( $step['prefix'] ?? '' ) . '-' . (string) ( $step['value'] ?? '' ) );
+		},
+	)
+) )->run(
+	$custom_foreach_spec,
+	array(
+		'items' => array(
+			array( 'id' => 42 ),
+		),
+	)
+);
+
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $custom_result->get_status(), 'foreach nested custom handler run succeeds', $failures, $passes );
+smoke_assert( 'item-42', $custom_result->get_output()['last']['iterations'][0]['last']['label'] ?? '', 'foreach nested step uses constructor-injected handler', $failures, $passes );
+
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
