@@ -136,8 +136,8 @@ if ( ! class_exists( 'WP_Agent_Workspace_Preload_Artifact' ) ) {
 		 * @return array<string,mixed>|WP_Error Normalized contract or validation error.
 		 */
 		private static function normalized_from_context( WP_Agent_Package_Artifact $artifact, array $context ) {
-			$target  = is_array( $context['target'] ?? null ) ? $context['target'] : array();
-			$payload = is_array( $context['payload'] ?? null ) ? $context['payload'] : ( is_array( $target['payload'] ?? null ) ? $target['payload'] : array() );
+			$target  = is_array( $context['target'] ?? null ) ? self::string_keyed_array( $context['target'] ) : array();
+			$payload = is_array( $context['payload'] ?? null ) ? self::string_keyed_array( $context['payload'] ) : ( is_array( $target['payload'] ?? null ) ? self::string_keyed_array( $target['payload'] ) : array() );
 			if ( array() === $payload ) {
 				return new WP_Error( 'wp_agent_workspace_preload_payload_missing', 'Workspace preload artifact callbacks require a payload array.', array( 'artifact' => $artifact->get_slug() ) );
 			}
