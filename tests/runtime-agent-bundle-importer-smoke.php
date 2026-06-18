@@ -54,11 +54,7 @@ $bundle = array(
 		'agent_slug'   => 'studio-web-static-site-generator',
 		'agent_name'   => 'Static Site Generator',
 		'agent_config' => array(
-			'studio_web'         => array( 'prompt' => 'Cook a site.' ),
-			'datamachine_bundle' => array(
-				'bundle_slug'    => 'studio-web-static-site-generator',
-				'bundle_version' => '1.2.3',
-			),
+			'studio_web' => array( 'prompt' => 'Cook a site.' ),
 		),
 	),
 );

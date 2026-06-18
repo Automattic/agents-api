@@ -228,12 +228,14 @@ add_filter(
 
 		$config = is_array( $agent['agent_config'] ?? null ) ? $agent['agent_config'] : array();
 		$meta   = is_array( $agent['meta'] ?? null ) ? $agent['meta'] : array();
-		if ( is_array( $config['datamachine_bundle'] ?? null ) ) {
+		$bundle_slug    = $string_value( $bundle['bundle_slug'] ?? null );
+		$bundle_version = $string_value( $bundle['bundle_version'] ?? null );
+		if ( '' !== $bundle_slug || '' !== $bundle_version ) {
 			$meta = array_merge(
 				array(
 					'source_type'    => 'runtime-agent-bundle',
-					'source_package' => $string_value( $config['datamachine_bundle']['bundle_slug'] ?? null, $bundle['bundle_slug'] ?? null ),
-					'source_version' => $string_value( $config['datamachine_bundle']['bundle_version'] ?? null, $bundle['bundle_version'] ?? null ),
+					'source_package' => $bundle_slug,
+					'source_version' => $bundle_version,
 				),
 				$meta
 			);
