@@ -49,6 +49,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Session and persistence contracts where they are provider-neutral.
 - Retrieved context authority vocabulary, context item shape, and conflict resolution contracts.
 - Workflow spec value object, structural validator, in-memory registry, abstract runner with `ability` and `agent` step types, `Store` and `Run_Recorder` interfaces, optional Action Scheduler bridge, and three canonical abilities (`agents/run-workflow`, `agents/validate-workflow`, `agents/describe-workflow`).
+- Runtime package workflow execution request/result contracts and the canonical dispatcher ability (`agents/run-runtime-package`) for consumer-owned package materialization and execution adapters.
 
 ## What Agents API Does Not Own
 
@@ -58,6 +59,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Product CLI commands beyond generic substrate needs.
 - Public REST controllers in v1 unless they are separately designed.
 - Product runner adapters that assemble prompts, choose concrete tools, materialize storage, or decide product policy.
+- Concrete runtime package materialization, package source checkout, sandbox provisioning, provider mapping, run polling, or evidence artifact upload. The package run contract only defines the request/result envelope and dispatcher seam.
 - Concrete tool execution adapters, prompt assembly policy, or product storage/materialization policy.
 - Product-specific consent UX, support routing, escalation targets, or transcript-sharing policy.
 - Concrete memory retrieval, file projection, convention-path writing, or filesystem layout adapters.
@@ -188,6 +190,8 @@ wp_register_agent(
 - `AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator`
 - `AgentsAPI\AI\WP_Agent_Conversation_Result`
 - `AgentsAPI\AI\WP_Agent_Chat_Run_Control`
+- `AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Request`
+- `AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Result`
 - `AgentsAPI\AI\WP_Agent_Conversation_Loop`
 - `WP_Agent_Consent_Policy`
 - `WP_Agent_Default_Consent_Policy`
@@ -214,6 +218,7 @@ wp_register_agent(
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Result`
 - `agents/ability-search` / `agents/ability-call`
+- `agents/run-runtime-package`
 - `agents/chat` / `agents/get-chat-run` / `agents/cancel-chat-run` / `agents/queue-chat-message`
 - `AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action`
