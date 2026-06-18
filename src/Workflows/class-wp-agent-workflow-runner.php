@@ -40,11 +40,14 @@
 namespace AgentsAPI\AI\Workflows;
 
 use AgentsAPI\AI\Abilities\WP_Agent_Ability_Dispatcher;
+use AgentsAPI\AI\WP_Agent_Run_Control;
 use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
 
 class WP_Agent_Workflow_Runner {
+
+	public const RUN_CONTROL_STORE = 'agents_api_workflow_run_control';
 
 	/**
 	 * @var array<string,mixed> Step type → handler candidate. Each callable handler
@@ -148,6 +151,15 @@ class WP_Agent_Workflow_Runner {
 			}
 		}
 
+		WP_Agent_Run_Control::start_run(
+			self::RUN_CONTROL_STORE,
+			$result->get_run_id(),
+			array(
+				'workflow_id' => $spec->get_id(),
+				'metadata'    => $metadata,
+			)
+		);
+
 		// Validate inputs against the spec's input declarations.
 		$input_error = self::validate_inputs( $spec, $inputs );
 		if ( null !== $input_error ) {
@@ -161,10 +173,19 @@ class WP_Agent_Workflow_Runner {
 			if ( $this->recorder ) {
 				$this->recorder->update( $terminal );
 			}
+			WP_Agent_Run_Control::finish_run( self::RUN_CONTROL_STORE, $result->get_run_id(), WP_Agent_Run_Control::STATUS_FAILED );
 			return $terminal;
 		}
 
-		$context  = WP_Agent_Workflow_Run_Context::from_inputs( $inputs );
+		$context  = new WP_Agent_Workflow_Run_Context(
+			array(
+				'inputs'              => $inputs,
+				'steps'               => array(),
+				'vars'                => array(),
+				'_workflow_run_id'    => $result->get_run_id(),
+				'_workflow_store_key' => self::RUN_CONTROL_STORE,
+			)
+		);
 		$executor = new WP_Agent_Workflow_Step_Executor( $this->step_handlers );
 
 		$step_records      = array();
@@ -173,8 +194,24 @@ class WP_Agent_Workflow_Runner {
 		$failure_error     = array();
 
 		foreach ( $spec->get_steps() as $step ) {
+			if ( self::is_cancel_requested( $result->get_run_id() ) ) {
+				$result = self::cancelled_result( $result, $step_records );
+				if ( $this->recorder ) {
+					$this->recorder->update( $result );
+				}
+				return $result;
+			}
+
 			$record         = $executor->execute( $step, $context );
 			$step_records[] = $record;
+
+			if ( self::is_cancel_requested( $result->get_run_id() ) ) {
+				$result = self::cancelled_result( $result, $step_records );
+				if ( $this->recorder ) {
+					$this->recorder->update( $result );
+				}
+				return $result;
+			}
 
 			if ( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED !== $record['status'] ) {
 				$failed        = true;
@@ -225,7 +262,36 @@ class WP_Agent_Workflow_Runner {
 		if ( $this->recorder ) {
 			$this->recorder->update( $result );
 		}
+		WP_Agent_Run_Control::finish_run(
+			self::RUN_CONTROL_STORE,
+			$result->get_run_id(),
+			$failed ? WP_Agent_Run_Control::STATUS_FAILED : WP_Agent_Run_Control::STATUS_SUCCEEDED
+		);
 		return $result;
+	}
+
+	/** @phpstan-impure */
+	private static function is_cancel_requested( string $run_id ): bool {
+		return WP_Agent_Run_Control::cancel_requested( self::RUN_CONTROL_STORE, $run_id );
+	}
+
+	/**
+	 * @param array<mixed> $step_records Step records completed before cancellation was observed.
+	 */
+	private static function cancelled_result( WP_Agent_Workflow_Run_Result $result, array $step_records ): WP_Agent_Workflow_Run_Result {
+		WP_Agent_Run_Control::finish_run( self::RUN_CONTROL_STORE, $result->get_run_id(), WP_Agent_Run_Control::STATUS_CANCELLED );
+
+		return $result->with(
+			array(
+				'status'   => WP_Agent_Workflow_Run_Result::STATUS_CANCELLED,
+				'steps'    => $step_records,
+				'error'    => array(
+					'code'    => 'cancel_requested',
+					'message' => 'Workflow run cancellation was requested.',
+				),
+				'ended_at' => time(),
+			)
+		);
 	}
 
 	/**
@@ -405,6 +471,10 @@ class WP_Agent_Workflow_Runner {
 		$iterations = array();
 
 		foreach ( array_values( $items ) as $index => $item ) {
+			if ( self::foreach_cancel_requested( $context ) ) {
+				return new \WP_Error( 'cancel_requested', 'Workflow run cancellation was requested.' );
+			}
+
 			$iteration_context = ( new WP_Agent_Workflow_Run_Context( $context ) )->with_vars(
 				array(
 					$as       => $item,
@@ -415,6 +485,10 @@ class WP_Agent_Workflow_Runner {
 			$last_output       = null;
 
 			foreach ( $steps as $nested_step ) {
+				if ( self::foreach_cancel_requested( $context ) ) {
+					return new \WP_Error( 'cancel_requested', 'Workflow run cancellation was requested.' );
+				}
+
 				if ( ! is_array( $nested_step ) ) {
 					return new \WP_Error(
 						'workflow_foreach_step_invalid',
@@ -475,6 +549,16 @@ class WP_Agent_Workflow_Runner {
 			'count'      => count( $iterations ),
 			'iterations' => $iterations,
 		);
+	}
+
+	/**
+	 * @param array<mixed> $context Resolution context.
+	 * @phpstan-impure
+	 */
+	private static function foreach_cancel_requested( array $context ): bool {
+		$run_id    = self::string_value( $context['_workflow_run_id'] ?? null );
+		$store_key = self::string_value( $context['_workflow_store_key'] ?? null );
+		return '' !== $run_id && '' !== $store_key && WP_Agent_Run_Control::cancel_requested( $store_key, $run_id );
 	}
 
 	/**

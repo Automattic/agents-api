@@ -45,8 +45,9 @@ if ( ! class_exists( 'WP_Ability' ) ) {
 	}
 }
 
-$GLOBALS['__filters']    = array();
-$GLOBALS['__abilities']  = array();
+$GLOBALS['__filters']   = array();
+$GLOBALS['__abilities'] = array();
+$GLOBALS['__options']   = array();
 
 if ( ! function_exists( 'add_filter' ) ) {
 	function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
@@ -85,6 +86,18 @@ if ( ! function_exists( 'do_action' ) ) {
 if ( ! function_exists( 'wp_get_ability' ) ) {
 	function wp_get_ability( string $name ) {
 		return $GLOBALS['__abilities'][ $name ] ?? null;
+	}
+}
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $option, $default = false ) {
+		return $GLOBALS['__options'][ $option ] ?? $default;
+	}
+}
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $option, $value, $autoload = null ): bool {
+		unset( $autoload );
+		$GLOBALS['__options'][ $option ] = $value;
+		return true;
 	}
 }
 
@@ -170,10 +183,12 @@ require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-result.php
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-store.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-recorder.php';
 require_once __DIR__ . '/../src/Abilities/class-wp-agent-ability-dispatcher.php';
+require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-context.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-executor.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-runner.php';
 
+use AgentsAPI\AI\WP_Agent_Run_Control;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Runner;
@@ -234,6 +249,13 @@ workflow_runner_smoke_register_ability(
 	}
 );
 workflow_runner_smoke_register_ability(
+	'demo/request-cancel',
+	static function ( array $input ): array {
+		WP_Agent_Run_Control::request_cancel( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, (string) ( $input['run_id'] ?? '' ) );
+		return array( 'cancel_requested' => true );
+	}
+);
+workflow_runner_smoke_register_ability(
 	'agents/chat',
 	static function ( array $input ): \WP_Error {
 		unset( $input );
@@ -285,6 +307,36 @@ smoke_assert( 1, $result->get_replay_metadata()['run_record_schema_version'] ?? 
 smoke_assert( '1.2.3', $result->get_replay_metadata()['workflow_spec_version'] ?? '', 'replay metadata includes workflow spec version', $failures, $passes );
 smoke_assert( true, 64 === strlen( $result->get_replay_metadata()['workflow_spec_hash'] ?? '' ), 'replay metadata includes sha256 spec hash', $failures, $passes );
 smoke_assert( $spec->to_array(), $result->get_replay_metadata()['workflow_spec_snapshot'] ?? array(), 'replay metadata includes workflow spec snapshot', $failures, $passes );
+
+// ─── Generic run-control cancellation stops before the next step ──────
+
+$cancel_spec = WP_Agent_Workflow_Spec::from_array(
+	array(
+		'id'    => 'demo/cancel-before-next-step',
+		'steps' => array(
+			array(
+				'id'      => 'request_cancel',
+				'type'    => 'ability',
+				'ability' => 'demo/request-cancel',
+				'args'    => array( 'run_id' => 'cancel-run-1' ),
+			),
+			array(
+				'id'      => 'should_not_run',
+				'type'    => 'ability',
+				'ability' => 'demo/uppercase',
+				'args'    => array( 'text' => 'never reached' ),
+			),
+		),
+	)
+);
+
+$cancel_result = ( new WP_Agent_Workflow_Runner( null ) )->run( $cancel_spec, array(), array( 'run_id' => 'cancel-run-1' ) );
+$cancel_stored = WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, 'cancel-run-1' );
+
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $cancel_result->get_status(), 'cancel_requested cancels workflow run', $failures, $passes );
+smoke_assert( 1, count( $cancel_result->get_steps() ), 'cancel_requested stops before next workflow step', $failures, $passes );
+smoke_assert( 'cancel_requested', $cancel_result->get_error()['code'] ?? '', 'cancelled workflow exposes cancel_requested error code', $failures, $passes );
+smoke_assert( WP_Agent_Run_Control::STATUS_CANCELLED, $cancel_stored['status'] ?? '', 'workflow run-control record is marked cancelled', $failures, $passes );
 
 // ─── Evidence refs stay first-class through results and recorders ─────
 
