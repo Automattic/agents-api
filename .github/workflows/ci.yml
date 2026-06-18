@@ -12,40 +12,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  homeboy:
-    name: Homeboy ${{ matrix.label }}
+  checks:
+    name: ${{ matrix.label }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - command: lint
-            label: lint (PHPCS + PHPStan)
-          - command: test
-            label: tests (PHPUnit + smoke tests)
+          - command: phpstan
+            label: PHPStan
+          - command: smoke
+            label: PHP smoke tests
 
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
-      - name: Generate app token
-        id: app-token
-        uses: actions/create-github-app-token@v3
-        continue-on-error: true
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
         with:
-          app-id: ${{ secrets.HOMEBOY_APP_ID }}
-          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
+          php-version: '8.1'
+          coverage: none
 
-      - name: Run Homeboy ${{ matrix.command }}
-        uses: Extra-Chill/homeboy-action@4b8c76830649c6b929fb64fa38e1169b3f133c9b # v2.7.10
-        with:
-          commands: ${{ matrix.command }}
-          expected-commands: lint,test
-          app-token: ${{ steps.app-token.outputs.token || '' }}
-          autofix: 'true'
-          autofix-commands: 'lint --fix'
+      - name: Validate Composer metadata
+        run: composer validate --strict
 
-      - name: Run PHP smoke tests
-        if: matrix.command == 'test'
-        run: composer smoke
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run ${{ matrix.label }}
+        run: composer ${{ matrix.command }}

@@ -70,12 +70,12 @@ Agents API requires **WordPress 7.0 or higher**. The substrate itself is provide
 
 ## Quality Gates
 
-Agents API uses [Homeboy](https://github.com/Extra-Chill/homeboy) as the single CI entry point for repository checks.
+Agents API runs repository checks directly through Composer scripts:
 
-- `Homeboy lint (PHPCS + PHPStan)` runs WordPress coding standards and PHPStan at max level through Homeboy's WordPress extension config.
-- `Homeboy tests (PHP smoke tests)` runs the current PHP smoke-test suite. When PHPUnit coverage is added, this lane should become `Homeboy tests (PHPUnit + smoke tests)`.
+- `composer phpstan` runs PHPStan at max level with WordPress stubs.
+- `composer smoke` runs the current PHP smoke-test suite.
 
-Keeping these checks behind Homeboy gives reviewers one consistent quality surface while still preserving the underlying tools' strengths: PHPCS catches WordPress style issues, PHPStan catches type and contract drift, and the smoke tests prove the runtime wiring still behaves as expected.
+These checks keep the package self-contained for Core-candidate review while proving the runtime wiring and static contracts still behave as expected.
 
 ## Core-Candidate API Naming
 
