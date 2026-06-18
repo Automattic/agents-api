@@ -183,12 +183,15 @@ require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-result.php
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-store.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-recorder.php';
 require_once __DIR__ . '/../src/Abilities/class-wp-agent-ability-dispatcher.php';
+require_once __DIR__ . '/../src/Runtime/interface-wp-agent-run-control-store.php';
+require_once __DIR__ . '/../src/Runtime/class-wp-agent-option-run-control-store.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-context.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-executor.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-runner.php';
 
 use AgentsAPI\AI\WP_Agent_Run_Control;
+use AgentsAPI\AI\WP_Agent_Run_Control_Store;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Runner;
@@ -216,6 +219,26 @@ class Capture_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	}
 	public function find( string $run_id ): ?WP_Agent_Workflow_Run_Result { return null; }
 	public function recent( array $args = array() ): array { return array(); }
+}
+
+class Memory_Run_Control_Store implements WP_Agent_Run_Control_Store {
+	public array $states = array();
+	public int $reads    = 0;
+	public int $writes   = 0;
+
+	public function get_state( string $store_key ): array {
+		++$this->reads;
+		$state = $this->states[ $store_key ] ?? array();
+		return array(
+			'runs'   => isset( $state['runs'] ) && is_array( $state['runs'] ) ? $state['runs'] : array(),
+			'queues' => isset( $state['queues'] ) && is_array( $state['queues'] ) ? $state['queues'] : array(),
+		);
+	}
+
+	public function save_state( string $store_key, array $state ): void {
+		++$this->writes;
+		$this->states[ $store_key ] = $state;
+	}
 }
 
 // ─── Happy path: 2 sequential ability steps with bindings between them ───
@@ -266,6 +289,28 @@ workflow_runner_smoke_register_ability(
 // Register all stub abilities with the real Abilities API (no-op in pure-PHP).
 do_action( 'wp_abilities_api_categories_init' );
 do_action( 'wp_abilities_api_init' );
+
+// ─── Generic run-control facade can use an injected store ──────────────
+
+$memory_store = new Memory_Run_Control_Store();
+WP_Agent_Run_Control::set_store( $memory_store );
+
+$stored_run = WP_Agent_Run_Control::start_run(
+	'injected_run_control_store',
+	'injected-run-1',
+	array(
+		'workflow_id' => 'demo/injected-store',
+		'metadata'    => array( 'source' => 'smoke' ),
+	)
+);
+$cancelled  = WP_Agent_Run_Control::request_cancel( 'injected_run_control_store', 'injected-run-1' );
+
+smoke_assert( 'injected-run-1', $stored_run['run_id'] ?? '', 'injected run-control store writes through facade', $failures, $passes );
+smoke_assert( WP_Agent_Run_Control::STATUS_CANCELLING, $cancelled['status'] ?? '', 'injected run-control store updates cancellation status', $failures, $passes );
+smoke_assert( true, $memory_store->writes >= 2, 'injected run-control store receives writes', $failures, $passes );
+smoke_assert( array(), $GLOBALS['__options']['injected_run_control_store'] ?? array(), 'injected run-control store does not write default options', $failures, $passes );
+
+WP_Agent_Run_Control::reset_store();
 
 $spec = WP_Agent_Workflow_Spec::from_array(
 	array(

@@ -161,6 +161,8 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-result.p
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-request-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-continuation.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-lifecycle.php';
+require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-run-control-store.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-option-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-control.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-outcome.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-result.php';
