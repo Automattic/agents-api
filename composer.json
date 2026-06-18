@@ -83,6 +83,7 @@
       "php tests/conversation-loop-events-smoke.php",
       "php tests/tool-declaration-rejection-smoke.php",
       "php tests/conversation-loop-interrupt-source-smoke.php",
+      "php tests/run-outcome-status-smoke.php",
       "php tests/iteration-budget-smoke.php",
       "php tests/conversation-loop-budgets-smoke.php",
       "php tests/channels-smoke.php",

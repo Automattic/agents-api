@@ -23,6 +23,9 @@ class WP_Agent_Run_Control {
 	public const STATUS_FAILED               = 'failed';
 	public const STATUS_RUNTIME_TOOL_PENDING = 'runtime_tool_pending';
 	public const STATUS_APPROVAL_REQUIRED    = 'approval_required';
+	public const STATUS_BUDGET_EXCEEDED      = 'budget_exceeded';
+	public const STATUS_STALLED              = 'stalled';
+	public const STATUS_INTERRUPTED          = 'interrupted';
 
 	/** @return string[] */
 	public static function statuses(): array {
@@ -36,6 +39,9 @@ class WP_Agent_Run_Control {
 			self::STATUS_FAILED,
 			self::STATUS_RUNTIME_TOOL_PENDING,
 			self::STATUS_APPROVAL_REQUIRED,
+			self::STATUS_BUDGET_EXCEEDED,
+			self::STATUS_STALLED,
+			self::STATUS_INTERRUPTED,
 		);
 	}
 
@@ -199,7 +205,7 @@ class WP_Agent_Run_Control {
 		}
 
 		$run               = $state['runs'][ $run_id ];
-		$terminal          = in_array( self::normalize_status( $run['status'] ?? '' ), array( self::STATUS_COMPLETED, self::STATUS_SUCCEEDED, self::STATUS_FAILED, self::STATUS_CANCELLED ), true );
+		$terminal          = in_array( self::normalize_status( $run['status'] ?? '' ), array( self::STATUS_COMPLETED, self::STATUS_SUCCEEDED, self::STATUS_FAILED, self::STATUS_CANCELLED, self::STATUS_BUDGET_EXCEEDED, self::STATUS_STALLED, self::STATUS_INTERRUPTED ), true );
 		$run['status']     = $terminal ? self::normalize_status( $run['status'] ?? '' ) : self::STATUS_CANCELLING;
 		$run['cancelled']  = ! $terminal;
 		$run['updated_at'] = self::now();
