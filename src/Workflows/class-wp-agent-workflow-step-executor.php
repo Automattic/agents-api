@@ -36,7 +36,8 @@ class WP_Agent_Workflow_Step_Executor {
 			'ended_at'   => 0,
 		);
 
-		$handler = $this->handlers[ $type ] ?? null;
+		$handler           = $this->handlers[ $type ] ?? null;
+		$record['handler'] = self::describe_handler( $handler );
 		if ( ! is_callable( $handler ) ) {
 			$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_SKIPPED;
 			$record['ended_at'] = time();
@@ -52,6 +53,7 @@ class WP_Agent_Workflow_Step_Executor {
 		$resolved      = 'foreach' === $type
 			? self::expand_foreach_outer_step( $step, $context_array )
 			: WP_Agent_Workflow_Bindings::expand( $step, $context_array );
+		$record['resolved_step'] = is_array( $resolved ) ? $resolved : array();
 		$step_output   = call_user_func( $handler, $resolved, $context_array );
 
 		if ( is_wp_error( $step_output ) ) {
@@ -105,5 +107,44 @@ class WP_Agent_Workflow_Step_Executor {
 		}
 
 		return '';
+	}
+
+	/**
+	 * @param mixed $handler Handler candidate.
+	 * @return array<string, string>|null
+	 */
+	private static function describe_handler( $handler ): ?array {
+		if ( is_string( $handler ) ) {
+			return array(
+				'type' => 'function',
+				'name' => $handler,
+			);
+		}
+
+		if ( is_array( $handler ) && isset( $handler[0], $handler[1] ) ) {
+			$class_or_object = is_object( $handler[0] ) ? get_class( $handler[0] ) : self::string_value( $handler[0] );
+			$method          = self::string_value( $handler[1] );
+
+			return array(
+				'type' => 'method',
+				'name' => $class_or_object . '::' . $method,
+			);
+		}
+
+		if ( $handler instanceof \Closure ) {
+			return array(
+				'type' => 'closure',
+				'name' => 'Closure',
+			);
+		}
+
+		if ( is_object( $handler ) && method_exists( $handler, '__invoke' ) ) {
+			return array(
+				'type' => 'invokable',
+				'name' => get_class( $handler ),
+			);
+		}
+
+		return null;
 	}
 }

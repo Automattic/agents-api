@@ -330,7 +330,7 @@ function agents_run_workflow_input_schema(): array {
 			),
 			'options'     => array(
 				'type'        => 'object',
-				'description' => 'Runtime options forwarded to the runner. Recognized keys: run_id, continue_on_error, metadata.',
+				'description' => 'Runtime options forwarded to the runner. Recognized keys: run_id, continue_on_error, metadata, evidence_refs.',
 				'default'     => array(),
 			),
 		),
@@ -356,12 +356,25 @@ function agents_run_workflow_output_schema(): array {
 				'type' => 'string',
 				'enum' => array( 'pending', 'running', 'succeeded', 'failed', 'skipped' ),
 			),
-			'output'      => array( 'type' => 'object' ),
-			'steps'       => array( 'type' => 'array' ),
-			'error'       => array( 'type' => array( 'object', 'null' ) ),
-			'started_at'  => array( 'type' => 'integer' ),
-			'ended_at'    => array( 'type' => 'integer' ),
-			'metadata'    => array( 'type' => 'object' ),
+			'output'        => array( 'type' => 'object' ),
+			'steps'         => array( 'type' => 'array' ),
+			'error'         => array( 'type' => array( 'object', 'null' ) ),
+			'started_at'    => array( 'type' => 'integer' ),
+			'ended_at'      => array( 'type' => 'integer' ),
+			'metadata'      => array( 'type' => 'object' ),
+			'evidence_refs' => array(
+				'type'        => 'array',
+				'description' => 'Neutral JSON-serializable artifact/log references owned by the host runtime.',
+			),
+			'replay'        => array(
+				'type'       => 'object',
+				'properties' => array(
+					'run_record_schema_version' => array( 'type' => 'integer' ),
+					'workflow_spec_version'     => array( 'type' => 'string' ),
+					'workflow_spec_hash'        => array( 'type' => 'string' ),
+					'workflow_spec_snapshot'    => array( 'type' => 'object' ),
+				),
+			),
 		),
 	);
 }

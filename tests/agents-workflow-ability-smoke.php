@@ -70,6 +70,8 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 agents_api_smoke_require_module();
 
 use function AgentsAPI\AI\Workflows\agents_describe_workflow;
+use function AgentsAPI\AI\Workflows\agents_run_workflow_input_schema;
+use function AgentsAPI\AI\Workflows\agents_run_workflow_output_schema;
 use function AgentsAPI\AI\Workflows\agents_run_workflow_dispatch;
 use function AgentsAPI\AI\Workflows\agents_run_workflow_permission;
 use function AgentsAPI\AI\Workflows\agents_validate_workflow;
@@ -85,6 +87,16 @@ smoke_assert( true, agents_run_workflow_permission( array() ), 'permission grant
 
 add_filter( 'agents_run_workflow_permission', static fn() => false );
 smoke_assert( false, agents_run_workflow_permission( array() ), 'filter can override permission to deny', $failures, $passes );
+
+// ─── run-workflow schemas ────────────────────────────────────────────
+
+$input_schema  = agents_run_workflow_input_schema();
+$output_schema = agents_run_workflow_output_schema();
+smoke_assert( true, str_contains( $input_schema['properties']['options']['description'] ?? '', 'evidence_refs' ), 'input schema documents evidence_refs runtime option', $failures, $passes );
+smoke_assert( 'array', $output_schema['properties']['evidence_refs']['type'] ?? '', 'output schema exposes evidence_refs', $failures, $passes );
+smoke_assert( 'object', $output_schema['properties']['replay']['type'] ?? '', 'output schema exposes replay metadata', $failures, $passes );
+smoke_assert( 'integer', $output_schema['properties']['replay']['properties']['run_record_schema_version']['type'] ?? '', 'replay schema includes schema version', $failures, $passes );
+smoke_assert( 'string', $output_schema['properties']['replay']['properties']['workflow_spec_hash']['type'] ?? '', 'replay schema includes spec hash', $failures, $passes );
 
 // ─── validate-workflow ───────────────────────────────────────────────
 

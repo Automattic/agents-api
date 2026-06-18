@@ -105,6 +105,7 @@ class WP_Agent_Workflow_Runner {
 		$run_id        = self::string_value( $options['run_id'] ?? self::generate_run_id() );
 		$metadata      = (array) ( $options['metadata'] ?? array() );
 		$evidence_refs = (array) ( $options['evidence_refs'] ?? array() );
+		$replay        = self::build_replay_metadata( $spec );
 
 		// Build the initial RUNNING result and persist via recorder->start()
 		// before doing anything else. Even if input validation fails on the
@@ -121,7 +122,8 @@ class WP_Agent_Workflow_Runner {
 			$started_at,
 			0,
 			$metadata,
-			$evidence_refs
+			$evidence_refs,
+			$replay
 		);
 
 		if ( $this->recorder ) {
@@ -248,6 +250,59 @@ class WP_Agent_Workflow_Runner {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Build deterministic metadata for recorders and replay tooling.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private static function build_replay_metadata( WP_Agent_Workflow_Spec $spec ): array {
+		$spec_snapshot = $spec->to_array();
+
+		return array(
+			'run_record_schema_version' => 1,
+			'workflow_spec_version'     => $spec->get_version(),
+			'workflow_spec_hash'        => hash( 'sha256', self::canonical_json( $spec_snapshot ) ),
+			'workflow_spec_snapshot'    => $spec_snapshot,
+		);
+	}
+
+	/**
+	 * JSON encode arrays with sorted object keys so equivalent specs hash the same.
+	 *
+	 * @param mixed $value Value to encode.
+	 */
+	private static function canonical_json( $value ): string {
+		$normalized = self::sort_recursive( $value );
+		$encoded    = function_exists( 'wp_json_encode' ) ? wp_json_encode( $normalized ) : json_encode( $normalized );
+
+		if ( false === $encoded ) {
+			return '';
+		}
+
+		return $encoded;
+	}
+
+	/**
+	 * @param mixed $value Value to sort.
+	 * @return mixed
+	 */
+	private static function sort_recursive( $value ) {
+		if ( ! is_array( $value ) ) {
+			return $value;
+		}
+
+		$is_list = array_keys( $value ) === range( 0, count( $value ) - 1 );
+		if ( ! $is_list ) {
+			ksort( $value );
+		}
+
+		foreach ( $value as $key => $child ) {
+			$value[ $key ] = self::sort_recursive( $child );
+		}
+
+		return $value;
 	}
 
 	/**
