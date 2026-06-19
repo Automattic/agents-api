@@ -111,6 +111,111 @@ class WP_Agent_Run_Control {
 	}
 
 	/**
+	 * Normalize a handler result into the generic run envelope.
+	 *
+	 * @param mixed  $result     Handler result.
+	 * @param string $error_code Error code for invalid results.
+	 * @return array<string,mixed>|\WP_Error
+	 */
+	public static function normalize_run_result( mixed $result, string $error_code ) {
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		if ( ! is_array( $result ) ) {
+			return new \WP_Error( $error_code, 'Run-control handlers must return an array or WP_Error.' );
+		}
+
+		try {
+			return self::normalize_run( self::string_keyed_array( $result ) );
+		} catch ( \InvalidArgumentException $error ) {
+			return new \WP_Error( $error_code, $error->getMessage() );
+		}
+	}
+
+	/**
+	 * Normalize a cancellation result and infer whether the request was accepted.
+	 *
+	 * @param mixed  $result     Handler result.
+	 * @param string $error_code Error code for invalid results.
+	 * @return array<string,mixed>|\WP_Error
+	 */
+	public static function normalize_cancel_result( mixed $result, string $error_code ) {
+		$result = self::normalize_run_result( $result, $error_code );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		$status              = self::normalize_status( $result['status'] ?? self::STATUS_RUNNING );
+		$result['status']    = $status;
+		$result['cancelled'] = (bool) ( $result['cancelled'] ?? in_array(
+			$status,
+			array(
+				self::STATUS_CANCELLING,
+				self::STATUS_CANCELLED,
+			),
+			true
+		) );
+
+		return $result;
+	}
+
+	/**
+	 * Normalize an event page for an addressable run.
+	 *
+	 * @param mixed  $result     Handler result.
+	 * @param string $error_code Error code for invalid results.
+	 * @return array<string,mixed>|\WP_Error
+	 */
+	public static function normalize_events_result( mixed $result, string $error_code ) {
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		if ( ! is_array( $result ) ) {
+			return new \WP_Error( $error_code, 'Run event handlers must return an array or WP_Error.' );
+		}
+
+		try {
+			$run = self::normalize_run( self::string_keyed_array( $result ) );
+		} catch ( \InvalidArgumentException $error ) {
+			return new \WP_Error( $error_code, $error->getMessage() );
+		}
+
+		$events = array();
+		foreach ( is_array( $result['events'] ?? null ) ? array_values( $result['events'] ) : array() as $event ) {
+			if ( is_array( $event ) ) {
+				$events[] = self::normalize_event( self::string_keyed_array( $event ) );
+			}
+		}
+
+		$run['events']   = $events;
+		$run['cursor']   = self::string_value( $result['cursor'] ?? '' );
+		$run['has_more'] = (bool) ( $result['has_more'] ?? false );
+
+		return $run;
+	}
+
+	/**
+	 * @param array<string,mixed> $event Raw event.
+	 * @return array<string,mixed>
+	 */
+	public static function normalize_event( array $event ): array {
+		$normalized = array(
+			'id'         => self::string_value( $event['id'] ?? '' ),
+			'type'       => self::string_value( $event['type'] ?? '' ),
+			'created_at' => self::string_value( $event['created_at'] ?? '' ),
+			'metadata'   => isset( $event['metadata'] ) && is_array( $event['metadata'] ) ? self::string_keyed_array( $event['metadata'] ) : array(),
+		);
+
+		if ( isset( $event['message'] ) ) {
+			$normalized['message'] = self::string_value( $event['message'] );
+		}
+
+		return $normalized;
+	}
+
+	/**
 	 * Start or update an addressable run in the selected store.
 	 *
 	 * @param string              $store_key Option key used by the backing store.
@@ -255,8 +360,23 @@ class WP_Agent_Run_Control {
 		return gmdate( 'c' );
 	}
 
-	private static function string_value( mixed $value ): string {
+	public static function string_value( mixed $value ): string {
 		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (string) $value : '';
+	}
+
+	/**
+	 * @param array<array-key,mixed> $value Raw array.
+	 * @return array<string,mixed>
+	 */
+	public static function string_keyed_array( array $value ): array {
+		$result = array();
+		foreach ( $value as $key => $item ) {
+			if ( is_string( $key ) ) {
+				$result[ $key ] = $item;
+			}
+		}
+
+		return $result;
 	}
 
 	private static function int_value( mixed $value ): int {

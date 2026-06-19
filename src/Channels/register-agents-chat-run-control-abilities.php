@@ -8,6 +8,8 @@
 namespace AgentsAPI\AI\Channels;
 
 use AgentsAPI\AI\WP_Agent_Chat_Run_Control;
+use AgentsAPI\AI\WP_Agent_Filter_Run_Control_Adapter;
+use AgentsAPI\AI\WP_Agent_Run_Control;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -94,9 +96,9 @@ add_action(
  * @return array<string, mixed>|\WP_Error
  */
 function agents_get_chat_run( array $input ) {
-	$handler = apply_filters( 'wp_agent_chat_run_status_handler', null, $input );
-	if ( is_callable( $handler ) ) {
-		return agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_run_invalid_status' );
+	$result = agents_chat_run_control_adapter()->get_run( $input );
+	if ( null !== $result ) {
+		return is_wp_error( $result ) ? $result : agents_chat_run_control_normalize_result( $result, 'agents_chat_run_invalid_status' );
 	}
 
 	$run                  = WP_Agent_Chat_Run_Control::get_run( agents_chat_run_control_string( $input['run_id'] ?? '' ) );
@@ -116,13 +118,7 @@ function agents_get_chat_run( array $input ) {
  * @return array<string, mixed>|\WP_Error
  */
 function agents_list_chat_run_events( array $input ) {
-	$handler = apply_filters( 'wp_agent_chat_run_events_handler', null, $input );
-	if ( is_callable( $handler ) ) {
-		$result = call_user_func( $handler, $input );
-		return agents_chat_run_events_normalize_result( $result );
-	}
-
-	return agents_chat_run_control_no_handler( 'agents_chat_run_events_no_handler', 'No chat run events handler is registered.' );
+	return agents_chat_run_events_normalize_result( agents_chat_run_control_adapter()->list_events( $input ) );
 }
 
 /**
@@ -130,9 +126,9 @@ function agents_list_chat_run_events( array $input ) {
  * @return array<string, mixed>|\WP_Error
  */
 function agents_cancel_chat_run( array $input ) {
-	$handler = apply_filters( 'wp_agent_chat_run_cancel_handler', null, $input );
-	if ( is_callable( $handler ) ) {
-		$result = agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_run_invalid_cancel_result' );
+	$result = agents_chat_run_control_adapter()->cancel_run( $input );
+	if ( null !== $result ) {
+		$result = is_wp_error( $result ) ? $result : agents_chat_run_control_normalize_result( $result, 'agents_chat_run_invalid_cancel_result' );
 	} else {
 		$run                  = WP_Agent_Chat_Run_Control::get_run( agents_chat_run_control_string( $input['run_id'] ?? '' ) );
 		$requested_session_id = agents_chat_run_control_string( $input['session_id'] ?? '' );
@@ -284,8 +280,9 @@ function agents_chat_run_control_normalize_result( $result, string $error_code )
 		return $result;
 	}
 
-	if ( ! is_array( $result ) ) {
-		return new \WP_Error( $error_code, 'Chat run-control handlers must return an array or WP_Error.' );
+	$result = WP_Agent_Run_Control::normalize_run_result( $result, $error_code );
+	if ( is_wp_error( $result ) ) {
+		return $result;
 	}
 
 	try {
@@ -304,8 +301,9 @@ function agents_chat_run_events_normalize_result( $result ) {
 		return $result;
 	}
 
-	if ( ! is_array( $result ) ) {
-		return new \WP_Error( 'agents_chat_run_invalid_events_result', 'Chat run event handlers must return an array or WP_Error.' );
+	$result = WP_Agent_Run_Control::normalize_events_result( $result, 'agents_chat_run_invalid_events_result' );
+	if ( is_wp_error( $result ) ) {
+		return $result;
 	}
 
 	$result               = agents_chat_run_control_string_keyed_array( $result );
@@ -317,6 +315,24 @@ function agents_chat_run_events_normalize_result( $result ) {
 	$result['has_more']   = (bool) ( $result['has_more'] ?? false );
 
 	return $result;
+}
+
+function agents_chat_run_control_adapter(): WP_Agent_Filter_Run_Control_Adapter {
+	static $adapter = null;
+	if ( ! $adapter instanceof WP_Agent_Filter_Run_Control_Adapter ) {
+		$adapter = new WP_Agent_Filter_Run_Control_Adapter(
+			'wp_agent_chat_run_status_handler',
+			'wp_agent_chat_run_events_handler',
+			'wp_agent_chat_run_cancel_handler',
+			'agents_chat_run_invalid_status',
+			'agents_chat_run_invalid_events_result',
+			'agents_chat_run_invalid_cancel_result',
+			'agents_chat_run_events_no_handler',
+			'No chat run events handler is registered.'
+		);
+	}
+
+	return $adapter;
 }
 
 function agents_chat_run_control_string( mixed $value ): string {
