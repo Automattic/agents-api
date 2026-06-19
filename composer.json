@@ -44,6 +44,7 @@
       "php tests/tool-policy-contracts-smoke.php",
       "php tests/tool-source-registry-smoke.php",
       "php tests/runtime-tool-policy-smoke.php",
+      "php tests/runtime-tool-lifecycle-abilities-smoke.php",
       "php tests/tool-tier-resolver-smoke.php",
       "php tests/action-policy-resolver-smoke.php",
       "php tests/ability-meta-abilities-smoke.php",
