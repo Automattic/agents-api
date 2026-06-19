@@ -165,6 +165,29 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Result' ) ) {
 			return $data;
 		}
 
+		public function to_run_result_envelope(): \AgentsAPI\AI\WP_Agent_Run_Result_Envelope {
+			return \AgentsAPI\AI\WP_Agent_Run_Result_Envelope::from_array(
+				array(
+					'run_id'        => $this->agent_slug,
+					'status'        => $this->canonical_status(),
+					'outputs'       => array(
+						'agent_slug' => $this->agent_slug,
+						'messages'   => $this->messages,
+						'applied'    => $this->applied_artifacts,
+						'skipped'    => $this->skipped_artifacts,
+						'failed'     => $this->failed_artifacts,
+					),
+					'artifact_refs' => $this->artifact_refs(),
+					'provenance'    => array( 'package_adoption_status' => $this->status ),
+					'metadata'      => $this->meta,
+				)
+			);
+		}
+
+		public function to_canonical_envelope(): \AgentsAPI\AI\WP_Agent_Run_Result_Envelope {
+			return $this->to_run_result_envelope();
+		}
+
 		/**
 		 * Validates status.
 		 *
@@ -179,6 +202,27 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Result' ) ) {
 			}
 
 			return $status;
+		}
+
+		private function canonical_status(): string {
+			if ( 'failed' === $this->status ) {
+				return \AgentsAPI\AI\WP_Agent_Run_Result_Envelope::STATUS_FAILED;
+			}
+			if ( in_array( $this->status, array( 'skipped', 'needs-approval' ), true ) ) {
+				return 'needs-approval' === $this->status ? \AgentsAPI\AI\WP_Agent_Run_Result_Envelope::STATUS_APPROVAL_REQUIRED : \AgentsAPI\AI\WP_Agent_Run_Result_Envelope::STATUS_SKIPPED;
+			}
+
+			return \AgentsAPI\AI\WP_Agent_Run_Result_Envelope::STATUS_SUCCEEDED;
+		}
+
+		/** @return array<int,array<string,mixed>> */
+		private function artifact_refs(): array {
+			$refs = array();
+			foreach ( $this->recorded_artifacts as $artifact ) {
+				$refs[] = $artifact->to_array();
+			}
+
+			return \AgentsAPI\AI\WP_Agent_Run_Result_Envelope::normalize_refs( $refs );
 		}
 
 		/**
