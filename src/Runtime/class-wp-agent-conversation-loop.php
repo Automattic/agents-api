@@ -180,6 +180,13 @@ class WP_Agent_Conversation_Loop {
 				$turns_run            = $turn;
 				$turn_context         = $context;
 				$turn_context['turn'] = $turn;
+				$interrupt            = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
+				if ( null !== $interrupt ) {
+					$messages[]   = $interrupt['message'];
+					$events[]     = self::interrupt_event( $interrupt );
+					$interrupted  = $interrupt['metadata'];
+					break;
+				}
 
 				self::emit_event( $on_event, 'turn_started', array(
 					'turn'          => $turn,
@@ -238,6 +245,14 @@ class WP_Agent_Conversation_Loop {
 					throw $error;
 				}
 
+				$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
+				if ( null !== $interrupt ) {
+					$messages[]   = $interrupt['message'];
+					$events[]     = self::interrupt_event( $interrupt );
+					$interrupted  = $interrupt['metadata'];
+					break;
+				}
+
 				if ( isset( $result['provider_diagnostics'] ) && is_array( $result['provider_diagnostics'] ) ) {
 					$provider_diagnostics[] = self::normalize_assoc_array( $result['provider_diagnostics'] );
 				}
@@ -291,6 +306,14 @@ class WP_Agent_Conversation_Loop {
 				// When mediation is enabled, the turn runner returns tool_calls
 				// and the loop handles execution. Otherwise, the caller-managed path applies.
 				if ( null !== $tool_executor && $mediation_enabled && isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ) {
+					$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
+					if ( null !== $interrupt ) {
+						$messages[]   = $interrupt['message'];
+						$events[]     = self::interrupt_event( $interrupt );
+						$interrupted  = $interrupt['metadata'];
+						break;
+					}
+
 					$mediation_result = WP_Agent_Tool_Mediation_Runner::run(
 						$messages,
 						self::normalize_assoc_array( $result ),
@@ -321,6 +344,13 @@ class WP_Agent_Conversation_Loop {
 					$approval_required     = $mediation_result['approval_required'] ?? null;
 					$runtime_tool_pending  = $mediation_result['runtime_tool_pending'] ?? null;
 					$stalled               = self::check_spin_detector( $spin_detector, $mediation_result['spin_signatures'], $turn_context, $on_event );
+					$interrupt             = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
+					if ( null !== $interrupt ) {
+						$messages[]   = $interrupt['message'];
+						$events[]     = self::interrupt_event( $interrupt );
+						$interrupted  = $interrupt['metadata'];
+						break;
+					}
 				} else {
 					// Caller-managed path: turn runner handles everything internally.
 					$result       = self::normalize_conversation_result( $result );
@@ -379,18 +409,12 @@ class WP_Agent_Conversation_Loop {
 				}
 
 				$interrupt = self::check_interrupt_source( $interrupt_source, $messages, $options, $turn_context, $on_event );
-				if ( null === $interrupt && '' !== $run_id ) {
-					$interrupt_message = WP_Agent_Chat_Run_Control::cancellation_interrupt_for_run( $run_id, $lock_session_id );
-					if ( null !== $interrupt_message ) {
-						$interrupt = self::normalize_interrupt_message( $interrupt_message, $turn_context, $on_event );
-					}
+				if ( null === $interrupt ) {
+					$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
 				}
 				if ( null !== $interrupt ) {
 					$messages[] = $interrupt['message'];
-					$events[]   = array(
-						'type'     => 'interrupt_received',
-						'metadata' => $interrupt['metadata'],
-					);
+					$events[]   = self::interrupt_event( $interrupt );
 
 					if ( 'cancel' === $interrupt['action'] ) {
 						$interrupted = $interrupt['metadata'];
@@ -1340,6 +1364,36 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		return self::normalize_interrupt_message( self::normalize_assoc_array( $message ), $context, $on_event );
+	}
+
+	/**
+	 * Check canonical chat run-control cancellation state.
+	 *
+	 * @param array<string,mixed> $context Current turn context.
+	 * @return array{message: array<string, mixed>, metadata: array<string, mixed>, action: string}|null
+	 */
+	private static function check_runtime_cancellation( string $run_id, string $lock_session_id, array $context, ?callable $on_event ): ?array {
+		if ( '' === $run_id ) {
+			return null;
+		}
+
+		$interrupt_message = WP_Agent_Chat_Run_Control::cancellation_interrupt_for_run( $run_id, $lock_session_id );
+		if ( null === $interrupt_message ) {
+			return null;
+		}
+
+		return self::normalize_interrupt_message( $interrupt_message, $context, $on_event );
+	}
+
+	/**
+	 * @param array{message: array<string, mixed>, metadata: array<string, mixed>, action: string} $interrupt Interrupt payload.
+	 * @return array<string,mixed>
+	 */
+	private static function interrupt_event( array $interrupt ): array {
+		return array(
+			'type'     => 'interrupt_received',
+			'metadata' => $interrupt['metadata'],
+		);
 	}
 
 	/**

@@ -89,6 +89,7 @@
       "php tests/conversation-loop-budgets-smoke.php",
       "php tests/runtime-package-run-contract-smoke.php",
       "php tests/run-control-normalization-smoke.php",
+      "php tests/canonical-run-lifecycle-smoke.php",
       "php tests/channels-smoke.php",
       "php tests/chat-run-control-smoke.php",
       "php tests/task-execution-smoke.php",
