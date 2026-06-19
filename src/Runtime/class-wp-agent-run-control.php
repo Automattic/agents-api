@@ -238,6 +238,7 @@ class WP_Agent_Run_Control {
 
 		$state                    = self::state( $store_key );
 		$state['runs'][ $run_id ] = $run;
+		$state                    = self::record_event_in_state( $state, $run_id, 'run_started', array( 'status' => self::STATUS_RUNNING ) );
 		self::save_state( $store_key, $state );
 
 		return self::normalize_run( $run );
@@ -257,6 +258,7 @@ class WP_Agent_Run_Control {
 
 		$state                    = self::state( $store_key );
 		$state['runs'][ $run_id ] = $normalized;
+		$state                    = self::record_event_in_state( $state, $run_id, 'run_updated', array( 'status' => $normalized['status'] ) );
 		self::save_state( $store_key, $state );
 
 		return $normalized;
@@ -284,6 +286,7 @@ class WP_Agent_Run_Control {
 		}
 
 		$state['runs'][ $run_id ] = $run;
+		$state                    = self::record_event_in_state( $state, $run_id, 'run_finished', array( 'status' => $run['status'] ) );
 		self::save_state( $store_key, $state );
 
 		return self::normalize_run( $run );
@@ -318,6 +321,7 @@ class WP_Agent_Run_Control {
 		$run['updated_at'] = self::now();
 
 		$state['runs'][ $run_id ] = $run;
+		$state                    = self::record_event_in_state( $state, $run_id, 'cancel_requested', array( 'status' => $run['status'] ) );
 		self::save_state( $store_key, $state );
 
 		return self::normalize_run( $run );
@@ -326,6 +330,32 @@ class WP_Agent_Run_Control {
 	public static function cancel_requested( string $store_key, string $run_id ): bool {
 		$run = self::get_run( $store_key, $run_id );
 		return null !== $run && self::STATUS_CANCELLING === ( $run['status'] ?? '' );
+	}
+
+	/**
+	 * @return array<string,mixed>|null
+	 */
+	public static function list_events( string $store_key, string $run_id, string $cursor = '', int $limit = 100 ): ?array {
+		$run = self::get_run( $store_key, $run_id );
+		if ( null === $run ) {
+			return null;
+		}
+
+		$state  = self::state( $store_key );
+		$events = array_values( $state['events'][ $run_id ] ?? array() );
+		$offset = max( 0, self::int_value( $cursor ) );
+		$limit  = max( 1, min( 500, $limit ) );
+		$page   = array_slice( $events, $offset, $limit );
+		$next   = $offset + count( $page );
+
+		return array_merge(
+			$run,
+			array(
+				'events'   => array_map( array( self::class, 'normalize_event' ), $page ),
+				'cursor'   => $next < count( $events ) ? (string) $next : '',
+				'has_more' => $next < count( $events ),
+			)
+		);
 	}
 
 	public static function store(): WP_Agent_Run_Control_Store {
@@ -344,13 +374,13 @@ class WP_Agent_Run_Control {
 		self::$store = null;
 	}
 
-	/** @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>} */
+	/** @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} */
 	public static function state( string $store_key ): array {
 		return self::store()->get_state( $store_key );
 	}
 
 	/**
-	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>} $state
+	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state
 	 */
 	public static function save_state( string $store_key, array $state ): void {
 		self::store()->save_state( $store_key, $state );
@@ -381,5 +411,23 @@ class WP_Agent_Run_Control {
 
 	private static function int_value( mixed $value ): int {
 		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (int) $value : 0;
+	}
+
+	/**
+	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state
+	 * @param array<string,mixed> $metadata Event metadata.
+	 * @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}
+	 */
+	private static function record_event_in_state( array $state, string $run_id, string $type, array $metadata = array() ): array {
+		$events         = array_values( $state['events'][ $run_id ] ?? array() );
+		$events[]       = array(
+			'id'         => $run_id . ':' . count( $events ),
+			'type'       => $type,
+			'created_at' => self::now(),
+			'metadata'   => self::string_keyed_array( $metadata ),
+		);
+		$state['events'][ $run_id ] = $events;
+
+		return $state;
 	}
 }

@@ -16,7 +16,7 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Run_Control_Store {
 
 	/**
 	 * @param string $store_key Store key.
-	 * @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>}
+	 * @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}
 	 */
 	public function get_state( string $store_key ): array {
 		$state = function_exists( 'get_option' ) ? get_option( $store_key, array() ) : array();
@@ -27,12 +27,13 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Run_Control_Store {
 		return array(
 			'runs'   => $this->stored_runs( $state['runs'] ?? array() ),
 			'queues' => $this->stored_queues( $state['queues'] ?? array() ),
+			'events' => $this->stored_queues( $state['events'] ?? array() ),
 		);
 	}
 
 	/**
 	 * @param string $store_key Store key.
-	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>} $state State envelope.
+	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state State envelope.
 	 */
 	public function save_state( string $store_key, array $state ): void {
 		if ( function_exists( 'update_option' ) ) {
