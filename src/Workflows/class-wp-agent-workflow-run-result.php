@@ -24,6 +24,8 @@
 
 namespace AgentsAPI\AI\Workflows;
 
+use AgentsAPI\AI\WP_Agent_Run_Result_Envelope;
+
 defined( 'ABSPATH' ) || exit;
 
 final class WP_Agent_Workflow_Run_Result {
@@ -174,6 +176,29 @@ final class WP_Agent_Workflow_Run_Result {
 
 	public function is_failed(): bool {
 		return self::STATUS_FAILED === $this->status;
+	}
+
+	public function to_run_result_envelope(): WP_Agent_Run_Result_Envelope {
+		return WP_Agent_Run_Result_Envelope::from_array(
+			array(
+				'run_id'        => $this->run_id,
+				'status'        => $this->status,
+				'outputs'       => $this->output,
+				'evidence_refs' => $this->evidence_refs,
+				'replay'        => $this->replay_metadata,
+				'provenance'    => array( 'workflow_id' => $this->workflow_id ),
+				'timestamps'    => array(
+					'started_at' => $this->started_at,
+					'ended_at'   => $this->ended_at,
+				),
+				'error'         => $this->error,
+				'metadata'      => $this->metadata + array( 'steps' => $this->steps, 'inputs' => $this->inputs ),
+			)
+		);
+	}
+
+	public function to_canonical_envelope(): WP_Agent_Run_Result_Envelope {
+		return $this->to_run_result_envelope();
 	}
 
 	/**

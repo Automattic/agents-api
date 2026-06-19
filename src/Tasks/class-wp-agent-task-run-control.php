@@ -7,6 +7,8 @@
 
 namespace AgentsAPI\AI\Tasks;
 
+use AgentsAPI\AI\WP_Agent_Run_Result_Envelope;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -93,11 +95,60 @@ class WP_Agent_Task_Run_Control {
 	}
 
 	/**
+	 * Convert a task run/result payload to the canonical run result envelope.
+	 *
+	 * @param array<string,mixed> $run Raw or normalized run payload.
+	 */
+	public static function to_run_result_envelope( array $run ): WP_Agent_Run_Result_Envelope {
+		$normalized = self::normalize_run( $run );
+		$status     = self::envelope_status( self::string_value( $normalized['status'] ) );
+
+		return WP_Agent_Run_Result_Envelope::from_array(
+			array(
+				'run_id'        => self::string_value( $normalized['run_id'] ),
+				'status'        => $status,
+				'outputs'       => self::map_value( $normalized['output'] ?? array() ),
+				'artifact_refs' => WP_Agent_Run_Result_Envelope::normalize_refs( $normalized['artifact_refs'] ?? array() ),
+				'evidence_refs' => WP_Agent_Run_Result_Envelope::normalize_refs( $normalized['evidence_refs'] ?? array() ),
+				'provenance'    => self::map_value( $normalized['provenance'] ?? array() ),
+				'timestamps'    => array(
+					'started_at' => $normalized['started_at'] ?? '',
+					'updated_at' => $normalized['updated_at'] ?? '',
+				),
+				'error'         => self::map_value( $normalized['error'] ?? array() ),
+				'cancellation'  => self::map_value( $normalized['cancellation'] ?? array() ),
+				'metadata'      => self::map_value( $normalized['metadata'] ?? array() ) + array(
+					'session_id'         => $normalized['session_id'],
+					'executor_id'        => $normalized['executor_id'],
+					'execution_metrics'  => $normalized['execution_metrics'],
+					'diagnostics'        => $normalized['diagnostics'],
+					'events'             => $normalized['events'],
+				),
+			)
+		);
+	}
+
+	/** @param array<string,mixed> $run Raw or normalized run payload. */
+	public static function to_canonical_envelope( array $run ): WP_Agent_Run_Result_Envelope {
+		return self::to_run_result_envelope( $run );
+	}
+
+	/**
 	 * Normalize status values while keeping the public vocabulary bounded.
 	 */
 	public static function normalize_status( mixed $status ): string {
 		$status = is_string( $status ) ? strtolower( trim( $status ) ) : '';
 		return in_array( $status, self::statuses(), true ) ? $status : self::STATUS_RUNNING;
+	}
+
+	private static function envelope_status( string $status ): string {
+		if ( self::STATUS_QUEUED === $status ) {
+			return WP_Agent_Run_Result_Envelope::STATUS_QUEUED;
+		}
+		if ( self::STATUS_CANCELLING === $status ) {
+			return WP_Agent_Run_Result_Envelope::STATUS_CANCELLING;
+		}
+		return WP_Agent_Run_Result_Envelope::normalize_status( $status );
 	}
 
 	/**

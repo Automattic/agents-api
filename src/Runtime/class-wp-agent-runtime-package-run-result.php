@@ -29,6 +29,7 @@ final class WP_Agent_Runtime_Package_Run_Result {
 	 * @param array<int,array<string,mixed>> $evidence_refs Neutral artifact/log refs.
 	 * @param array<string,mixed> $metadata      Host/runtime metadata.
 	 * @param array<string,mixed> $replay        Replay/materialization metadata.
+	 * @param array<int,array<string,mixed>> $artifact_refs Canonical artifact refs.
 	 */
 	public function __construct(
 		private string $status,
@@ -37,7 +38,8 @@ final class WP_Agent_Runtime_Package_Run_Result {
 		private array $error = array(),
 		private array $evidence_refs = array(),
 		private array $metadata = array(),
-		private array $replay = array()
+		private array $replay = array(),
+		private array $artifact_refs = array()
 	) {}
 
 	/**
@@ -56,7 +58,8 @@ final class WP_Agent_Runtime_Package_Run_Result {
 			self::array_value( $value['error'] ?? array() ),
 			self::list_of_arrays( $value['evidence_refs'] ?? array() ),
 			self::array_value( $value['metadata'] ?? array() ),
-			self::array_value( $value['replay'] ?? array() )
+			self::array_value( $value['replay'] ?? array() ),
+			self::list_of_arrays( $value['artifact_refs'] ?? array() )
 		);
 	}
 
@@ -95,6 +98,11 @@ final class WP_Agent_Runtime_Package_Run_Result {
 		return $this->evidence_refs;
 	}
 
+	/** @return array<int,array<string,mixed>> */
+	public function get_artifact_refs(): array {
+		return self::list_of_arrays( $this->artifact_refs );
+	}
+
 	/** @return array<string,mixed> */
 	public function get_metadata(): array {
 		return $this->metadata;
@@ -112,10 +120,30 @@ final class WP_Agent_Runtime_Package_Run_Result {
 			'run_id'        => $this->run_id,
 			'result'        => $this->result,
 			'error'         => $this->error,
+			'artifact_refs' => $this->artifact_refs,
 			'evidence_refs' => $this->evidence_refs,
 			'metadata'      => $this->metadata,
 			'replay'        => $this->replay,
 		);
+	}
+
+	public function to_run_result_envelope(): WP_Agent_Run_Result_Envelope {
+		return WP_Agent_Run_Result_Envelope::from_array(
+			array(
+				'run_id'        => $this->run_id,
+				'status'        => $this->status,
+				'outputs'       => $this->result,
+				'artifact_refs' => $this->artifact_refs,
+				'evidence_refs' => $this->evidence_refs,
+				'replay'        => $this->replay,
+				'error'         => $this->error,
+				'metadata'      => $this->metadata,
+			)
+		);
+	}
+
+	public function to_canonical_envelope(): WP_Agent_Run_Result_Envelope {
+		return $this->to_run_result_envelope();
 	}
 
 	private static function string_value( mixed $value ): string {

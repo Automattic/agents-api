@@ -84,6 +84,7 @@
       "php tests/tool-declaration-rejection-smoke.php",
       "php tests/conversation-loop-interrupt-source-smoke.php",
       "php tests/run-outcome-status-smoke.php",
+      "php tests/run-result-envelope-smoke.php",
       "php tests/iteration-budget-smoke.php",
       "php tests/conversation-loop-budgets-smoke.php",
       "php tests/runtime-package-run-contract-smoke.php",
