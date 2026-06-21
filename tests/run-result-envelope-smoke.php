@@ -67,7 +67,7 @@ $runtime = WP_Agent_Runtime_Package_Run_Result::from_array(
 		'artifact_refs' => array( array( 'type' => 'package', 'label' => 'bundle' ) ),
 		'evidence_refs' => array( array( 'type' => 'trace', 'label' => 'trace' ) ),
 		'replay'        => array( 'recipe' => 'site' ),
-		'metadata'      => array( 'runtime' => 'codebox' ),
+		'metadata'      => array( 'runtime' => 'runtime_local' ),
 	)
 );
 $runtime_array    = $runtime->to_array();

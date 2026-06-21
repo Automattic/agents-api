@@ -37,14 +37,19 @@ class WP_Agent_Runtime_Tool_Policy {
 				continue;
 			}
 
-			$runtime = self::runtimeMetadata( $tool );
+			$runtime          = self::runtimeMetadata( $tool );
+			$environment      = $runtime[ WP_Agent_Tool_Declaration::RUNTIME_ENVIRONMENT ];
+			$capability_scope = $runtime[ WP_Agent_Tool_Declaration::RUNTIME_CAPABILITY_SCOPE ];
 			$policy_tool = array(
 				'id'                   => $id,
 				'runtime_tool_id'      => self::runtimeToolId( $id, $tool ),
 				'allowed'              => self::isRuntimeLocal( $runtime ),
+				'environment'          => $environment,
+				'capability_scope'     => $capability_scope,
 				'runtime'              => $runtime,
 				'execution_location'   => self::legacyExecutionLocation( $runtime ),
 				'transport_visibility' => self::legacyTransportVisibility( $runtime ),
+				'legacy_fields'        => array( 'execution_location', 'transport_visibility' ),
 			);
 			if ( is_string( $tool['source'] ?? null ) && '' !== $tool['source'] ) {
 				$policy_tool['source'] = $tool['source'];

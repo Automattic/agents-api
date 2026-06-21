@@ -398,6 +398,8 @@ The substrate treats `runtime` as a JSON-friendly associative array. It preserve
 
 Delegated runtime consumers should advertise runtime-local tools with `capability_scope: runtime_local` and `environment: runtime_local`. Control-plane tools such as repository mutation, deployment, approval, or parent orchestration actions should use `capability_scope: control_plane` and stay out of runtime-local declarations. Agents API records and propagates this vocabulary; hosts still own the concrete allow/deny policy and execution adapter.
 
+Runtime tool policy envelopes use the canonical schema `agents-api/runtime-tool-policy/v1`. Each projected tool emits neutral top-level `environment` and `capability_scope` fields alongside the nested `runtime` metadata. The compatibility fields `execution_location` and `transport_visibility` may still appear for older consumers; treat them as legacy aliases and prefer `runtime_local`/`control_plane` values from the canonical fields. Policy entries list those aliases in `legacy_fields` when emitted.
+
 Delegated runtimes can also resolve an execution principal with `WP_Agent_Execution_Principal::runtime()`. The helper produces a non-user runtime principal with `auth_source: runtime`, `request_context: runtime`, a host-owned runtime `audience_id`, and an isolated runtime conversation owner key. Hosts remain responsible for attesting the runtime, choosing the owner key, supplying any `runtime_type` claim, and enforcing authorization policy.
 
 When the conversation loop mediates tool calls, declaration runtime metadata is propagated into the normalized tool result and exposed on the corresponding `tool_execution_results[]` entry:

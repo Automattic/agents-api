@@ -188,7 +188,7 @@ smoke_assert( array( 'session_id', 'reply' ), $out_schema['required'] ?? array()
 smoke_reset_chat_filters();
 $runtime_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::runtime(
 	'runtime-session-1',
-	'sandbox-agent',
+	'runtime-local-agent',
 	array( 'source' => 'example-runtime' ),
 	'workspace:demo',
 	'example-runtime-cli',
@@ -199,7 +199,7 @@ register_chat_handler( static function ( array $input ) use ( &$captured_princip
 	$captured_principal = is_array( $input['principal'] ?? null ) ? $input['principal'] : array();
 	return array( 'session_id' => 'runtime-s-1', 'reply' => 'runtime ok', 'completed' => true );
 } );
-$runtime_result = agents_chat_dispatch( array( 'agent' => 'sandbox-agent', 'message' => 'go', 'principal' => $runtime_principal ) );
+$runtime_result = agents_chat_dispatch( array( 'agent' => 'runtime-local-agent', 'message' => 'go', 'principal' => $runtime_principal ) );
 smoke_assert( 'runtime ok', $runtime_result['reply'] ?? null, 'runtime_principal_dispatch_succeeds', $failures, $passes );
 smoke_assert( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_RUNTIME, $captured_principal['auth_source'] ?? null, 'runtime_principal_normalized_for_handler', $failures, $passes );
 smoke_assert( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_RUNTIME, 'key' => 'runtime-session-1' ), AgentsAPI\AI\WP_Agent_Execution_Principal::from_array( $captured_principal )->conversation_owner(), 'runtime_principal_preserves_owner', $failures, $passes );
@@ -211,7 +211,7 @@ add_filter( 'agents_chat_runtime_principal_permission', static function ( bool $
 }, 10, 2 );
 smoke_assert( true, agents_chat_permission( array( 'principal' => $runtime_principal ) ), 'runtime_principal_permission_filter_allows', $failures, $passes );
 
-$invalid_principal_result = agents_chat_dispatch( array( 'agent' => 'sandbox-agent', 'message' => 'go', 'principal' => 'not-object' ) );
+$invalid_principal_result = agents_chat_dispatch( array( 'agent' => 'runtime-local-agent', 'message' => 'go', 'principal' => 'not-object' ) );
 smoke_assert( true, $invalid_principal_result instanceof WP_Error, 'invalid_principal_returns_wp_error', $failures, $passes );
 smoke_assert( 'agents_chat_invalid_principal', $invalid_principal_result->get_error_code(), 'invalid_principal_error_code', $failures, $passes );
 

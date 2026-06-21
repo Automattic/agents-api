@@ -59,7 +59,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Product CLI commands beyond generic substrate needs.
 - Public REST controllers in v1 unless they are separately designed.
 - Product runner adapters that assemble prompts, choose concrete tools, materialize storage, or decide product policy.
-- Concrete runtime package materialization, package source checkout, sandbox provisioning, provider mapping, run polling, or evidence artifact upload. The package run contract only defines the request/result envelope and dispatcher seam.
+- Concrete runtime package materialization, package source checkout, delegated-runtime provisioning, provider mapping, run polling, or evidence artifact upload. The package run contract only defines the request/result envelope and dispatcher seam.
 - Concrete tool execution adapters, prompt assembly policy, or product storage/materialization policy.
 - Product-specific consent UX, support routing, escalation targets, or transcript-sharing policy.
 - Concrete memory retrieval, file projection, convention-path writing, or filesystem layout adapters.
