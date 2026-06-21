@@ -149,6 +149,7 @@ wp_register_agent(
 
 - `wp_agents_api_init`
 - `agents_api_loop_event`
+- `wp_agent_dispatch_ability()` / `wp_agent_run_runtime_package()`
 - `wp_register_agent()` / `wp_get_agent()` / `wp_get_agents()` / `wp_has_agent()` / `wp_unregister_agent()`
 - `WP_Agent`
 - `WP_Agent_Runtime_Overrides`

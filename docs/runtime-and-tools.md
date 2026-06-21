@@ -50,6 +50,45 @@ Registered abilities:
 | `agents/get-task-run` | Read the canonical status/result for an addressable task run. |
 | `agents/cancel-task-run` | Request best-effort cancellation for an addressable task run. |
 
+## Stable host import and invocation boundary
+
+Hosts that load generated runtime bundles should depend on the plugin or Composer
+package bootstrap, then use public helpers and ability slugs. Runtime code should
+not include files from `src/`, instantiate Agents API internals, or depend on
+consumer-specific class names.
+
+Stable PHP helpers:
+
+| Helper | Purpose |
+| --- | --- |
+| `wp_agent_import_runtime_bundles( $bundle_specs, $input )` | Import one or more portable runtime bundle specs through the generic importer seam. |
+| `wp_agent_run_runtime_package( $input )` | Invoke the canonical `agents/run-runtime-package` ability from in-process host code. |
+| `wp_agent_dispatch_ability( $ability_name, $parameters )` | Dispatch any registered WordPress ability through the shared Agents API facade. |
+
+Example:
+
+```php
+$import_results = wp_agent_import_runtime_bundles(
+	array(
+		array( 'source' => __DIR__ . '/bundles/example-agent.json' ),
+	),
+	array( 'on_conflict' => 'upgrade' )
+);
+
+$run_result = wp_agent_run_runtime_package(
+	array(
+		'package'  => array( 'slug' => 'example-agent' ),
+		'workflow' => array( 'id' => 'default' ),
+		'input'    => array( 'prompt' => 'Draft the site outline.' ),
+	)
+);
+```
+
+Provider-specific runtimes remain behind filters such as
+`wp_agent_runtime_import_bundle` and `wp_agent_runtime_package_run_handler`.
+Agents API owns the stable envelopes and dispatch seam; hosts own package
+materialization, execution, storage, and product policy.
+
 Executor providers register targets through `wp_agent_execution_targets` and
 dispatch handlers through `wp_agent_task_handler`, mirroring the `agents/chat`
 and `wp_agent_chat_handler` pattern:
