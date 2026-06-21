@@ -11,8 +11,8 @@ if ( ! function_exists( 'wp_agent_dispatch_ability' ) ) {
 	/**
 	 * Dispatch a registered WordPress ability through the stable Agents API facade.
 	 *
-	 * Runtime bundles and generated host code should call this helper instead of
-	 * importing Agents API internal classes or file paths.
+	 * Runtime bundles and generated host code call this helper for ability
+	 * invocation from in-process PHP.
 	 *
 	 * @param string       $ability_name Registered ability name.
 	 * @param array<mixed> $parameters   Ability input parameters.
@@ -31,7 +31,7 @@ if ( ! function_exists( 'wp_agent_run_runtime_package' ) ) {
 	/**
 	 * Run a portable runtime package through the canonical runtime package ability.
 	 *
-	 * This is the stable PHP import boundary for hosts that need to invoke a
+	 * This is the stable PHP import boundary for hosts that invoke a
 	 * generated runtime bundle from in-process code. The helper prefers the
 	 * Abilities API registry and only falls back to the dispatcher when the
 	 * registry is not loaded, which keeps normal WordPress requests on the

@@ -52,10 +52,10 @@ Registered abilities:
 
 ## Stable host import and invocation boundary
 
-Hosts that load generated runtime bundles should depend on the plugin or Composer
-package bootstrap, then use public helpers and ability slugs. Runtime code should
-not include files from `src/`, instantiate Agents API internals, or depend on
-consumer-specific class names.
+Hosts that load generated runtime bundles depend on the plugin or Composer
+package bootstrap, then use public helpers and ability slugs. Runtime code calls
+the stable helpers below and receives normalized runtime envelopes from Agents
+API.
 
 Stable PHP helpers:
 
@@ -84,7 +84,7 @@ $run_result = wp_agent_run_runtime_package(
 );
 ```
 
-Provider-specific runtimes remain behind filters such as
+Provider-specific runtimes connect through filters such as
 `wp_agent_runtime_import_bundle` and `wp_agent_runtime_package_run_handler`.
 Agents API owns the stable envelopes and dispatch seam; hosts own package
 materialization, execution, storage, and product policy.
