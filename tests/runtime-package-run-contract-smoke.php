@@ -33,6 +33,7 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-runtime-package-run-request.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-runtime-package-run-result.php';
 require_once __DIR__ . '/../src/Runtime/register-runtime-package-run-ability.php';
+require_once __DIR__ . '/../src/Abilities/functions-ability-dispatch.php';
 
 use AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Request;
 use AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Result;
@@ -116,5 +117,16 @@ agents_api_smoke_assert_equals( false, is_wp_error( $dispatch ), 'dispatcher ret
 agents_api_smoke_assert_equals( 'succeeded', is_array( $dispatch ) ? $dispatch['status'] ?? '' : '', 'dispatcher normalizes result status', $failures, $passes );
 agents_api_smoke_assert_equals( 'build-site', is_array( $dispatch ) ? $dispatch['result']['workflow_id'] ?? '' : '', 'dispatcher passes workflow to handler', $failures, $passes );
 agents_api_smoke_assert_equals( 'runtime log', is_array( $dispatch ) ? $dispatch['evidence_refs'][0]['label'] ?? '' : '', 'dispatcher preserves evidence refs', $failures, $passes );
+
+echo "\n[4] Public host helper invokes the canonical runtime package boundary:\n";
+$helper_dispatch = wp_agent_run_runtime_package(
+	array(
+		'package'  => array( 'slug' => 'site-builder' ),
+		'workflow' => array( 'id' => 'build-site' ),
+	)
+);
+agents_api_smoke_assert_equals( false, is_wp_error( $helper_dispatch ), 'public helper returns handler output', $failures, $passes );
+agents_api_smoke_assert_equals( 'succeeded', is_array( $helper_dispatch ) ? $helper_dispatch['status'] ?? '' : '', 'public helper preserves result status', $failures, $passes );
+agents_api_smoke_assert_equals( 'build-site', is_array( $helper_dispatch ) ? $helper_dispatch['result']['workflow_id'] ?? '' : '', 'public helper passes workflow to handler', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API runtime package run contract', $failures, $passes );
