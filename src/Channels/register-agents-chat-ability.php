@@ -355,7 +355,7 @@ function agents_chat_input_schema(): array {
 			),
 			'tool_policy'           => array(
 				'type'        => array( 'object', 'null' ),
-				'description' => 'Optional caller-owned tool policy for this turn. Runtimes may use this to narrow tool visibility for peer-agent or sandbox invocations.',
+				'description' => 'Optional caller-owned tool policy for this turn. Runtimes may use this to narrow tool visibility for peer-agent or delegated-runtime invocations.',
 				'properties'  => array(
 					'mode'  => array(
 						'type' => 'string',

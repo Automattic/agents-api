@@ -83,11 +83,14 @@ foreach ( $policy['tools'] as $tool ) {
 
 agents_api_smoke_assert_equals( true, $by_id['filesystem-write']['allowed'] ?? false, 'runtime-local tool is allowed', $failures, $passes );
 agents_api_smoke_assert_equals( 'filesystem_write', $by_id['filesystem-write']['runtime_tool_id'] ?? '', 'runtime tool id can be declared explicitly', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Tool_Declaration::ENVIRONMENT_RUNTIME_LOCAL, $by_id['filesystem-write'][ WP_Agent_Tool_Declaration::RUNTIME_ENVIRONMENT ] ?? '', 'runtime-local tool emits canonical execution environment', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Tool_Declaration::CAPABILITY_SCOPE_RUNTIME_LOCAL, $by_id['filesystem-write'][ WP_Agent_Tool_Declaration::RUNTIME_CAPABILITY_SCOPE ] ?? '', 'runtime-local tool emits canonical capability scope', $failures, $passes );
 agents_api_smoke_assert_equals( WP_Agent_Tool_Declaration::ENVIRONMENT_RUNTIME_LOCAL, $by_id['filesystem-write']['runtime'][ WP_Agent_Tool_Declaration::RUNTIME_ENVIRONMENT ] ?? '', 'runtime-local tool records execution environment', $failures, $passes );
-agents_api_smoke_assert_equals( 'sandbox', $by_id['filesystem-write']['execution_location'] ?? '', 'runtime-local tool projects legacy sandbox location for consumers', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'execution_location', 'transport_visibility' ), $by_id['filesystem-write']['legacy_fields'] ?? array(), 'runtime-local tool marks compatibility-only fields as legacy', $failures, $passes );
 
 agents_api_smoke_assert_equals( false, $by_id['control-plane/workspace-git-push']['allowed'] ?? true, 'control-plane tool is denied to runtime-local agent', $failures, $passes );
-agents_api_smoke_assert_equals( 'parent', $by_id['control-plane/workspace-git-push']['transport_visibility'] ?? '', 'control-plane tool projects parent visibility', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Tool_Declaration::ENVIRONMENT_CONTROL_PLANE, $by_id['control-plane/workspace-git-push'][ WP_Agent_Tool_Declaration::RUNTIME_ENVIRONMENT ] ?? '', 'control-plane tool emits canonical execution environment', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Tool_Declaration::CAPABILITY_SCOPE_CONTROL_PLANE, $by_id['control-plane/workspace-git-push'][ WP_Agent_Tool_Declaration::RUNTIME_CAPABILITY_SCOPE ] ?? '', 'control-plane tool emits canonical capability scope', $failures, $passes );
 agents_api_smoke_assert_equals( 'control_plane_workspace_read', $by_id['control-plane/workspace-read']['runtime_tool_id'] ?? '', 'runtime tool id defaults from tool name', $failures, $passes );
 agents_api_smoke_assert_equals( false, $by_id['control-plane/workspace-read']['allowed'] ?? true, 'tools without runtime metadata default closed', $failures, $passes );
 
