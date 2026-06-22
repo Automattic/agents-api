@@ -4,37 +4,45 @@ on:
   workflow_dispatch:
     inputs:
       prompt:
-        description: Instruction for Docs Agent.
-        required: true
-        default: Generate or update technical developer documentation for Agents API from source code. Open a documentation PR only if needed.
-      openai_model:
-        description: OpenAI model to use for the imported agent flow.
-        required: true
-        default: gpt-5.5
-      docs_agent_flow:
-        description: Docs Agent flow slug to run.
+        description: Optional additional instruction for Docs Agent.
+        required: false
+        default: Generate or update Agents API documentation from repository source. Open a documentation pull request only when changes are needed.
+      audience:
+        description: Documentation lane to maintain.
         type: choice
         required: true
         options:
-          - technical-docs-bootstrap-flow
-          - technical-docs-maintenance-flow
-          - technical-docs-flow
-          - user-docs-bootstrap-flow
-          - user-docs-maintenance-flow
-          - user-docs-flow
-        default: technical-docs-maintenance-flow
+          - technical
+          - user
+        default: technical
+      run_kind:
+        description: Docs Agent run kind.
+        type: choice
+        required: true
+        options:
+          - maintenance
+          - bootstrap
+        default: maintenance
+      openai_model:
+        description: OpenAI model to use for Docs Agent.
+        required: true
+        default: gpt-5.5
       docs_agent_ref:
-        description: Docs Agent ref.
+        description: Automattic/docs-agent ref to use for the Docs Agent recipe.
         required: true
         default: main
-      data_machine_ref:
-        description: Data Machine ref.
+      base_ref:
+        description: Base branch or ref for documentation pull requests.
         required: true
         default: main
-      data_machine_code_ref:
-        description: Data Machine Code ref.
+      docs_branch:
+        description: Stable branch reused for the Docs Agent pull request.
         required: true
-        default: main
+        default: docs-agent/docs-upkeep
+      writable_paths:
+        description: Comma-separated paths Docs Agent may edit.
+        required: true
+        default: README.md,docs/**
 
 permissions:
   contents: write
@@ -42,160 +50,26 @@ permissions:
   issues: write
 
 jobs:
-  prepare:
-    name: Prepare Docs Agent config
-    runs-on: ubuntu-latest
-    outputs:
-      docs_workflow: ${{ steps.config.outputs.docs_workflow }}
-      pipeline_slug: ${{ steps.config.outputs.pipeline_slug }}
-      docs_branch: ${{ steps.config.outputs.docs_branch }}
-      audience: ${{ steps.config.outputs.audience }}
-      success_requires_pr: ${{ steps.config.outputs.success_requires_pr }}
-      completion_instruction: ${{ steps.config.outputs.completion_instruction }}
-      fallback_pr_title: ${{ steps.config.outputs.fallback_pr_title }}
-    steps:
-      - name: Resolve flow settings
-        id: config
-        env:
-          DOCS_AGENT_FLOW: ${{ inputs.docs_agent_flow }}
-        run: |
-          set -euo pipefail
-          case "$DOCS_AGENT_FLOW" in
-            technical-docs-bootstrap-flow|technical-docs-maintenance-flow|technical-docs-flow)
-              docs_workflow="technical"
-              pipeline_slug="technical-docs-pipeline"
-              audience="technical developer-facing"
-              ;;
-            user-docs-bootstrap-flow|user-docs-maintenance-flow|user-docs-flow)
-              docs_workflow="user"
-              pipeline_slug="user-docs-pipeline"
-              audience="non-technical user-facing"
-              ;;
-            *)
-              echo "Unsupported docs_agent_flow: $DOCS_AGENT_FLOW" >&2
-              exit 1
-              ;;
-          esac
-
-          success_requires_pr="false"
-          docs_branch="docs-agent/${docs_workflow}-docs"
-          fallback_pr_title="Update ${docs_workflow} documentation"
-          completion_instruction="If no documentation update is needed, finish cleanly without opening a pull request. If an update is needed, write only allowed documentation paths and open one pull request."
-          if [[ "$DOCS_AGENT_FLOW" == *-bootstrap-flow ]]; then
-            success_requires_pr="true"
-            docs_branch="docs-agent/${docs_workflow}-bootstrap-docs"
-            fallback_pr_title="Bootstrap ${docs_workflow} documentation surface"
-            completion_instruction="This is a bootstrap run. Scaffold a complete, clean, hierarchical documentation surface under the allowed documentation paths. Cover the repository source as the source of truth, organize pages by architecture and logical module boundaries, and write every needed digestible topic page before opening one pull request. A no_changes outcome is invalid for this consumer bootstrap proof."
-          fi
-
-          {
-            printf 'docs_workflow=%s\n' "$docs_workflow"
-            printf 'pipeline_slug=%s\n' "$pipeline_slug"
-            printf 'docs_branch=%s\n' "$docs_branch"
-            printf 'audience=%s\n' "$audience"
-            printf 'success_requires_pr=%s\n' "$success_requires_pr"
-            printf 'fallback_pr_title=%s\n' "$fallback_pr_title"
-            printf 'completion_instruction<<EOF\n%s\nEOF\n' "$completion_instruction"
-          } >> "$GITHUB_OUTPUT"
-
   docs-agent:
-    name: Run Docs Agent
-    needs: prepare
-    uses: Extra-Chill/homeboy-extensions/.github/workflows/datamachine-agent-ci.yml@feat/agent-ci-runner-extensions
+    name: Maintain Documentation
+    uses: Automattic/docs-agent/.github/workflows/maintain-docs.yml@main
     with:
-      bundle_path: bundles/docs-agent
-      bundle_repo: https://github.com/Automattic/docs-agent.git
-      bundle_ref: ${{ inputs.docs_agent_ref }}
-      bundle_path_in_repo: bundles/docs-agent
-      agent_slug: docs-agent
-      pipeline_slug: ${{ needs.prepare.outputs.pipeline_slug }}
-      flow_slug: ${{ inputs.docs_agent_flow }}
-      target_repo: Automattic/agents-api
+      audience: ${{ inputs.audience }}
+      run_kind: ${{ inputs.run_kind }}
+      base_ref: ${{ inputs.base_ref }}
+      docs_branch: ${{ inputs.docs_branch }}
+      writable_paths: ${{ inputs.writable_paths }}
       model: ${{ inputs.openai_model }}
-      validation_dependencies: Extra-Chill/data-machine@${{ inputs.data_machine_ref }},Extra-Chill/data-machine-code@${{ inputs.data_machine_code_ref }},WordPress/ai-provider-for-openai@trunk
-      success_requires_pr: ${{ needs.prepare.outputs.success_requires_pr == 'true' }}
-      max_turns: 20
-      step_budget: 24
-      time_budget_ms: 600000
-      engine_key: docs_agent
-      tool_results_key: github_tool_results
-      extra_required_abilities: '["datamachine/create-or-update-github-file"]'
-      allowed_repos: '["Automattic/agents-api"]'
-      tool_recorders: |
+      docs_agent_ref: ${{ inputs.docs_agent_ref }}
+      verification_commands: |
         [
-          {
-            "tool": "create_or_update_github_file",
-            "forced_parameters": {
-              "allowed_file_paths": ["README.md", "docs/**"],
-              "branch": "${{ needs.prepare.outputs.docs_branch }}"
-            },
-            "record": {
-              "engine_key": "docs_agent",
-              "tool_results_key": "github_tool_results"
-            }
-          },
-          {
-            "tool": "create_github_pull_request",
-            "record": {
-              "engine_key": "docs_agent",
-              "tool_results_key": "github_tool_results",
-              "event": {
-                "key": "pr",
-                "type": "pull_request",
-                "only_if_success": true
-              }
-            }
-          }
+          "php tests/no-product-imports-smoke.php"
         ]
-      fallback_pull_request: |
-        {
-          "repo": "Automattic/agents-api",
-          "title": "${{ needs.prepare.outputs.fallback_pr_title }}",
-          "head": "${{ needs.prepare.outputs.docs_branch }}",
-          "base": "main",
-          "body": "## Summary\n- Generate or update Agents API documentation from repository source.\n- Keep documentation under README.md and docs/**.\n- Generated by the Docs Agent workflow.\n\n## AI assistance\n- **AI assistance:** Yes\n- **Tool(s):** OpenCode (GPT-5.5) via Docs Agent\n- **Used for:** Generated documentation draft from repository source for human review."
-        }
-      engine_data_outputs: '{"docs_agent_pr_url":"metadata.engine_data.docs_agent.pr.url","success_status":"metadata.success_status"}'
-      transcript_artifact_name: docs-agent-transcript-${{ github.run_id }}
       prompt: |
         ${{ inputs.prompt }}
 
         Target repository: Automattic/agents-api
-        Event name: ${{ github.event_name }}
-        Target ref: ${{ github.ref_name }}
-        Head SHA: ${{ github.sha }}
         Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        Writable documentation paths: README.md, docs/**
-        Selected docs workflow: ${{ needs.prepare.outputs.docs_workflow }} (${{ needs.prepare.outputs.audience }})
 
-        Generate documentation from source code for the selected audience. ${{ needs.prepare.outputs.completion_instruction }}
+        Preserve the Agents API product-neutral boundary. Use Agents API as the product name in production and package documentation. Keep generated documentation focused on the public API substrate, repository source, developer contracts, setup, tests, and contributor workflows for the selected audience.
     secrets: inherit
-
-  validate-bootstrap-docs:
-    name: Validate bootstrap docs links
-    needs:
-      - prepare
-      - docs-agent
-    if: ${{ needs.prepare.outputs.success_requires_pr == 'true' && fromJSON(needs.docs-agent.outputs.engine_data_json).success_status == 'pr_opened' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Agents API
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Checkout Docs Agent
-        uses: actions/checkout@v4
-        with:
-          repository: Automattic/docs-agent
-          ref: ${{ inputs.docs_agent_ref }}
-          path: .ci/docs-agent
-
-      - name: Repair and validate generated Markdown links
-        env:
-          DOCS_AGENT_BRANCH: ${{ needs.prepare.outputs.docs_branch }}
-        run: |
-          set -euo pipefail
-          php .ci/docs-agent/scripts/repair-docs-links.php "$GITHUB_WORKSPACE" "$DOCS_AGENT_BRANCH" --commit
-          git fetch origin "$DOCS_AGENT_BRANCH"
-          php tests/playground-ci/scripts/validate-docs-links.php "$GITHUB_WORKSPACE" FETCH_HEAD
