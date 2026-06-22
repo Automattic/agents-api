@@ -13,11 +13,11 @@ require_once __DIR__ . '/interface-wp-agent-run-control-store.php';
 require_once __DIR__ . '/class-wp-agent-option-run-control-store.php';
 require_once __DIR__ . '/class-wp-agent-run-control.php';
 
-const AGENTS_RUN_RUNTIME_PACKAGE_ABILITY               = 'agents/run-runtime-package';
-const AGENTS_GET_RUNTIME_PACKAGE_RUN_ABILITY           = 'agents/get-runtime-package-run';
-const AGENTS_CANCEL_RUNTIME_PACKAGE_RUN_ABILITY        = 'agents/cancel-runtime-package-run';
-const AGENTS_LIST_RUNTIME_PACKAGE_RUN_EVENTS_ABILITY   = 'agents/list-runtime-package-run-events';
-const AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE         = 'agents_api_runtime_package_run_control';
+const AGENTS_RUN_RUNTIME_PACKAGE_ABILITY             = 'agents/run-runtime-package';
+const AGENTS_GET_RUNTIME_PACKAGE_RUN_ABILITY         = 'agents/get-runtime-package-run';
+const AGENTS_CANCEL_RUNTIME_PACKAGE_RUN_ABILITY      = 'agents/cancel-runtime-package-run';
+const AGENTS_LIST_RUNTIME_PACKAGE_RUN_EVENTS_ABILITY = 'agents/list-runtime-package-run-events';
+const AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE       = 'agents_api_runtime_package_run_control';
 
 add_action(
 	'wp_abilities_api_categories_init',
@@ -345,11 +345,11 @@ function agents_runtime_package_run_id_input_schema(): array {
 
 /** @return array<string,mixed> */
 function agents_runtime_package_run_events_input_schema(): array {
-	$schema                  = agents_runtime_package_run_id_input_schema();
-	$properties              = is_array( $schema['properties'] ?? null ) ? $schema['properties'] : array();
-	$properties['cursor']    = array( 'type' => 'string' );
-	$properties['limit']     = array( 'type' => 'integer' );
-	$schema['properties']    = $properties;
+	$schema               = agents_runtime_package_run_id_input_schema();
+	$properties           = is_array( $schema['properties'] ?? null ) ? $schema['properties'] : array();
+	$properties['cursor'] = array( 'type' => 'string' );
+	$properties['limit']  = array( 'type' => 'integer' );
+	$schema['properties'] = $properties;
 	return $schema;
 }
 
@@ -380,20 +380,20 @@ function agents_runtime_package_run_control_output_schema( bool $include_cancell
 
 /** @return array<string,mixed> */
 function agents_runtime_package_run_events_output_schema(): array {
-	$schema                  = agents_runtime_package_run_control_output_schema();
-	$required                = is_array( $schema['required'] ?? null ) ? array_values( $schema['required'] ) : array();
-	$properties              = is_array( $schema['properties'] ?? null ) ? $schema['properties'] : array();
-	$required[]              = 'events';
-	$required[]              = 'cursor';
-	$required[]              = 'has_more';
-	$properties['events']    = array(
+	$schema                 = agents_runtime_package_run_control_output_schema();
+	$required               = is_array( $schema['required'] ?? null ) ? array_values( $schema['required'] ) : array();
+	$properties             = is_array( $schema['properties'] ?? null ) ? $schema['properties'] : array();
+	$required[]             = 'events';
+	$required[]             = 'cursor';
+	$required[]             = 'has_more';
+	$properties['events']   = array(
 		'type'  => 'array',
 		'items' => array( 'type' => 'object' ),
 	);
-	$properties['cursor']    = array( 'type' => 'string' );
-	$properties['has_more']  = array( 'type' => 'boolean' );
-	$schema['required']      = $required;
-	$schema['properties']    = $properties;
+	$properties['cursor']   = array( 'type' => 'string' );
+	$properties['has_more'] = array( 'type' => 'boolean' );
+	$schema['required']     = $required;
+	$schema['properties']   = $properties;
 	return $schema;
 }
 

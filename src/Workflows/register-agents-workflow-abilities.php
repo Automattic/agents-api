@@ -21,11 +21,11 @@ namespace AgentsAPI\AI\Workflows;
 
 defined( 'ABSPATH' ) || exit;
 
-const AGENTS_RUN_WORKFLOW_ABILITY      = 'agents/run-workflow';
-const AGENTS_VALIDATE_WORKFLOW_ABILITY = 'agents/validate-workflow';
-const AGENTS_DESCRIBE_WORKFLOW_ABILITY = 'agents/describe-workflow';
-const AGENTS_GET_WORKFLOW_RUN_ABILITY  = 'agents/get-workflow-run';
-const AGENTS_CANCEL_WORKFLOW_RUN_ABILITY = 'agents/cancel-workflow-run';
+const AGENTS_RUN_WORKFLOW_ABILITY             = 'agents/run-workflow';
+const AGENTS_VALIDATE_WORKFLOW_ABILITY        = 'agents/validate-workflow';
+const AGENTS_DESCRIBE_WORKFLOW_ABILITY        = 'agents/describe-workflow';
+const AGENTS_GET_WORKFLOW_RUN_ABILITY         = 'agents/get-workflow-run';
+const AGENTS_CANCEL_WORKFLOW_RUN_ABILITY      = 'agents/cancel-workflow-run';
 const AGENTS_LIST_WORKFLOW_RUN_EVENTS_ABILITY = 'agents/list-workflow-run-events';
 
 add_action(
@@ -524,11 +524,11 @@ function agents_workflow_run_id_input_schema(): array {
 
 /** @return array<string,mixed> */
 function agents_workflow_run_events_input_schema(): array {
-	$schema                 = agents_workflow_run_id_input_schema();
-	$properties             = is_array( $schema['properties'] ?? null ) ? $schema['properties'] : array();
-	$properties['cursor']   = array( 'type' => 'string' );
-	$properties['limit']    = array( 'type' => 'integer' );
-	$schema['properties']   = $properties;
+	$schema               = agents_workflow_run_id_input_schema();
+	$properties           = is_array( $schema['properties'] ?? null ) ? $schema['properties'] : array();
+	$properties['cursor'] = array( 'type' => 'string' );
+	$properties['limit']  = array( 'type' => 'integer' );
+	$schema['properties'] = $properties;
 	return $schema;
 }
 

@@ -41,7 +41,7 @@ if ( ! function_exists( 'wp_agent_run_runtime_package' ) ) {
 	 * @return array<string,mixed>|WP_Error Runtime package result or dispatch error.
 	 */
 	function wp_agent_run_runtime_package( array $input ) {
-		$ability_name = defined( 'AgentsAPI\\AI\\AGENTS_RUN_RUNTIME_PACKAGE_ABILITY' )
+		$ability_name     = defined( 'AgentsAPI\\AI\\AGENTS_RUN_RUNTIME_PACKAGE_ABILITY' )
 			? constant( 'AgentsAPI\\AI\\AGENTS_RUN_RUNTIME_PACKAGE_ABILITY' )
 			: 'agents/run-runtime-package';
 		$normalize_result = static function ( mixed $result ) {

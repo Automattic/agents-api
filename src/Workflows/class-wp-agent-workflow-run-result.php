@@ -192,7 +192,10 @@ final class WP_Agent_Workflow_Run_Result {
 					'ended_at'   => $this->ended_at,
 				),
 				'error'         => $this->error,
-				'metadata'      => $this->metadata + array( 'steps' => $this->steps, 'inputs' => $this->inputs ),
+				'metadata'      => $this->metadata + array(
+					'steps'  => $this->steps,
+					'inputs' => $this->inputs,
+				),
 			)
 		);
 	}

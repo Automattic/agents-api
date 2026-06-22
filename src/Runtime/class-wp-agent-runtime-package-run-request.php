@@ -55,7 +55,7 @@ final class WP_Agent_Runtime_Package_Run_Request {
 			);
 		}
 
-		$workflow_id  = self::string_value( $workflow['id'] ?? '' );
+		$workflow_id   = self::string_value( $workflow['id'] ?? '' );
 		$workflow_spec = self::array_value( $workflow['spec'] ?? array() );
 		if ( '' === $workflow_id && empty( $workflow_spec ) ) {
 			return new \WP_Error(
