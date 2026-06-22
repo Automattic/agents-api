@@ -1,10 +1,16 @@
 # Agents API
 
-Agents API is a WordPress-shaped backend substrate for durable agent runtime behavior.
+**The shared foundation for building AI agents in WordPress.**
 
-Agents API is maintained by Automattic as a standalone WordPress substrate package.
+If you're building a plugin that needs an AI agent — one that can hold a conversation, call tools, run workflows, remember things between sessions, or talk to users through Slack, Telegram, or email — you shouldn't have to reinvent the plumbing every time. Agents API gives you that plumbing.
 
-It provides generic contracts and value objects that product plugins can build on without copying agent runtime primitives into every product. It is not an admin application or a provider-specific AI client. It ships **workflow plumbing** (spec value object, validator, runner skeleton, in-memory registry, three abilities, optional Action Scheduler bridge) but does **not** ship a concrete workflow runtime, durable run history, scheduling stack, editor UI, or product-specific step types — those are consumer concerns.
+It's a small, focused WordPress package maintained by Automattic. Think of it as the layer that sits *underneath* your product: it owns the boring-but-important parts (agent identity, runtime contracts, tool mediation, sessions, transcripts, memory, workflow scaffolding), so your plugin can focus on what makes it special.
+
+**What you get out of the box:** a way to register agents, a messaging channel base class that plugs into any transport, value objects for the agent lifecycle, contracts for tools and memory and consent, and lightweight workflow plumbing (spec, validator, runner skeleton, three abilities, an optional Action Scheduler bridge).
+
+**What you don't get — and shouldn't expect:** a concrete workflow runtime, durable run history, an editor UI, admin screens, or any provider-specific AI client. Those belong to your product. Agents API is the substrate, not the application.
+
+New here? Start with the [Introduction](docs/introduction.md) — it breaks down the core concepts and vocabulary in plain language — then browse the [developer documentation](docs/README.md).
 
 ## Layer Boundary
 
@@ -24,6 +30,10 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Agent execution principal/context value objects.
 - Agent access grant, token, token authenticator, authorization policy, and capability ceiling contracts.
 - Multi-turn orchestration contracts.
+- Opt-in mediated tool result truncation for oversized transcript payloads.
+- Opt-in between-turn interrupt sources for cancel, redirect, or additional instruction messages.
+- Canonical chat run-control contracts for run IDs, run status, best-effort cancellation, and queued messages.
+- Canonical ability discovery and dispatch meta-abilities for large tool surfaces.
 - Agent package and package-artifact contracts.
 - Shared `wp_guideline` / `wp_guideline_type` storage substrate polyfill when Core/Gutenberg do not provide it.
 - Agent memory store contracts and value objects.
@@ -39,6 +49,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Session and persistence contracts where they are provider-neutral.
 - Retrieved context authority vocabulary, context item shape, and conflict resolution contracts.
 - Workflow spec value object, structural validator, in-memory registry, abstract runner with `ability` and `agent` step types, `Store` and `Run_Recorder` interfaces, optional Action Scheduler bridge, and three canonical abilities (`agents/run-workflow`, `agents/validate-workflow`, `agents/describe-workflow`).
+- Runtime package workflow execution request/result contracts and the canonical dispatcher ability (`agents/run-runtime-package`) for consumer-owned package materialization and execution adapters.
 
 ## What Agents API Does Not Own
 
@@ -48,6 +59,7 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Product CLI commands beyond generic substrate needs.
 - Public REST controllers in v1 unless they are separately designed.
 - Product runner adapters that assemble prompts, choose concrete tools, materialize storage, or decide product policy.
+- Concrete runtime package materialization, package source checkout, delegated-runtime provisioning, provider mapping, run polling, or evidence artifact upload. The package run contract only defines the request/result envelope and dispatcher seam.
 - Concrete tool execution adapters, prompt assembly policy, or product storage/materialization policy.
 - Product-specific consent UX, support routing, escalation targets, or transcript-sharing policy.
 - Concrete memory retrieval, file projection, convention-path writing, or filesystem layout adapters.
@@ -57,6 +69,43 @@ Products can require Agents API because they build on the substrate. Agents API 
 ## Requirements
 
 Agents API requires **WordPress 7.0 or higher**. The substrate itself is provider-agnostic and loads on earlier versions, but every realistic consumer needs an AI provider. The only WordPress-native provider story is `wp-ai-client`, which ships in WordPress 7.0 core. Sites running 6.8–6.9 can install Agents API without errors but won't have a working AI provider unless they manually install the deprecated `wp-ai-client` plugin.
+
+## Quality Gates
+
+Agents API runs repository checks directly through Composer scripts:
+
+- `composer phpstan` runs PHPStan at max level with WordPress stubs.
+- `composer smoke` runs the current PHP smoke-test suite.
+
+These checks keep the package self-contained for Core-candidate review while proving the runtime wiring and static contracts still behave as expected.
+
+## Core-Candidate API Naming
+
+Agents API intentionally exposes WordPress-shaped public APIs such as `wp_register_agent()`, `wp_get_agent()`, `wp_agents_api_init`, and `wp_agent_*` hooks.
+
+These names are not accidental plugin globals. They are the public API surface being evaluated for possible WordPress Core alignment, following existing Core naming conventions for substrate APIs. Plugin Check may report prefix warnings for these symbols; those warnings are expected for this Core-candidate package and should be reviewed in that context.
+
+## Installation
+
+Agents API supports the same two delivery shapes used by other shared WordPress runtime packages such as Action Scheduler: install it as a normal WordPress plugin, or require it through Composer and load Composer's autoloader from the host project.
+
+Both paths load the same `agents-api.php` bootstrap. The bootstrap is idempotent, so loading it through Composer and WordPress in the same request is safe.
+
+### WordPress Plugin
+
+Install and activate the Agents API plugin through the normal WordPress plugin mechanism. This is the recommended path for site owners and plugins that declare Agents API as a plugin dependency.
+
+### Composer
+
+Require the package from a host plugin, mu-plugin, or Composer-managed WordPress project:
+
+```sh
+composer require wordpress/agents-api:^0.1
+```
+
+Composer autoloads `agents-api.php` through the package `files` autoload entry. The consuming project must load Composer's generated `vendor/autoload.php` during WordPress bootstrap. After that, the same public API is available as in the plugin activation path.
+
+Pin released tags (`^0.1`, `0.1.x`, or an exact `0.1.0` tag) for reproducible production installs. Track `main` only for active substrate development.
 
 ## Consumer Integration
 
@@ -100,9 +149,13 @@ wp_register_agent(
 
 - `wp_agents_api_init`
 - `agents_api_loop_event`
+- `wp_agent_dispatch_ability()` / `wp_agent_run_runtime_package()`
 - `wp_register_agent()` / `wp_get_agent()` / `wp_get_agents()` / `wp_has_agent()` / `wp_unregister_agent()`
 - `WP_Agent`
+- `WP_Agent_Runtime_Overrides`
 - `WP_Agents_Registry`
+- `WP_Agent_Event_Trigger`
+- `WP_Agent_Event_Trigger_Registry`
 - `WP_Agent_Package*` value objects and artifact registry helpers
 - `WP_Agent_Access_Grant`
 - `WP_Agent_Access_Store`
@@ -128,7 +181,18 @@ wp_register_agent(
 - `AgentsAPI\AI\WP_Agent_Null_Transcript_Persister`
 - `AgentsAPI\AI\WP_Agent_Conversation_Compaction`
 - `AgentsAPI\AI\WP_Agent_Iteration_Budget`
+- `AgentsAPI\AI\WP_Agent_Spin_Signature`
+- `AgentsAPI\AI\WP_Agent_Spin_Detector`
+- `AgentsAPI\AI\WP_Agent_Consecutive_Spin_Detector`
+- `AgentsAPI\AI\WP_Agent_Identical_Failure_Signature`
+- `AgentsAPI\AI\WP_Agent_Identical_Failure_Tracker`
+- `AgentsAPI\AI\WP_Agent_Consecutive_Identical_Failure_Tracker`
+- `AgentsAPI\AI\WP_Agent_Tool_Result_Truncator`
+- `AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator`
 - `AgentsAPI\AI\WP_Agent_Conversation_Result`
+- `AgentsAPI\AI\WP_Agent_Chat_Run_Control`
+- `AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Request`
+- `AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Result`
 - `AgentsAPI\AI\WP_Agent_Conversation_Loop`
 - `WP_Agent_Consent_Policy`
 - `WP_Agent_Default_Consent_Policy`
@@ -154,10 +218,16 @@ wp_register_agent(
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Executor`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core`
 - `AgentsAPI\AI\Tools\WP_Agent_Tool_Result`
+- `agents/ability-search` / `agents/ability-call`
+- `agents/run-runtime-package`
+- `agents/chat` / `agents/get-chat-run` / `agents/cancel-chat-run` / `agents/queue-chat-message`
 - `AgentsAPI\AI\Approvals\WP_Agent_Approval_Decision`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Store`
+- `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Observer`
+- `AgentsAPI\AI\Approvals\WP_Agent_Approval_Memory_Store`
+- `AgentsAPI\AI\Approvals\WP_Agent_Null_Approval_Memory_Store`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Resolver`
 - `AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Handler`
 - `AgentsAPI\AI\Context\WP_Agent_Context_Authority_Tier`
@@ -180,6 +250,10 @@ wp_register_agent(
 - `WP_Agent_Tool_Policy`
 - `WP_Agent_Tool_Policy_Filter`
 - `WP_Agent_Tool_Access_Policy`
+- `WP_Agent_Tool_Tier_Resolver`
+- `WP_Agent_Default_Tool_Tier_Resolver`
+- `WP_Agent_Tool_Usage_Tracker`
+- `WP_Agent_Null_Tool_Usage_Tracker`
 - `WP_Agent_Action_Policy_Resolver`
 - `WP_Agent_Action_Policy_Provider`
 - `AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope`
@@ -298,8 +372,11 @@ Tool visibility is resolved by `WP_Agent_Tool_Policy` over an already-gathered t
 - Registered agent or runtime `tool_policy` config with `allow` / `deny`, `tools`, and `categories`.
 - Host-provided `WP_Agent_Tool_Access_Policy` policy fragments.
 - Runtime `categories`, `allow_only`, and explicit `deny` lists.
+- Caller-provided runtime tool opt-in via `runtime_tools`, `runtime_categories`, allow-mode `tools` / `categories`, `allow_only`, or mandatory policy.
 
-Mandatory tools are not hardcoded by Agents API. A consumer that needs mandatory runtime plumbing can return `mandatory_tools` or `mandatory_categories` from a policy provider, and explicit deny still wins.
+Caller-provided runtime tools are declarations with neutral metadata such as `runtime_tool: true`, `executor: client`, or `scope: run`. They are excluded by default so transport-provided tools are not exposed to the model ambiently. A caller, agent config, or policy provider must opt them in explicitly by name or category. Mandatory tools are not hardcoded by Agents API; a consumer that needs mandatory runtime plumbing can return `mandatory_tools` or `mandatory_categories` from a policy provider, and explicit deny still wins.
+
+This visibility policy is separate from parameter sourcing. Required tool parameters are filled from model/caller parameters first, then from `client_context_bindings` only when the tool declaration explicitly maps a context key. Ambient runtime context keys, including sensitive names such as `api_key`, `token`, and `authorization`, do not satisfy required parameters just because their names match.
 
 ```php
 $visible_tools = ( new WP_Agent_Tool_Policy() )->resolve(
@@ -310,12 +387,30 @@ $visible_tools = ( new WP_Agent_Tool_Policy() )->resolve(
 			'tool_policy' => array(
 				'mode'       => 'allow',
 				'categories' => array( 'read' ),
+				'runtime_tools' => array( 'client/choose_post' ),
 			),
 		),
 		'tool_policy_providers' => array( $consumer_policy_provider ),
 	)
 );
 ```
+
+Consumers that gather tools from multiple product-owned sources can use `WP_Agent_Tool_Source_Registry` before the policy pass. Sources are named callbacks that receive `(array $context, WP_Agent_Tool_Source_Registry $registry)` and return declarations keyed by tool name. Lower source priorities run earlier, `agents_api_tool_source_order` can reorder sources for runtime context such as modes, and earlier sources win duplicate tool names.
+
+```php
+$registry = new WP_Agent_Tool_Source_Registry();
+$registry->registerSource( 'runtime', $runtime_source, 10 );
+$registry->registerSource( 'static', $static_source, 20 );
+
+$all_tools = $registry->gather(
+	array(
+		'agent_id' => 'writer',
+		'modes'    => array( 'chat' ),
+	)
+);
+```
+
+The registry exposes three composition hooks: `agents_api_tool_sources` for injecting or replacing named sources, `agents_api_tool_source_order` for source precedence, and `agents_api_tool_source_tools` for context-aware adjustment of one source's gathered declarations.
 
 Action policy is resolved by `WP_Agent_Action_Policy_Resolver` and always returns one of the canonical values from `AgentsAPI\AI\Tools\WP_Agent_Action_Policy`: `direct`, `preview`, or `forbidden`.
 
@@ -325,10 +420,11 @@ Resolution order is:
 2. Registered agent or runtime `action_policy.tools[tool_name]`.
 3. Registered agent or runtime `action_policy.categories[category]`.
 4. Host-provided `WP_Agent_Action_Policy_Provider` providers.
-5. Tool-declared `action_policy` default.
-6. Tool-declared mode-specific `action_policy_<mode>` default.
-7. Global default `direct`.
-8. Final `agents_api_tool_action_policy` filter, if present.
+5. Host-provided `WP_Agent_Approval_Memory_Store` remembered decisions.
+6. Tool-declared `action_policy` default.
+7. Tool-declared mode-specific `action_policy_<mode>` default.
+8. Global default `direct`.
+9. Final `agents_api_tool_action_policy` filter, if present.
 
 ```php
 $policy = ( new WP_Agent_Action_Policy_Resolver() )->resolve_for_tool(
@@ -347,6 +443,8 @@ $policy = ( new WP_Agent_Action_Policy_Resolver() )->resolve_for_tool(
 	)
 );
 ```
+
+Remembered approvals are host-owned. Pass an `approval_memory_store` context value, constructor argument, or filter-provided store through `agents_api_approval_memory_store` to let a user's "always allow" decision participate in the canonical resolver without maintaining a parallel cache.
 
 ## Workspace Scope
 
@@ -723,6 +821,14 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 		// Typed completion policy (#42)
 		'completion_policy' => $my_completion_policy,   // WP_Agent_Conversation_Completion_Policy
 
+		// Optional tool result truncation for oversized mediated results.
+		'tool_result_truncator' => new AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator( 8192 ),
+
+		// Optional between-turn interruption. Return a message array or null.
+		'interrupt_source' => static function ( AgentsAPI\AI\WP_Agent_Conversation_Request $request ): ?array {
+			return $interrupt_queue->next_message_for( $request );
+		},
+
 		// Transcript persistence (#43)
 		'transcript_persister' => $my_persister,        // WP_Agent_Transcript_Persister
 
@@ -734,7 +840,7 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 
 		// Lifecycle events (#44)
 		'on_event' => static function ( string $event, array $payload ): void {
-			// Events: turn_started, tool_call, tool_result, budget_exceeded, completed, failed
+			// Events: turn_started, tool_call, tool_result, tool_result_truncated, interrupt_received, budget_exceeded, completed, failed
 			$logger->log( $event, $payload );
 		},
 
@@ -754,6 +860,14 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 ```
 
 All new options are opt-in. Existing callers passing only the original options continue to work identically.
+
+Server-mediated tools use the canonical `WP_Agent_Tool_Declaration::normalizeForServer()` envelope before they reach provider-turn requests or loop mediation. The normalized shape is a stable namespaced `name`, host/source `source`, non-empty `description`, array `parameters`, `executor => 'host'`, `scope => 'run'`, optional sanitized `runtime` metadata, and JSON-friendly extension fields such as `client_context_bindings`. Legacy non-client executor labels canonicalize to `host` because concrete execution remains owned by `WP_Agent_Tool_Executor`. Client runtime tools remain strict through `normalize()`, while request/catalog ingestion keeps older `client/*` loop declarations working by supplying implied `client` executor/source/scope defaults.
+
+When `tool_result_truncator` is provided, the loop asks it to normalize mediated tool results before adding them to `tool_execution_results` and transcript `tool_result` messages. `WP_Agent_Byte_Limit_Tool_Result_Truncator` replaces oversized JSON-encoded results with an excerpt plus byte-count metadata and emits `tool_result_truncated`; the event payload includes `original_result` for observer-owned storage, logging, or artifact capture.
+
+When `interrupt_source` is provided, the loop checks it between turns with the current `WP_Agent_Conversation_Request`. Returning a message appends that message to the transcript and emits `interrupt_received`. Message metadata can set `interrupt_action` to `message`, `redirect`, or `cancel`; `cancel` stops the loop with `status: interrupted`, while `message` and `redirect` continue through the normal continuation policy.
+
+For large ability surfaces, Agents API registers two canonical meta-abilities. `agents/ability-search` searches registered abilities by name, category, substring, `+keyword`, or `select:foo/bar,baz/qux` and returns compact `{ name, summary, required_fields }` entries. `agents/ability-call` invokes a registered ability by name with JSON parameters, letting consumers keep lower-priority tools out of the prompt while still making them reachable through a stable discovery-and-call path.
 
 The loop treats all adapter inputs and outputs as JSON-friendly arrays so products can map them to their own storage, streaming, audit, and transport layers without Agents API owning those layers.
 

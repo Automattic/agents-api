@@ -1,0 +1,209 @@
+# Auth, Consent, Context, and Memory
+
+This page documents the security, consent, context, and memory contracts that bound agent execution without prescribing product storage or UX.
+
+Source evidence: `src/Auth/*`, `src/Consent/*`, `src/Context/*`, `src/Memory/*`, `src/Workspace/*`, `src/Guidelines/*`, `tests/authorization-smoke.php`, `tests/caller-context-smoke.php`, `tests/consent-policy-smoke.php`, `tests/context-*.php`, `tests/memory-metadata-contract-smoke.php`, `tests/workspace-scope-smoke.php`, and `tests/guidelines-substrate-smoke.php`.
+
+## Auth boundary
+
+Agents API provides generic auth value objects and policies. Hosts provide request routing, token storage, trust decisions, and product-specific authorization UX.
+
+The bearer-token flow is:
+
+```text
+raw bearer token
+-> WP_Agent_Token::hash_token()
+-> WP_Agent_Token_Store::resolve_token_hash()
+-> reject missing/expired/prefix-mismatched tokens
+-> parse WP_Agent_Caller_Context from headers
+-> touch token only after caller context is valid
+-> return WP_Agent_Execution_Principal::agent_token()
+```
+
+`WP_Agent_Token_Authenticator::authenticate_bearer_token()` returns `null` on empty tokens, prefix mismatches, unresolved tokens, expired tokens, or malformed caller-context headers. It does not expose raw token material.
+
+## Token and access value objects
+
+`WP_Agent_Token` stores token metadata for hashed bearer credentials:
+
+| Field | Purpose |
+| --- | --- |
+| `token_id` | Store-owned positive integer id. |
+| `agent_id` | Effective agent identifier. |
+| `owner_user_id` | WordPress user whose capabilities bound execution. |
+| `token_hash` | SHA-256 hash of raw token material. Not exported by `to_metadata_array()`. |
+| `token_prefix` | Non-secret display/logging prefix. |
+| `allowed_capabilities` | Optional allow-list used to build a capability ceiling. |
+| `expires_at`, `last_used_at`, `created_at` | UTC lifecycle timestamps. |
+| `client_id`, `workspace_id` | Optional client and workspace scope. |
+| `metadata` | JSON-serializable host metadata. |
+
+`WP_Agent_Access_Grant` models a role-based grant between a WordPress user and an agent. Roles are ordered from lowest to highest privilege: `viewer`, `operator`, `admin`. `role_meets()` compares a grant with a required role. Concrete stores implement `WP_Agent_Access_Store`.
+
+`WP_Agent_Capability_Ceiling` intersects token/client restrictions with a user's WordPress capabilities. `WP_Agent_WordPress_Authorization_Policy` denies unless the ceiling allows the requested capability and `user_can()` allows it for the acting/owner user.
+
+## Caller context headers
+
+`WP_Agent_Caller_Context` carries cross-site agent-to-agent caller claims. It is a parser and value object; hosts decide whether to trust the remote host and token.
+
+Canonical headers:
+
+| Header | Meaning |
+| --- | --- |
+| `X-Agents-Api-Caller-Agent` | Agent id/slug on the caller host. |
+| `X-Agents-Api-Caller-User` | User id on the caller host, or `0`. |
+| `X-Agents-Api-Caller-Host` | `self` or an absolute HTTP(S) URL. |
+| `X-Agents-Api-Chain-Depth` | Non-negative chain depth. |
+| `X-Agents-Api-Chain-Root` | Stable originating request id. |
+
+Missing headers produce a top-of-chain context. Malformed headers throw `InvalidArgumentException`, and the token authenticator fails closed before touching the token. Default max depth is `WP_Agent_Caller_Context::DEFAULT_MAX_CHAIN_DEPTH` (`16`).
+
+## Execution principals and workspace scope
+
+`AgentsAPI\AI\WP_Agent_Execution_Principal` represents one runtime actor: acting user id, effective agent id/slug, auth source, request context, optional token id, workspace id, client id, capability ceiling, caller context, non-user audience id/claims, optional transcript owner, and JSON-friendly metadata.
+
+Generic principal fields:
+
+| Field | Purpose |
+| --- | --- |
+| `acting_user_id` | WordPress user ID on whose behalf execution happens, or `0` for non-user/runtime/system principals. Hosts still enforce capabilities with WordPress-native auth, caps, and REST permission callbacks. |
+| `effective_agent_id` | Registered agent id/slug effective for this run. This is routing identity, not a permission grant by itself. |
+| `auth_source` | Product-neutral source such as `user`, `application_password`, `agent_token`, `audience`, `runtime`, or `system`; hosts may register additional sources with `wp_agent_known_auth_sources`. |
+| `request_context` | Entry context such as `rest`, `cli`, `cron`, `chat`, or `runtime`. |
+| `workspace_id` | Host-owned scope id for persistence, tool policy, audit, or result filtering. |
+| `client_id` | Host/client surface identifier, such as a frontend, bridge, runtime, or API client. |
+| `audience_id` / `audience_claims` | Host-resolved non-user audience context. Claims are private runtime/audit data, not a display contract. |
+| `owner_type` / `owner_key` | Optional transcript/session owner. Non-user principals must use opaque host-owned owner keys; audience access alone is not a transcript owner. |
+| `capability_ceiling` | Optional ceiling intersected by authorization policy with WordPress capabilities. |
+| `caller_context` | Cross-agent/cross-host chain context for delegation and loop prevention. |
+| `request_metadata` / `binding` | Private host audit/runtime data. These fields are not safe citation or frontend metadata. |
+
+Permission-aware tools and retrieval surfaces should attach only safe principal metadata to user-visible citations, diagnostics, or frontend result objects. `to_safe_metadata()` returns the generic safe shape: schema version, effective agent, auth source, request context, acting user id, workspace id, client id, audience id, owner type, and boolean flags for conversation-owner/capability/caller-context presence. It intentionally omits token ids, owner keys, request metadata, audience claims, capability details, and cryptographic binding claims.
+
+Hosts that need richer audit trails should persist the full `to_array()` shape in private storage they control. Frontend clients, citations, and source diagnostics should use the safe metadata shape plus result-level status fields instead of receiving raw credentials, tokens, opaque session ids, or authorization internals.
+
+Client context is caller-owned runtime context carried on conversation requests and frontend channel payloads. It may describe selected UI state, host context, explicit routing hints, or opaque client metadata, but Agents API does not infer tool arguments from it. Tool declarations must opt in with `client_context_bindings`, either as `array( 'parameter_name' )` or `array( 'parameter_name' => 'context_key' )`. Sensitive ambient keys such as `api_key`, `token`, `authorization`, `cookie`, `nonce`, or `password` must be passed only through explicit bindings/defaults and host-owned authorization policy; matching key names alone never satisfies required parameters.
+
+Permission-aware retrieval results should use product-neutral status vocabulary so frontend clients can explain restricted output without learning product-specific policy:
+
+| Status | Meaning |
+| --- | --- |
+| `allowed` | The source/result was available to the current principal. |
+| `denied` | The source/result exists but the current principal cannot access it. |
+| `partial` | Some matching items were withheld or redacted. |
+| `source_restricted` | The source itself is unavailable in the current workspace/client/principal context. |
+
+Result and citation metadata may include `access_status`, `restriction_reason`, `source`, `source_id`, `item_id`, `fragment_id`, `source_title`, `source_url`, `score`, `excerpt`, and `principal` using `to_safe_metadata()`. Concrete auth checks remain downstream: WordPress users, roles, capabilities, REST permission callbacks, and host policy decide access; Agents API only defines the transportable, product-neutral context shape.
+
+`AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope` is the generic workspace identity shared by memory, transcripts, persistence, and audit adapters. It is deliberately `(workspace_type, workspace_id)` rather than a WordPress site id so consumers can map sites, networks, code workspaces, pull requests, or ephemeral environments without changing generic contracts.
+
+## Consent policy
+
+Consent is separate from authorization. `WP_Agent_Consent_Policy` implementations answer whether a runtime operation is allowed under user expectations and product policy.
+
+Operations are defined by `AgentsAPI\AI\Consent\WP_Agent_Consent_Operation`:
+
+- `store_memory`
+- `use_memory`
+- `store_transcript`
+- `share_transcript`
+- `escalate_to_human`
+
+`WP_Agent_Default_Consent_Policy` is conservative:
+
+1. Non-interactive modes are denied by default.
+2. Interactive contexts are allowed only when explicit per-operation consent is present.
+3. Decisions return `WP_Agent_Consent_Decision` with `allowed`, `operation`, `reason`, and `audit_metadata`.
+
+```php
+$decision = ( new WP_Agent_Default_Consent_Policy() )->can_store_transcript(
+	array(
+		'mode'    => 'chat',
+		'user_id' => get_current_user_id(),
+		'agent_id' => 'example-agent',
+		'consent' => array( 'store_transcript' => true ),
+	)
+);
+```
+
+Products should persist consent decision arrays beside memory writes, transcript persistence/share events, or escalation records they apply.
+
+## Memory and context source registry
+
+`WP_Agent_Memory_Registry` is the canonical generic registry for memory/context sources. Hosts and adapters register source availability here, then project the normalized metadata into their own filesystem, database, retrieval, or runtime layers. The registry is portable source truth; memory stores and host adapters remain responsible for persistence and physical paths.
+
+The registry does not assume sources are files. Its normalized metadata includes:
+
+| Field | Purpose |
+| --- | --- |
+| `id` | Source identifier such as `workspace/instructions`. |
+| `layer` | Normalized `WP_Agent_Memory_Layer`. |
+| `priority` | Sort order. |
+| `protected`, `editable`, `capability` | Generic editability and access metadata. |
+| `modes` | Eligible runtime modes, or `all`. |
+| `retrieval_policy` | `always`, `on_intent`, `on_tool_need`, `manual`, or `never`. |
+| `composable`, `context_slug` | Whether this source contributes to composable context. |
+| `convention_path` | Optional adapter hint such as `AGENTS.md`; not source identity or storage identity. |
+| `external_projection_target` | Optional adapter projection hint, such as a guideline id or host-owned destination. |
+| `label`, `description`, `meta` | Display and extension metadata. |
+
+`agents_api_memory_sources` lets extensions register sources lazily when sources are first resolved. Hook callbacks should call `WP_Agent_Memory_Registry::register()`; the hook argument is an inspection snapshot, not a mutable source of truth.
+
+Filesystem-backed systems can use `convention_path` to map a registered source to a relative file and `external_projection_target` to map it to another host concept. They should avoid maintaining a second source registry with independent layer, mode, editability, or retrieval-policy truth.
+
+`WP_Agent_Context_Section_Registry` composes ordered context sections. `WP_Agent_Composable_Context` carries assembled context output.
+
+## Retrieved context authority and conflict resolution
+
+Context items carry both content and provenance:
+
+- `content`
+- `scope`
+- `authority_tier`
+- `provenance`
+- `conflict_kind`
+- `conflict_key`
+- `metadata`
+
+Retrieved context items place canonical citation metadata at `metadata['citations']`. Each citation is a generic associative array with optional `source`, `source_id`, `item_id`, `fragment_id`, `source_title`, `source_url`, `score`, and `excerpt` fields. Agents API normalizes these canonical fields and preserves additional caller-owned citation metadata without interpreting it.
+
+Authority tiers are generic, with platform/support/workspace/user/agent/conversation ordering defined in `WP_Agent_Context_Authority_Tier`. `WP_Agent_Default_Context_Conflict_Resolver` resolves authoritative facts by authority tier and preferences by specificity then authority.
+
+## Memory store contract
+
+`AgentsAPI\Core\FilesRepository\WP_Agent_Memory_Store` is the persistence interface for agent memory. Implementations map a `WP_Agent_Memory_Scope` to physical storage and declare metadata support.
+
+Methods:
+
+- `capabilities()` returns `WP_Agent_Memory_Store_Capabilities`.
+- `read( WP_Agent_Memory_Scope $scope, array $metadata_fields )` returns `WP_Agent_Memory_Read_Result` or not-found.
+- `write( WP_Agent_Memory_Scope $scope, string $content, ?string $if_match, ?WP_Agent_Memory_Metadata $metadata )` supports compare-and-swap when implemented.
+- `exists()` checks scope existence.
+- `delete()` is idempotent.
+- `list_layer()` lists top-level files by layer and identity.
+- `list_subtree()` recursively lists a path prefix.
+
+Memory scope identity is `(layer, workspace_type, workspace_id, user_id, agent_id, filename)`. Section parsing, scaffold creation, prompt injection policy, ability permissions, and convention-path semantics remain higher-level concerns.
+
+## Memory metadata
+
+`WP_Agent_Memory_Metadata` standardizes provenance and trust fields:
+
+- `source_type`: `user_asserted`, `agent_inferred`, `workspace_extracted`, `system_generated`, `curated`, or `imported`;
+- `source_ref`;
+- `created_by_user_id` and `created_by_agent_id`;
+- `workspace`;
+- `confidence` from `0.0` to `1.0`;
+- `validator`;
+- `authority_tier`: `low`, `medium`, `high`, or `canonical`;
+- `created_at` and `updated_at`.
+
+`with_defaults()` applies conservative trust defaults. Agent-inferred memories default to lower confidence and authority than user-asserted, curated, or system-generated memories.
+
+## Guidelines substrate
+
+When Core/Gutenberg does not provide `wp_guideline`, Agents API can register a guideline substrate. It uses explicit capabilities such as `read_agent_memory`, `edit_agent_memory`, `read_private_agent_memory`, `edit_private_agent_memory`, `read_workspace_guidelines`, `edit_workspace_guidelines`, and `promote_agent_memory`. Hosts can disable the polyfill with `wp_guidelines_substrate_enabled` or register `wp_guideline` before Agents API.
+
+## Future coverage
+
+Future passes should add method-by-method reference pages for `WP_Agent_Execution_Principal`, guideline post/taxonomy internals, identity materialization stores, and each memory result value object. This page documents the integration-level contracts and storage/auth boundaries needed by new consumers.

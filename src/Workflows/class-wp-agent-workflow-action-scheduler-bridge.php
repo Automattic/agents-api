@@ -68,7 +68,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 			 * @since 0.103.0
 			 *
 			 * @param WP_Agent_Workflow_Spec $spec
-			 * @param array                  $trigger
+			 * @param array<mixed>                  $trigger
 			 */
 			do_action( 'wp_agent_workflow_schedule_requested', $spec, $trigger );
 
@@ -81,16 +81,17 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 			// Unschedule prior occurrences for idempotency.
 			as_unschedule_all_actions( self::SCHEDULED_HOOK, $args, self::GROUP );
 
-			if ( ! empty( $trigger['expression'] ) ) {
-				as_schedule_cron_action(
+			$scheduled = null;
+			if ( ! empty( $trigger['expression'] ) && is_scalar( $trigger['expression'] ) ) {
+				$scheduled = as_schedule_cron_action(
 					time(),
 					(string) $trigger['expression'],
 					self::SCHEDULED_HOOK,
 					$args,
 					self::GROUP
 				);
-			} elseif ( ! empty( $trigger['interval'] ) ) {
-				as_schedule_recurring_action(
+			} elseif ( ! empty( $trigger['interval'] ) && is_numeric( $trigger['interval'] ) ) {
+				$scheduled = as_schedule_recurring_action(
 					time(),
 					(int) $trigger['interval'],
 					self::SCHEDULED_HOOK,
@@ -99,10 +100,32 @@ final class WP_Agent_Workflow_Action_Scheduler_Bridge {
 				);
 			}
 
-			++$count;
+			if ( ! empty( $scheduled ) ) {
+				++$count;
+			}
 		}
 
 		return $count;
+	}
+
+	/**
+	 * Re-sync the AS schedule for a durable workflow spec.
+	 *
+	 * Unconditionally unschedules every existing AS action keyed on this
+	 * workflow id, then registers the cron triggers declared on the new
+	 * spec. Distinct from {@see register()} because it tears down stale
+	 * schedules even when the new spec has no cron triggers — the case
+	 * an update that switches from `cron` to `on_demand` would otherwise
+	 * leak. This is the method durable-store lifecycle subscribers want.
+	 *
+	 * @since 0.108.0
+	 *
+	 * @return int Number of schedules registered (zero if the new spec
+	 *             has no cron triggers; the unschedule step still ran).
+	 */
+	public static function sync( WP_Agent_Workflow_Spec $spec ): int {
+		self::unregister( $spec->get_id() );
+		return self::register( $spec );
 	}
 
 	/**

@@ -14,31 +14,39 @@ $passes   = 0;
 
 echo "workflow-spec-validator-smoke\n";
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private $data = null ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-	public function get_error_data() { return $this->data; }
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '', private $data = null ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+		public function get_error_data() { return $this->data; }
+	}
 }
 
-function is_wp_error( $value ): bool {
-	return $value instanceof WP_Error;
+if ( ! function_exists( 'is_wp_error' ) ) {
+	function is_wp_error( $value ): bool {
+		return $value instanceof WP_Error;
+	}
 }
 
 $GLOBALS['__filters'] = array();
-function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	unset( $accepted_args );
-	$GLOBALS['__filters'][ $hook ][ $priority ][] = $cb;
-}
-function apply_filters( string $hook, $value, ...$args ) {
-	$cbs = $GLOBALS['__filters'][ $hook ] ?? array();
-	ksort( $cbs );
-	foreach ( $cbs as $bucket ) {
-		foreach ( $bucket as $cb ) {
-			$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
-		}
+if ( ! function_exists( 'add_filter' ) ) {
+	function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
+		unset( $accepted_args );
+		$GLOBALS['__filters'][ $hook ][ $priority ][] = $cb;
 	}
-	return $value;
+}
+if ( ! function_exists( 'apply_filters' ) ) {
+	function apply_filters( string $hook, $value, ...$args ) {
+		$cbs = $GLOBALS['__filters'][ $hook ] ?? array();
+		ksort( $cbs );
+		foreach ( $cbs as $bucket ) {
+			foreach ( $bucket as $cb ) {
+				$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
+			}
+		}
+		return $value;
+	}
 }
 
 function smoke_assert( $expected, $actual, string $name, array &$failures, int &$passes ): void {

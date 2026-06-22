@@ -42,16 +42,16 @@ add_action(
  *
  * @since 0.104.0
  *
- * @param string|array $args Either the bare workflow_id string (when the
- *                           bridge scheduled a single-arg payload) or the
- *                           full args array (when AS spreads).
+ * @param string|array<mixed> $args Either the bare workflow_id string (when the
+ *                                  bridge scheduled a single-arg payload) or the
+ *                                  full args array (when AS spreads).
  */
 function dispatch_scheduled_workflow_run( $args ): void {
 	$workflow_id = '';
 	if ( is_string( $args ) ) {
 		$workflow_id = $args;
 	} elseif ( is_array( $args ) ) {
-		$workflow_id = (string) ( $args['workflow_id'] ?? '' );
+		$workflow_id = extract_scheduled_workflow_id( $args );
 	}
 
 	if ( '' === $workflow_id ) {
@@ -98,4 +98,12 @@ function dispatch_scheduled_workflow_run( $args ): void {
 			)
 		);
 	}
+}
+
+/**
+ * @param array<mixed> $args Scheduled action args.
+ */
+function extract_scheduled_workflow_id( array $args ): string {
+	$value = $args['workflow_id'] ?? ( $args[0] ?? '' );
+	return is_string( $value ) ? $value : '';
 }

@@ -70,20 +70,27 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact_Type' ) ) {
 		private array $meta = array();
 
 		/**
+		 * Example artifact declarations for documentation and host validation.
+		 *
+		 * @var array<int, array<string, mixed>>
+		 */
+		private array $example_artifacts = array();
+
+		/**
 		 * Constructor.
 		 *
-		 * @param string $type Artifact type slug.
-		 * @param array  $args Registration arguments.
+		 * @param string              $type Artifact type slug.
+		 * @param array<string,mixed> $args Registration arguments.
 		 */
 		public function __construct( string $type, array $args = array() ) {
 			$this->type  = WP_Agent_Package_Artifact::prepare_type( $type );
-			$this->label = isset( $args['label'] ) ? trim( (string) $args['label'] ) : $this->type;
+			$this->label = is_scalar( $args['label'] ?? null ) ? trim( (string) $args['label'] ) : $this->type;
 
 			if ( '' === $this->label ) {
 				$this->label = $this->type;
 			}
 
-			$this->description = isset( $args['description'] ) ? trim( (string) $args['description'] ) : '';
+			$this->description = is_scalar( $args['description'] ?? null ) ? trim( (string) $args['description'] ) : '';
 
 			foreach ( array( 'validate_callback', 'diff_callback', 'import_callback', 'delete_callback' ) as $property ) {
 				if ( ! array_key_exists( $property, $args ) ) {
@@ -102,8 +109,31 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact_Type' ) ) {
 					throw new InvalidArgumentException( 'Agent package artifact type meta property must be an array.' );
 				}
 
-				$this->meta = $args['meta'];
+				$this->meta = self::prepare_meta( $args['meta'] );
 			}
+
+			if ( isset( $args['example_artifacts'] ) ) {
+				if ( ! is_array( $args['example_artifacts'] ) ) {
+					throw new InvalidArgumentException( 'Agent package artifact type example_artifacts property must be an array.' );
+				}
+
+				$this->example_artifacts = $this->prepare_example_artifacts( $args['example_artifacts'] );
+			}
+		}
+
+		/**
+		 * @param array<mixed> $meta Raw metadata.
+		 * @return array<string,mixed>
+		 */
+		private static function prepare_meta( array $meta ): array {
+			$prepared = array();
+			foreach ( $meta as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+
+			return $prepared;
 		}
 
 		/**
@@ -179,6 +209,15 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact_Type' ) ) {
 		}
 
 		/**
+		 * Retrieves example artifact declarations.
+		 *
+		 * @return array<int, array<string, mixed>>
+		 */
+		public function get_example_artifacts(): array {
+			return $this->example_artifacts;
+		}
+
+		/**
 		 * Exports registration arguments.
 		 *
 		 * @return array<string, mixed>
@@ -192,8 +231,50 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact_Type' ) ) {
 				'diff_callback'     => $this->diff_callback,
 				'import_callback'   => $this->import_callback,
 				'delete_callback'   => $this->delete_callback,
+				'example_artifacts' => $this->example_artifacts,
 				'meta'              => $this->meta,
 			);
+		}
+
+		/**
+		 * Normalizes example artifact declarations against the generic artifact shape.
+		 *
+		 * @param array<mixed> $examples Raw example declarations.
+		 * @return array<int, array<string, mixed>>
+		 */
+		private function prepare_example_artifacts( array $examples ): array {
+			$prepared = array();
+			foreach ( $examples as $example ) {
+				if ( ! is_array( $example ) ) {
+					throw new InvalidArgumentException( 'Agent package artifact type example_artifacts entries must be arrays.' );
+				}
+
+				$artifact = WP_Agent_Package_Artifact::from_array(
+					array_merge(
+						$this->string_keyed_array( $example ),
+						array( 'type' => $this->type )
+					)
+				);
+
+				$prepared[] = $artifact->to_array();
+			}
+
+			return $prepared;
+		}
+
+		/**
+		 * @param array<mixed> $values Raw values.
+		 * @return array<string, mixed>
+		 */
+		private function string_keyed_array( array $values ): array {
+			$prepared = array();
+			foreach ( $values as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+
+			return $prepared;
 		}
 	}
 }

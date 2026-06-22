@@ -64,17 +64,58 @@ if ( ! class_exists( 'WP_Error' ) ) {
 		public function get_error_data() { return $this->data; }
 	}
 }
+$GLOBALS['smoke_dispatched'] = array();
+$GLOBALS['routine_as_calls'] = array();
 if ( ! function_exists( 'do_action' ) ) {
 	function do_action( string $hook, ...$args ): void {
-		// no-op for substrate-only smoke; the registry doesn't depend on
-		// listener side effects.
+		// Capturing shim — append every fired hook + its first arg (routines
+		// always pass the WP_Agent_Routine object as the only payload). The
+		// registry's lifecycle verbs assert on this from section 6 onwards.
+		$GLOBALS['smoke_dispatched'][] = array( 'hook' => $hook, 'arg' => $args[0] ?? null );
+	}
+} elseif ( function_exists( 'add_action' ) ) {
+	// Real WordPress: the lifecycle verbs fire real actions, so capture them
+	// with real listeners into the same dispatch log the assertions read.
+	foreach ( array( 'wp_agent_routine_paused', 'wp_agent_routine_resumed', 'wp_agent_routine_run_now_requested' ) as $routine_lifecycle_hook ) {
+		add_action(
+			$routine_lifecycle_hook,
+			static function ( $routine = null ) use ( $routine_lifecycle_hook ): void {
+				$GLOBALS['smoke_dispatched'][] = array( 'hook' => $routine_lifecycle_hook, 'arg' => $routine );
+			}
+		);
+	}
+}
+if ( ! function_exists( 'as_schedule_recurring_action' ) ) {
+	function as_schedule_recurring_action( int $start, int $interval, string $hook, array $args = array(), string $group = '' ): int {
+		$GLOBALS['routine_as_calls'][] = array( 'fn' => 'recurring', 'hook' => $hook, 'args' => $args, 'group' => $group, 'interval' => $interval );
+		return count( $GLOBALS['routine_as_calls'] );
+	}
+}
+if ( ! function_exists( 'as_schedule_cron_action' ) ) {
+	function as_schedule_cron_action( int $start, string $schedule, string $hook, array $args = array(), string $group = '' ): int {
+		$GLOBALS['routine_as_calls'][] = array( 'fn' => 'cron', 'hook' => $hook, 'args' => $args, 'group' => $group, 'schedule' => $schedule );
+		return count( $GLOBALS['routine_as_calls'] );
+	}
+}
+if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
+	function as_unschedule_all_actions( string $hook, array $args = array(), string $group = '' ): int {
+		$GLOBALS['routine_as_calls'][] = array( 'fn' => 'unschedule', 'hook' => $hook, 'args' => $args, 'group' => $group );
+		return 1;
+	}
+}
+if ( ! function_exists( 'as_enqueue_async_action' ) ) {
+	function as_enqueue_async_action( string $hook, array $args = array(), string $group = '' ): int {
+		$GLOBALS['routine_as_calls'][] = array( 'fn' => 'enqueue', 'hook' => $hook, 'args' => $args, 'group' => $group );
+		return count( $GLOBALS['routine_as_calls'] );
 	}
 }
 
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine.php';
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-registry.php';
+require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-action-scheduler-bridge.php';
 
 use AgentsAPI\AI\Routines\WP_Agent_Routine;
+use AgentsAPI\AI\Routines\WP_Agent_Routine_Action_Scheduler_Bridge;
 use AgentsAPI\AI\Routines\WP_Agent_Routine_Registry;
 
 WP_Agent_Routine_Registry::reset();
@@ -165,6 +206,80 @@ smoke_assert( true, is_object( $missing ) && method_exists( $missing, 'get_error
 // 5. Registry rejects invalid args via WP_Error.
 $bad = WP_Agent_Routine_Registry::register( 'x', array( 'interval' => 1 ) );
 smoke_assert( true, is_object( $bad ) && method_exists( $bad, 'get_error_code' ) && 'invalid_routine' === $bad->get_error_code(), 'registry returns WP_Error on validation failure', $failures, $passes );
+
+// 6. Lifecycle verbs: pause / resume / run_now.
+WP_Agent_Routine_Registry::reset();
+$GLOBALS['smoke_dispatched'] = array();
+
+WP_Agent_Routine_Registry::register( 'lunar-monitor', array( 'agent' => 'commander', 'interval' => 60 ) );
+
+// Filter helper for the captured dispatch log.
+$last_fired = static function ( string $hook ): ?array {
+	foreach ( array_reverse( $GLOBALS['smoke_dispatched'] ) as $entry ) {
+		if ( $entry['hook'] === $hook ) {
+			return $entry;
+		}
+	}
+	return null;
+};
+
+// Pause returns true + fires wp_agent_routine_paused with the routine.
+$paused_result = WP_Agent_Routine_Registry::pause( 'lunar-monitor' );
+smoke_assert( true, $paused_result, 'pause returns true on existing routine', $failures, $passes );
+$paused_event = $last_fired( 'wp_agent_routine_paused' );
+smoke_assert( true, null !== $paused_event && $paused_event['arg'] instanceof WP_Agent_Routine && 'lunar-monitor' === $paused_event['arg']->get_id(), 'pause fires wp_agent_routine_paused with the routine', $failures, $passes );
+smoke_assert( true, null !== WP_Agent_Routine_Registry::find( 'lunar-monitor' ), 'pause keeps the routine in the registry', $failures, $passes );
+
+// Resume returns true + fires wp_agent_routine_resumed.
+$resumed_result = WP_Agent_Routine_Registry::resume( 'lunar-monitor' );
+smoke_assert( true, $resumed_result, 'resume returns true on existing routine', $failures, $passes );
+$resumed_event = $last_fired( 'wp_agent_routine_resumed' );
+smoke_assert( true, null !== $resumed_event && $resumed_event['arg'] instanceof WP_Agent_Routine, 'resume fires wp_agent_routine_resumed with the routine', $failures, $passes );
+
+// run_now returns true + fires wp_agent_routine_run_now_requested.
+$run_now_result = WP_Agent_Routine_Registry::run_now( 'lunar-monitor' );
+smoke_assert( true, $run_now_result, 'run_now returns true on existing routine', $failures, $passes );
+$run_now_event = $last_fired( 'wp_agent_routine_run_now_requested' );
+smoke_assert( true, null !== $run_now_event && $run_now_event['arg'] instanceof WP_Agent_Routine, 'run_now fires wp_agent_routine_run_now_requested with the routine', $failures, $passes );
+
+// 7. Action Scheduler bridge uses one stable associative args shape.
+$GLOBALS['routine_as_calls'] = array();
+$scheduled_routine = new WP_Agent_Routine(
+	'daily-check',
+	array(
+		'agent'    => 'commander',
+		'interval' => 300,
+	)
+);
+
+WP_Agent_Routine_Action_Scheduler_Bridge::register( $scheduled_routine );
+WP_Agent_Routine_Action_Scheduler_Bridge::unregister( 'daily-check' );
+WP_Agent_Routine_Action_Scheduler_Bridge::run_now( $scheduled_routine );
+
+$args_for_call = static function ( string $fn, int $index ): ?array {
+	$matches = array_values( array_filter(
+		$GLOBALS['routine_as_calls'],
+		static fn( array $call ): bool => $fn === $call['fn']
+	) );
+	return isset( $matches[ $index ]['args'] ) && is_array( $matches[ $index ]['args'] ) ? $matches[ $index ]['args'] : null;
+};
+
+smoke_assert( array( 'routine_id' => 'daily-check' ), $args_for_call( 'unschedule', 0 ), 'bridge register unschedules by routine_id arg', $failures, $passes );
+smoke_assert( array( 'routine_id' => 'daily-check' ), $args_for_call( 'recurring', 0 ), 'bridge register schedules by routine_id arg', $failures, $passes );
+smoke_assert( array( 'routine_id' => 'daily-check' ), $args_for_call( 'unschedule', 1 ), 'bridge unregister unschedules by routine_id arg', $failures, $passes );
+smoke_assert( array( 'routine_id' => 'daily-check' ), $args_for_call( 'enqueue', 0 ), 'bridge run_now enqueues by routine_id arg', $failures, $passes );
+
+// All three verbs return WP_Error('not_registered') for unknown ids.
+foreach ( array( 'pause', 'resume', 'run_now' ) as $verb ) {
+	$result = WP_Agent_Routine_Registry::$verb( 'never-registered' );
+	smoke_assert(
+		true,
+		is_object( $result ) && method_exists( $result, 'get_error_code' ) && 'not_registered' === $result->get_error_code(),
+		"{$verb} returns WP_Error('not_registered') for unknown id",
+		$failures,
+		$passes
+	);
+}
 
 if ( count( $failures ) > 0 ) {
 	echo 'FAIL ' . count( $failures ) . " failures\n";

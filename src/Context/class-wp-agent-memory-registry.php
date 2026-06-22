@@ -1,6 +1,6 @@
 <?php
 /**
- * Generic agent memory/context source registry.
+ * Canonical generic agent memory/context source registry.
  *
  * @package AgentsAPI
  */
@@ -10,6 +10,11 @@ defined( 'ABSPATH' ) || exit;
 if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 	/**
 	 * Registers memory and context sources without prescribing storage shape.
+	 *
+	 * Hosts and adapters should register their available sources here, then map the
+	 * normalized metadata to their own storage, filesystem, retrieval, or projection
+	 * layers. The registry is the portable source contract; persistence remains the
+	 * responsibility of memory stores or host-owned adapters.
 	 */
 	final class WP_Agent_Memory_Registry {
 
@@ -32,8 +37,12 @@ if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 		/**
 		 * Register a memory or context source.
 		 *
-		 * @param string $source_id Source identifier, e.g. `workspace/instructions`.
-		 * @param array  $args      Registration metadata.
+		 * @param string       $source_id Source identifier, e.g. `workspace/instructions`.
+		 * @param array<mixed> $args      Registration metadata. Adapter hints such as
+		 *                                `convention_path` and
+		 *                                `external_projection_target` describe how a host
+		 *                                may project the source; they are not source
+		 *                                identity and do not imply file-backed storage.
 		 * @return array<string, mixed>|null Normalized source metadata, or null on invalid ID.
 		 */
 		public static function register( string $source_id, array $args = array() ): ?array {
@@ -48,17 +57,19 @@ if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 				$editable = true;
 			}
 
+			$context_slug = $args['context_slug'] ?? $source_id;
+
 			$metadata = array(
 				'id'                         => $source_id,
 				'layer'                      => WP_Agent_Memory_Layer::normalize( $args['layer'] ?? null ),
-				'priority'                   => (int) ( $args['priority'] ?? 50 ),
+				'priority'                   => self::optional_int( $args['priority'] ?? null, 50 ),
 				'protected'                  => (bool) ( $args['protected'] ?? false ),
 				'editable'                   => $editable,
 				'capability'                 => isset( $args['capability'] ) && is_string( $args['capability'] ) ? $args['capability'] : '',
 				'modes'                      => self::normalize_modes( $args['modes'] ?? array( self::MODE_ALL ) ),
 				'retrieval_policy'           => WP_Agent_Context_Injection_Policy::normalize( $args['retrieval_policy'] ?? null ),
 				'composable'                 => $composable,
-				'context_slug'               => self::sanitize_source_id( (string) ( $args['context_slug'] ?? $source_id ) ),
+				'context_slug'               => self::sanitize_source_id( is_string( $context_slug ) ? $context_slug : $source_id ),
 				'convention_path'            => self::normalize_relative_path( $args['convention_path'] ?? '' ),
 				'external_projection_target' => is_string( $args['external_projection_target'] ?? null ) ? $args['external_projection_target'] : '',
 				'label'                      => is_string( $args['label'] ?? null ) ? $args['label'] : self::id_to_label( $source_id ),
@@ -132,7 +143,7 @@ if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 			return array_filter(
 				self::get_resolved(),
 				static function ( array $source ) use ( $mode, $retrieval_policy ): bool {
-					$modes = $source['modes'] ?? array( self::MODE_ALL );
+					$modes = self::normalize_modes( $source['modes'] ?? array( self::MODE_ALL ) );
 					if ( '' !== $mode && ! in_array( self::MODE_ALL, $modes, true ) && ! in_array( $mode, $modes, true ) ) {
 						return false;
 					}
@@ -184,6 +195,15 @@ if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 		private static function get_resolved(): array {
 			if ( ! self::$hooks_fired ) {
 				if ( function_exists( 'do_action' ) ) {
+					/**
+					 * Fires before memory/context sources are resolved.
+					 *
+					 * Extensions should call {@see WP_Agent_Memory_Registry::register()} from
+					 * this hook to add sources lazily. The hook argument is a snapshot for
+					 * inspection, not a mutable source of truth.
+					 *
+					 * @param array<string, array<string, mixed>> $sources Registered source snapshot.
+					 */
 					do_action( 'agents_api_memory_sources', self::$sources );
 				}
 				self::$hooks_fired = true;
@@ -194,7 +214,9 @@ if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 				$sources,
 				static function ( array $a, array $b ): int {
 					$priority_order = $a['priority'] <=> $b['priority'];
-					return 0 !== $priority_order ? $priority_order : strcmp( $a['id'], $b['id'] );
+					$a_id           = is_string( $a['id'] ?? null ) ? $a['id'] : '';
+					$b_id           = is_string( $b['id'] ?? null ) ? $b['id'] : '';
+					return 0 !== $priority_order ? $priority_order : strcmp( $a_id, $b_id );
 				}
 			);
 
@@ -210,8 +232,29 @@ if ( ! class_exists( 'WP_Agent_Memory_Registry' ) ) {
 				return array( self::MODE_ALL );
 			}
 
-			$normalized = array_values( array_unique( array_filter( array_map( array( self::class, 'sanitize_slug' ), $modes ) ) ) );
+			$normalized = array();
+			foreach ( $modes as $mode ) {
+				if ( ! is_string( $mode ) ) {
+					continue;
+				}
+
+				$mode = self::sanitize_slug( $mode );
+				if ( '' !== $mode ) {
+					$normalized[] = $mode;
+				}
+			}
+
+			$normalized = array_values( array_unique( $normalized ) );
 			return empty( $normalized ) ? array( self::MODE_ALL ) : $normalized;
+		}
+
+		/**
+		 * @param mixed $value Raw value.
+		 * @param int   $fallback Default value.
+		 * @return int
+		 */
+		private static function optional_int( $value, int $fallback ): int {
+			return is_scalar( $value ) ? (int) $value : $fallback;
 		}
 
 		/**

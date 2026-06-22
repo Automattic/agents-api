@@ -45,6 +45,36 @@ $tools = array(
 		'categories' => array( 'system' ),
 		'modes'      => array( 'system' ),
 	),
+	'client/runtime'   => array(
+		'name'         => 'client/runtime',
+		'categories'   => array( 'read' ),
+		'modes'        => array( 'chat' ),
+		'executor'     => 'client',
+		'scope'        => 'run',
+		'parameters'   => array(
+			'type'       => 'object',
+			'required'   => array( 'api_key' ),
+			'properties' => array(
+				'api_key' => array( 'type' => 'string' ),
+			),
+		),
+		'runtime_tool' => true,
+	),
+	'client/ambient'   => array(
+		'name'         => 'client/ambient',
+		'categories'   => array( 'read' ),
+		'modes'        => array( 'chat' ),
+		'executor'     => 'client',
+		'scope'        => 'run',
+		'runtime_tool' => true,
+	),
+	'web_fetch'        => array(
+		'name'       => 'web_fetch',
+		'categories' => array( 'read' ),
+		'modes'      => array( 'chat' ),
+		'executor'   => 'host',
+		'scope'      => 'run',
+	),
 );
 
 $resolver = new WP_Agent_Tool_Policy();
@@ -109,5 +139,90 @@ $resolved = $resolver->resolve(
 	)
 );
 agents_api_smoke_assert_equals( array( 'client/read' ), array_keys( $resolved ), 'explicit deny removes mandatory provider tool', $failures, $passes );
+
+echo "\n[5] Runtime/client tools require explicit opt-in while non-runtime tools remain visible:\n";
+$resolved = $resolver->resolve(
+	$tools,
+	array(
+		'mode' => 'chat',
+	)
+);
+$resolved_names = array_keys( $resolved );
+sort( $resolved_names );
+agents_api_smoke_assert_equals( array( 'client/mandatory', 'client/read', 'client/write', 'web_fetch' ), $resolved_names, 'runtime tools are excluded by default without hiding ordinary host tools', $failures, $passes );
+
+$resolved = $resolver->resolve(
+	$tools,
+	array(
+		'mode'         => 'chat',
+		'agent_config' => array(
+			'tool_policy' => array(
+				'mode'  => 'allow',
+				'tools' => array( 'client/read', 'client/runtime' ),
+			),
+		),
+	)
+);
+$resolved_names = array_keys( $resolved );
+sort( $resolved_names );
+agents_api_smoke_assert_equals( array( 'client/read', 'client/runtime' ), $resolved_names, 'allow policy can explicitly opt in a runtime tool by name', $failures, $passes );
+
+$resolved = $resolver->resolve(
+	$tools,
+	array(
+		'mode'        => 'chat',
+		'tool_policy' => array(
+			'mode'          => 'deny',
+			'tools'         => array( 'client/write' ),
+			'runtime_tools' => array( 'client/runtime' ),
+		),
+	)
+);
+$resolved_names = array_keys( $resolved );
+sort( $resolved_names );
+agents_api_smoke_assert_equals( array( 'client/mandatory', 'client/read', 'client/runtime', 'web_fetch' ), $resolved_names, 'deny policy still requires runtime_tools opt-in for runtime tools without hiding host tools', $failures, $passes );
+
+$resolved = $resolver->resolve(
+	$tools,
+	array(
+		'mode'       => 'chat',
+		'allow_only' => array( 'client/read', 'client/runtime' ),
+	)
+);
+$resolved_names = array_keys( $resolved );
+sort( $resolved_names );
+agents_api_smoke_assert_equals( array( 'client/read', 'client/runtime' ), $resolved_names, 'allow_only explicitly opts in a named runtime tool', $failures, $passes );
+
+$resolved = $resolver->resolve(
+	$tools,
+	array(
+		'mode'        => 'chat',
+		'tool_policy' => array(
+			'mode'               => 'deny',
+			'runtime_categories' => array( 'read' ),
+		),
+		'deny'        => array( 'client/runtime' ),
+	)
+);
+$resolved_names = array_keys( $resolved );
+sort( $resolved_names );
+agents_api_smoke_assert_equals( array( 'client/ambient', 'client/mandatory', 'client/read', 'client/write', 'web_fetch' ), $resolved_names, 'runtime category opt-in composes with final explicit deny without hiding host tools', $failures, $passes );
+
+echo "\n[6] Sensitive required parameters stay auditable and intentional:\n";
+$parameters = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array(),
+	array( 'api_key' => 'ambient-secret' ),
+	$tools['client/runtime']
+);
+agents_api_smoke_assert_equals( array(), $parameters, 'ambient sensitive context does not satisfy runtime tool required parameters', $failures, $passes );
+
+$bound_runtime_tool                            = $tools['client/runtime'];
+$bound_runtime_tool['client_context_bindings'] = array( 'api_key' );
+$parameters                                    = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array(),
+	array( 'api_key' => 'declared-secret' ),
+	$bound_runtime_tool
+);
+agents_api_smoke_assert_equals( array( 'api_key' => 'declared-secret' ), $parameters, 'declared context binding makes sensitive required parameter sourcing explicit', $failures, $passes );
 
 agents_api_smoke_finish( 'Tool policy contracts', $failures, $passes );

@@ -40,7 +40,8 @@ final class WP_Agent_Routine {
 	private string $expression = '';
 	private string $prompt     = '';
 	private string $session_id = '';
-	private array $meta        = array();
+	/** @var array<string, mixed> */
+	private array $meta = array();
 
 	/**
 	 * @param string                $id   Unique routine slug.
@@ -58,16 +59,16 @@ final class WP_Agent_Routine {
 		}
 		$this->id = $id;
 
-		$this->label = isset( $args['label'] ) ? (string) $args['label'] : $id;
+		$this->label = isset( $args['label'] ) && is_scalar( $args['label'] ) ? (string) $args['label'] : $id;
 
-		$agent = isset( $args['agent'] ) ? (string) $args['agent'] : '';
+		$agent = isset( $args['agent'] ) && is_scalar( $args['agent'] ) ? (string) $args['agent'] : '';
 		if ( '' === $agent ) {
 			throw new \InvalidArgumentException( esc_html( sprintf( 'Routine "%s" must specify an agent slug.', $id ) ) );
 		}
 		$this->agent_slug = $agent;
 
-		$has_interval   = isset( $args['interval'] ) && (int) $args['interval'] > 0;
-		$has_expression = isset( $args['expression'] ) && '' !== trim( (string) $args['expression'] );
+		$has_interval   = isset( $args['interval'] ) && is_numeric( $args['interval'] ) && (int) $args['interval'] > 0;
+		$has_expression = isset( $args['expression'] ) && is_scalar( $args['expression'] ) && '' !== trim( (string) $args['expression'] );
 
 		if ( $has_interval && $has_expression ) {
 			throw new \InvalidArgumentException( esc_html( sprintf( 'Routine "%s" must specify either `interval` or `expression`, not both.', $id ) ) );
@@ -84,13 +85,17 @@ final class WP_Agent_Routine {
 			$this->expression   = trim( (string) $args['expression'] );
 		}
 
-		$this->prompt     = isset( $args['prompt'] ) ? (string) $args['prompt'] : '';
-		$this->session_id = isset( $args['session_id'] ) && '' !== (string) $args['session_id']
+		$this->prompt     = isset( $args['prompt'] ) && is_scalar( $args['prompt'] ) ? (string) $args['prompt'] : '';
+		$this->session_id = isset( $args['session_id'] ) && is_scalar( $args['session_id'] ) && '' !== (string) $args['session_id']
 			? (string) $args['session_id']
 			: 'routine:' . $id;
 
 		if ( isset( $args['meta'] ) && is_array( $args['meta'] ) ) {
-			$this->meta = $args['meta'];
+			foreach ( $args['meta'] as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$this->meta[ $key ] = $value;
+				}
+			}
 		}
 	}
 

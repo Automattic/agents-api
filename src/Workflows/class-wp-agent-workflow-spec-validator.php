@@ -35,7 +35,7 @@ defined( 'ABSPATH' ) || exit;
 final class WP_Agent_Workflow_Spec_Validator {
 
 	/** @since 0.103.0 */
-	public const KNOWN_STEP_TYPES = array( 'ability', 'agent' );
+	public const KNOWN_STEP_TYPES = array( 'ability', 'agent', 'foreach' );
 
 	/** @since 0.103.0 */
 	public const KNOWN_TRIGGER_TYPES = array( 'on_demand', 'wp_action', 'cron' );
@@ -45,7 +45,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $spec Raw spec.
+	 * @param array<mixed> $spec Raw spec.
 	 * @return array<int,array{path:string,code:string,message:string}> Empty when valid.
 	 */
 	public static function validate( array $spec ): array {
@@ -77,7 +77,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 				'message' => 'workflow spec must declare at least one step',
 			);
 		} else {
-			$step_errors = self::validate_steps( $spec['steps'] );
+			$step_errors = self::validate_steps( array_values( $spec['steps'] ) );
 			$errors      = array_merge( $errors, $step_errors );
 		}
 
@@ -100,7 +100,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 		// exists earlier in the list. Catches typos and re-orderings that
 		// would otherwise resolve to null silently at runtime.
 		if ( isset( $spec['steps'] ) && is_array( $spec['steps'] ) ) {
-			$binding_errors = self::validate_step_binding_references( $spec['steps'] );
+			$binding_errors = self::validate_step_binding_references( array_values( $spec['steps'] ) );
 			$errors         = array_merge( $errors, $binding_errors );
 		}
 
@@ -204,6 +204,29 @@ final class WP_Agent_Workflow_Spec_Validator {
 					);
 				}
 			}
+
+			if ( 'foreach' === $step['type'] ) {
+				if ( ! array_key_exists( 'items', $step ) ) {
+					$errors[] = array(
+						'path'    => "{$path}.items",
+						'code'    => 'missing_required',
+						'message' => 'foreach step is missing required `items` field',
+					);
+				}
+				if ( empty( $step['steps'] ) || ! is_array( $step['steps'] ) || array_values( $step['steps'] ) !== $step['steps'] ) {
+					$errors[] = array(
+						'path'    => "{$path}.steps",
+						'code'    => 'missing_required',
+						'message' => 'foreach step must declare a non-empty `steps` list',
+					);
+				} else {
+					foreach ( self::validate_steps( $step['steps'] ) as $inner_error ) {
+						$inner_path          = (string) preg_replace( '/^steps\./', '', $inner_error['path'] );
+						$inner_error['path'] = "{$path}.steps." . $inner_path;
+						$errors[]            = $inner_error;
+					}
+				}
+			}
 		}
 
 		return $errors;
@@ -227,8 +250,8 @@ final class WP_Agent_Workflow_Spec_Validator {
 				continue;
 			}
 
-			$step_id = isset( $step['id'] ) ? (string) $step['id'] : '';
-			$tokens  = self::extract_step_binding_ids( $step );
+			$step_id = is_string( $step['id'] ?? null ) ? $step['id'] : '';
+			$tokens  = self::extract_top_level_step_binding_ids( $step );
 
 			foreach ( $tokens as $referenced_id ) {
 				if ( ! isset( $seen[ $referenced_id ] ) ) {
@@ -251,6 +274,24 @@ final class WP_Agent_Workflow_Spec_Validator {
 		}
 
 		return $errors;
+	}
+
+	/**
+	 * Pull step references from a top-level step without validating nested
+	 * foreach step bodies against the outer step order.
+	 *
+	 * @param array<mixed> $step
+	 * @return array<int,string>
+	 */
+	private static function extract_top_level_step_binding_ids( array $step ): array {
+		$ids = array();
+		foreach ( $step as $key => $value ) {
+			if ( 'steps' === $key && 'foreach' === ( $step['type'] ?? '' ) ) {
+				continue;
+			}
+			$ids = array_merge( $ids, self::extract_step_binding_ids( $value ) );
+		}
+		return $ids;
 	}
 
 	/**
@@ -311,7 +352,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 				continue;
 			}
 
-			$known = (array) apply_filters( 'wp_agent_workflow_known_trigger_types', self::KNOWN_TRIGGER_TYPES );
+			$known = self::string_list( apply_filters( 'wp_agent_workflow_known_trigger_types', self::KNOWN_TRIGGER_TYPES ) );
 			if ( ! in_array( $trigger['type'], $known, true ) ) {
 				$errors[] = array(
 					'path'    => "{$path}.type",
@@ -343,5 +384,21 @@ final class WP_Agent_Workflow_Spec_Validator {
 		}
 
 		return $errors;
+	}
+
+	/**
+	 * @param mixed $values Raw values.
+	 * @return array<int,string>
+	 */
+	private static function string_list( $values ): array {
+		$values   = is_array( $values ) ? $values : array();
+		$prepared = array();
+		foreach ( $values as $value ) {
+			if ( is_string( $value ) && '' !== $value ) {
+				$prepared[] = $value;
+			}
+		}
+
+		return array_values( array_unique( $prepared ) );
 	}
 }

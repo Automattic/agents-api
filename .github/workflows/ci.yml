@@ -12,31 +12,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  homeboy:
-    name: Homeboy (${{ matrix.command }})
+  checks:
+    name: ${{ matrix.label }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        command: [lint, test]
+        include:
+          - command: phpstan
+            label: PHPStan
+          - command: smoke
+            label: PHP smoke tests
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v6
 
-      - name: Generate app token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        continue-on-error: true
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
         with:
-          app-id: ${{ secrets.HOMEBOY_APP_ID }}
-          private-key: ${{ secrets.HOMEBOY_APP_PRIVATE_KEY }}
+          php-version: '8.1'
+          coverage: none
 
-      - name: Run Homeboy ${{ matrix.command }}
-        uses: Extra-Chill/homeboy-action@v2
-        with:
-          commands: ${{ matrix.command }}
-          expected-commands: lint,test
-          app-token: ${{ steps.app-token.outputs.token || '' }}
-          autofix: 'false'
+      - name: Validate Composer metadata
+        run: composer validate --strict
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run ${{ matrix.label }}
+        run: composer ${{ matrix.command }}

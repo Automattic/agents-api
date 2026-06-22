@@ -298,5 +298,82 @@ $result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 3, $turn_count, 'explicit turns budget overrides higher max_turns', $failures, $passes );
 agents_api_smoke_assert_equals( 'budget_exceeded', $result['status'] ?? null, 'explicit turns budget produces budget_exceeded status', $failures, $passes );
 agents_api_smoke_assert_equals( 'turns', $result['budget'] ?? null, 'explicit turns budget identified in result', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Run_Outcome::STATUS_BUDGET_EXCEEDED, $result['run_outcome']['status'] ?? '', 'explicit turns budget run outcome is budget_exceeded', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STOP_MAX_TURNS, $result['run_outcome']['stop_reason'] ?? '', 'explicit turns budget run outcome stop reason is max turns', $failures, $passes );
+agents_api_smoke_assert_equals( true, $result['run_outcome']['retryable'] ?? false, 'explicit turns budget run outcome is retryable', $failures, $passes );
+
+echo "\n[9] Agent runtime max_iterations clamps loop turns and reaches runner context:\n";
+$turn_count  = 0;
+$provider_id = '';
+$agent       = new WP_Agent(
+	'budgeted-agent',
+	array(
+		'runtime_overrides' => array(
+			'max_iterations' => 2,
+			'provider_id'    => 'openai',
+		),
+	)
+);
+$result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'go' ) ),
+	static function ( array $messages, array $context ) use ( &$turn_count, &$provider_id ): array {
+		++$turn_count;
+		$provider_id = (string) ( $context['provider_id'] ?? '' );
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'turn ' . $context['turn'] );
+
+		return array(
+			'messages'               => $messages,
+			'tool_execution_results' => array(),
+			'events'                 => array(),
+		);
+	},
+	array(
+		'agent'           => $agent,
+		'max_turns'       => 10,
+		'should_continue' => static function (): bool {
+			return true;
+		},
+	)
+);
+agents_api_smoke_assert_equals( 'openai', $provider_id, 'runtime provider override reaches runner context', $failures, $passes );
+agents_api_smoke_assert_equals( 2, $turn_count, 'runtime max_iterations clamps loop turns', $failures, $passes );
+agents_api_smoke_assert_equals( false, isset( $result['status'] ), 'runtime max_iterations clamp preserves max_turns exit semantics', $failures, $passes );
+
+echo "\n[10] Wall-clock budget stops before starting an over-budget turn:\n";
+$turn_count = 0;
+$event_log  = array();
+$result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'go' ) ),
+	static function ( array $messages ) use ( &$turn_count ): array {
+		++$turn_count;
+
+		return array(
+			'messages'               => $messages,
+			'tool_execution_results' => array(),
+			'events'                 => array(),
+		);
+	},
+	array(
+		'max_turns'       => 3,
+		'budgets'         => array(
+			new AgentsAPI\AI\WP_Agent_Iteration_Budget( 'wall_clock_seconds', 1, 1 ),
+		),
+		'should_continue' => static function (): bool {
+			return true;
+		},
+		'on_event'        => static function ( string $event, array $payload ) use ( &$event_log ): void {
+			$event_log[] = array( 'event' => $event, 'payload' => $payload );
+		},
+	)
+);
+
+$budget_events = array_values( array_filter( $event_log, static function ( array $e ): bool {
+	return 'budget_exceeded' === $e['event'];
+} ) );
+agents_api_smoke_assert_equals( 0, $turn_count, 'wall-clock budget prevents the turn runner from starting', $failures, $passes );
+agents_api_smoke_assert_equals( 'budget_exceeded', $result['status'] ?? null, 'wall-clock budget produces budget_exceeded status', $failures, $passes );
+agents_api_smoke_assert_equals( 'wall_clock_seconds', $result['budget'] ?? null, 'wall-clock budget is identified in result', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $budget_events ), 'wall-clock budget emits one budget event', $failures, $passes );
+agents_api_smoke_assert_equals( 'wall_clock', $budget_events[0]['payload']['dimension'] ?? null, 'wall-clock budget event carries wall_clock dimension', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API conversation loop budgets', $failures, $passes );

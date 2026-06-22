@@ -9,7 +9,7 @@ defined( 'ABSPATH' ) || exit;
 
 if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 	/**
-	 * Role-based access grant between a WordPress user and an agent.
+	 * Role-based access grant between a WordPress user/audience and an agent.
 	 */
 	final class WP_Agent_Access_Grant {
 
@@ -26,6 +26,7 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 		 * @param int|null        $granted_by_user_id  Optional WordPress user ID that created the grant.
 		 * @param string|null     $granted_at          Optional UTC datetime string.
 		 * @param array<string,mixed> $metadata         Host-owned metadata.
+		 * @param string|null     $audience_id         Optional non-user audience receiving access.
 		 */
 		public function __construct(
 			public readonly string $agent_id,
@@ -36,13 +37,22 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 			public readonly ?int $granted_by_user_id = null,
 			public readonly ?string $granted_at = null,
 			public readonly array $metadata = array(),
+			public readonly ?string $audience_id = null,
 		) {
 			if ( '' === trim( $this->agent_id ) ) {
 				throw self::invalid( 'agent_id', 'must be a non-empty string' );
 			}
 
-			if ( $this->user_id <= 0 ) {
-				throw self::invalid( 'user_id', 'must be a positive integer' );
+			if ( $this->user_id < 0 ) {
+				throw self::invalid( 'user_id', 'must be zero or a positive integer' );
+			}
+
+			if ( 0 === $this->user_id && null === $this->audience_id ) {
+				throw self::invalid( 'user_id', 'must be positive unless audience_id is present' );
+			}
+
+			if ( null !== $this->audience_id && '' === trim( $this->audience_id ) ) {
+				throw self::invalid( 'audience_id', 'must be null or a non-empty string' );
 			}
 
 			if ( null !== $this->grant_id && $this->grant_id <= 0 ) {
@@ -87,14 +97,15 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 		 */
 		public static function from_array( array $grant ): self {
 			return new self(
-				isset( $grant['agent_id'] ) ? (string) $grant['agent_id'] : '',
-				isset( $grant['user_id'] ) ? (int) $grant['user_id'] : 0,
-				isset( $grant['role'] ) ? (string) $grant['role'] : self::ROLE_VIEWER,
-				array_key_exists( 'workspace_id', $grant ) && null !== $grant['workspace_id'] ? (string) $grant['workspace_id'] : null,
-				isset( $grant['grant_id'] ) ? (int) $grant['grant_id'] : null,
-				isset( $grant['granted_by_user_id'] ) ? (int) $grant['granted_by_user_id'] : null,
-				array_key_exists( 'granted_at', $grant ) && null !== $grant['granted_at'] ? (string) $grant['granted_at'] : null,
-				isset( $grant['metadata'] ) && is_array( $grant['metadata'] ) ? $grant['metadata'] : array()
+				self::string_field( $grant, 'agent_id' ),
+				self::int_field( $grant, 'user_id' ) ?? 0,
+				self::string_field( $grant, 'role', self::ROLE_VIEWER ),
+				self::nullable_string_field( $grant, 'workspace_id' ),
+				self::int_field( $grant, 'grant_id' ),
+				self::int_field( $grant, 'granted_by_user_id' ),
+				self::nullable_string_field( $grant, 'granted_at' ),
+				self::metadata_field( $grant, 'metadata' ),
+				self::nullable_string_field( $grant, 'audience_id' )
 			);
 		}
 
@@ -124,6 +135,7 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 				'granted_by_user_id' => $this->granted_by_user_id,
 				'granted_at'         => $this->granted_at,
 				'metadata'           => $this->metadata,
+				'audience_id'        => $this->audience_id,
 			);
 		}
 
@@ -140,6 +152,61 @@ if ( ! class_exists( 'WP_Agent_Access_Grant' ) ) {
 			} catch ( JsonException $e ) {
 				return false;
 			}
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 */
+		private static function string_field( array $source, string $key, string $fallback = '' ): string {
+			$value = $source[ $key ] ?? null;
+			return is_scalar( $value ) ? (string) $value : $fallback;
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 */
+		private static function nullable_string_field( array $source, string $key ): ?string {
+			if ( ! array_key_exists( $key, $source ) || null === $source[ $key ] ) {
+				return null;
+			}
+
+			return self::string_field( $source, $key );
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 */
+		private static function int_field( array $source, string $key ): ?int {
+			$value = $source[ $key ] ?? null;
+			if ( is_int( $value ) ) {
+				return $value;
+			}
+
+			if ( is_float( $value ) || is_string( $value ) ) {
+				return (int) $value;
+			}
+
+			return null;
+		}
+
+		/**
+		 * @param array<string,mixed> $source Raw source array.
+		 * @return array<string,mixed>
+		 */
+		private static function metadata_field( array $source, string $key ): array {
+			$value = $source[ $key ] ?? null;
+			if ( ! is_array( $value ) ) {
+				return array();
+			}
+
+			$metadata = array();
+			foreach ( $value as $metadata_key => $metadata_value ) {
+				if ( is_string( $metadata_key ) ) {
+					$metadata[ $metadata_key ] = $metadata_value;
+				}
+			}
+
+			return $metadata;
 		}
 
 		/**

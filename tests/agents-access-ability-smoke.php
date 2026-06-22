@@ -1,0 +1,315 @@
+<?php
+/**
+ * Pure-PHP smoke test for agent access helpers and abilities.
+ *
+ * Run with: php tests/agents-access-ability-smoke.php
+ *
+ * @package AgentsAPI\Tests
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	define( 'ABSPATH', __DIR__ . '/' );
+}
+
+$failures = array();
+$passes   = 0;
+
+echo "agents-access-ability-smoke\n";
+
+require_once __DIR__ . '/agents-api-smoke-helpers.php';
+
+$GLOBALS['__agents_api_smoke_current_user_id'] = 7;
+$GLOBALS['__agents_api_smoke_abilities']       = array();
+$GLOBALS['__agents_api_smoke_categories']      = array();
+
+/**
+ * Switch the acting user for both backends. The pure-PHP shim reads the smoke
+ * global directly. Under real WordPress get_current_user_id() can only return a
+ * real user, so instead of inventing a user row we synthesize the execution
+ * principal from this smoke user id through the agents_api_execution_principal
+ * filter registered below — environment-independent and Playground-safe.
+ */
+function agents_access_smoke_set_user( int $user_id ): void {
+	$GLOBALS['__agents_api_smoke_current_user_id'] = $user_id;
+}
+
+if ( ! function_exists( 'get_current_user_id' ) ) {
+	function get_current_user_id(): int {
+		return (int) $GLOBALS['__agents_api_smoke_current_user_id'];
+	}
+}
+
+if ( ! function_exists( 'is_user_logged_in' ) ) {
+	function is_user_logged_in(): bool {
+		return get_current_user_id() > 0;
+	}
+}
+
+if ( ! function_exists( 'wp_has_ability_category' ) ) {
+	function wp_has_ability_category( string $category ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
+	}
+}
+
+if ( ! function_exists( 'wp_register_ability_category' ) ) {
+	function wp_register_ability_category( string $category, array $args ): void {
+		$GLOBALS['__agents_api_smoke_categories'][ $category ] = $args;
+	}
+}
+
+if ( ! function_exists( 'wp_has_ability' ) ) {
+	function wp_has_ability( string $ability ): bool {
+		return isset( $GLOBALS['__agents_api_smoke_abilities'][ $ability ] );
+	}
+}
+
+if ( ! function_exists( 'wp_register_ability' ) ) {
+	function wp_register_ability( string $ability, array $args ): void {
+		$GLOBALS['__agents_api_smoke_abilities'][ $ability ] = $args;
+	}
+}
+
+agents_access_smoke_set_user( 7 );
+
+agents_api_smoke_require_module();
+
+// Under real WordPress get_current_user_id() cannot conjure the smoke user, so
+// synthesize a user-session execution principal for the active smoke user id
+// (when > 0) through the resolution filter. The later audience filter handles
+// the anonymous (user id 0) case.
+if ( ! function_exists( 'get_current_user_id' ) || function_exists( 'wp_set_current_user' ) ) {
+	add_filter(
+		'agents_api_execution_principal',
+		static function ( $principal, array $context ) {
+			$smoke_user = (int) ( $GLOBALS['__agents_api_smoke_current_user_id'] ?? 0 );
+			if ( $smoke_user <= 0 ) {
+				return $principal;
+			}
+
+			return AgentsAPI\AI\WP_Agent_Execution_Principal::user_session(
+				$smoke_user,
+				'current-user',
+				$context['request_context'] ?? AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+				array( 'source' => 'smoke-test' ),
+				$context['workspace_id'] ?? null,
+				$context['client_id'] ?? null
+			);
+		},
+		5,
+		2
+	);
+}
+
+add_action(
+	'wp_agents_api_init',
+	static function (): void {
+		wp_register_agent(
+			'editor-agent',
+			array(
+				'label'       => 'Editor Agent',
+				'description' => 'Edits posts.',
+				'meta'        => array( 'source_plugin' => 'tests' ),
+			)
+		);
+
+		wp_register_agent(
+			'admin-agent',
+			array(
+				'label'       => 'Admin Agent',
+				'description' => 'Administers the site.',
+			)
+		);
+
+		wp_register_agent(
+			'public-agent',
+			array(
+				'label'       => 'Public Agent',
+				'description' => 'Available to public audience principals.',
+			)
+		);
+	}
+);
+
+do_action( 'init' );
+
+$grant = new WP_Agent_Access_Grant( 'editor-agent', 7, WP_Agent_Access_Grant::ROLE_OPERATOR, 'site:42' );
+
+$access_store = new class( $grant ) implements WP_Agent_Access_Store, WP_Agent_Principal_Access_Store {
+	/** @var WP_Agent_Access_Grant[] */
+	private array $audience_grants;
+
+	/**
+	 * @param WP_Agent_Access_Grant $grant Test grant.
+	 */
+	public function __construct( private WP_Agent_Access_Grant $grant ) {
+		$this->audience_grants = array(
+			new WP_Agent_Access_Grant( 'admin-agent', 0, WP_Agent_Access_Grant::ROLE_OPERATOR, 'site:42', null, null, null, array(), 'audience:docs-readers' ),
+			new WP_Agent_Access_Grant( 'public-agent', 0, WP_Agent_Access_Grant::ROLE_OPERATOR, 'site:42', null, null, null, array(), 'audience:public' ),
+		);
+	}
+
+	public function grant_access( WP_Agent_Access_Grant $grant ): WP_Agent_Access_Grant {
+		$this->grant = $grant;
+		return $grant;
+	}
+
+	public function revoke_access( string $agent_id, int $user_id, ?string $workspace_id = null ): bool {
+		return $this->grant->agent_id === $agent_id && $this->grant->user_id === $user_id && $this->grant->workspace_id === $workspace_id;
+	}
+
+	public function get_access( string $agent_id, int $user_id, ?string $workspace_id = null ): ?WP_Agent_Access_Grant {
+		return $this->grant->agent_id === $agent_id && $this->grant->user_id === $user_id && $this->grant->workspace_id === $workspace_id ? $this->grant : null;
+	}
+
+	public function get_agent_ids_for_user( int $user_id, ?string $minimum_role = null, ?string $workspace_id = null ): array {
+		if ( $this->grant->user_id !== $user_id || $this->grant->workspace_id !== $workspace_id ) {
+			return array();
+		}
+
+		return null === $minimum_role || $this->grant->role_meets( $minimum_role ) ? array( $this->grant->agent_id ) : array();
+	}
+
+	public function get_users_for_agent( string $agent_id, ?string $workspace_id = null ): array {
+		return $this->grant->agent_id === $agent_id && $this->grant->workspace_id === $workspace_id ? array( $this->grant ) : array();
+	}
+
+	public function get_access_for_principal( string $agent_id, AgentsAPI\AI\WP_Agent_Execution_Principal $principal, ?string $workspace_id = null ): ?WP_Agent_Access_Grant {
+		if ( null === $principal->audience_id ) {
+			return null;
+		}
+
+		foreach ( $this->audience_grants as $grant ) {
+			if ( $grant->agent_id === $agent_id && $grant->audience_id === $principal->audience_id && $grant->workspace_id === $workspace_id ) {
+				return $grant;
+			}
+		}
+
+		return null;
+	}
+
+	public function get_agent_ids_for_principal( AgentsAPI\AI\WP_Agent_Execution_Principal $principal, ?string $minimum_role = null, ?string $workspace_id = null ): array {
+		if ( null === $principal->audience_id ) {
+			return array();
+		}
+
+		$agent_ids = array();
+		foreach ( $this->audience_grants as $grant ) {
+			if ( $grant->audience_id !== $principal->audience_id || $grant->workspace_id !== $workspace_id ) {
+				continue;
+			}
+
+			if ( null === $minimum_role || $grant->role_meets( $minimum_role ) ) {
+				$agent_ids[] = $grant->agent_id;
+			}
+		}
+
+		return $agent_ids;
+	}
+};
+
+add_filter(
+	'wp_agent_access_store',
+	static function ( $store ) use ( $access_store ) {
+		return $store instanceof WP_Agent_Access_Store ? $store : $access_store;
+	}
+);
+
+agents_api_smoke_assert_equals( true, class_exists( 'WP_Agent_Access' ), 'access helper class is available', $failures, $passes );
+agents_api_smoke_assert_equals( $access_store, WP_Agent_Access::get_store(), 'access store resolves through filter', $failures, $passes );
+
+$principal = WP_Agent_Access::get_current_principal( array( 'workspace_id' => 'site:42' ) );
+agents_api_smoke_assert_equals( 7, $principal->acting_user_id, 'current principal falls back to current user', $failures, $passes );
+agents_api_smoke_assert_equals( 'site:42', $principal->workspace_id, 'current principal carries workspace scope', $failures, $passes );
+
+agents_api_smoke_assert_equals( true, WP_Agent_Access::can_current_principal_access_agent( 'editor-agent', WP_Agent_Access_Grant::ROLE_VIEWER, array( 'workspace_id' => 'site:42' ) ), 'current principal can access granted agent at viewer role', $failures, $passes );
+agents_api_smoke_assert_equals( true, WP_Agent_Access::can_current_principal_access_agent( 'editor-agent', WP_Agent_Access_Grant::ROLE_OPERATOR, array( 'workspace_id' => 'site:42' ) ), 'current principal can access granted agent at operator role', $failures, $passes );
+agents_api_smoke_assert_equals( false, WP_Agent_Access::can_current_principal_access_agent( 'editor-agent', WP_Agent_Access_Grant::ROLE_ADMIN, array( 'workspace_id' => 'site:42' ) ), 'current principal cannot access granted agent above grant role', $failures, $passes );
+
+$agents = WP_Agent_Access::list_accessible_agents_for_current_principal( WP_Agent_Access_Grant::ROLE_VIEWER, array( 'workspace_id' => 'site:42' ) );
+agents_api_smoke_assert_equals( 'editor-agent', $agents[0]['slug'] ?? null, 'accessible agents list contains granted registered agent', $failures, $passes );
+agents_api_smoke_assert_equals( 'Editor Agent', $agents[0]['label'] ?? null, 'accessible agents include agent label', $failures, $passes );
+agents_api_smoke_assert_equals( true, in_array( 'public-agent', array_column( $agents, 'slug' ), true ), 'logged-in principal inherits public audience grants in accessible list', $failures, $passes );
+
+$can_access = AgentsAPI\AI\Auth\agents_can_access_agent(
+	array(
+		'agent'        => 'editor-agent',
+		'minimum_role' => WP_Agent_Access_Grant::ROLE_OPERATOR,
+		'workspace_id' => 'site:42',
+	)
+);
+agents_api_smoke_assert_equals( true, $can_access['allowed'] ?? false, 'can-access ability returns allowed true for grant', $failures, $passes );
+
+$cannot_access = AgentsAPI\AI\Auth\agents_can_access_agent(
+	array(
+		'agent'        => 'editor-agent',
+		'minimum_role' => WP_Agent_Access_Grant::ROLE_ADMIN,
+		'workspace_id' => 'site:42',
+	)
+);
+agents_api_smoke_assert_equals( false, $cannot_access['allowed'] ?? true, 'can-access ability returns allowed false below minimum role', $failures, $passes );
+
+$public_access = AgentsAPI\AI\Auth\agents_can_access_agent(
+	array(
+		'agent'        => 'public-agent',
+		'minimum_role' => WP_Agent_Access_Grant::ROLE_OPERATOR,
+		'workspace_id' => 'site:42',
+	)
+);
+agents_api_smoke_assert_equals( true, $public_access['allowed'] ?? false, 'logged-in principal can access public audience agent', $failures, $passes );
+
+$ability_list = AgentsAPI\AI\Auth\agents_list_accessible_agents( array( 'workspace_id' => 'site:42' ) );
+agents_api_smoke_assert_equals( 'editor-agent', $ability_list['agents'][0]['slug'] ?? null, 'list-accessible ability returns granted registered agent', $failures, $passes );
+
+agents_access_smoke_set_user( 0 );
+add_filter(
+	'agents_api_execution_principal',
+	static function ( $principal, array $context ) {
+		if ( (int) $GLOBALS['__agents_api_smoke_current_user_id'] > 0 ) {
+			return $principal;
+		}
+
+		return AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
+			'audience:docs-readers',
+			'audience-gateway',
+			$context['request_context'] ?? AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+			array( 'source' => 'smoke-test' ),
+			$context['workspace_id'] ?? null
+		);
+	},
+	20,
+	2
+);
+
+$audience_principal = WP_Agent_Access::get_current_principal( array( 'workspace_id' => 'site:42' ) );
+agents_api_smoke_assert_equals( 0, $audience_principal->acting_user_id, 'current principal can resolve anonymous audience', $failures, $passes );
+agents_api_smoke_assert_equals( 'audience:docs-readers', $audience_principal->audience_id, 'anonymous audience principal carries audience id', $failures, $passes );
+agents_api_smoke_assert_equals( true, AgentsAPI\AI\Auth\agents_access_permission( array( 'workspace_id' => 'site:42' ) ), 'access ability permission accepts resolved audience principal', $failures, $passes );
+
+$audience_can_access = AgentsAPI\AI\Auth\agents_can_access_agent(
+	array(
+		'agent'        => 'admin-agent',
+		'minimum_role' => WP_Agent_Access_Grant::ROLE_OPERATOR,
+		'workspace_id' => 'site:42',
+	)
+);
+agents_api_smoke_assert_equals( true, $audience_can_access['allowed'] ?? false, 'can-access ability returns allowed true for audience grant', $failures, $passes );
+
+$audience_cannot_access = AgentsAPI\AI\Auth\agents_can_access_agent(
+	array(
+		'agent'        => 'admin-agent',
+		'minimum_role' => WP_Agent_Access_Grant::ROLE_ADMIN,
+		'workspace_id' => 'site:42',
+	)
+);
+agents_api_smoke_assert_equals( false, $audience_cannot_access['allowed'] ?? true, 'can-access ability enforces audience grant role', $failures, $passes );
+
+$audience_ability_list = AgentsAPI\AI\Auth\agents_list_accessible_agents( array( 'workspace_id' => 'site:42' ) );
+agents_api_smoke_assert_equals( 'admin-agent', $audience_ability_list['agents'][0]['slug'] ?? null, 'list-accessible ability returns audience granted agent', $failures, $passes );
+
+do_action( 'wp_abilities_api_categories_init' );
+do_action( 'wp_abilities_api_init' );
+
+agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Auth\AGENTS_CAN_ACCESS_AGENT_ABILITY ), 'can-access ability registers with Abilities API', $failures, $passes );
+agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Auth\AGENTS_LIST_ACCESSIBLE_AGENTS_ABILITY ), 'list-accessible ability registers with Abilities API', $failures, $passes );
+
+agents_api_smoke_finish( 'Agents API access abilities', $failures, $passes );

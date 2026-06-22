@@ -17,7 +17,8 @@ if ( ! interface_exists( 'WP_Agent_Tool_Access_Policy' ) ) {
 		 * Return a tool visibility policy for the current runtime context.
 		 *
 		 * Supported keys are: mode, tools, categories, allow_only, deny,
-		 * mandatory_tools, and mandatory_categories.
+		 * runtime_tools, runtime_categories, mandatory_tools, and
+		 * mandatory_categories.
 		 *
 		 * @param array<string, mixed> $context Runtime context.
 		 * @return array<string, mixed>|null Policy fragment, or null for no opinion.

@@ -45,13 +45,13 @@ final class WP_Agent_Workflow_Spec {
 	 *
 	 * @param string $id        Stable, namespaced workflow identifier (`my-plugin/triage-comments`).
 	 * @param string $version   Caller-defined version string (semver suggested but not enforced).
-	 * @param array  $inputs    Map of `<input_name> => <schema>`. Each schema is a JSON-Schema-like
+	 * @param array<string, mixed>  $inputs    Map of `<input_name> => <schema>`. Each schema is a JSON-Schema-like
 	 *                          fragment with `type`, optional `required`, optional `default`.
-	 * @param array  $steps     Ordered list of step definitions. v0 supports `ability` and `agent`
+	 * @param array<int, array<string, mixed>>  $steps     Ordered list of step definitions. v0 supports `ability` and `agent`
 	 *                          types; consumers may register additional types via a step handler map.
-	 * @param array  $triggers  List of trigger definitions. v0 supports `on_demand`, `wp_action`, `cron`.
-	 * @param array  $meta      Free-form metadata for the registering plugin. Opaque to the runner.
-	 * @param array  $raw       The full raw array the spec was constructed from. Used for round-tripping
+	 * @param array<int, array<string, mixed>>  $triggers  List of trigger definitions. v0 supports `on_demand`, `wp_action`, `cron`.
+	 * @param array<mixed>  $meta      Free-form metadata for the registering plugin. Opaque to the runner.
+	 * @param array<mixed>  $raw       The full raw array the spec was constructed from. Used for round-tripping
 	 *                          a spec back to its caller-supplied shape.
 	 */
 	public function __construct(
@@ -71,7 +71,7 @@ final class WP_Agent_Workflow_Spec {
 	 *
 	 * @since 0.103.0
 	 *
-	 * @param array $raw Raw spec input.
+	 * @param array<mixed> $raw Raw spec input.
 	 * @return self|WP_Error
 	 */
 	public static function from_array( array $raw ) {
@@ -89,13 +89,16 @@ final class WP_Agent_Workflow_Spec {
 			);
 		}
 
+		$id      = is_string( $raw['id'] ?? null ) ? $raw['id'] : '';
+		$version = isset( $raw['version'] ) && is_scalar( $raw['version'] ) ? (string) $raw['version'] : '0.0.0';
+
 		return new self(
-			(string) $raw['id'],
-			(string) ( $raw['version'] ?? '0.0.0' ),
-			(array) ( $raw['inputs'] ?? array() ),
-			(array) ( $raw['steps'] ?? array() ),
-			(array) ( $raw['triggers'] ?? array() ),
-			(array) ( $raw['meta'] ?? array() ),
+			$id,
+			$version,
+			isset( $raw['inputs'] ) && is_array( $raw['inputs'] ) ? self::string_keyed_array( $raw['inputs'] ) : array(),
+			isset( $raw['steps'] ) && is_array( $raw['steps'] ) ? self::list_of_arrays( $raw['steps'] ) : array(),
+			isset( $raw['triggers'] ) && is_array( $raw['triggers'] ) ? self::list_of_arrays( $raw['triggers'] ) : array(),
+			isset( $raw['meta'] ) && is_array( $raw['meta'] ) ? $raw['meta'] : array(),
 			$raw
 		);
 	}
@@ -109,32 +112,63 @@ final class WP_Agent_Workflow_Spec {
 	}
 
 	/**
-	 * @return array<string,array> Input schemas keyed by input name.
+	 * @return array<string, mixed> Input schemas keyed by input name.
 	 */
 	public function get_inputs(): array {
 		return $this->inputs;
 	}
 
 	/**
-	 * @return array<int,array> Step definitions in order.
+	 * @return array<int, array<string, mixed>> Step definitions in order.
 	 */
 	public function get_steps(): array {
 		return $this->steps;
 	}
 
 	/**
-	 * @return array<int,array> Trigger definitions.
+	 * @return array<int, array<string, mixed>> Trigger definitions.
 	 */
 	public function get_triggers(): array {
 		return $this->triggers;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
 	public function get_meta(): array {
 		return $this->meta;
 	}
 
 	/**
-	 * @return array The raw spec array as supplied to {@see from_array()}.
+	 * @param array<mixed> $items
+	 * @return array<string, mixed>
+	 */
+	private static function string_keyed_array( array $items ): array {
+		$out = array();
+		foreach ( $items as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$out[ $key ] = $value;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @param array<mixed> $items
+	 * @return array<int, array<string, mixed>>
+	 */
+	private static function list_of_arrays( array $items ): array {
+		$out = array();
+		foreach ( $items as $value ) {
+			if ( is_array( $value ) ) {
+				$out[] = self::string_keyed_array( $value );
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * @return array<mixed> The raw spec array as supplied to {@see from_array()}.
 	 */
 	public function to_array(): array {
 		return $this->raw;

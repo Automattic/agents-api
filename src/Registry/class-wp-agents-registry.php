@@ -38,7 +38,7 @@ if ( ! class_exists( 'WP_Agents_Registry' ) ) {
 		 * Register an agent definition on this registry instance.
 		 *
 		 * @param string|WP_Agent $agent Agent slug or definition object.
-		 * @param array           $args  Registration arguments when `$agent` is a slug.
+		 * @param array<mixed>           $args  Registration arguments when `$agent` is a slug.
 		 * @return WP_Agent|null Registered agent, or null on invalid arguments.
 		 */
 		public function register( $agent, array $args = array() ): ?WP_Agent {

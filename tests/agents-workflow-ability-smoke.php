@@ -15,40 +15,43 @@ $passes   = 0;
 
 echo "agents-workflow-ability-smoke\n";
 
-class WP_Error {
-	public function __construct( private string $code = '', private string $message = '', private $data = null ) {}
-	public function get_error_code(): string { return $this->code; }
-	public function get_error_message(): string { return $this->message; }
-	public function get_error_data() { return $this->data; }
-}
-function is_wp_error( $value ): bool { return $value instanceof WP_Error; }
-function current_user_can( string $cap ): bool { unset( $cap ); return $GLOBALS['__can'] ?? false; }
+require_once __DIR__ . '/agents-api-smoke-helpers.php';
 
-$GLOBALS['__filters'] = array();
-function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	unset( $accepted_args );
-	$GLOBALS['__filters'][ $hook ][ $priority ][] = $cb;
-}
-function apply_filters( string $hook, $value, ...$args ) {
-	$cbs = $GLOBALS['__filters'][ $hook ] ?? array();
-	ksort( $cbs );
-	foreach ( $cbs as $bucket ) {
-		foreach ( $bucket as $cb ) {
-			$value = call_user_func_array( $cb, array_merge( array( $value ), $args ) );
-		}
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '', private $data = null ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+		public function get_error_data() { return $this->data; }
 	}
-	return $value;
 }
-function add_action( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
-	add_filter( $hook, $cb, $priority, $accepted_args );
-}
-function do_action( string $hook, ...$args ): void {
-	$cbs = $GLOBALS['__filters'][ $hook ] ?? array();
-	ksort( $cbs );
-	foreach ( $cbs as $bucket ) {
-		foreach ( $bucket as $cb ) {
-			call_user_func_array( $cb, $args );
+
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $cap ): bool { unset( $cap ); return $GLOBALS['__can'] ?? false; }
+} else {
+	add_filter(
+		'user_has_cap',
+		static function ( array $allcaps ): array {
+			$allcaps['manage_options'] = (bool) ( $GLOBALS['__can'] ?? false );
+			return $allcaps;
 		}
+	);
+}
+
+function smoke_reset_workflow_filters(): void {
+	$hooks = array(
+		'agents_run_workflow_dispatch_failed',
+		'agents_run_workflow_permission',
+		'wp_agent_workflow_handler',
+	);
+
+	foreach ( $hooks as $hook ) {
+		if ( function_exists( 'remove_all_filters' ) ) {
+			remove_all_filters( $hook );
+			continue;
+		}
+
+		unset( $GLOBALS['__agents_api_smoke_actions'][ $hook ] );
 	}
 }
 
@@ -64,17 +67,11 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 	echo '    actual:   ' . var_export( $actual, true ) . "\n";
 }
 
-require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
-require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
-require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-bindings.php';
-require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-result.php';
-require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-store.php';
-require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-recorder.php';
-require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-runner.php';
-require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-registry.php';
-require_once __DIR__ . '/../src/Workflows/register-agents-workflow-abilities.php';
+agents_api_smoke_require_module();
 
 use function AgentsAPI\AI\Workflows\agents_describe_workflow;
+use function AgentsAPI\AI\Workflows\agents_run_workflow_input_schema;
+use function AgentsAPI\AI\Workflows\agents_run_workflow_output_schema;
 use function AgentsAPI\AI\Workflows\agents_run_workflow_dispatch;
 use function AgentsAPI\AI\Workflows\agents_run_workflow_permission;
 use function AgentsAPI\AI\Workflows\agents_validate_workflow;
@@ -90,6 +87,16 @@ smoke_assert( true, agents_run_workflow_permission( array() ), 'permission grant
 
 add_filter( 'agents_run_workflow_permission', static fn() => false );
 smoke_assert( false, agents_run_workflow_permission( array() ), 'filter can override permission to deny', $failures, $passes );
+
+// ─── run-workflow schemas ────────────────────────────────────────────
+
+$input_schema  = agents_run_workflow_input_schema();
+$output_schema = agents_run_workflow_output_schema();
+smoke_assert( true, str_contains( $input_schema['properties']['options']['description'] ?? '', 'evidence_refs' ), 'input schema documents evidence_refs runtime option', $failures, $passes );
+smoke_assert( 'array', $output_schema['properties']['evidence_refs']['type'] ?? '', 'output schema exposes evidence_refs', $failures, $passes );
+smoke_assert( 'object', $output_schema['properties']['replay']['type'] ?? '', 'output schema exposes replay metadata', $failures, $passes );
+smoke_assert( 'integer', $output_schema['properties']['replay']['properties']['run_record_schema_version']['type'] ?? '', 'replay schema includes schema version', $failures, $passes );
+smoke_assert( 'string', $output_schema['properties']['replay']['properties']['workflow_spec_hash']['type'] ?? '', 'replay schema includes spec hash', $failures, $passes );
 
 // ─── validate-workflow ───────────────────────────────────────────────
 
@@ -161,7 +168,7 @@ smoke_assert( array( 'a' => 1 ), $ok['output']['echo'] ?? array(), 'handler sees
 
 // ─── handler returns invalid type ────────────────────────────────────
 
-$GLOBALS['__filters'] = array(); // wipe registered handler
+smoke_reset_workflow_filters();
 add_filter( 'wp_agent_workflow_handler', static fn() => static fn() => 'not an array' );
 
 $bad = agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/x' ) );
@@ -177,14 +184,13 @@ smoke_assert(
 // ─── observability: dispatch_failed fires ────────────────────────────
 
 $failed_reasons = array();
+smoke_reset_workflow_filters();
 add_filter(
 	'agents_run_workflow_dispatch_failed',
 	static function ( $reason ) use ( &$failed_reasons ) {
 		$failed_reasons[] = $reason;
 	}
 );
-
-$GLOBALS['__filters']['wp_agent_workflow_handler'] = array();
 agents_run_workflow_dispatch( array( 'workflow_id' => 'whatever' ) );
 smoke_assert( true, in_array( 'no_handler', $failed_reasons, true ), 'dispatch_failed fires with no_handler', $failures, $passes );
 

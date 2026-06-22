@@ -37,7 +37,7 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 
 			$ceiling = $context['capability_ceiling'] ?? $principal->capability_ceiling;
 			if ( is_array( $ceiling ) ) {
-				$ceiling = WP_Agent_Capability_Ceiling::from_array( $ceiling );
+				$ceiling = WP_Agent_Capability_Ceiling::from_array( $this->string_keyed_array( $ceiling ) );
 			}
 
 			if ( $ceiling instanceof WP_Agent_Capability_Ceiling && ! $ceiling->allows_capability( $capability ) ) {
@@ -74,8 +74,23 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 				return false;
 			}
 
-			$grant = $access_store->get_access( $agent_id, $principal->acting_user_id, $principal->workspace_id );
-			return $grant instanceof WP_Agent_Access_Grant && $grant->role_meets( $minimum_role );
+			if ( $principal->acting_user_id > 0 ) {
+				$grant = $access_store->get_access( $agent_id, $principal->acting_user_id, $principal->workspace_id );
+				if ( $grant instanceof WP_Agent_Access_Grant && $grant->role_meets( $minimum_role ) ) {
+					return true;
+				}
+			}
+
+			if ( $access_store instanceof WP_Agent_Principal_Access_Store ) {
+				foreach ( WP_Agent_Access::access_principals_for( $principal, $context ) as $access_principal ) {
+					$grant = $access_store->get_access_for_principal( $agent_id, $access_principal, $principal->workspace_id );
+					if ( $grant instanceof WP_Agent_Access_Grant && $grant->role_meets( $minimum_role ) ) {
+						return true;
+					}
+				}
+			}
+
+			return false;
 		}
 
 		/**
@@ -87,6 +102,21 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 			}
 
 			return function_exists( 'user_can' ) && user_can( $user_id, $capability );
+		}
+
+		/**
+		 * @param array<mixed,mixed> $value Raw array.
+		 * @return array<string,mixed>
+		 */
+		private function string_keyed_array( array $value ): array {
+			$result = array();
+			foreach ( $value as $key => $item ) {
+				if ( is_string( $key ) ) {
+					$result[ $key ] = $item;
+				}
+			}
+
+			return $result;
 		}
 	}
 }

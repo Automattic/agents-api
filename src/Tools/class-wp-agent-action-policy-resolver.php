@@ -6,6 +6,9 @@
  */
 
 use AgentsAPI\AI\Tools\WP_Agent_Action_Policy;
+use AgentsAPI\AI\Approvals\WP_Agent_Approval_Memory_Store;
+use AgentsAPI\AI\Approvals\WP_Agent_Null_Approval_Memory_Store;
+use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -26,14 +29,21 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		private WP_Agent_Tool_Policy_Filter $tool_filter;
 
 		/**
+		 * @var WP_Agent_Approval_Memory_Store
+		 */
+		private WP_Agent_Approval_Memory_Store $approval_memory_store;
+
+		/**
 		 * Constructor.
 		 *
-		 * @param WP_Agent_Action_Policy_Provider[]|null $policy_providers Host policy providers.
-		 * @param WP_Agent_Tool_Policy_Filter|null                 $tool_filter      Shared tool filter.
+		 * @param WP_Agent_Action_Policy_Provider[]|null $policy_providers      Host policy providers.
+		 * @param WP_Agent_Tool_Policy_Filter|null       $tool_filter           Shared tool filter.
+		 * @param WP_Agent_Approval_Memory_Store|null    $approval_memory_store Approval memory store.
 		 */
-		public function __construct( ?array $policy_providers = null, ?WP_Agent_Tool_Policy_Filter $tool_filter = null ) {
-			$this->policy_providers = is_array( $policy_providers ) ? $policy_providers : array();
-			$this->tool_filter      = $tool_filter ?? new WP_Agent_Tool_Policy_Filter();
+		public function __construct( ?array $policy_providers = null, ?WP_Agent_Tool_Policy_Filter $tool_filter = null, ?WP_Agent_Approval_Memory_Store $approval_memory_store = null ) {
+			$this->policy_providers      = is_array( $policy_providers ) ? $policy_providers : array();
+			$this->tool_filter           = $tool_filter ?? new WP_Agent_Tool_Policy_Filter();
+			$this->approval_memory_store = $approval_memory_store ?? new WP_Agent_Null_Approval_Memory_Store();
 		}
 
 		/**
@@ -43,9 +53,9 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		 * @return string One of direct, preview, forbidden.
 		 */
 		public function resolve_for_tool( array $context ): string {
-			$tool_name = (string) ( $context['tool_name'] ?? '' );
-			$mode      = (string) ( $context['mode'] ?? WP_Agent_Tool_Policy::RUNTIME_CHAT );
-			$tool_def  = is_array( $context['tool_def'] ?? null ) ? $context['tool_def'] : array();
+			$tool_name = $this->string_value( $context['tool_name'] ?? '' );
+			$mode      = $this->string_value( $context['mode'] ?? WP_Agent_Tool_Policy::RUNTIME_CHAT );
+			$tool_def  = is_array( $context['tool_def'] ?? null ) ? $this->string_keyed_array( $context['tool_def'] ) : array();
 
 			if ( '' === $tool_name ) {
 				return WP_Agent_Action_Policy::DIRECT;
@@ -71,6 +81,11 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 				if ( null !== $provided ) {
 					return $this->apply_filter( $provided, $tool_name, $mode, $context );
 				}
+			}
+
+			$remembered = $this->remembered_action_policy( $context, $tool_name );
+			if ( null !== $remembered ) {
+				return $this->apply_filter( $remembered, $tool_name, $mode, $context );
 			}
 
 			$tool_default = $this->tool_declared_default( $tool_def );
@@ -111,6 +126,66 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		}
 
 		/**
+		 * Return approval memory store from context, filters, or constructor.
+		 *
+		 * @param array<string, mixed> $context Runtime context.
+		 * @return WP_Agent_Approval_Memory_Store Store.
+		 */
+		private function get_approval_memory_store( array $context ): WP_Agent_Approval_Memory_Store {
+			$store = $context['approval_memory_store'] ?? $this->approval_memory_store;
+
+			if ( function_exists( 'apply_filters' ) ) {
+				$store = apply_filters( 'agents_api_approval_memory_store', $store, $context, $this );
+			}
+
+			return $store instanceof WP_Agent_Approval_Memory_Store ? $store : new WP_Agent_Null_Approval_Memory_Store();
+		}
+
+		/**
+		 * Recall remembered action policy for the current invocation, when enough identity exists.
+		 *
+		 * @param array<string, mixed> $context   Runtime context.
+		 * @param string               $tool_name Tool name.
+		 * @return string|null Normalized remembered policy or null.
+		 */
+		private function remembered_action_policy( array $context, string $tool_name ): ?string {
+			$workspace = $this->workspace_from_context( $context );
+			$user_id   = $this->int_value( $context['user_id'] ?? ( $context['acting_user_id'] ?? 0 ) );
+			$agent_id  = $this->string_value( $context['agent_id'] ?? ( $context['agent_slug'] ?? '' ) );
+
+			if ( null === $workspace || $user_id <= 0 || '' === $agent_id ) {
+				return null;
+			}
+
+			return WP_Agent_Action_Policy::normalize(
+				$this->get_approval_memory_store( $context )->recall( $workspace, $user_id, $agent_id, $tool_name )
+			);
+		}
+
+		/**
+		 * Return workspace scope from context.
+		 *
+		 * @param array<string, mixed> $context Runtime context.
+		 * @return WP_Agent_Workspace_Scope|null Workspace scope when present and valid.
+		 */
+		private function workspace_from_context( array $context ): ?WP_Agent_Workspace_Scope {
+			$workspace = $context['workspace'] ?? null;
+			if ( $workspace instanceof WP_Agent_Workspace_Scope ) {
+				return $workspace;
+			}
+
+			if ( is_array( $workspace ) ) {
+				try {
+					return WP_Agent_Workspace_Scope::from_array( $workspace );
+				} catch ( \InvalidArgumentException $e ) {
+					return null;
+				}
+			}
+
+			return null;
+		}
+
+		/**
 		 * Return action policy from runtime or registered agent config.
 		 *
 		 * @param array<string, mixed> $context Runtime context.
@@ -118,7 +193,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 		 */
 		private function agent_action_policy_from_context( array $context ): array {
 			if ( is_array( $context['action_policy'] ?? null ) ) {
-				return $context['action_policy'];
+				return $this->string_keyed_array( $context['action_policy'] );
 			}
 
 			$agent_config = array();
@@ -127,7 +202,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 			} elseif ( ( $context['agent'] ?? null ) instanceof WP_Agent ) {
 				$agent_config = $context['agent']->get_default_config();
 			} else {
-				$agent_slug = (string) ( $context['agent_slug'] ?? ( $context['agent_id'] ?? '' ) );
+				$agent_slug = $this->string_value( $context['agent_slug'] ?? ( $context['agent_id'] ?? '' ) );
 				if ( '' !== $agent_slug && function_exists( 'wp_get_agent' ) ) {
 					$agent = wp_get_agent( $agent_slug );
 					if ( $agent instanceof WP_Agent ) {
@@ -136,7 +211,7 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 				}
 			}
 
-			return is_array( $agent_config['action_policy'] ?? null ) ? $agent_config['action_policy'] : array();
+			return is_array( $agent_config['action_policy'] ?? null ) ? $this->string_keyed_array( $agent_config['action_policy'] ) : array();
 		}
 
 		/**
@@ -230,6 +305,59 @@ if ( ! class_exists( 'WP_Agent_Action_Policy_Resolver' ) ) {
 			);
 
 			return array_values( array_unique( $values ) );
+		}
+
+		/**
+		 * Convert scalar/Stringable input to a string.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return string String value, or empty string for non-stringable input.
+		 */
+		private function string_value( $value ): string {
+			return is_scalar( $value ) || $value instanceof Stringable ? (string) $value : '';
+		}
+
+		/**
+		 * Convert scalar/Stringable input to an integer.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return int Integer value, or zero for non-stringable input.
+		 */
+		private function int_value( $value ): int {
+			if ( is_int( $value ) ) {
+				return $value;
+			}
+
+			if ( is_bool( $value ) ) {
+				return $value ? 1 : 0;
+			}
+
+			if ( is_float( $value ) ) {
+				return (int) $value;
+			}
+
+			if ( is_string( $value ) || $value instanceof Stringable ) {
+				return (int) (string) $value;
+			}
+
+			return 0;
+		}
+
+		/**
+		 * Keep only string-keyed entries from a policy map.
+		 *
+		 * @param array<mixed,mixed> $values Raw map.
+		 * @return array<string,mixed>
+		 */
+		private function string_keyed_array( array $values ): array {
+			$prepared = array();
+			foreach ( $values as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$prepared[ $key ] = $value;
+				}
+			}
+
+			return $prepared;
 		}
 	}
 }

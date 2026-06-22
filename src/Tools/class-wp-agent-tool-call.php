@@ -17,7 +17,7 @@ class WP_Agent_Tool_Call {
 	/**
 	 * Normalize a runtime tool call.
 	 *
-	 * @param array $tool_call Raw tool call.
+	 * @param array<mixed> $tool_call Raw tool call.
 	 * @return array<string, mixed>
 	 */
 	public static function normalize( array $tool_call ): array {
@@ -36,10 +36,18 @@ class WP_Agent_Tool_Call {
 			$metadata = array();
 		}
 
-		return array(
+		$normalized = array(
 			'tool_name'  => $tool_name,
 			'parameters' => $parameters,
 			'metadata'   => $metadata,
 		);
+
+		$id = $tool_call['id'] ?? $tool_call['tool_call_id'] ?? $metadata['tool_call_id'] ?? '';
+		if ( is_string( $id ) && '' !== trim( $id ) ) {
+			$normalized['id'] = trim( $id );
+			$normalized['metadata']['tool_call_id'] = $normalized['id'];
+		}
+
+		return $normalized;
 	}
 }

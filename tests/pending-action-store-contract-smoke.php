@@ -21,6 +21,7 @@ agents_api_smoke_require_module();
 
 echo "\n[1] Pending action store contract is available without a concrete backend:\n";
 agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Store' ), 'pending action store interface is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Observer' ), 'pending action observer interface is available', $failures, $passes );
 
 $reflection = new ReflectionClass( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Store' );
 $methods    = array();
@@ -61,5 +62,29 @@ agents_api_smoke_assert_equals( array( 'before' ), array_map( static fn( Reflect
 agents_api_smoke_assert_equals( '?string', (string) $expire_parameters[0]->getType(), 'expire boundary is nullable string', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'action_id' ), array_map( static fn( ReflectionParameter $parameter ): string => $parameter->getName(), $delete_parameters ), 'delete accepts action ID only', $failures, $passes );
 agents_api_smoke_assert_equals( 'string', (string) $delete_parameters[0]->getType(), 'delete action ID is string', $failures, $passes );
+
+$observer_reflection = new ReflectionClass( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action_Observer' );
+$observer_methods    = array();
+foreach ( $observer_reflection->getMethods() as $method ) {
+	$observer_methods[ $method->getName() ] = $method;
+}
+
+echo "\n[3] Pending action observer exposes stored, resolved, and expired lifecycle hooks:\n";
+agents_api_smoke_assert_equals( array( 'on_stored', 'on_resolved', 'on_expired' ), array_keys( $observer_methods ), 'observer exposes lifecycle methods', $failures, $passes );
+agents_api_smoke_assert_equals( 'void', (string) $observer_methods['on_stored']->getReturnType(), 'on_stored returns void', $failures, $passes );
+agents_api_smoke_assert_equals( 'void', (string) $observer_methods['on_resolved']->getReturnType(), 'on_resolved returns void', $failures, $passes );
+agents_api_smoke_assert_equals( 'void', (string) $observer_methods['on_expired']->getReturnType(), 'on_expired returns void', $failures, $passes );
+
+$stored_parameters   = $observer_methods['on_stored']->getParameters();
+$resolved_parameters = $observer_methods['on_resolved']->getParameters();
+$expired_parameters  = $observer_methods['on_expired']->getParameters();
+agents_api_smoke_assert_equals( array( 'action' ), array_map( static fn( ReflectionParameter $parameter ): string => $parameter->getName(), $stored_parameters ), 'on_stored accepts action', $failures, $passes );
+agents_api_smoke_assert_equals( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action', (string) $stored_parameters[0]->getType(), 'on_stored action is pending action', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'action', 'decision', 'resolver' ), array_map( static fn( ReflectionParameter $parameter ): string => $parameter->getName(), $resolved_parameters ), 'on_resolved accepts action, decision, and resolver', $failures, $passes );
+agents_api_smoke_assert_equals( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action', (string) $resolved_parameters[0]->getType(), 'on_resolved action is pending action', $failures, $passes );
+agents_api_smoke_assert_equals( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Approval_Decision', (string) $resolved_parameters[1]->getType(), 'on_resolved decision is approval decision', $failures, $passes );
+agents_api_smoke_assert_equals( 'string', (string) $resolved_parameters[2]->getType(), 'on_resolved resolver is string', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'action' ), array_map( static fn( ReflectionParameter $parameter ): string => $parameter->getName(), $expired_parameters ), 'on_expired accepts action', $failures, $passes );
+agents_api_smoke_assert_equals( 'AgentsAPI\\AI\\Approvals\\WP_Agent_Pending_Action', (string) $expired_parameters[0]->getType(), 'on_expired action is pending action', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API pending action store contract', $failures, $passes );

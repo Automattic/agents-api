@@ -52,6 +52,22 @@ agents_api_smoke_assert_equals( 456, $principal_array['token_id'], 'principal ex
 agents_api_smoke_assert_equals( 'site:42', $principal_array['workspace_id'], 'principal exports workspace id', $failures, $passes );
 agents_api_smoke_assert_equals( 'kimaki', $principal_array['client_id'], 'principal exports client id', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'edit_posts' ), $principal_array['capability_ceiling']['allowed_capabilities'], 'principal exports capability ceiling', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_TOKEN, 'key' => '456' ), $principal->conversation_owner(), 'agent token derives token conversation owner', $failures, $passes );
+
+$safe_metadata = $principal->to_safe_metadata();
+agents_api_smoke_assert_equals( 1, $safe_metadata['schema_version'], 'safe metadata declares schema version', $failures, $passes );
+agents_api_smoke_assert_equals( 'content-helper', $safe_metadata['effective_agent_id'], 'safe metadata includes effective agent id', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_AGENT_TOKEN, $safe_metadata['auth_source'], 'safe metadata includes auth source', $failures, $passes );
+agents_api_smoke_assert_equals( 'site:42', $safe_metadata['workspace_id'], 'safe metadata includes workspace id', $failures, $passes );
+agents_api_smoke_assert_equals( 'kimaki', $safe_metadata['client_id'], 'safe metadata includes client id', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_TOKEN, $safe_metadata['owner_type'], 'safe metadata includes owner type without owner key', $failures, $passes );
+agents_api_smoke_assert_equals( true, $safe_metadata['has_conversation_owner'], 'safe metadata reports conversation owner presence', $failures, $passes );
+agents_api_smoke_assert_equals( true, $safe_metadata['has_capability_ceiling'], 'safe metadata reports capability ceiling presence', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'token_id', $safe_metadata ), 'safe metadata omits token id', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'request_metadata', $safe_metadata ), 'safe metadata omits request metadata', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'owner_key', $safe_metadata ), 'safe metadata omits owner key', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'capability_ceiling', $safe_metadata ), 'safe metadata omits capability details', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'binding', $safe_metadata ), 'safe metadata omits binding claims', $failures, $passes );
 
 $from_array = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
 	array(
@@ -73,6 +89,10 @@ $from_array = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
 			'chain_depth'          => 1,
 			'chain_root_request_id' => 'root-1',
 		),
+		'binding'              => array(
+			'kid'       => 'key-1',
+			'signature' => 'sig-1',
+		),
 	)
 );
 agents_api_smoke_assert_equals( 7, $from_array->acting_user_id, 'from_array normalizes acting user id', $failures, $passes );
@@ -85,6 +105,8 @@ agents_api_smoke_assert_equals( 'browser', $from_array->client_id, 'from_array n
 agents_api_smoke_assert_equals( array( 'read' ), $from_array->capability_ceiling->allowed_capabilities, 'from_array normalizes capability ceiling', $failures, $passes );
 agents_api_smoke_assert_equals( 'caller-agent', $from_array->caller_context->caller_agent_id, 'from_array restores caller context', $failures, $passes );
 agents_api_smoke_assert_equals( 'root-1', $from_array->to_array()['caller_context']['chain_root_request_id'], 'principal exports caller context', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'kid' => 'key-1', 'signature' => 'sig-1' ), $from_array->binding(), 'from_array restores binding', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'kid' => 'key-1', 'signature' => 'sig-1' ), $from_array->to_array()['binding'], 'principal exports binding', $failures, $passes );
 
 $user_session = AgentsAPI\AI\WP_Agent_Execution_Principal::user_session(
 	99,
@@ -96,6 +118,9 @@ agents_api_smoke_assert_equals( 99, $user_session->acting_user_id, 'user_session
 agents_api_smoke_assert_equals( 'editor-agent', $user_session->effective_agent_id, 'user_session records effective agent id', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER, $user_session->auth_source, 'user_session records user auth source', $failures, $passes );
 agents_api_smoke_assert_equals( null, $user_session->token_id, 'user_session omits token id', $failures, $passes );
+agents_api_smoke_assert_equals( null, $user_session->binding(), 'user_session binding defaults to null', $failures, $passes );
+agents_api_smoke_assert_equals( null, $user_session->to_array()['binding'], 'principal exports null binding as no-op', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_USER, 'key' => '99' ), $user_session->conversation_owner(), 'user_session derives user conversation owner', $failures, $passes );
 
 add_filter(
 	'agents_api_execution_principal',
@@ -129,6 +154,66 @@ $with_metadata = $from_array->with_request_metadata( array( 'request_id' => 'req
 agents_api_smoke_assert_equals( array( 'request_id' => 'req-next' ), $with_metadata->request_metadata, 'metadata replacement returns updated copy', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'ip_hash' => 'abc123' ), $from_array->request_metadata, 'metadata replacement leaves original immutable', $failures, $passes );
 
+$audience_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
+	'audience:docs-readers',
+	'audience-gateway',
+	AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+	array( 'route' => '/agents/v1/chat' ),
+	'site:42',
+	'browser',
+	array( 'example' => 'docs-readers' )
+);
+agents_api_smoke_assert_equals( 0, $audience_principal->acting_user_id, 'audience principal has no WordPress user', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_AUDIENCE, $audience_principal->auth_source, 'audience principal records audience auth source', $failures, $passes );
+agents_api_smoke_assert_equals( 'audience:docs-readers', $audience_principal->audience_id, 'audience principal records audience id', $failures, $passes );
+agents_api_smoke_assert_equals( true, $audience_principal->has_audience(), 'audience principal reports audience presence', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'example' => 'docs-readers' ), $audience_principal->to_array()['audience_claims'], 'audience principal exports claims', $failures, $passes );
+agents_api_smoke_assert_equals( null, $audience_principal->conversation_owner(), 'audience access alone is not a conversation owner', $failures, $passes );
+
+$audience_owner_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
+	'audience:docs-readers',
+	'audience-gateway',
+	AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+	array( 'route' => '/agents/v1/chat' ),
+	'site:42',
+	'browser',
+	array( 'example' => 'docs-readers' ),
+	'browser-session:opaque-123'
+);
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_AUDIENCE, 'key' => 'browser-session:opaque-123' ), $audience_owner_principal->conversation_owner(), 'audience principal can carry opaque conversation owner key', $failures, $passes );
+agents_api_smoke_assert_equals( 'browser-session:opaque-123', $audience_owner_principal->to_array()['owner_key'], 'principal exports owner key', $failures, $passes );
+
+$audience_from_array = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
+	array(
+		'acting_user_id'     => 0,
+		'effective_agent_id' => 'audience-gateway',
+		'auth_source'        => AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_AUDIENCE,
+		'request_context'    => AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+		'audience_id'        => 'audience:docs-readers',
+		'audience_claims'    => array( 'tier' => 'viewer' ),
+		'owner_type'         => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_AUDIENCE,
+		'owner_key'          => 'browser-session:opaque-456',
+	)
+);
+agents_api_smoke_assert_equals( 'audience:docs-readers', $audience_from_array->audience_id, 'from_array restores audience id', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'tier' => 'viewer' ), $audience_from_array->audience_claims, 'from_array restores audience claims', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_AUDIENCE, 'key' => 'browser-session:opaque-456' ), $audience_from_array->conversation_owner(), 'from_array restores explicit conversation owner', $failures, $passes );
+
+$runtime_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::runtime(
+	'runtime-session-123',
+	'delegated-runtime-agent',
+	array( 'route' => '/agents/runtime' ),
+	'workspace:demo',
+	'example-runtime',
+	array( AgentsAPI\AI\WP_Agent_Execution_Principal::AUDIENCE_CLAIM_RUNTIME_TYPE => 'ephemeral' )
+);
+agents_api_smoke_assert_equals( 0, $runtime_principal->acting_user_id, 'runtime principal has no WordPress user', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_RUNTIME, $runtime_principal->auth_source, 'runtime principal records runtime auth source', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_RUNTIME, $runtime_principal->request_context, 'runtime principal records runtime request context', $failures, $passes );
+agents_api_smoke_assert_equals( 'runtime-session-123', $runtime_principal->audience_id, 'runtime principal records runtime id as audience id', $failures, $passes );
+agents_api_smoke_assert_equals( 'ephemeral', $runtime_principal->audience_claims[ AgentsAPI\AI\WP_Agent_Execution_Principal::AUDIENCE_CLAIM_RUNTIME_TYPE ] ?? null, 'runtime principal preserves host-supplied runtime type claim', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_RUNTIME, 'key' => 'runtime-session-123' ), $runtime_principal->conversation_owner(), 'runtime principal derives isolated runtime conversation owner', $failures, $passes );
+
 try {
 	new AgentsAPI\AI\WP_Agent_Execution_Principal( -1, 'agent', AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER, AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );
 	agents_api_smoke_assert_equals( true, false, 'negative user id is rejected', $failures, $passes );
@@ -142,6 +227,25 @@ try {
 } catch ( InvalidArgumentException $e ) {
 	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'effective_agent_id' ), 'empty effective agent id is rejected', $failures, $passes );
 }
+
+try {
+	new AgentsAPI\AI\WP_Agent_Execution_Principal( 1, 'agent', 'external_runtime', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );
+	agents_api_smoke_assert_equals( true, false, 'unknown auth source is rejected', $failures, $passes );
+} catch ( InvalidArgumentException $e ) {
+	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'auth_source' ), 'unknown auth source is rejected', $failures, $passes );
+}
+
+add_filter(
+	'wp_agent_known_auth_sources',
+	static function ( array $sources ): array {
+		$sources[] = 'external_runtime';
+		return $sources;
+	}
+);
+
+$filtered_auth_source = new AgentsAPI\AI\WP_Agent_Execution_Principal( 1, 'agent', 'external_runtime', AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST );
+agents_api_smoke_assert_equals( 'external_runtime', $filtered_auth_source->auth_source, 'filter-allowed auth source is accepted', $failures, $passes );
+agents_api_smoke_assert_equals( true, AgentsAPI\AI\WP_Agent_Execution_Principal::is_known_auth_source( 'external_runtime' ), 'filter declares known auth source', $failures, $passes );
 
 try {
 	new AgentsAPI\AI\WP_Agent_Execution_Principal( 1, 'agent', AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER, AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, 0 );

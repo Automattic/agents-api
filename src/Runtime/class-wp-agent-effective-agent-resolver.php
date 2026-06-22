@@ -44,7 +44,7 @@ final class WP_Agent_Effective_Agent_Resolver {
 
 		$principal = $context['principal'] ?? null;
 		if ( ! $principal instanceof WP_Agent_Execution_Principal && ! empty( $context['resolve_principal'] ) ) {
-			$principal_context = isset( $context['principal_context'] ) && is_array( $context['principal_context'] ) ? $context['principal_context'] : array();
+			$principal_context = isset( $context['principal_context'] ) && is_array( $context['principal_context'] ) ? self::string_keyed_array( $context['principal_context'] ) : array();
 			$principal         = WP_Agent_Execution_Principal::resolve( $principal_context );
 		}
 
@@ -65,7 +65,7 @@ final class WP_Agent_Effective_Agent_Resolver {
 			return $persisted;
 		}
 
-		$owner_user_id = (int) ( $context['owner_user_id'] ?? 0 );
+		$owner_user_id = self::int_value( $context['owner_user_id'] ?? 0 );
 		if ( $owner_user_id <= 0 ) {
 			return '';
 		}
@@ -124,7 +124,7 @@ final class WP_Agent_Effective_Agent_Resolver {
 	/**
 	 * Normalize and dedupe candidate slug list.
 	 *
-	 * @param array<int,mixed> $slugs Raw slugs.
+	 * @param array<mixed> $slugs Raw slugs.
 	 * @return string[] Normalized slugs.
 	 */
 	private static function normalize_slug_list( array $slugs ): array {
@@ -166,11 +166,46 @@ final class WP_Agent_Effective_Agent_Resolver {
 				continue;
 			}
 
-			if ( (int) call_user_func( $owner_resolver ) === $owner_user_id ) {
+			if ( self::int_value( call_user_func( $owner_resolver ) ) === $owner_user_id ) {
 				$matches[] = $agent->get_slug();
 			}
 		}
 
 		return self::normalize_slug_list( $matches );
+	}
+
+	/**
+	 * Normalize an associative array to string keys.
+	 *
+	 * @param array<mixed> $value Raw array.
+	 * @return array<string, mixed>
+	 */
+	private static function string_keyed_array( array $value ): array {
+		$normalized = array();
+		foreach ( $value as $key => $item ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $item;
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize numeric owner IDs without casting arbitrary values.
+	 *
+	 * @param mixed $value Raw value.
+	 * @return int
+	 */
+	private static function int_value( $value ): int {
+		if ( is_int( $value ) ) {
+			return $value;
+		}
+
+		if ( is_string( $value ) && is_numeric( $value ) ) {
+			return (int) $value;
+		}
+
+		return 0;
 	}
 }

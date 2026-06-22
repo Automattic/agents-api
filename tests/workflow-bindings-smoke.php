@@ -45,6 +45,12 @@ $context = array(
 			),
 		),
 	),
+	'vars'   => array(
+		'item' => array(
+			'id'    => 7,
+			'title' => 'Uruguay',
+		),
+	),
 );
 
 // Whole-string atomic substitution preserves type.
@@ -168,6 +174,22 @@ smoke_assert(
 	'urgent',
 	WP_Agent_Workflow_Bindings::expand( '${inputs.meta.tags.0}', $context ),
 	'numeric segment indexes lists',
+	$failures,
+	$passes
+);
+
+smoke_assert(
+	7,
+	WP_Agent_Workflow_Bindings::expand( '${vars.item.id}', $context ),
+	'vars root resolves scoped runtime values',
+	$failures,
+	$passes
+);
+
+smoke_assert(
+	'team Uruguay',
+	WP_Agent_Workflow_Bindings::expand( 'team ${vars.item.title}', $context ),
+	'mixed vars template stringifies inline values',
 	$failures,
 	$passes
 );

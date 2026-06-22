@@ -74,6 +74,13 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		protected array $conversation_compaction_policy = array();
 
 		/**
+		 * Nullable runtime overrides for this agent.
+		 *
+		 * @var WP_Agent_Runtime_Overrides
+		 */
+		protected WP_Agent_Runtime_Overrides $runtime_overrides;
+
+		/**
 		 * Optional metadata.
 		 *
 		 * The following optional keys are reserved for source provenance so
@@ -106,15 +113,16 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		 * Constructor.
 		 *
 		 * @param string $slug Unique agent slug.
-		 * @param array  $args Registration arguments.
+		 * @param array<mixed, mixed> $args Registration arguments.
 		 */
 		public function __construct( string $slug, array $args = array() ) {
-			$this->slug = sanitize_title( $slug );
+			$this->slug              = sanitize_title( $slug );
+			$this->runtime_overrides = new WP_Agent_Runtime_Overrides();
 			if ( '' === $this->slug ) {
 				throw new InvalidArgumentException( 'Agent slug cannot be empty.' );
 			}
 
-			$properties = $this->prepare_properties( $args );
+			$properties = $this->prepare_properties( self::normalize_args( $args ) );
 			foreach ( $properties as $property_name => $property_value ) {
 				if ( ! property_exists( $this, $property_name ) ) {
 					$this->notice_invalid_property( __METHOD__, sprintf( 'Property "%s" is not a valid property for agent "%s".', $property_name, $this->slug ) );
@@ -135,12 +143,12 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		protected function prepare_properties( array $args ): array {
 			$properties = array();
 
-			$properties['label'] = isset( $args['label'] ) ? (string) $args['label'] : $this->slug;
+			$properties['label'] = isset( $args['label'] ) && is_scalar( $args['label'] ) ? (string) $args['label'] : $this->slug;
 			if ( '' === $properties['label'] ) {
 				$properties['label'] = $this->slug;
 			}
 
-			$properties['description'] = isset( $args['description'] ) ? (string) $args['description'] : '';
+			$properties['description'] = isset( $args['description'] ) && is_scalar( $args['description'] ) ? (string) $args['description'] : '';
 
 			if ( isset( $args['memory_seeds'] ) ) {
 				if ( ! is_array( $args['memory_seeds'] ) ) {
@@ -175,7 +183,17 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 					throw new InvalidArgumentException( 'Agent conversation_compaction_policy property must be an array.' );
 				}
 
-				$properties['conversation_compaction_policy'] = \AgentsAPI\AI\WP_Agent_Conversation_Compaction::normalize_policy( $args['conversation_compaction_policy'] );
+				$properties['conversation_compaction_policy'] = \AgentsAPI\AI\WP_Agent_Conversation_Compaction::normalize_policy( self::normalize_args( $args['conversation_compaction_policy'] ) );
+			}
+
+			if ( isset( $args['runtime_overrides'] ) ) {
+				if ( $args['runtime_overrides'] instanceof WP_Agent_Runtime_Overrides ) {
+					$properties['runtime_overrides'] = $args['runtime_overrides'];
+				} elseif ( is_array( $args['runtime_overrides'] ) ) {
+					$properties['runtime_overrides'] = new WP_Agent_Runtime_Overrides( self::normalize_args( $args['runtime_overrides'] ) );
+				} else {
+					throw new InvalidArgumentException( 'Agent runtime_overrides property must be an array or WP_Agent_Runtime_Overrides.' );
+				}
 			}
 
 			if ( isset( $args['meta'] ) ) {
@@ -191,12 +209,7 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 					throw new InvalidArgumentException( 'Agent subagents property must be an array of slugs.' );
 				}
 
-				$properties['subagents'] = array_values(
-					array_filter(
-						array_map( static fn( $slug ): string => sanitize_title( (string) $slug ), $args['subagents'] ),
-						static fn( string $slug ): bool => '' !== $slug
-					)
-				);
+				$properties['subagents'] = $this->prepare_subagents( $args['subagents'] );
 			}
 
 			foreach ( $args as $property_name => $property_value ) {
@@ -218,10 +231,49 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 			$prepared = array();
 
 			foreach ( $memory_seeds as $filename => $path ) {
+				if ( ! is_scalar( $path ) ) {
+					continue;
+				}
+
 				$filename = sanitize_file_name( (string) $filename );
 				$path     = (string) $path;
 				if ( '' !== $filename && '' !== $path ) {
 					$prepared[ $filename ] = $path;
+				}
+			}
+
+			return $prepared;
+		}
+
+		/**
+		 * @param array<mixed, mixed> $args Raw arguments.
+		 * @return array<string, mixed>
+		 */
+		private static function normalize_args( array $args ): array {
+			$normalized = array();
+			foreach ( $args as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$normalized[ $key ] = $value;
+				}
+			}
+
+			return $normalized;
+		}
+
+		/**
+		 * @param array<mixed, mixed> $subagents Raw subagent list.
+		 * @return string[]
+		 */
+		private function prepare_subagents( array $subagents ): array {
+			$prepared = array();
+			foreach ( $subagents as $slug ) {
+				if ( ! is_scalar( $slug ) ) {
+					continue;
+				}
+
+				$slug = sanitize_title( (string) $slug );
+				if ( '' !== $slug ) {
+					$prepared[] = $slug;
 				}
 			}
 
@@ -301,6 +353,15 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		}
 
 		/**
+		 * Retrieves runtime overrides.
+		 *
+		 * @return WP_Agent_Runtime_Overrides
+		 */
+		public function runtime_overrides(): WP_Agent_Runtime_Overrides {
+			return $this->runtime_overrides;
+		}
+
+		/**
 		 * Retrieves optional metadata.
 		 *
 		 * @return array<string, mixed>
@@ -332,7 +393,7 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 		/**
 		 * Return registration arguments for the registry.
 		 *
-		 * @return array
+		 * @return array<mixed>
 		 */
 		public function to_array(): array {
 			return array(
@@ -344,6 +405,7 @@ if ( ! class_exists( 'WP_Agent' ) ) {
 				'default_config'                   => $this->default_config,
 				'supports_conversation_compaction' => $this->supports_conversation_compaction,
 				'conversation_compaction_policy'   => $this->conversation_compaction_policy,
+				'runtime_overrides'                => $this->runtime_overrides->to_array(),
 				'meta'                             => $this->meta,
 				'subagents'                        => $this->subagents,
 			);

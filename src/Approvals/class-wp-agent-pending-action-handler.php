@@ -20,8 +20,8 @@ interface WP_Agent_Pending_Action_Handler {
 	 *
 	 * @param WP_Agent_Pending_Action    $action   Stored pending action.
 	 * @param WP_Agent_Approval_Decision $decision Accepted/rejected decision.
-	 * @param array            $payload  Fresh resolver payload supplied with the decision.
-	 * @param array            $context  Optional caller context.
+	 * @param array<mixed>            $payload  Fresh resolver payload supplied with the decision.
+	 * @param array<mixed>            $context  Optional caller context.
 	 * @return bool Whether resolution is allowed.
 	 */
 	public function can_resolve_pending_action( WP_Agent_Pending_Action $action, WP_Agent_Approval_Decision $decision, array $payload = array(), array $context = array() ): bool;
@@ -34,8 +34,8 @@ interface WP_Agent_Pending_Action_Handler {
 	 *
 	 * @param WP_Agent_Pending_Action    $action   Stored pending action.
 	 * @param WP_Agent_Approval_Decision $decision Accepted/rejected decision.
-	 * @param array            $payload  Fresh resolver payload supplied with the decision.
-	 * @param array            $context  Optional caller context.
+	 * @param array<mixed>            $payload  Fresh resolver payload supplied with the decision.
+	 * @param array<mixed>            $context  Optional caller context.
 	 * @return mixed Generic implementation result.
 	 */
 	public function handle_pending_action( WP_Agent_Pending_Action $action, WP_Agent_Approval_Decision $decision, array $payload = array(), array $context = array() ): mixed;

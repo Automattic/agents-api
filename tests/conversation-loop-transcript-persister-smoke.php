@@ -35,6 +35,8 @@ $persister     = new class( $persister_log ) implements AgentsAPI\AI\WP_Agent_Tr
 			'request_turns'    => $request->maxTurns(),
 			'workspace'        => $request->workspace() ? $request->workspace()->to_array() : null,
 			'result_keys'      => array_keys( $result ),
+			'result_status'    => $result['status'] ?? '',
+			'completed'        => $result['completed'] ?? null,
 			'request_metadata' => $result['request_metadata'] ?? null,
 		);
 
@@ -70,30 +72,33 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 1, count( $persister_log ), 'persister was called once on success', $failures, $passes );
 agents_api_smoke_assert_equals( 2, $persister_log[0]['message_count'], 'persister received final messages', $failures, $passes );
 agents_api_smoke_assert_equals( 1, $persister_log[0]['request_turns'], 'persister received request with correct max_turns', $failures, $passes );
+agents_api_smoke_assert_equals( true, in_array( 'schema', $persister_log[0]['result_keys'], true ), 'persister receives replay result schema key', $failures, $passes );
+agents_api_smoke_assert_equals( true, in_array( 'version', $persister_log[0]['result_keys'], true ), 'persister receives replay result version key', $failures, $passes );
+agents_api_smoke_assert_equals( true, $result['completed'] ?? null, 'successful loop result is marked completed', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::SCHEMA, $result['schema'], 'successful loop result exposes replay schema', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::VERSION, $result['version'], 'successful loop result exposes replay version', $failures, $passes );
+agents_api_smoke_assert_equals( true, $persister_log[0]['completed'], 'persister receives completed successful result', $failures, $passes );
 agents_api_smoke_assert_equals( 'SITE.md', $result['request_metadata']['memory_files'][0]['filename'] ?? '', 'loop result preserves caller request metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'SITE.md', $persister_log[0]['request_metadata']['memory_files'][0]['filename'] ?? '', 'persister receives caller request metadata', $failures, $passes );
 
 echo "\n[2] Persister fires on the failure path (turn runner throws):\n";
 $persister_log = array();
 
-$threw = false;
-try {
-	AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
-		array( array( 'role' => 'user', 'content' => 'fail' ) ),
-		static function (): array {
-			throw new \RuntimeException( 'provider error' );
-		},
-		array(
-			'max_turns'            => 1,
-			'transcript_persister' => $persister,
-		)
-	);
-} catch ( \RuntimeException $e ) {
-	$threw = 'provider error' === $e->getMessage();
-}
+$failure_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'fail' ) ),
+	static function (): array {
+		throw new \RuntimeException( 'provider error' );
+	},
+	array(
+		'max_turns'            => 1,
+		'transcript_persister' => $persister,
+	)
+);
 
-agents_api_smoke_assert_equals( true, $threw, 'turn runner exception was re-thrown', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $failure_result['status'] ?? '', 'turn runner exception returns structured failure status', $failures, $passes );
+agents_api_smoke_assert_equals( 'provider error', $failure_result['failure']['message'] ?? '', 'structured failure preserves provider error', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $persister_log ), 'persister was called on failure path', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $persister_log[0]['result_status'] ?? '', 'persister receives structured failure result', $failures, $passes );
 
 echo "\n[3] No persister = no persistence calls (backwards compatible):\n";
 $persister_log = array();

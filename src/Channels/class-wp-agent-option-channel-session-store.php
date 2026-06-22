@@ -14,7 +14,7 @@ final class WP_Agent_Option_Channel_Session_Store implements WP_Agent_Channel_Se
 
 	public function get( string $connector_id, string $external_conversation_id, string $agent_slug = '' ): ?string {
 		$value = get_option( $this->storage_key( $connector_id, $external_conversation_id, $agent_slug ), '' );
-		return '' === $value ? null : (string) $value;
+		return is_string( $value ) && '' !== $value ? $value : null;
 	}
 
 	public function set( string $connector_id, string $external_conversation_id, string $session_id, string $agent_slug = '' ): void {

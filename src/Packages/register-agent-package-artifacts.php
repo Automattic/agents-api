@@ -15,7 +15,7 @@ if ( ! function_exists( 'wp_register_agent_package_artifact_type' ) ) {
 	 * registry collects type metadata without deciding when lifecycle callbacks run.
 	 *
 	 * @param string|WP_Agent_Package_Artifact_Type $type Artifact type slug or object.
-	 * @param array                                 $args Registration arguments.
+	 * @param array<mixed>                                 $args Registration arguments.
 	 * @return WP_Agent_Package_Artifact_Type|null Registered artifact type, or null on invalid arguments.
 	 */
 	function wp_register_agent_package_artifact_type( $type, array $args = array() ): ?WP_Agent_Package_Artifact_Type {

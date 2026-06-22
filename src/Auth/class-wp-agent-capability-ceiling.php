@@ -51,9 +51,9 @@ if ( ! class_exists( 'WP_Agent_Capability_Ceiling' ) ) {
 		 */
 		public static function from_array( array $ceiling ): self {
 			return new self(
-				isset( $ceiling['user_id'] ) ? (int) $ceiling['user_id'] : 0,
-				array_key_exists( 'allowed_capabilities', $ceiling ) && null !== $ceiling['allowed_capabilities'] ? array_values( array_map( 'strval', (array) $ceiling['allowed_capabilities'] ) ) : null,
-				isset( $ceiling['metadata'] ) && is_array( $ceiling['metadata'] ) ? $ceiling['metadata'] : array()
+				isset( $ceiling['user_id'] ) && is_scalar( $ceiling['user_id'] ) ? self::int_value( $ceiling['user_id'] ) : 0,
+				array_key_exists( 'allowed_capabilities', $ceiling ) && null !== $ceiling['allowed_capabilities'] ? self::string_list( $ceiling['allowed_capabilities'] ) : null,
+				isset( $ceiling['metadata'] ) && is_array( $ceiling['metadata'] ) ? self::string_keyed_array( $ceiling['metadata'] ) : array()
 			);
 		}
 
@@ -127,6 +127,47 @@ if ( ! class_exists( 'WP_Agent_Capability_Ceiling' ) ) {
 		 */
 		private static function invalid( string $path, string $reason ): InvalidArgumentException {
 			return new InvalidArgumentException( 'invalid_wp_agent_capability_ceiling: ' . $path . ' ' . $reason );
+		}
+
+		/**
+		 * @param int|float|string|bool $value Scalar value.
+		 */
+		private static function int_value( $value ): int {
+			return (int) $value;
+		}
+
+		/**
+		 * @param mixed $value Raw capability list.
+		 * @return string[]
+		 */
+		private static function string_list( $value ): array {
+			if ( ! is_array( $value ) ) {
+				return array();
+			}
+
+			$strings = array();
+			foreach ( $value as $item ) {
+				if ( is_scalar( $item ) ) {
+					$strings[] = (string) $item;
+				}
+			}
+
+			return $strings;
+		}
+
+		/**
+		 * @param array<mixed,mixed> $value Raw metadata.
+		 * @return array<string,mixed>
+		 */
+		private static function string_keyed_array( array $value ): array {
+			$result = array();
+			foreach ( $value as $key => $item ) {
+				if ( is_string( $key ) ) {
+					$result[ $key ] = $item;
+				}
+			}
+
+			return $result;
 		}
 	}
 }

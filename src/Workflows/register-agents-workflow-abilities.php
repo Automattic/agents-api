@@ -24,6 +24,9 @@ defined( 'ABSPATH' ) || exit;
 const AGENTS_RUN_WORKFLOW_ABILITY      = 'agents/run-workflow';
 const AGENTS_VALIDATE_WORKFLOW_ABILITY = 'agents/validate-workflow';
 const AGENTS_DESCRIBE_WORKFLOW_ABILITY = 'agents/describe-workflow';
+const AGENTS_GET_WORKFLOW_RUN_ABILITY  = 'agents/get-workflow-run';
+const AGENTS_CANCEL_WORKFLOW_RUN_ABILITY = 'agents/cancel-workflow-run';
+const AGENTS_LIST_WORKFLOW_RUN_EVENTS_ABILITY = 'agents/list-workflow-run-events';
 
 add_action(
 	'wp_abilities_api_categories_init',
@@ -142,6 +145,62 @@ add_action(
 				)
 			);
 		}
+
+		$run_control_abilities = array(
+			AGENTS_GET_WORKFLOW_RUN_ABILITY         => array(
+				'label'            => 'Get Workflow Run',
+				'description'      => 'Read the canonical status envelope for an addressable workflow run.',
+				'input_schema'     => agents_workflow_run_id_input_schema(),
+				'output_schema'    => agents_workflow_run_control_output_schema(),
+				'execute_callback' => __NAMESPACE__ . '\\agents_get_workflow_run',
+				'permission'       => __NAMESPACE__ . '\\agents_workflow_run_read_permission',
+				'annotations'      => array( 'idempotent' => true ),
+			),
+			AGENTS_CANCEL_WORKFLOW_RUN_ABILITY      => array(
+				'label'            => 'Cancel Workflow Run',
+				'description'      => 'Request best-effort cancellation for an addressable workflow run.',
+				'input_schema'     => agents_workflow_run_id_input_schema(),
+				'output_schema'    => agents_workflow_run_control_output_schema( true ),
+				'execute_callback' => __NAMESPACE__ . '\\agents_cancel_workflow_run',
+				'permission'       => __NAMESPACE__ . '\\agents_workflow_run_cancel_permission',
+				'annotations'      => array(
+					'destructive' => true,
+					'idempotent'  => true,
+				),
+			),
+			AGENTS_LIST_WORKFLOW_RUN_EVENTS_ABILITY => array(
+				'label'            => 'List Workflow Run Events',
+				'description'      => 'List canonical lifecycle events for an addressable workflow run.',
+				'input_schema'     => agents_workflow_run_events_input_schema(),
+				'output_schema'    => agents_workflow_run_events_output_schema(),
+				'execute_callback' => __NAMESPACE__ . '\\agents_list_workflow_run_events',
+				'permission'       => __NAMESPACE__ . '\\agents_workflow_run_read_permission',
+				'annotations'      => array( 'idempotent' => true ),
+			),
+		);
+
+		foreach ( $run_control_abilities as $ability => $args ) {
+			if ( wp_has_ability( $ability ) ) {
+				continue;
+			}
+
+			wp_register_ability(
+				$ability,
+				array(
+					'label'               => $args['label'],
+					'description'         => $args['description'],
+					'category'            => 'agents-api',
+					'input_schema'        => $args['input_schema'],
+					'output_schema'       => $args['output_schema'],
+					'execute_callback'    => $args['execute_callback'],
+					'permission_callback' => $args['permission'],
+					'meta'                => array(
+						'show_in_rest' => true,
+						'annotations'  => $args['annotations'],
+					),
+				)
+			);
+		}
 	}
 );
 
@@ -150,8 +209,8 @@ add_action(
  *
  * @since  0.103.0
  *
- * @param  array $input Canonical run-workflow input.
- * @return array|\WP_Error Canonical output, or WP_Error if no runtime is registered.
+ * @param  array<mixed> $input Canonical run-workflow input.
+ * @return array<mixed>|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_run_workflow_dispatch( array $input ) {
 	/**
@@ -165,7 +224,7 @@ function agents_run_workflow_dispatch( array $input ) {
 	 *
 	 * @param callable|null $handler Currently registered handler. Null when
 	 *                               no runtime has registered.
-	 * @param array         $input   The canonical input being dispatched.
+	 * @param array<mixed>         $input   The canonical input being dispatched.
 	 */
 	$handler = apply_filters( 'wp_agent_workflow_handler', null, $input );
 
@@ -177,7 +236,7 @@ function agents_run_workflow_dispatch( array $input ) {
 		 * @since 0.103.0
 		 *
 		 * @param string $reason Always `'no_handler'` for this branch.
-		 * @param array  $input  The canonical input that was rejected.
+		 * @param array<mixed>  $input  The canonical input that was rejected.
 		 */
 		do_action( 'agents_run_workflow_dispatch_failed', 'no_handler', $input );
 
@@ -213,8 +272,8 @@ function agents_run_workflow_dispatch( array $input ) {
  *
  * @since  0.103.0
  *
- * @param  array $input
- * @return array
+ * @param  array<mixed> $input
+ * @return array<mixed>
  */
 function agents_validate_workflow( array $input ): array {
 	$errors = WP_Agent_Workflow_Spec_Validator::validate( (array) ( $input['spec'] ?? array() ) );
@@ -230,11 +289,11 @@ function agents_validate_workflow( array $input ): array {
  *
  * @since  0.103.0
  *
- * @param  array $input
- * @return array
+ * @param  array<mixed> $input
+ * @return array<mixed>
  */
 function agents_describe_workflow( array $input ): array {
-	$workflow_id = (string) ( $input['workflow_id'] ?? '' );
+	$workflow_id = is_string( $input['workflow_id'] ?? null ) ? $input['workflow_id'] : '';
 	$spec        = WP_Agent_Workflow_Registry::find( $workflow_id );
 	if ( null === $spec ) {
 		return array(
@@ -249,6 +308,67 @@ function agents_describe_workflow( array $input ): array {
 }
 
 /**
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed>|\WP_Error
+ */
+function agents_get_workflow_run( array $input ) {
+	$handler = apply_filters( 'wp_agent_workflow_run_status_handler', null, $input );
+	if ( is_callable( $handler ) ) {
+		return \AgentsAPI\AI\WP_Agent_Run_Control::normalize_run_result( call_user_func( $handler, $input ), 'agents_workflow_run_invalid_status' );
+	}
+
+	$run = \AgentsAPI\AI\WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, agents_workflow_string( $input['run_id'] ?? '' ) );
+	if ( null === $run ) {
+		return new \WP_Error( 'agents_workflow_run_not_found', 'No workflow run was found for the requested run_id.' );
+	}
+
+	return $run;
+}
+
+/**
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed>|\WP_Error
+ */
+function agents_cancel_workflow_run( array $input ) {
+	$handler = apply_filters( 'wp_agent_workflow_run_cancel_handler', null, $input );
+	if ( is_callable( $handler ) ) {
+		$result = \AgentsAPI\AI\WP_Agent_Run_Control::normalize_cancel_result( call_user_func( $handler, $input ), 'agents_workflow_run_invalid_cancel_result' );
+	} else {
+		$result = \AgentsAPI\AI\WP_Agent_Run_Control::request_cancel( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, agents_workflow_string( $input['run_id'] ?? '' ) );
+		if ( null === $result ) {
+			return new \WP_Error( 'agents_workflow_run_not_found', 'No workflow run was found for the requested run_id.' );
+		}
+		$result = \AgentsAPI\AI\WP_Agent_Run_Control::normalize_cancel_result( $result, 'agents_workflow_run_invalid_cancel_result' );
+	}
+
+	return $result;
+}
+
+/**
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed>|\WP_Error
+ */
+function agents_list_workflow_run_events( array $input ) {
+	$handler = apply_filters( 'wp_agent_workflow_run_events_handler', null, $input );
+	if ( is_callable( $handler ) ) {
+		return \AgentsAPI\AI\WP_Agent_Run_Control::normalize_events_result( call_user_func( $handler, $input ), 'agents_workflow_run_invalid_events_result' );
+	}
+
+	$result = \AgentsAPI\AI\WP_Agent_Run_Control::list_events(
+		WP_Agent_Workflow_Runner::RUN_CONTROL_STORE,
+		agents_workflow_string( $input['run_id'] ?? '' ),
+		agents_workflow_string( $input['cursor'] ?? '' ),
+		'' !== agents_workflow_string( $input['limit'] ?? '' ) ? (int) agents_workflow_string( $input['limit'] ?? '' ) : 100
+	);
+
+	if ( null === $result ) {
+		return new \WP_Error( 'agents_workflow_run_not_found', 'No workflow run was found for the requested run_id.' );
+	}
+
+	return $result;
+}
+
+/**
  * Permission gate for the workflow abilities. Same default as
  * `agents/chat`: `manage_options`. Consumers with their own auth model
  * (HMAC-signed webhook, OAuth bearer, scheduled action) widen via the
@@ -256,7 +376,7 @@ function agents_describe_workflow( array $input ): array {
  *
  * @since 0.103.0
  *
- * @param array $input Canonical input.
+ * @param array<mixed> $input Canonical input.
  * @return bool
  */
 function agents_run_workflow_permission( array $input ): bool {
@@ -266,7 +386,7 @@ function agents_run_workflow_permission( array $input ): bool {
 	 * @since 0.103.0
 	 *
 	 * @param bool  $allowed Default: current_user_can( 'manage_options' ).
-	 * @param array $input   The canonical input being authorized.
+	 * @param array<mixed> $input   The canonical input being authorized.
 	 */
 	return (bool) apply_filters(
 		'agents_run_workflow_permission',
@@ -284,7 +404,7 @@ function agents_run_workflow_permission( array $input ): bool {
  *
  * @since 0.103.0
  *
- * @param array $input
+ * @param array<mixed> $input
  * @return bool
  */
 function agents_validate_workflow_permission( array $input ): bool {
@@ -294,7 +414,7 @@ function agents_validate_workflow_permission( array $input ): bool {
 	 * @since 0.103.0
 	 *
 	 * @param bool  $allowed Default: any logged-in user.
-	 * @param array $input
+	 * @param array<mixed> $input
 	 */
 	return (bool) apply_filters(
 		'agents_validate_workflow_permission',
@@ -303,12 +423,25 @@ function agents_validate_workflow_permission( array $input ): bool {
 	);
 }
 
+/** @param array<string,mixed> $input Ability input. */
+function agents_workflow_run_read_permission( array $input ): bool {
+	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'read' ) : false;
+	return (bool) apply_filters( 'agents_workflow_run_read_permission', $allowed, $input );
+}
+
+/** @param array<string,mixed> $input Ability input. */
+function agents_workflow_run_cancel_permission( array $input ): bool {
+	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
+	return (bool) apply_filters( 'agents_workflow_run_cancel_permission', $allowed, $input );
+}
+
 /**
  * Canonical input schema for `agents/run-workflow`.
  *
  * @since  0.103.0
  *
- * @return array
+ * @return array<mixed>
+ * @return array<string, mixed>
  */
 function agents_run_workflow_input_schema(): array {
 	return array(
@@ -329,7 +462,7 @@ function agents_run_workflow_input_schema(): array {
 			),
 			'options'     => array(
 				'type'        => 'object',
-				'description' => 'Runtime options forwarded to the runner. Recognized keys: run_id, continue_on_error, metadata.',
+				'description' => 'Runtime options forwarded to the runner. Recognized keys: run_id, continue_on_error, metadata, evidence_refs.',
 				'default'     => array(),
 			),
 		),
@@ -341,27 +474,111 @@ function agents_run_workflow_input_schema(): array {
  *
  * @since  0.103.0
  *
- * @return array
+ * @return array<mixed>
+ * @return array<string, mixed>
  */
 function agents_run_workflow_output_schema(): array {
 	return array(
 		'type'       => 'object',
 		'required'   => array( 'run_id', 'workflow_id', 'status' ),
 		'properties' => array(
-			'run_id'      => array( 'type' => 'string' ),
-			'workflow_id' => array( 'type' => 'string' ),
-			'status'      => array(
+			'run_id'        => array( 'type' => 'string' ),
+			'workflow_id'   => array( 'type' => 'string' ),
+			'status'        => array(
 				'type' => 'string',
 				'enum' => array( 'pending', 'running', 'succeeded', 'failed', 'skipped' ),
 			),
-			'output'      => array( 'type' => 'object' ),
-			'steps'       => array( 'type' => 'array' ),
-			'error'       => array( 'type' => array( 'object', 'null' ) ),
-			'started_at'  => array( 'type' => 'integer' ),
-			'ended_at'    => array( 'type' => 'integer' ),
-			'metadata'    => array( 'type' => 'object' ),
+			'output'        => array( 'type' => 'object' ),
+			'steps'         => array( 'type' => 'array' ),
+			'error'         => array( 'type' => array( 'object', 'null' ) ),
+			'started_at'    => array( 'type' => 'integer' ),
+			'ended_at'      => array( 'type' => 'integer' ),
+			'metadata'      => array( 'type' => 'object' ),
+			'evidence_refs' => array(
+				'type'        => 'array',
+				'description' => 'Neutral JSON-serializable artifact/log references owned by the host runtime.',
+			),
+			'replay'        => array(
+				'type'       => 'object',
+				'properties' => array(
+					'run_record_schema_version' => array( 'type' => 'integer' ),
+					'workflow_spec_version'     => array( 'type' => 'string' ),
+					'workflow_spec_hash'        => array( 'type' => 'string' ),
+					'workflow_spec_snapshot'    => array( 'type' => 'object' ),
+				),
+			),
 		),
 	);
+}
+
+/** @return array<string,mixed> */
+function agents_workflow_run_id_input_schema(): array {
+	return array(
+		'type'       => 'object',
+		'required'   => array( 'run_id' ),
+		'properties' => array(
+			'run_id' => array( 'type' => 'string' ),
+		),
+	);
+}
+
+/** @return array<string,mixed> */
+function agents_workflow_run_events_input_schema(): array {
+	$schema                 = agents_workflow_run_id_input_schema();
+	$properties             = is_array( $schema['properties'] ?? null ) ? $schema['properties'] : array();
+	$properties['cursor']   = array( 'type' => 'string' );
+	$properties['limit']    = array( 'type' => 'integer' );
+	$schema['properties']   = $properties;
+	return $schema;
+}
+
+/** @return array<string,mixed> */
+function agents_workflow_run_control_output_schema( bool $include_cancelled = false ): array {
+	$properties = array(
+		'run_id'      => array( 'type' => 'string' ),
+		'status'      => array(
+			'type' => 'string',
+			'enum' => \AgentsAPI\AI\WP_Agent_Run_Control::statuses(),
+		),
+		'started_at'  => array( 'type' => 'string' ),
+		'updated_at'  => array( 'type' => 'string' ),
+		'workflow_id' => array( 'type' => 'string' ),
+		'metadata'    => array( 'type' => 'object' ),
+	);
+	$required   = array( 'run_id', 'status', 'started_at', 'updated_at', 'metadata' );
+	if ( $include_cancelled ) {
+		$required[]              = 'cancelled';
+		$properties['cancelled'] = array( 'type' => 'boolean' );
+	}
+
+	return array(
+		'type'       => 'object',
+		'required'   => $required,
+		'properties' => $properties,
+	);
+}
+
+/** @return array<string,mixed> */
+function agents_workflow_run_events_output_schema(): array {
+	$schema                 = agents_workflow_run_control_output_schema();
+	$required               = is_array( $schema['required'] ?? null ) ? array_values( $schema['required'] ) : array();
+	$properties             = is_array( $schema['properties'] ?? null ) ? $schema['properties'] : array();
+	$required[]             = 'events';
+	$required[]             = 'cursor';
+	$required[]             = 'has_more';
+	$properties['events']   = array(
+		'type'  => 'array',
+		'items' => array( 'type' => 'object' ),
+	);
+	$properties['cursor']   = array( 'type' => 'string' );
+	$properties['has_more'] = array( 'type' => 'boolean' );
+	$schema['required']     = $required;
+	$schema['properties']   = $properties;
+	return $schema;
+}
+
+function agents_workflow_string( mixed $value ): string {
+	return is_scalar( $value ) ? trim( (string) $value ) : '';
 }
 
 /**

@@ -67,20 +67,20 @@ class WP_Agent_Conversation_Compaction {
 		$normalized = array_merge( self::default_policy(), $policy );
 
 		$normalized['enabled']                      = (bool) $normalized['enabled'];
-		$normalized['max_messages']                 = max( 1, (int) $normalized['max_messages'] );
-		$normalized['recent_messages']              = max( 1, (int) $normalized['recent_messages'] );
+		$normalized['max_messages']                 = max( 1, self::normalize_int( $normalized['max_messages'] ) );
+		$normalized['recent_messages']              = max( 1, self::normalize_int( $normalized['recent_messages'] ) );
 		$normalized['summary_role']                 = self::normalize_string( $normalized['summary_role'], 'system' );
 		$normalized['summary_prefix']               = self::normalize_string( $normalized['summary_prefix'], 'Earlier conversation summary:' );
 		$normalized['summary_model']                = self::normalize_string( $normalized['summary_model'], '' );
 		$normalized['summary_provider']             = self::normalize_string( $normalized['summary_provider'], '' );
 		$normalized['preserve_tool_boundaries']     = (bool) $normalized['preserve_tool_boundaries'];
 		$normalized['conservation_enabled']         = (bool) $normalized['conservation_enabled'];
-		$normalized['minimum_conserved_byte_ratio'] = max( 0.0, (float) $normalized['minimum_conserved_byte_ratio'] );
+		$normalized['minimum_conserved_byte_ratio'] = max( 0.0, self::normalize_float( $normalized['minimum_conserved_byte_ratio'] ) );
 		$normalized['fail_on_conservation_failure'] = (bool) $normalized['fail_on_conservation_failure'];
 		$normalized['overflow_archive_enabled']     = (bool) $normalized['overflow_archive_enabled'];
-		$normalized['overflow_threshold_bytes']     = max( 0, (int) $normalized['overflow_threshold_bytes'] );
-		$normalized['overflow_retained_messages']   = max( 0, (int) $normalized['overflow_retained_messages'] );
-		$normalized['overflow_retained_bytes']      = max( 0, (int) $normalized['overflow_retained_bytes'] );
+		$normalized['overflow_threshold_bytes']     = max( 0, self::normalize_int( $normalized['overflow_threshold_bytes'] ) );
+		$normalized['overflow_retained_messages']   = max( 0, self::normalize_int( $normalized['overflow_retained_messages'] ) );
+		$normalized['overflow_retained_bytes']      = max( 0, self::normalize_int( $normalized['overflow_retained_bytes'] ) );
 		$normalized['overflow_archive_pointer']     = is_array( $normalized['overflow_archive_pointer'] ) ? $normalized['overflow_archive_pointer'] : array();
 		$normalized['overflow_stub_role']           = self::normalize_string( $normalized['overflow_stub_role'], 'system' );
 		$normalized['overflow_stub_prefix']         = self::normalize_string( $normalized['overflow_stub_prefix'], 'Earlier conversation archived without summarization.' );
@@ -100,8 +100,8 @@ class WP_Agent_Conversation_Compaction {
 	 * `archived_items`. On failure the original transcript is returned unchanged
 	 * with a `compaction_failed` lifecycle event.
 	 *
-	 * @param array    $messages   Complete transcript messages.
-	 * @param array    $policy     Compaction policy.
+	 * @param array<mixed>    $messages   Complete transcript messages.
+	 * @param array<string, mixed> $policy     Compaction policy.
 	 * @param callable $summarizer Summary producer supplied by the runtime.
 	 * @return array{messages: array<int, array<string, mixed>>, metadata: array<string, mixed>, events: array<int, array<string, mixed>>, archive_items?: array<int, array<string, mixed>>}
 	 */
@@ -109,7 +109,7 @@ class WP_Agent_Conversation_Compaction {
 		$policy              = self::normalize_policy( $policy );
 		$normalized_messages = WP_Agent_Message::normalize_many( $messages );
 		$total_messages      = count( $normalized_messages );
-		$source_messages     = array_values( $messages );
+		$source_messages     = self::normalize_array_items( $messages );
 
 		if ( self::should_archive_overflow( $source_messages, $policy ) ) {
 			return self::archive_overflow( $source_messages, $normalized_messages, $policy );
@@ -164,8 +164,8 @@ class WP_Agent_Conversation_Compaction {
 		}
 
 		$summary_message = WP_Agent_Message::text(
-			$policy['summary_role'],
-			$policy['summary_prefix'] . "\n\n" . trim( $summary ),
+			self::normalize_string( $policy['summary_role'] ?? 'system', 'system' ),
+			self::normalize_string( $policy['summary_prefix'] ?? 'Earlier conversation summary:', 'Earlier conversation summary:' ) . "\n\n" . trim( $summary ),
 			array(
 				'agents_api_compaction' => array(
 					'compacted_message_count' => $cutoff,
@@ -210,7 +210,7 @@ class WP_Agent_Conversation_Compaction {
 	 */
 	public static function select_boundary( array $messages, array $policy ): int {
 		$policy          = self::normalize_policy( $policy );
-		$recent_messages = (int) $policy['recent_messages'];
+		$recent_messages = self::normalize_int( $policy['recent_messages'] ?? 1 );
 		$cutoff          = max( 0, count( $messages ) - $recent_messages );
 
 		return $policy['preserve_tool_boundaries'] ? self::move_boundary_to_safe_index( $messages, $cutoff ) : $cutoff;
@@ -235,8 +235,8 @@ class WP_Agent_Conversation_Compaction {
 			'events'   => $events,
 		);
 
-		if ( isset( $extra['archive_items'] ) && is_array( $extra['archive_items'] ) ) {
-			$result['archive_items'] = $extra['archive_items'];
+		if ( isset( $extra['archive_items'] ) ) {
+			$result['archive_items'] = self::normalize_array_items( $extra['archive_items'] );
 		}
 
 		return $result;
@@ -265,7 +265,7 @@ class WP_Agent_Conversation_Compaction {
 	 */
 	private static function archive_overflow( array $source_messages, array $normalized_messages, array $policy ): array {
 		$total_messages = count( $normalized_messages );
-		$retain_count   = (int) ( $policy['overflow_retained_messages'] > 0 ? $policy['overflow_retained_messages'] : $policy['recent_messages'] );
+		$retain_count   = self::normalize_int( $policy['overflow_retained_messages'] ?? 0 ) > 0 ? self::normalize_int( $policy['overflow_retained_messages'] ?? 0 ) : self::normalize_int( $policy['recent_messages'] ?? 1 );
 		$cutoff         = (int) max( 0, $total_messages - $retain_count );
 
 		while ( $policy['overflow_retained_bytes'] > 0 && $cutoff < $total_messages - 1 && self::encoded_size( array_slice( $normalized_messages, $cutoff ) ) > $policy['overflow_retained_bytes'] ) {
@@ -309,8 +309,8 @@ class WP_Agent_Conversation_Compaction {
 		);
 
 		$stub_message = WP_Agent_Message::text(
-			$policy['overflow_stub_role'],
-			$policy['overflow_stub_prefix'] . "\n\nArchive ID: " . $archive_id . "\nArchived messages: " . count( $archive_items ),
+			self::normalize_string( $policy['overflow_stub_role'] ?? 'system', 'system' ),
+			self::normalize_string( $policy['overflow_stub_prefix'] ?? 'Earlier conversation archived without summarization.', 'Earlier conversation archived without summarization.' ) . "\n\nArchive ID: " . $archive_id . "\nArchived messages: " . count( $archive_items ),
 			array(
 				'agents_api_compaction_archive' => $archive_meta,
 			)
@@ -422,6 +422,80 @@ class WP_Agent_Conversation_Compaction {
 		}
 
 		return array_values( $summary_result['archived_items'] );
+	}
+
+	/**
+	 * Normalize mixed archive item input to item arrays.
+	 *
+	 * @param mixed $items Raw items.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private static function normalize_array_items( $items ): array {
+		if ( ! is_array( $items ) ) {
+			return array();
+		}
+
+		$normalized = array();
+		foreach ( $items as $item ) {
+			if ( is_array( $item ) ) {
+				$normalized[] = self::normalize_array_item( $item );
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize an item array to string keys.
+	 *
+	 * @param array<mixed> $item Raw item.
+	 * @return array<string, mixed>
+	 */
+	private static function normalize_array_item( array $item ): array {
+		$normalized = array();
+		foreach ( $item as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $value;
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize an integer policy field.
+	 *
+	 * @param mixed $value Raw value.
+	 * @return int
+	 */
+	private static function normalize_int( $value ): int {
+		if ( is_int( $value ) ) {
+			return $value;
+		}
+
+		if ( is_float( $value ) || ( is_string( $value ) && is_numeric( $value ) ) ) {
+			return intval( $value );
+		}
+
+		return 0;
+	}
+
+	/**
+	 * Normalize a floating-point policy field.
+	 *
+	 * @param mixed $value Raw value.
+	 * @return float
+	 */
+	private static function normalize_float( $value ): float {
+		if ( is_float( $value ) || is_int( $value ) ) {
+			return floatval( $value );
+		}
+
+		if ( is_string( $value ) && is_numeric( $value ) ) {
+			return floatval( $value );
+		}
+
+		return 0.0;
 	}
 
 	/**
