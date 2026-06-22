@@ -118,11 +118,11 @@ class WP_Agent_Task_Run_Control {
 				'error'         => self::map_value( $normalized['error'] ?? array() ),
 				'cancellation'  => self::map_value( $normalized['cancellation'] ?? array() ),
 				'metadata'      => self::map_value( $normalized['metadata'] ?? array() ) + array(
-					'session_id'         => $normalized['session_id'],
-					'executor_id'        => $normalized['executor_id'],
-					'execution_metrics'  => $normalized['execution_metrics'],
-					'diagnostics'        => $normalized['diagnostics'],
-					'events'             => $normalized['events'],
+					'session_id'        => $normalized['session_id'],
+					'executor_id'       => $normalized['executor_id'],
+					'execution_metrics' => $normalized['execution_metrics'],
+					'diagnostics'       => $normalized['diagnostics'],
+					'events'            => $normalized['events'],
 				),
 			)
 		);

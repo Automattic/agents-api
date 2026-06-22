@@ -343,8 +343,8 @@ function agents_runtime_tool_required_string( array $input, string $field ) {
  * @return array<string, mixed>
  */
 function agents_runtime_tool_normalize_stored_request( array $request ): array {
-	$status     = is_string( $request['status'] ?? null ) && '' !== trim( $request['status'] ) ? trim( $request['status'] ) : WP_Agent_Runtime_Tool_Request::STATUS_PENDING;
-	$normalized = WP_Agent_Runtime_Tool_Request::normalize( $request );
+	$status               = is_string( $request['status'] ?? null ) && '' !== trim( $request['status'] ) ? trim( $request['status'] ) : WP_Agent_Runtime_Tool_Request::STATUS_PENDING;
+	$normalized           = WP_Agent_Runtime_Tool_Request::normalize( $request );
 	$normalized['status'] = $status;
 
 	if ( isset( $request['result'] ) && is_array( $request['result'] ) ) {

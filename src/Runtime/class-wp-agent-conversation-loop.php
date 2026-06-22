@@ -182,9 +182,9 @@ class WP_Agent_Conversation_Loop {
 				$turn_context['turn'] = $turn;
 				$interrupt            = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
 				if ( null !== $interrupt ) {
-					$messages[]   = $interrupt['message'];
-					$events[]     = self::interrupt_event( $interrupt );
-					$interrupted  = $interrupt['metadata'];
+					$messages[]  = $interrupt['message'];
+					$events[]    = self::interrupt_event( $interrupt );
+					$interrupted = $interrupt['metadata'];
 					break;
 				}
 
@@ -247,9 +247,9 @@ class WP_Agent_Conversation_Loop {
 
 				$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
 				if ( null !== $interrupt ) {
-					$messages[]   = $interrupt['message'];
-					$events[]     = self::interrupt_event( $interrupt );
-					$interrupted  = $interrupt['metadata'];
+					$messages[]  = $interrupt['message'];
+					$events[]    = self::interrupt_event( $interrupt );
+					$interrupted = $interrupt['metadata'];
 					break;
 				}
 
@@ -308,9 +308,9 @@ class WP_Agent_Conversation_Loop {
 				if ( null !== $tool_executor && $mediation_enabled && isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ) {
 					$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
 					if ( null !== $interrupt ) {
-						$messages[]   = $interrupt['message'];
-						$events[]     = self::interrupt_event( $interrupt );
-						$interrupted  = $interrupt['metadata'];
+						$messages[]  = $interrupt['message'];
+						$events[]    = self::interrupt_event( $interrupt );
+						$interrupted = $interrupt['metadata'];
 						break;
 					}
 
@@ -346,9 +346,9 @@ class WP_Agent_Conversation_Loop {
 					$stalled               = self::check_spin_detector( $spin_detector, $mediation_result['spin_signatures'], $turn_context, $on_event );
 					$interrupt             = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
 					if ( null !== $interrupt ) {
-						$messages[]   = $interrupt['message'];
-						$events[]     = self::interrupt_event( $interrupt );
-						$interrupted  = $interrupt['metadata'];
+						$messages[]  = $interrupt['message'];
+						$events[]    = self::interrupt_event( $interrupt );
+						$interrupted = $interrupt['metadata'];
 						break;
 					}
 				} else {

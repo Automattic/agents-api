@@ -419,8 +419,8 @@ class WP_Agent_Run_Control {
 	 * @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}
 	 */
 	private static function record_event_in_state( array $state, string $run_id, string $type, array $metadata = array() ): array {
-		$events         = array_values( $state['events'][ $run_id ] ?? array() );
-		$events[]       = array(
+		$events                     = array_values( $state['events'][ $run_id ] ?? array() );
+		$events[]                   = array(
 			'id'         => $run_id . ':' . count( $events ),
 			'type'       => $type,
 			'created_at' => self::now(),
