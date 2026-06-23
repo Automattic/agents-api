@@ -5,6 +5,8 @@
  * Exposes the canonical agents/chat ability over a JSON-RPC 2.0 wire keyed by
  * agent id, so protocol clients that speak `message/send` (request/response)
  * and `message/stream` (Server-Sent Events) can drive a registered runtime.
+ * Legacy Agent Protocol task method names (`tasks/send`, `tasks/sendSubscribe`)
+ * are accepted as aliases for compatibility with older clients.
  *
  * The route is intentionally a thin envelope: `message/send` is one synchronous
  * agents/chat call wrapped in a Task; `message/stream` emits the same Task over
@@ -30,11 +32,13 @@ use AgentsAPI\AI\WP_Agent_Chat_Run_Control;
 
 defined( 'ABSPATH' ) || exit;
 
-const AGENTS_CHAT_JSONRPC_NAMESPACE     = 'agents-api/v1';
-const AGENTS_CHAT_JSONRPC_ROUTE         = '/agent/(?P<agent_id>[A-Za-z0-9._-]+)';
-const AGENTS_CHAT_JSONRPC_VERSION       = '2.0';
-const AGENTS_CHAT_JSONRPC_METHOD_SEND   = 'message/send';
-const AGENTS_CHAT_JSONRPC_METHOD_STREAM = 'message/stream';
+const AGENTS_CHAT_JSONRPC_NAMESPACE                   = 'agents-api/v1';
+const AGENTS_CHAT_JSONRPC_ROUTE                       = '/agent/(?P<agent_id>[A-Za-z0-9._-]+)';
+const AGENTS_CHAT_JSONRPC_VERSION                     = '2.0';
+const AGENTS_CHAT_JSONRPC_METHOD_SEND                 = 'message/send';
+const AGENTS_CHAT_JSONRPC_METHOD_STREAM               = 'message/stream';
+const AGENTS_CHAT_JSONRPC_METHOD_TASKS_SEND           = 'tasks/send';
+const AGENTS_CHAT_JSONRPC_METHOD_TASKS_SEND_SUBSCRIBE = 'tasks/sendSubscribe';
 
 // JSON-RPC 2.0 reserved error codes (see the spec + agenttic-client ErrorCodes).
 const AGENTS_CHAT_JSONRPC_ERR_PARSE            = -32700;
@@ -167,20 +171,20 @@ function agents_chat_jsonrpc_dispatch( \WP_REST_Request $request ): \WP_REST_Res
 		);
 	}
 
-	$input = agents_chat_jsonrpc_input_from_params( $params, $agent );
+	$input = agents_chat_jsonrpc_input_from_params( $params, $agent, $body );
 	if ( is_wp_error( $input ) ) {
 		return rest_ensure_response(
 			agents_chat_jsonrpc_error_frame( $rpc_id, AGENTS_CHAT_JSONRPC_ERR_INVALID_PARAMS, $input->get_error_message() )
 		);
 	}
 
-	if ( AGENTS_CHAT_JSONRPC_METHOD_STREAM === $method ) {
+	if ( agents_chat_jsonrpc_method_streams( $method ) ) {
 		// Streams directly and exits; never returns to the REST server.
 		agents_chat_jsonrpc_stream( $rpc_id, $input );
 		exit;
 	}
 
-	if ( AGENTS_CHAT_JSONRPC_METHOD_SEND !== $method ) {
+	if ( ! agents_chat_jsonrpc_method_sends( $method ) ) {
 		return rest_ensure_response(
 			agents_chat_jsonrpc_error_frame( $rpc_id, AGENTS_CHAT_JSONRPC_ERR_METHOD_NOT_FOUND, sprintf( 'Unknown JSON-RPC method "%s".', $method ) )
 		);
@@ -196,6 +200,24 @@ function agents_chat_jsonrpc_dispatch( \WP_REST_Request $request ): \WP_REST_Res
 	return rest_ensure_response(
 		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ) )
 	);
+}
+
+/**
+ * Whether a JSON-RPC method maps to a synchronous send turn.
+ *
+ * @param string $method JSON-RPC method.
+ */
+function agents_chat_jsonrpc_method_sends( string $method ): bool {
+	return in_array( $method, array( AGENTS_CHAT_JSONRPC_METHOD_SEND, AGENTS_CHAT_JSONRPC_METHOD_TASKS_SEND ), true );
+}
+
+/**
+ * Whether a JSON-RPC method maps to a streaming turn.
+ *
+ * @param string $method JSON-RPC method.
+ */
+function agents_chat_jsonrpc_method_streams( string $method ): bool {
+	return in_array( $method, array( AGENTS_CHAT_JSONRPC_METHOD_STREAM, AGENTS_CHAT_JSONRPC_METHOD_TASKS_SEND_SUBSCRIBE ), true );
 }
 
 /**
@@ -280,9 +302,10 @@ function agents_chat_jsonrpc_stream( $rpc_id, array $input ): void {
  *
  * @param array<mixed> $params JSON-RPC params (MessageSendParams).
  * @param string       $agent  Agent slug from the URL.
+ * @param array<mixed> $body   Full JSON-RPC request body.
  * @return array<string,mixed>|\WP_Error
  */
-function agents_chat_jsonrpc_input_from_params( array $params, string $agent ) {
+function agents_chat_jsonrpc_input_from_params( array $params, string $agent, array $body = array() ) {
 	if ( '' === $agent ) {
 		return new \WP_Error( 'agents_chat_jsonrpc_invalid_params', 'A non-empty agent id is required.' );
 	}
@@ -296,9 +319,13 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent ) {
 	$session_id = \AgentsAPI\AI\agents_api_scalar_to_string( $params['sessionId'] ?? null );
 	$run_id     = \AgentsAPI\AI\agents_api_scalar_to_string( $params['id'] ?? null );
 
-	$client_context = array(
-		'source'      => 'jsonrpc',
-		'client_name' => 'jsonrpc-chat',
+	$client_context = agents_chat_jsonrpc_client_context( $message );
+	$client_context = array_merge(
+		$client_context,
+		array(
+			'source'      => 'jsonrpc',
+			'client_name' => 'jsonrpc-chat',
+		)
 	);
 	if ( isset( $params['metadata'] ) && is_array( $params['metadata'] ) ) {
 		$client_context['metadata'] = $params['metadata'];
@@ -313,6 +340,10 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent ) {
 		'client_context' => $client_context,
 	);
 
+	if ( array_key_exists( 'tokenStreaming', $body ) ) {
+		$input['token_streaming'] = (bool) $body['tokenStreaming'];
+	}
+
 	/**
 	 * Filter the canonical agents/chat input built by the JSON-RPC adapter.
 	 *
@@ -324,6 +355,30 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent ) {
 	$filtered = apply_filters( 'agents_chat_jsonrpc_input', $input, $params, $agent );
 
 	return is_array( $filtered ) ? \AgentsAPI\AI\agents_api_string_keyed_array( $filtered ) : $input;
+}
+
+/**
+ * Extract client context from Agent Protocol data parts.
+ *
+ * @param array<mixed> $message JSON-RPC Message.
+ * @return array<string,mixed>
+ */
+function agents_chat_jsonrpc_client_context( array $message ): array {
+	$parts          = isset( $message['parts'] ) && is_array( $message['parts'] ) ? $message['parts'] : array();
+	$client_context = array();
+
+	foreach ( $parts as $part ) {
+		if ( ! is_array( $part ) || 'data' !== ( $part['type'] ?? null ) ) {
+			continue;
+		}
+
+		$data = isset( $part['data'] ) && is_array( $part['data'] ) ? $part['data'] : array();
+		if ( isset( $data['clientContext'] ) && is_array( $data['clientContext'] ) ) {
+			$client_context = array_merge( $client_context, \AgentsAPI\AI\agents_api_string_keyed_array( $data['clientContext'] ) );
+		}
+	}
+
+	return $client_context;
 }
 
 /**
