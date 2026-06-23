@@ -38,6 +38,7 @@ function agents_register_runtime_package_ability_category(): void {
 		return;
 	}
 
+	/** @var array<string,mixed> $args */
 	$args = array(
 		'label'       => 'Agents API',
 		'description' => 'Cross-cutting abilities provided by the Agents API substrate.',
@@ -48,16 +49,12 @@ function agents_register_runtime_package_ability_category(): void {
 		return;
 	}
 
-	if ( ! class_exists( '\WP_Ability_Categories_Registry' ) ) {
+	if ( ! did_action( 'init' ) || ! class_exists( '\WP_Ability_Categories_Registry' ) ) {
 		return;
 	}
 
 	$registry = \WP_Ability_Categories_Registry::get_instance();
-	if ( null === $registry || ! method_exists( $registry, 'register' ) ) {
-		return;
-	}
-
-	if ( method_exists( $registry, 'is_registered' ) && $registry->is_registered( 'agents-api' ) ) {
+	if ( null === $registry ) {
 		return;
 	}
 
@@ -146,8 +143,8 @@ function agents_register_runtime_package_run_abilities(): void {
 /**
  * Register a runtime package ability across normal and late-loaded runtimes.
  *
- * @param string       $ability Ability name.
- * @param array<mixed> $args Ability args.
+ * @param string              $ability Ability name.
+ * @param array<string,mixed> $args Ability args.
  */
 function agents_register_runtime_package_ability( string $ability, array $args ): void {
 	if ( wp_has_ability( $ability ) ) {
@@ -159,19 +156,11 @@ function agents_register_runtime_package_ability( string $ability, array $args )
 		return;
 	}
 
-	if ( ! class_exists( '\WP_Abilities_Registry' ) ) {
+	if ( ! did_action( 'init' ) || ! class_exists( '\WP_Abilities_Registry' ) ) {
 		return;
 	}
 
 	$registry = \WP_Abilities_Registry::get_instance();
-	if ( null === $registry || ! method_exists( $registry, 'register' ) ) {
-		return;
-	}
-
-	if ( method_exists( $registry, 'is_registered' ) && $registry->is_registered( $ability ) ) {
-		return;
-	}
-
 	$registry->register( $ability, $args );
 }
 
