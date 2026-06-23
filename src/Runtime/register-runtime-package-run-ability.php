@@ -19,27 +19,59 @@ const AGENTS_CANCEL_RUNTIME_PACKAGE_RUN_ABILITY      = 'agents/cancel-runtime-pa
 const AGENTS_LIST_RUNTIME_PACKAGE_RUN_EVENTS_ABILITY = 'agents/list-runtime-package-run-events';
 const AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE       = 'agents_api_runtime_package_run_control';
 
-add_action(
-	'wp_abilities_api_categories_init',
-	static function (): void {
-		if ( wp_has_ability_category( 'agents-api' ) ) {
-			return;
-		}
+add_action( 'wp_abilities_api_categories_init', __NAMESPACE__ . '\agents_register_runtime_package_ability_category' );
+add_action( 'wp_abilities_api_init', __NAMESPACE__ . '\agents_register_runtime_package_run_abilities' );
 
-		wp_register_ability_category(
-			'agents-api',
-			array(
-				'label'       => 'Agents API',
-				'description' => 'Cross-cutting abilities provided by the Agents API substrate.',
-			)
-		);
+if ( function_exists( 'did_action' ) && did_action( 'wp_abilities_api_init' ) ) {
+	agents_register_runtime_package_run_abilities();
+}
+
+/**
+ * Register the Agents API runtime package ability category.
+ */
+function agents_register_runtime_package_ability_category(): void {
+	if ( ! function_exists( 'wp_has_ability_category' ) || ! function_exists( 'wp_register_ability_category' ) ) {
+		return;
 	}
-);
 
-add_action(
-	'wp_abilities_api_init',
-	static function (): void {
-		$abilities = array(
+	if ( wp_has_ability_category( 'agents-api' ) ) {
+		return;
+	}
+
+	/** @var array<string,mixed> $args */
+	$args = array(
+		'label'       => 'Agents API',
+		'description' => 'Cross-cutting abilities provided by the Agents API substrate.',
+	);
+
+	if ( doing_action( 'wp_abilities_api_categories_init' ) ) {
+		wp_register_ability_category( 'agents-api', $args );
+		return;
+	}
+
+	if ( ! did_action( 'init' ) || ! class_exists( '\WP_Ability_Categories_Registry' ) ) {
+		return;
+	}
+
+	$registry = \WP_Ability_Categories_Registry::get_instance();
+	if ( null === $registry ) {
+		return;
+	}
+
+	$registry->register( 'agents-api', $args );
+}
+
+/**
+ * Register canonical runtime package execution abilities.
+ */
+function agents_register_runtime_package_run_abilities(): void {
+	if ( ! function_exists( 'wp_has_ability' ) || ! function_exists( 'wp_register_ability' ) ) {
+		return;
+	}
+
+	agents_register_runtime_package_ability_category();
+
+	$abilities = array(
 			AGENTS_RUN_RUNTIME_PACKAGE_ABILITY             => array(
 				'label'            => 'Run Runtime Package',
 				'description'      => 'Canonical entry point for running a portable agent package workflow. Dispatches to a consumer-provided runtime handler.',
@@ -84,30 +116,53 @@ add_action(
 			),
 		);
 
-		foreach ( $abilities as $ability => $args ) {
-			if ( wp_has_ability( $ability ) ) {
-				continue;
-			}
-
-			wp_register_ability(
-				$ability,
-				array(
-					'label'               => $args['label'],
-					'description'         => $args['description'],
-					'category'            => 'agents-api',
-					'input_schema'        => $args['input_schema'],
-					'output_schema'       => $args['output_schema'],
-					'execute_callback'    => $args['execute_callback'],
-					'permission_callback' => $args['permission'],
-					'meta'                => array(
-						'show_in_rest' => true,
-						'annotations'  => $args['annotations'],
-					),
-				)
-			);
+	foreach ( $abilities as $ability => $args ) {
+		if ( wp_has_ability( $ability ) ) {
+			continue;
 		}
+
+		agents_register_runtime_package_ability(
+			$ability,
+			array(
+				'label'               => $args['label'],
+				'description'         => $args['description'],
+				'category'            => 'agents-api',
+				'input_schema'        => $args['input_schema'],
+				'output_schema'       => $args['output_schema'],
+				'execute_callback'    => $args['execute_callback'],
+				'permission_callback' => $args['permission'],
+				'meta'                => array(
+					'show_in_rest' => true,
+					'annotations'  => $args['annotations'],
+				),
+			)
+		);
 	}
-);
+}
+
+/**
+ * Register a runtime package ability across normal and late-loaded runtimes.
+ *
+ * @param string              $ability Ability name.
+ * @param array<string,mixed> $args Ability args.
+ */
+function agents_register_runtime_package_ability( string $ability, array $args ): void {
+	if ( wp_has_ability( $ability ) ) {
+		return;
+	}
+
+	if ( doing_action( 'wp_abilities_api_init' ) ) {
+		wp_register_ability( $ability, $args );
+		return;
+	}
+
+	if ( ! did_action( 'init' ) || ! class_exists( '\WP_Abilities_Registry' ) ) {
+		return;
+	}
+
+	$registry = \WP_Abilities_Registry::get_instance();
+	$registry->register( $ability, $args );
+}
 
 /**
  * Dispatch a runtime package workflow run to a registered consumer handler.

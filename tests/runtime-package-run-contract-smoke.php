@@ -30,6 +30,167 @@ if ( ! function_exists( 'is_wp_error' ) ) {
 }
 
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
+
+if ( ! class_exists( 'WP_Ability' ) ) {
+	class WP_Ability {
+		/** @param array<string,mixed> $args Ability registration arguments. */
+		public function __construct( private string $name, private array $args ) {}
+
+		/** @param array<mixed> $input Ability input. */
+		public function execute( array $input ) {
+			$callback = $this->args['execute_callback'] ?? null;
+			return is_callable( $callback ) ? call_user_func( $callback, $input ) : null;
+		}
+
+		public function get_name(): string {
+			return $this->name;
+		}
+	}
+}
+
+if ( ! class_exists( 'WP_Ability_Category' ) ) {
+	class WP_Ability_Category {
+		/** @param array<string,mixed> $args Category registration arguments. */
+		public function __construct( private string $slug, private array $args ) {}
+
+		public function get_slug(): string {
+			return $this->slug;
+		}
+	}
+}
+
+if ( ! class_exists( 'WP_Ability_Categories_Registry' ) ) {
+	class WP_Ability_Categories_Registry {
+		private static ?self $instance = null;
+
+		/** @var array<string,WP_Ability_Category> */
+		private array $categories = array();
+
+		public static function get_instance(): ?self {
+			if ( ! did_action( 'init' ) ) {
+				_doing_it_wrong( __METHOD__, 'Ability API should not be initialized before init.', '6.9.0' );
+				return null;
+			}
+
+			if ( null === self::$instance ) {
+				self::$instance = new self();
+				do_action( 'wp_abilities_api_categories_init', self::$instance );
+			}
+
+			return self::$instance;
+		}
+
+		/** @param array<string,mixed> $args Category registration arguments. */
+		public function register( string $category, array $args ): ?WP_Ability_Category {
+			if ( $this->is_registered( $category ) ) {
+				return null;
+			}
+
+			$this->categories[ $category ] = new WP_Ability_Category( $category, $args );
+			return $this->categories[ $category ];
+		}
+
+		public function is_registered( string $category ): bool {
+			return isset( $this->categories[ $category ] );
+		}
+
+		public static function reset_for_smoke(): void {
+			self::$instance = null;
+		}
+	}
+}
+
+if ( ! class_exists( 'WP_Abilities_Registry' ) ) {
+	class WP_Abilities_Registry {
+		private static ?self $instance = null;
+
+		/** @var array<string,WP_Ability> */
+		private array $abilities = array();
+
+		public static function get_instance(): ?self {
+			if ( ! did_action( 'init' ) ) {
+				_doing_it_wrong( __METHOD__, 'Ability API should not be initialized before init.', '6.9.0' );
+				return null;
+			}
+
+			if ( null === self::$instance ) {
+				self::$instance = new self();
+				WP_Ability_Categories_Registry::get_instance();
+				do_action( 'wp_abilities_api_init', self::$instance );
+			}
+
+			return self::$instance;
+		}
+
+		/** @param array<string,mixed> $args Ability registration arguments. */
+		public function register( string $ability, array $args ): ?WP_Ability {
+			if ( $this->is_registered( $ability ) || ! wp_has_ability_category( (string) ( $args['category'] ?? '' ) ) ) {
+				return null;
+			}
+
+			$this->abilities[ $ability ] = new WP_Ability( $ability, $args );
+			return $this->abilities[ $ability ];
+		}
+
+		public function is_registered( string $ability ): bool {
+			return isset( $this->abilities[ $ability ] );
+		}
+
+		public function get_registered( string $ability ): ?WP_Ability {
+			return $this->abilities[ $ability ] ?? null;
+		}
+
+		public function reset_registered_for_smoke(): void {
+			$this->abilities = array();
+		}
+	}
+}
+
+if ( ! function_exists( 'wp_has_ability_category' ) ) {
+	function wp_has_ability_category( string $category ): bool {
+		$registry = WP_Ability_Categories_Registry::get_instance();
+		return null !== $registry && $registry->is_registered( $category );
+	}
+}
+
+if ( ! function_exists( 'wp_register_ability_category' ) ) {
+	function wp_register_ability_category( string $category, array $args ): ?WP_Ability_Category {
+		if ( ! doing_action( 'wp_abilities_api_categories_init' ) ) {
+			_doing_it_wrong( __FUNCTION__, 'Ability categories must be registered on wp_abilities_api_categories_init.', '6.9.0' );
+			return null;
+		}
+
+		$registry = WP_Ability_Categories_Registry::get_instance();
+		return null === $registry ? null : $registry->register( $category, $args );
+	}
+}
+
+if ( ! function_exists( 'wp_has_ability' ) ) {
+	function wp_has_ability( string $ability ): bool {
+		$registry = WP_Abilities_Registry::get_instance();
+		return null !== $registry && $registry->is_registered( $ability );
+	}
+}
+
+if ( ! function_exists( 'wp_register_ability' ) ) {
+	function wp_register_ability( string $ability, array $args ): ?WP_Ability {
+		if ( ! doing_action( 'wp_abilities_api_init' ) ) {
+			_doing_it_wrong( __FUNCTION__, 'Abilities must be registered on wp_abilities_api_init.', '6.9.0' );
+			return null;
+		}
+
+		$registry = WP_Abilities_Registry::get_instance();
+		return null === $registry ? null : $registry->register( $ability, $args );
+	}
+}
+
+if ( ! function_exists( 'wp_get_ability' ) ) {
+	function wp_get_ability( string $ability ): ?WP_Ability {
+		$registry = WP_Abilities_Registry::get_instance();
+		return null === $registry ? null : $registry->get_registered( $ability );
+	}
+}
+
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-runtime-package-run-request.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-runtime-package-run-result.php';
 require_once __DIR__ . '/../src/Runtime/register-runtime-package-run-ability.php';
@@ -37,6 +198,45 @@ require_once __DIR__ . '/../src/Abilities/functions-ability-dispatch.php';
 
 use AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Request;
 use AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Result;
+
+echo "\n[0] Runtime package ability resolves in normal and late Abilities API lifecycles:\n";
+do_action( 'init' );
+$registry = WP_Abilities_Registry::get_instance();
+agents_api_smoke_assert_equals( true, wp_get_ability( AgentsAPI\AI\AGENTS_RUN_RUNTIME_PACKAGE_ABILITY ) instanceof WP_Ability, 'runtime package ability registers through wp_abilities_api_init', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $GLOBALS['__agents_api_smoke_wrong'] ), 'normal registration path does not call public helpers outside their actions', $failures, $passes );
+
+if ( $registry instanceof WP_Abilities_Registry ) {
+	$registry->reset_registered_for_smoke();
+}
+
+AgentsAPI\AI\agents_register_runtime_package_run_abilities();
+$late_ability = wp_get_ability( AgentsAPI\AI\AGENTS_RUN_RUNTIME_PACKAGE_ABILITY );
+agents_api_smoke_assert_equals( true, $late_ability instanceof WP_Ability, 'runtime package ability resolves through wp_get_ability after abilities init already fired', $failures, $passes );
+
+add_filter(
+	'wp_agent_runtime_package_run_handler',
+	static function ( $handler, WP_Agent_Runtime_Package_Run_Request $handler_request ) {
+		unset( $handler );
+		return static function () use ( $handler_request ): array {
+			return array(
+				'status' => 'succeeded',
+				'result' => array( 'workflow_id' => $handler_request->get_workflow()['id'] ?? '' ),
+			);
+		};
+	},
+	10,
+	2
+);
+
+$late_dispatch = $late_ability instanceof WP_Ability ? $late_ability->execute(
+	array(
+		'package'  => array( 'slug' => 'site-builder' ),
+		'workflow' => array( 'id' => 'late-load' ),
+	)
+) : null;
+agents_api_smoke_assert_equals( false, is_wp_error( $late_dispatch ), 'late-resolved ability executes through the canonical ability object', $failures, $passes );
+agents_api_smoke_assert_equals( 'late-load', is_array( $late_dispatch ) ? $late_dispatch['result']['workflow_id'] ?? '' : '', 'late-resolved ability uses the runtime package handler filter', $failures, $passes );
+$GLOBALS['__agents_api_smoke_actions']['wp_agent_runtime_package_run_handler'] = array();
 
 echo "\n[1] Request validates package and workflow selectors:\n";
 $request = WP_Agent_Runtime_Package_Run_Request::from_array(
