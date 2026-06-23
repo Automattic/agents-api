@@ -124,9 +124,13 @@ use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_input_from_params;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_task_from_output;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_delta_to_wire;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_delta_frame;
+use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_dispatch;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_result_frame;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_error_frame;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_extract_text;
+use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_client_context;
+use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_method_sends;
+use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_method_streams;
 use function AgentsAPI\AI\Channels\agents_chat_input_schema;
 use function AgentsAPI\AI\Channels\register_chat_stream_handler;
 
@@ -161,19 +165,22 @@ $params = array(
 			array( 'type' => 'text', 'text' => 'Hello ' ),
 			array( 'type' => 'text', 'text' => 'world' ),
 			array( 'type' => 'text', 'text' => 'SECRET', 'contentType' => 'context' ),
+			array( 'type' => 'data', 'data' => array( 'clientContext' => array( 'traceId' => 'trace-1' ) ) ),
 			array( 'type' => 'file', 'file' => array( 'name' => 'a.png', 'mimeType' => 'image/png' ) ),
 		),
 	),
-	'metadata'  => array( 'locale' => 'es' ),
+	'metadata'       => array( 'locale' => 'es' ),
 );
 
-$input = agents_chat_jsonrpc_input_from_params( $params, 'support-agent' );
+$input = agents_chat_jsonrpc_input_from_params( $params, 'support-agent', array( 'tokenStreaming' => true ) );
 agents_api_smoke_assert_equals( false, $input instanceof WP_Error, 'input mapping succeeds', $failures, $passes );
 agents_api_smoke_assert_equals( 'support-agent', $input['agent'] ?? null, 'input carries agent slug from URL', $failures, $passes );
 agents_api_smoke_assert_equals( 'Hello world', $input['message'] ?? null, 'input concatenates text parts and skips context parts', $failures, $passes );
 agents_api_smoke_assert_equals( 'sess-9', $input['session_id'] ?? null, 'input carries sessionId', $failures, $passes );
 agents_api_smoke_assert_equals( 'rpc-1', $input['run_id'] ?? null, 'input maps JSON-RPC id to run_id', $failures, $passes );
 agents_api_smoke_assert_equals( 'jsonrpc', $input['client_context']['source'] ?? null, 'input marks jsonrpc source', $failures, $passes );
+agents_api_smoke_assert_equals( 'trace-1', $input['client_context']['traceId'] ?? null, 'input preserves camelCase clientContext', $failures, $passes );
+agents_api_smoke_assert_equals( true, $input['token_streaming'] ?? null, 'input maps top-level tokenStreaming to token_streaming', $failures, $passes );
 $input_schema = agents_chat_input_schema();
 $source_enum  = $input_schema['properties']['client_context']['properties']['source']['enum'] ?? array();
 agents_api_smoke_assert_equals( true, in_array( $input['client_context']['source'] ?? null, $source_enum, true ), 'input source is accepted by agents/chat schema', $failures, $passes );
@@ -181,6 +188,51 @@ agents_api_smoke_assert_equals( 'a.png', $input['attachments'][0]['name'] ?? nul
 
 $empty = agents_chat_jsonrpc_input_from_params( array( 'message' => array( 'parts' => array() ) ), 'support-agent' );
 agents_api_smoke_assert_equals( true, $empty instanceof WP_Error, 'input rejects empty message', $failures, $passes );
+
+$context = agents_chat_jsonrpc_client_context(
+	array(
+		'parts' => array(
+			array( 'type' => 'data', 'data' => array( 'clientContext' => array( 'first' => 'a', 'shared' => 'old' ) ) ),
+			array( 'type' => 'data', 'data' => array( 'clientContext' => array( 'second' => 'b', 'shared' => 'new' ) ) ),
+		),
+	)
+);
+agents_api_smoke_assert_equals( array( 'first' => 'a', 'shared' => 'new', 'second' => 'b' ), $context, 'clientContext data parts merge in order', $failures, $passes );
+
+$top_level_token_streaming = agents_chat_jsonrpc_input_from_params( $params, 'support-agent', array( 'tokenStreaming' => false ) );
+agents_api_smoke_assert_equals( false, $top_level_token_streaming['token_streaming'] ?? null, 'input preserves false top-level tokenStreaming', $failures, $passes );
+
+// --- Legacy Agent Protocol method aliases -----------------------------------
+agents_api_smoke_assert_equals( true, agents_chat_jsonrpc_method_sends( 'message/send' ), 'message/send maps to sync send', $failures, $passes );
+agents_api_smoke_assert_equals( true, agents_chat_jsonrpc_method_sends( 'tasks/send' ), 'tasks/send maps to sync send', $failures, $passes );
+agents_api_smoke_assert_equals( true, agents_chat_jsonrpc_method_streams( 'message/stream' ), 'message/stream maps to stream', $failures, $passes );
+agents_api_smoke_assert_equals( true, agents_chat_jsonrpc_method_streams( 'tasks/sendSubscribe' ), 'tasks/sendSubscribe maps to stream', $failures, $passes );
+
+$GLOBALS['__agents_api_smoke_abilities']['agents/chat'] = new class() {
+	public function execute( array $in ): array {
+		$GLOBALS['__agents_api_smoke_jsonrpc_last_input'] = $in;
+		return array(
+			'session_id' => $in['session_id'] ?? '',
+			'reply'      => 'alias ok',
+			'run_id'     => $in['run_id'] ?? '',
+			'completed'  => true,
+		);
+	}
+};
+$alias_response = agents_chat_jsonrpc_dispatch(
+	new WP_REST_Request(
+		array( 'agent_id' => 'support-agent' ),
+		array(
+			'jsonrpc' => '2.0',
+			'id'      => 'rpc-alias',
+			'method'  => 'tasks/send',
+			'params'  => array_merge( $params, array( 'id' => 'rpc-alias' ) ),
+		)
+	)
+);
+agents_api_smoke_assert_equals( 'rpc-alias', $alias_response->data['id'] ?? null, 'tasks/send dispatch echoes rpc id', $failures, $passes );
+agents_api_smoke_assert_equals( 'alias ok', $alias_response->data['result']['status']['message']['parts'][0]['text'] ?? null, 'tasks/send dispatch runs sync handler', $failures, $passes );
+agents_api_smoke_assert_equals( 'trace-1', $GLOBALS['__agents_api_smoke_jsonrpc_last_input']['client_context']['traceId'] ?? null, 'tasks/send dispatch preserves clientContext', $failures, $passes );
 
 // extract_text directly
 agents_api_smoke_assert_equals( 'ab', agents_chat_jsonrpc_extract_text( array( 'parts' => array( array( 'type' => 'text', 'text' => 'a' ), array( 'type' => 'text', 'text' => 'b' ) ) ) ), 'extract_text concatenates', $failures, $passes );
