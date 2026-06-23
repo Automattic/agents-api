@@ -174,6 +174,9 @@ streaming handlers are consumer territory (the same boundary as `agents/chat`).
 add_filter( 'agents_api_enable_default_conversation_store', '__return_true' );
 
 // 2. A runtime: register a chat handler (sync) and/or a stream handler (tokens).
+//    Pass an agent slug as the 3rd arg to scope the handler to one agent so
+//    multiple consumer plugins can coexist on the same site without colliding:
+//    register_chat_handler( $my_sync_handler, 10, 'my-agent-slug' );
 AgentsAPI\AI\Channels\register_chat_handler( $my_sync_handler );
 AgentsAPI\AI\Channels\register_chat_stream_handler( $my_stream_handler );
 
