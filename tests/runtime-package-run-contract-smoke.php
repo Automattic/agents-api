@@ -236,6 +236,19 @@ $late_dispatch = $late_ability instanceof WP_Ability ? $late_ability->execute(
 ) : null;
 agents_api_smoke_assert_equals( false, is_wp_error( $late_dispatch ), 'late-resolved ability executes through the canonical ability object', $failures, $passes );
 agents_api_smoke_assert_equals( 'late-load', is_array( $late_dispatch ) ? $late_dispatch['result']['workflow_id'] ?? '' : '', 'late-resolved ability uses the runtime package handler filter', $failures, $passes );
+
+if ( $registry instanceof WP_Abilities_Registry ) {
+	$registry->reset_registered_for_smoke();
+}
+
+$helper_dispatch = wp_agent_run_runtime_package(
+	array(
+		'package'  => array( 'slug' => 'site-builder' ),
+		'workflow' => array( 'id' => 'helper-late-load' ),
+	)
+);
+agents_api_smoke_assert_equals( false, is_wp_error( $helper_dispatch ), 'runtime package helper resolves the ability after abilities init already fired', $failures, $passes );
+agents_api_smoke_assert_equals( 'helper-late-load', is_array( $helper_dispatch ) ? $helper_dispatch['result']['workflow_id'] ?? '' : '', 'runtime package helper dispatches through the canonical ability', $failures, $passes );
 $GLOBALS['__agents_api_smoke_actions']['wp_agent_runtime_package_run_handler'] = array();
 
 echo "\n[1] Request validates package and workflow selectors:\n";

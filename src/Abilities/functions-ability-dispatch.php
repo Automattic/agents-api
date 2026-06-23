@@ -44,6 +44,10 @@ if ( ! function_exists( 'wp_agent_run_runtime_package' ) ) {
 		$ability_name     = defined( 'AgentsAPI\\AI\\AGENTS_RUN_RUNTIME_PACKAGE_ABILITY' )
 			? constant( 'AgentsAPI\\AI\\AGENTS_RUN_RUNTIME_PACKAGE_ABILITY' )
 			: 'agents/run-runtime-package';
+		if ( function_exists( 'AgentsAPI\\AI\\agents_register_runtime_package_run_abilities' ) ) {
+			AgentsAPI\AI\agents_register_runtime_package_run_abilities();
+		}
+
 		$normalize_result = static function ( mixed $result ) {
 			if ( $result instanceof WP_Error ) {
 				return $result;
