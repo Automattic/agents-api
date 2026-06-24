@@ -485,6 +485,10 @@ class WP_Agent_Tool_Declaration {
 			if ( ! is_string( $key ) || '' === $key ) {
 				continue;
 			}
+			if ( WP_Agent_Tool_Parameters::sensitiveKey( $key ) ) {
+				$normalized[ $key ] = WP_Agent_Tool_Parameters::REDACTED_VALUE;
+				continue;
+			}
 
 			$normalized_value = self::normalizeRuntimeMetadataValue( $value );
 			if ( null === $normalized_value ) {

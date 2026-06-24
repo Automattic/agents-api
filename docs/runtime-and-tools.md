@@ -433,7 +433,9 @@ Canonical keys:
 | `capability_scope` | `runtime_local` or `control_plane` | Whether a host may expose the tool to a delegated runtime or should keep it in the parent/control-plane runtime. |
 | `environment` | `runtime_local` or `control_plane` | The intended execution environment for a declaration or result. |
 
-The substrate treats `runtime` as a JSON-friendly associative array. It preserves scalar and nested array values with string keys, drops unsupported values, and leaves product-specific interpretation to callers.
+The substrate treats `runtime` as a JSON-friendly associative array. It preserves scalar and nested array values with string keys, drops unsupported values, redacts sensitive key names such as tokens, secrets, cookies, nonces, passwords, authorization headers, and API keys, and leaves product-specific interpretation to callers.
+
+`parameter_defaults` is a model/request-facing declaration field, not private secret storage. Defaults for sensitive-looking parameter names are normalized to `[redacted]`; hosts that need credentials should resolve them inside the concrete executor or through an explicit binding/authorization layer that is not serialized into the tool declaration.
 
 Delegated runtime consumers should advertise runtime-local tools with `capability_scope: runtime_local` and `environment: runtime_local`. Control-plane tools such as repository mutation, deployment, approval, or parent orchestration actions should use `capability_scope: control_plane` and stay out of runtime-local declarations. Agents API records and propagates this vocabulary; hosts still own the concrete allow/deny policy and execution adapter.
 

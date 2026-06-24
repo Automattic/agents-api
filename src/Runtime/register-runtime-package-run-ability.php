@@ -260,7 +260,8 @@ function agents_runtime_package_run_dispatch( array $input ) {
 function agents_get_runtime_package_run( array $input ) {
 	$handler = apply_filters( 'wp_agent_runtime_package_run_status_handler', null, $input );
 	if ( is_callable( $handler ) ) {
-		return WP_Agent_Run_Control::normalize_run_result( call_user_func( $handler, $input ), 'agents_runtime_package_run_invalid_status' );
+		$result = WP_Agent_Run_Control::normalize_run_result( call_user_func( $handler, $input ), 'agents_runtime_package_run_invalid_status' );
+		return is_wp_error( $result ) ? $result : agents_runtime_package_run_observer_payload( $result, $input );
 	}
 
 	$run = WP_Agent_Run_Control::get_run( AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, agents_runtime_package_run_string( $input['run_id'] ?? '' ) );
@@ -268,7 +269,7 @@ function agents_get_runtime_package_run( array $input ) {
 		return new \WP_Error( 'agents_runtime_package_run_not_found', 'No runtime package run was found for the requested run_id.' );
 	}
 
-	return $run;
+	return agents_runtime_package_run_observer_payload( $run, $input );
 }
 
 /**
@@ -297,7 +298,8 @@ function agents_cancel_runtime_package_run( array $input ) {
 function agents_list_runtime_package_run_events( array $input ) {
 	$handler = apply_filters( 'wp_agent_runtime_package_run_events_handler', null, $input );
 	if ( is_callable( $handler ) ) {
-		return WP_Agent_Run_Control::normalize_events_result( call_user_func( $handler, $input ), 'agents_runtime_package_run_invalid_events_result' );
+		$result = WP_Agent_Run_Control::normalize_events_result( call_user_func( $handler, $input ), 'agents_runtime_package_run_invalid_events_result' );
+		return is_wp_error( $result ) ? $result : agents_runtime_package_run_observer_payload( $result, $input );
 	}
 
 	$result = WP_Agent_Run_Control::list_events(
@@ -310,7 +312,7 @@ function agents_list_runtime_package_run_events( array $input ) {
 		return new \WP_Error( 'agents_runtime_package_run_not_found', 'No runtime package run was found for the requested run_id.' );
 	}
 
-	return $result;
+	return agents_runtime_package_run_observer_payload( $result, $input );
 }
 
 /**
@@ -332,8 +334,23 @@ function agents_runtime_package_run_permission( array $input ): bool {
 
 /** @param array<string,mixed> $input Ability input. */
 function agents_runtime_package_run_read_permission( array $input ): bool {
-	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'read' ) : false;
+	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
 	return (bool) apply_filters( 'agents_runtime_package_run_read_permission', $allowed, $input );
+}
+
+/** @param array<string,mixed> $input Ability input. */
+function agents_runtime_package_run_unredacted_read_permission( array $input ): bool {
+	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
+	return (bool) apply_filters( 'agents_runtime_package_run_unredacted_read_permission', $allowed, $input );
+}
+
+/**
+ * @param array<string,mixed> $payload Run or event-page payload.
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed>
+ */
+function agents_runtime_package_run_observer_payload( array $payload, array $input ): array {
+	return agents_runtime_package_run_unredacted_read_permission( $input ) ? $payload : WP_Agent_Run_Control::redacted_observer_payload( $payload );
 }
 
 /** @param array<string,mixed> $input Ability input. */

@@ -160,7 +160,8 @@ class WP_Agent_Tool_Parameters {
 				throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_defaults' );
 			}
 
-			$normalized[ trim( $parameter_name ) ] = $value;
+			$parameter_name = trim( $parameter_name );
+			$normalized[ $parameter_name ] = self::sensitiveKey( $parameter_name ) ? self::REDACTED_VALUE : $value;
 		}
 
 		return $normalized;
@@ -522,7 +523,7 @@ class WP_Agent_Tool_Parameters {
 	 * @param string $key Parameter key.
 	 * @return bool
 	 */
-	private static function sensitiveKey( string $key ): bool {
+	public static function sensitiveKey( string $key ): bool {
 		return '' !== $key && 1 === preg_match( '/(api[_-]?key|authorization|auth[_-]?token|bearer|cookie|credential|nonce|password|private[_-]?key|secret|session[_-]?id|token)/i', $key );
 	}
 

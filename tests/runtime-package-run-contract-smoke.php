@@ -29,6 +29,28 @@ if ( ! function_exists( 'is_wp_error' ) ) {
 	}
 }
 
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $capability ): bool {
+		return ! empty( $GLOBALS['__agents_api_smoke_caps'][ $capability ] );
+	}
+}
+
+$GLOBALS['__agents_api_smoke_options'] = array();
+
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $option, $default = false ) {
+		return $GLOBALS['__agents_api_smoke_options'][ $option ] ?? $default;
+	}
+}
+
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $option, $value, $autoload = null ): bool {
+		unset( $autoload );
+		$GLOBALS['__agents_api_smoke_options'][ $option ] = $value;
+		return true;
+	}
+}
+
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
 
 if ( ! class_exists( 'WP_Ability' ) ) {
@@ -330,6 +352,27 @@ agents_api_smoke_assert_equals( false, is_wp_error( $dispatch ), 'dispatcher ret
 agents_api_smoke_assert_equals( 'succeeded', is_array( $dispatch ) ? $dispatch['status'] ?? '' : '', 'dispatcher normalizes result status', $failures, $passes );
 agents_api_smoke_assert_equals( 'build-site', is_array( $dispatch ) ? $dispatch['result']['workflow_id'] ?? '' : '', 'dispatcher passes workflow to handler', $failures, $passes );
 agents_api_smoke_assert_equals( 'runtime log', is_array( $dispatch ) ? $dispatch['evidence_refs'][0]['label'] ?? '' : '', 'dispatcher preserves evidence refs', $failures, $passes );
+
+$observer_run_id = 'observer-runtime-run';
+AgentsAPI\AI\WP_Agent_Run_Control::save_run(
+	AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE,
+	array(
+		'run_id'   => $observer_run_id,
+		'status'   => 'succeeded',
+		'metadata' => array(
+			'package'  => array( 'slug' => 'site-builder' ),
+			'workflow' => array( 'id' => 'build-site' ),
+		),
+	)
+);
+$GLOBALS['__agents_api_smoke_caps'] = array( 'read' => true );
+agents_api_smoke_assert_equals( false, AgentsAPI\AI\agents_runtime_package_run_read_permission( array( 'run_id' => $observer_run_id ) ), 'runtime package read defaults to operators', $failures, $passes );
+$observer_run = AgentsAPI\AI\agents_get_runtime_package_run( array( 'run_id' => $observer_run_id ) );
+agents_api_smoke_assert_equals( 'succeeded', $observer_run['status'] ?? '', 'runtime package get-run still returns observer status when called directly', $failures, $passes );
+agents_api_smoke_assert_equals( true, $observer_run['metadata']['package']['redacted'] ?? false, 'runtime package observer envelope redacts nested package metadata', $failures, $passes );
+$GLOBALS['__agents_api_smoke_caps']['manage_options'] = true;
+$operator_run = AgentsAPI\AI\agents_get_runtime_package_run( array( 'run_id' => $observer_run_id ) );
+agents_api_smoke_assert_equals( 'site-builder', $operator_run['metadata']['package']['slug'] ?? '', 'runtime package manager get-run preserves operator metadata', $failures, $passes );
 
 echo "\n[4] Public host helper invokes the canonical runtime package boundary:\n";
 $helper_dispatch = wp_agent_run_runtime_package(

@@ -98,7 +98,12 @@ add_action(
 function agents_get_chat_run( array $input ) {
 	$result = agents_chat_run_control_adapter()->get_run( $input );
 	if ( null !== $result ) {
-		return is_wp_error( $result ) ? $result : agents_chat_run_control_normalize_result( $result, 'agents_chat_run_invalid_status' );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		$result = agents_chat_run_control_normalize_result( $result, 'agents_chat_run_invalid_status' );
+		return is_wp_error( $result ) ? $result : agents_chat_run_observer_payload( $result, $input );
 	}
 
 	$run                  = WP_Agent_Chat_Run_Control::get_run( agents_chat_run_control_string( $input['run_id'] ?? '' ) );
@@ -107,7 +112,7 @@ function agents_get_chat_run( array $input ) {
 		return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested session_id and run_id.' );
 	}
 	if ( null !== $run ) {
-		return $run;
+		return agents_chat_run_observer_payload( $run, $input );
 	}
 
 	return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
@@ -118,7 +123,8 @@ function agents_get_chat_run( array $input ) {
  * @return array<string, mixed>|\WP_Error
  */
 function agents_list_chat_run_events( array $input ) {
-	return agents_chat_run_events_normalize_result( agents_chat_run_control_adapter()->list_events( $input ) );
+	$result = agents_chat_run_events_normalize_result( agents_chat_run_control_adapter()->list_events( $input ) );
+	return is_wp_error( $result ) ? $result : agents_chat_run_observer_payload( $result, $input );
 }
 
 /**
@@ -240,6 +246,30 @@ function agents_chat_run_write_permission( array $input ): bool {
 	}
 
 	return $allowed || agents_chat_run_current_user_owns_session( $input );
+}
+
+/** @param array<string,mixed> $input Ability input. */
+function agents_chat_run_unredacted_read_permission( array $input ): bool {
+	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
+	$agent   = sanitize_title( agents_chat_run_control_string( $input['agent'] ?? '' ) );
+	if ( '' !== $agent && class_exists( '\WP_Agent_Access' ) && class_exists( '\WP_Agent_Access_Grant' ) ) {
+		$allowed = $allowed || \WP_Agent_Access::can_current_principal_access_agent(
+			$agent,
+			\WP_Agent_Access_Grant::ROLE_OPERATOR,
+			agents_chat_run_control_request_scope( $input )
+		);
+	}
+
+	return (bool) apply_filters( 'agents_chat_run_unredacted_read_permission', $allowed, $input );
+}
+
+/**
+ * @param array<string,mixed> $payload Run or event-page payload.
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed>
+ */
+function agents_chat_run_observer_payload( array $payload, array $input ): array {
+	return agents_chat_run_unredacted_read_permission( $input ) ? $payload : WP_Agent_Run_Control::redacted_observer_payload( $payload );
 }
 
 /** @param array<string, mixed> $input Ability input. */

@@ -216,6 +216,17 @@ class WP_Agent_Run_Control {
 	}
 
 	/**
+	 * Build an observer-safe run/event payload without changing stored state.
+	 *
+	 * @param array<string,mixed> $payload Normalized run or event-page payload.
+	 * @return array<string,mixed> Redacted payload for non-operator readers.
+	 */
+	public static function redacted_observer_payload( array $payload ): array {
+		$redacted = self::redact_payload_value( $payload );
+		return is_array( $redacted ) ? self::string_keyed_array( $redacted ) : array();
+	}
+
+	/**
 	 * Start or update an addressable run in the selected store.
 	 *
 	 * @param string              $store_key Option key used by the backing store.
@@ -411,6 +422,31 @@ class WP_Agent_Run_Control {
 
 	private static function int_value( mixed $value ): int {
 		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (int) $value : 0;
+	}
+
+	/**
+	 * @param mixed $value Raw value.
+	 * @return mixed Redacted value.
+	 */
+	private static function redact_payload_value( $value, string $key = '' ) {
+		if ( '' !== $key && self::is_sensitive_payload_key( $key ) ) {
+			return is_array( $value ) ? array( 'redacted' => true ) : '[redacted]';
+		}
+
+		if ( ! is_array( $value ) ) {
+			return $value;
+		}
+
+		$redacted = array();
+		foreach ( $value as $item_key => $item_value ) {
+			$redacted[ $item_key ] = self::redact_payload_value( $item_value, is_string( $item_key ) ? $item_key : '' );
+		}
+
+		return $redacted;
+	}
+
+	private static function is_sensitive_payload_key( string $key ): bool {
+		return 1 === preg_match( '/(api[_-]?key|authorization|auth[_-]?token|bearer|cookie|credential|diagnostics|nonce|output|package|password|private[_-]?key|provenance|raw|secret|token|workflow)/i', $key );
 	}
 
 	/**

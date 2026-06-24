@@ -97,6 +97,7 @@ $host_declaration = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForCo
 		'scope'       => AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::SCOPE_RUN,
 		'runtime'     => array(
 			'duplicate_policy' => 'repeatable',
+			'api_key'          => 'secret-key',
 			'unsupported'      => new stdClass(),
 		),
 	)
@@ -106,6 +107,7 @@ agents_api_smoke_assert_equals( 'ability', $host_declaration['source'], 'request
 agents_api_smoke_assert_equals( 'host', $host_declaration['executor'], 'request declaration records host executor', $failures, $passes );
 agents_api_smoke_assert_equals( 'run', $host_declaration['scope'], 'request declaration records run scope for host tools', $failures, $passes );
 agents_api_smoke_assert_equals( 'repeatable', $host_declaration['runtime']['duplicate_policy'] ?? '', 'request declaration preserves host runtime metadata', $failures, $passes );
+agents_api_smoke_assert_equals( '[redacted]', $host_declaration['runtime']['api_key'] ?? '', 'request declaration redacts sensitive runtime metadata', $failures, $passes );
 agents_api_smoke_assert_equals( false, array_key_exists( 'unsupported', $host_declaration['runtime'] ?? array() ), 'request declaration drops unsupported host metadata values', $failures, $passes );
 
 $strict_rejected_host = false;
@@ -256,7 +258,7 @@ $dot_path_parameters = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParamet
 agents_api_smoke_assert_equals( 42, $dot_path_parameters['post_id'] ?? null, 'parameter bindings read values from allowed dot-path context sources', $failures, $passes );
 
 $default_definition = array(
-	'parameter_defaults' => array( 'query' => 'top-level-default' ),
+	'parameter_defaults' => array( 'query' => 'top-level-default', 'api_key' => 'secret-key' ),
 	'parameter_bindings' => array(
 		'query' => array(
 			'source'  => 'client_context',
@@ -267,6 +269,7 @@ $default_definition = array(
 );
 $defaulted = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters( array(), array(), $default_definition );
 agents_api_smoke_assert_equals( 'binding-default', $defaulted['query'] ?? null, 'binding defaults override top-level parameter defaults', $failures, $passes );
+agents_api_smoke_assert_equals( '[redacted]', $defaulted['api_key'] ?? null, 'sensitive parameter defaults redact before model-facing declarations', $failures, $passes );
 $default_context = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
 	array(),
 	array( 'client_context' => array( 'search' => array( 'query' => 'bound-context' ) ) ),
