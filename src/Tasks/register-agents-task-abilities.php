@@ -240,7 +240,8 @@ function agents_list_execution_targets( array $input ) {
 function agents_get_task_run( array $input ) {
 	$handler = apply_filters( 'wp_agent_task_run_status_handler', null, $input );
 	if ( is_callable( $handler ) ) {
-		return agents_task_normalize_run_control_result( call_user_func( $handler, $input ), 'agents_task_run_invalid_status' );
+		$result = agents_task_normalize_run_control_result( call_user_func( $handler, $input ), 'agents_task_run_invalid_status' );
+		return is_wp_error( $result ) ? $result : agents_task_run_observer_payload( $result, $input );
 	}
 
 	$run                  = WP_Agent_Task_Run_Control::get_run( agents_task_string( $input['run_id'] ?? '' ) );
@@ -249,7 +250,7 @@ function agents_get_task_run( array $input ) {
 		return new \WP_Error( 'agents_task_run_not_found', 'No task run was found for the requested session_id and run_id.' );
 	}
 	if ( null !== $run ) {
-		return $run;
+		return agents_task_run_observer_payload( $run, $input );
 	}
 
 	return new \WP_Error( 'agents_task_run_not_found', 'No task run was found for the requested run_id.' );
@@ -451,6 +452,21 @@ function agents_task_read_permission( array $input ): bool {
 	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'read' ) : false;
 	$allowed = (bool) apply_filters( 'agents_task_read_permission', $allowed, $input );
 	return (bool) apply_filters( 'agents_task_permission', $allowed, $input );
+}
+
+/** @param array<string,mixed> $input Ability input. */
+function agents_task_unredacted_read_permission( array $input ): bool {
+	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
+	return (bool) apply_filters( 'agents_task_unredacted_read_permission', $allowed, $input );
+}
+
+/**
+ * @param array<string,mixed> $payload Run payload.
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed>
+ */
+function agents_task_run_observer_payload( array $payload, array $input ): array {
+	return agents_task_unredacted_read_permission( $input ) ? $payload : \AgentsAPI\AI\WP_Agent_Run_Control::redacted_observer_payload( $payload );
 }
 
 /** @param array<string,mixed> $input Ability input. */

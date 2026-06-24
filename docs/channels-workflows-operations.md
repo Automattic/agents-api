@@ -91,6 +91,8 @@ array(
 
 Cancellation is best-effort. A runtime that can abort provider work immediately may do so; a runtime that cannot should mark the run `cancelling` and let its conversation loop stop at the next interrupt check. `WP_Agent_Chat_Run_Control::cancellation_interrupt_message()` builds the message shape expected by `WP_Agent_Conversation_Loop` `interrupt_source` callbacks.
 
+Read abilities return observer-safe run envelopes for non-operators. Stored run state may contain runtime diagnostics, package/workflow selectors, raw refs, provenance, output, or caller metadata for audit/debugging, but `agents/get-chat-run`, `agents/list-chat-run-events`, `agents/get-task-run`, `agents/get-runtime-package-run`, and `agents/list-runtime-package-run-events` redact high-risk keys unless the caller passes the explicit unredacted read gate. Managers keep full access by default; hosts can extend that path with `agents_chat_run_unredacted_read_permission`, `agents_task_unredacted_read_permission`, or `agents_runtime_package_run_unredacted_read_permission` while leaving broad read access observer-safe.
+
 Queued messages return the same run payload plus `queued_message_id` and `position`. Async runtimes can drain queued messages through their worker, cron, or Action Scheduler integration. Synchronous runtimes can expose queued state and require polling or an explicit continue operation in the consuming product; the substrate does not force a background runner.
 
 ## Session, webhook, and idempotency helpers

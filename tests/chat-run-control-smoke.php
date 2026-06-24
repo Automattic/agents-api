@@ -216,7 +216,7 @@ add_filter(
 		'status'     => 'running',
 		'started_at' => '2026-01-01T00:00:00Z',
 		'updated_at' => '2026-01-01T00:00:01Z',
-		'metadata'   => array( 'provider' => 'test' ),
+		'metadata'   => array( 'provider' => 'test', 'token' => 'secret-token' ),
 	),
 	10,
 	2
@@ -225,6 +225,12 @@ add_filter(
 $status = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) );
 agents_api_smoke_assert_equals( 'running', $status['status'] ?? null, 'get-run normalizes status payload', $failures, $passes );
 agents_api_smoke_assert_equals( 'test', $status['metadata']['provider'] ?? null, 'get-run preserves metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'secret-token', $status['metadata']['token'] ?? null, 'manager get-run preserves operator metadata', $failures, $passes );
+$GLOBALS['__agents_api_smoke_caps']['manage_options'] = false;
+$observer_status = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) );
+agents_api_smoke_assert_equals( 'test', $observer_status['metadata']['provider'] ?? null, 'observer get-run preserves safe metadata', $failures, $passes );
+agents_api_smoke_assert_equals( '[redacted]', $observer_status['metadata']['token'] ?? null, 'observer get-run redacts metadata secrets', $failures, $passes );
+$GLOBALS['__agents_api_smoke_caps']['manage_options'] = true;
 
 add_filter(
 	'wp_agent_chat_run_cancel_handler',

@@ -60,6 +60,11 @@ $forbidden_product_vocabulary = array(
 	'wp-site generator',
 	'WPSG',
 	'wpsg',
+	'Codebox',
+	'codebox',
+	'Studio Native',
+	'studio-native',
+	'studio_native',
 );
 
 $forbidden_admin_apis = array(

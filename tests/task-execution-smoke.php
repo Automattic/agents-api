@@ -207,8 +207,9 @@ add_filter(
 						'type' => 'completed',
 					),
 				),
-				'provenance'        => array( 'source' => 'fake' ),
-				'output'            => array( 'answer' => 'done' ),
+				'provenance'        => array( 'source' => 'fake', 'api_key' => 'secret-key' ),
+				'output'            => array( 'answer' => 'done', 'token' => 'secret-token' ),
+				'metadata'          => array( 'token' => 'secret-token', 'safe' => 'yes' ),
 			);
 		};
 	},
@@ -261,6 +262,20 @@ agents_api_smoke_assert_equals( 'succeeded', $stored['status'] ?? null, 'get-tas
 agents_api_smoke_assert_equals( 'agents-api/execution-metrics/v1', $stored['execution_metrics']['schema'] ?? null, 'get-task-run preserves stored metrics schema', $failures, $passes );
 agents_api_smoke_assert_equals( 300, $stored['execution_metrics']['artifact_bytes'] ?? null, 'get-task-run preserves stored metrics artifact bytes', $failures, $passes );
 agents_api_smoke_assert_equals( 'metrics-raw-1', $stored['execution_metrics']['raw_refs'][0]['id'] ?? null, 'get-task-run preserves stored metrics raw refs', $failures, $passes );
+agents_api_smoke_assert_equals( 'secret-token', $stored['metadata']['token'] ?? null, 'manager get-task-run keeps full operator metadata', $failures, $passes );
+
+$GLOBALS['__agents_api_smoke_caps']['manage_options'] = false;
+$observer_stored = AgentsAPI\AI\Tasks\agents_get_task_run(
+	array(
+		'session_id' => $result['session_id'],
+		'run_id'     => $result['run_id'],
+	)
+);
+agents_api_smoke_assert_equals( 'yes', $observer_stored['metadata']['safe'] ?? null, 'observer get-task-run preserves safe metadata', $failures, $passes );
+agents_api_smoke_assert_equals( '[redacted]', $observer_stored['metadata']['token'] ?? null, 'observer get-task-run redacts metadata secrets', $failures, $passes );
+agents_api_smoke_assert_equals( true, $observer_stored['provenance']['redacted'] ?? false, 'observer get-task-run redacts provenance', $failures, $passes );
+agents_api_smoke_assert_equals( true, $observer_stored['output']['redacted'] ?? false, 'observer get-task-run redacts output', $failures, $passes );
+$GLOBALS['__agents_api_smoke_caps']['manage_options'] = true;
 
 AgentsAPI\AI\Tasks\WP_Agent_Task_Run_Control::start_run( 'task-run-cancel', 'task-session-cancel', 'fake-executor' );
 $cancelled = AgentsAPI\AI\Tasks\agents_cancel_task_run(
