@@ -72,11 +72,12 @@ Agents API owns the generic run-control ability contracts and default run-contro
 | --- | --- | --- |
 | `agents/get-chat-run` | Return status for a known chat run. | `wp_agent_chat_run_status_handler` |
 | `agents/cancel-chat-run` | Request best-effort cancellation for a known chat run. | `wp_agent_chat_run_cancel_handler` |
+| `agents/list-chat-run-events` | Return lifecycle/event pages for a known chat run. | `wp_agent_chat_run_events_handler` |
 | `agents/queue-chat-message` | Accept a next user message while a session has an active run. | `wp_agent_chat_message_queue_handler` |
 
 Clients can expose status, Stop, and Queue controls whenever these canonical abilities are available and the caller has permission for the selected agent. The default handlers preserve safe behavior for synchronous runtimes; runtime-specific handlers are enhancements, not prerequisites.
 
-Run status vocabulary is bounded to `queued`, `running`, `cancelling`, `cancelled`, `completed`, and `failed`. The canonical run payload is:
+Run status vocabulary is bounded to `queued`, `running`, `cancelling`, `cancelled`, `completed`, `failed`, `runtime_tool_pending`, `approval_required`, `budget_exceeded`, `stalled`, and `interrupted`. The canonical run payload is:
 
 ```php
 array(
@@ -85,9 +86,97 @@ array(
 	'status'     => 'running',
 	'started_at' => '2026-01-01T00:00:00Z',
 	'updated_at' => '2026-01-01T00:00:01Z',
-	'metadata'   => array(),
+	'metadata'   => array(
+		'orchestration' => array(
+			'provider'     => 'external-provider-id',
+			'run_id'       => 'provider-run-id',
+			'event_cursor' => 'provider-event-cursor',
+		),
+	),
 )
 ```
+
+The status, events, and cancel hooks are the generic external durable-run adapter contract. A host can back them with any durable run provider by returning the canonical payloads above; Agents API normalizes status values, validates required identifiers, applies the existing permission callbacks, and keeps provider-specific state inside metadata. The canonical metadata object is `metadata['orchestration']` with `provider` for the adapter/provider id, `run_id` for the durable provider run id, and `event_cursor` for the provider cursor associated with the latest status or event page. These keys are intentionally generic and do not imply a specific runner, queue, or product.
+
+Event handlers return the same run fields plus an `events` list, `cursor`, and `has_more`. Each event uses `id`, `type`, `created_at`, optional `message`, and opaque `metadata`. The returned `cursor` is the client polling cursor for the next `agents/list-chat-run-events` call; adapters can mirror a provider-native cursor in `metadata['orchestration']['event_cursor']` when the provider cursor differs from the public cursor.
+
+### External durable-run bridge
+
+An external orchestration bridge should call its own in-process adapter or service client for its provider-native durable run status, then return the canonical Agents API run-control shape. Agents API does not shell out to an orchestrator and does not require any orchestrator package dependency; the bridge is just a handler behind `wp_agent_chat_run_status_handler` and `wp_agent_chat_run_events_handler`.
+
+Mapping guidance:
+
+| External status field | Agents API field |
+| --- | --- |
+| `run.state` | `status`, mapped into the bounded Agents API vocabulary: `queued`, `running`, `cancelling`, `cancelled`, `completed`, `failed`, `stalled`, or `interrupted`. |
+| `run.id` | `metadata.orchestration.run_id`; keep the client-addressable chat `run_id` unchanged at the top level. |
+| `totals` | `metadata.orchestration.totals`. |
+| `latest_event_cursor` | `cursor` on event pages and `metadata.orchestration.event_cursor` on status/event payloads. |
+| `normalized_events` | `events`, with each item using canonical `id`, `type`, `created_at`, `message`, and `metadata`. |
+| `artifact_refs` | `metadata.orchestration.artifact_refs`. |
+
+Example provider-native input shape:
+
+```php
+array(
+	'schema'              => 'example-orchestrator/run-status/v1',
+	'run'                 => array(
+		'id'         => 'external-run-1',
+		'state'      => 'succeeded',
+		'started_at' => '2026-06-25T12:00:00Z',
+		'updated_at' => '2026-06-25T12:03:00Z',
+	),
+	'totals'              => array(
+		'events'    => 2,
+		'artifacts' => 1,
+		'errors'    => 0,
+	),
+	'latest_event_cursor' => 'provider-cursor-2',
+	'normalized_events'   => array(
+		array(
+			'id'         => 'provider-event-2',
+			'cursor'     => 'provider-cursor-2',
+			'type'       => 'artifact',
+			'created_at' => '2026-06-25T12:03:00Z',
+			'message'    => 'Recorded transcript artifact.',
+		),
+	),
+	'artifact_refs'       => array(
+		array(
+			'id'    => 'artifact-transcript',
+			'type'  => 'transcript',
+			'label' => 'Transcript',
+		),
+	),
+)
+```
+
+Canonical `agents/get-chat-run` output:
+
+```php
+array(
+	'run_id'     => 'run-chat-1',
+	'session_id' => 'session-external-1',
+	'status'     => 'completed',
+	'started_at' => '2026-06-25T12:00:00Z',
+	'updated_at' => '2026-06-25T12:03:00Z',
+	'metadata'   => array(
+		'orchestration' => array(
+			'provider'      => 'example-orchestrator',
+			'schema'        => 'example-orchestrator/run-status/v1',
+			'run_id'        => 'external-run-1',
+			'state'         => 'succeeded',
+			'event_cursor'  => 'provider-cursor-2',
+			'totals'        => array( 'events' => 2, 'artifacts' => 1, 'errors' => 0 ),
+			'artifact_refs' => array(
+				array( 'id' => 'artifact-transcript', 'type' => 'transcript', 'label' => 'Transcript' ),
+			),
+		),
+	),
+)
+```
+
+Canonical `agents/list-chat-run-events` output uses the same run fields, returns provider events mapped into the canonical event shape, sets `cursor` to the latest provider cursor, and repeats that cursor in `metadata.orchestration.event_cursor` when useful. Cancellation stays handler-owned: register `wp_agent_chat_run_cancel_handler` only when the bridge can request cancellation through its durable provider; otherwise Agents API keeps the default local cancellation behavior.
 
 Cancellation is best-effort. A runtime that can abort provider work immediately may do so; a runtime that cannot should mark the run `cancelling` and let its conversation loop stop at the next interrupt check. `WP_Agent_Chat_Run_Control::cancellation_interrupt_message()` builds the message shape expected by `WP_Agent_Conversation_Loop` `interrupt_source` callbacks.
 
