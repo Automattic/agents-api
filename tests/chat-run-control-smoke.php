@@ -216,7 +216,15 @@ add_filter(
 		'status'     => 'running',
 		'started_at' => '2026-01-01T00:00:00Z',
 		'updated_at' => '2026-01-01T00:00:01Z',
-		'metadata'   => array( 'provider' => 'test', 'token' => 'secret-token' ),
+		'metadata'   => array(
+			'provider'      => 'test',
+			'orchestration' => array(
+				'provider'     => 'fake-durable-runner',
+				'run_id'       => 'external-run-1',
+				'event_cursor' => 'external-cursor-1',
+			),
+			'token'         => 'secret-token',
+		),
 	),
 	10,
 	2
@@ -225,6 +233,9 @@ add_filter(
 $status = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) );
 agents_api_smoke_assert_equals( 'running', $status['status'] ?? null, 'get-run normalizes status payload', $failures, $passes );
 agents_api_smoke_assert_equals( 'test', $status['metadata']['provider'] ?? null, 'get-run preserves metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'fake-durable-runner', $status['metadata']['orchestration']['provider'] ?? null, 'get-run preserves external orchestration provider metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'external-run-1', $status['metadata']['orchestration']['run_id'] ?? null, 'get-run preserves external orchestration run id metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'external-cursor-1', $status['metadata']['orchestration']['event_cursor'] ?? null, 'get-run preserves external orchestration event cursor metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'secret-token', $status['metadata']['token'] ?? null, 'manager get-run preserves operator metadata', $failures, $passes );
 $GLOBALS['__agents_api_smoke_caps']['manage_options'] = false;
 $observer_status = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) );
@@ -283,6 +294,13 @@ add_filter(
 		'run_id'     => $input['run_id'],
 		'session_id' => $input['session_id'],
 		'status'     => 'running',
+		'metadata'   => array(
+			'orchestration' => array(
+				'provider'     => 'fake-durable-runner',
+				'run_id'       => 'external-events-run-1',
+				'event_cursor' => 'external-event-cursor-1',
+			),
+		),
 		'events'     => array(
 			array(
 				'id'         => 'evt_1',
@@ -290,9 +308,14 @@ add_filter(
 				'message'    => 'Calling client/tool...',
 				'created_at' => '2026-01-01T00:00:00Z',
 				'metadata'   => array(
-					'turn'         => 1,
-					'tool_name'    => 'client/tool',
-					'tool_call_id' => 'call-1',
+					'turn'          => 1,
+					'tool_name'     => 'client/tool',
+					'tool_call_id'  => 'call-1',
+					'orchestration' => array(
+						'provider'     => 'fake-durable-runner',
+						'run_id'       => 'external-events-run-1',
+						'event_cursor' => 'external-event-cursor-1',
+					),
 				),
 			),
 		),
@@ -314,6 +337,10 @@ agents_api_smoke_assert_equals( 'run-events-1', $event_page['run_id'] ?? null, '
 agents_api_smoke_assert_equals( 'session-events-1', $event_page['session_id'] ?? null, 'run events handler preserves session id', $failures, $passes );
 agents_api_smoke_assert_equals( 'running', $event_page['status'] ?? null, 'run events handler normalizes status', $failures, $passes );
 agents_api_smoke_assert_equals( 'evt_1', $event_page['cursor'] ?? null, 'run events handler returns cursor', $failures, $passes );
+agents_api_smoke_assert_equals( 'fake-durable-runner', $event_page['metadata']['orchestration']['provider'] ?? null, 'run events handler preserves external orchestration provider metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'external-events-run-1', $event_page['metadata']['orchestration']['run_id'] ?? null, 'run events handler preserves external orchestration run id metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'external-event-cursor-1', $event_page['metadata']['orchestration']['event_cursor'] ?? null, 'run events handler preserves external orchestration event cursor metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/tool', $event_page['events'][0]['metadata']['tool_name'] ?? null, 'run events handler returns safe metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'external-event-cursor-1', $event_page['events'][0]['metadata']['orchestration']['event_cursor'] ?? null, 'run events handler returns external event cursor metadata', $failures, $passes );
 
 agents_api_smoke_finish( 'chat run-control', $failures, $passes );

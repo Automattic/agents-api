@@ -453,7 +453,10 @@ function agents_chat_run_output_schema(): array {
 			),
 			'started_at' => array( 'type' => 'string' ),
 			'updated_at' => array( 'type' => 'string' ),
-			'metadata'   => array( 'type' => 'object' ),
+			'metadata'   => array(
+				'type'        => 'object',
+				'description' => 'Opaque run metadata. External durable-run adapters should use orchestration.provider, orchestration.run_id, and orchestration.event_cursor for provider identity, provider run identity, and latest event cursor.',
+			),
 		),
 	);
 }
@@ -486,8 +489,15 @@ function agents_chat_run_events_output_schema(): array {
 					),
 				),
 			),
-			'cursor'     => array( 'type' => 'string' ),
+			'cursor'     => array(
+				'type'        => 'string',
+				'description' => 'Opaque cursor for the next events page. External durable-run adapters should also mirror the latest durable cursor in metadata.orchestration.event_cursor when useful for status polling.',
+			),
 			'has_more'   => array( 'type' => 'boolean' ),
+			'metadata'   => array(
+				'type'        => 'object',
+				'description' => 'Opaque event-page metadata using the same orchestration.provider, orchestration.run_id, and orchestration.event_cursor convention as run status payloads.',
+			),
 		),
 	);
 }
