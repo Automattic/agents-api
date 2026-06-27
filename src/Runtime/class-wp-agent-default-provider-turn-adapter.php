@@ -33,6 +33,19 @@ defined( 'ABSPATH' ) || exit;
  * callable that transforms `(system_prompt, messages, context)` into
  * `(system_prompt, messages)` before the builder is populated, without
  * replacing the dispatch, extraction, or normalization the adapter provides.
+ *
+ * Dispatch is the second consumer-variable concern. A consumer that needs an
+ * authenticated, transport-tuned, cached, model-config-aware, or vision-capable
+ * request cannot influence the bare builder this adapter constructs by default.
+ * For that case the adapter exposes a second injectable "dispatch provider"
+ * strategy, symmetric with the prompt-input one. When a dispatcher is injected,
+ * the adapter still owns the generic mapping (provider/model/system/messages/
+ * declarations) and the generic tail (tool-call extraction, text/usage
+ * normalization, result-shape assembly); the consumer owns only request
+ * construction and dispatch, returning a wp-ai-client `GenerativeAiResult`. When
+ * no dispatcher is injected the adapter builds and dispatches the bare
+ * `wp_ai_client_prompt()` builder exactly as before — the seam is a pure
+ * addition with no behavior change on the default path.
  */
 // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Turn-dispatch exceptions are caught by the conversation loop and returned as structured arrays, never rendered.
 class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_Adapter {
@@ -52,13 +65,17 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	/** @var callable|null Injectable prompt-input strategy, defaulting to identity. */
 	private $prompt_input_provider;
 
+	/** @var callable|null Injectable dispatch strategy, defaulting to the bare builder. */
+	private $dispatch_provider;
+
 	/**
 	 * @param string                $provider_id   Provider identifier (for example `openai`).
 	 * @param string                $model_id      Model identifier.
 	 * @param string                $system_prompt Default system prompt.
 	 * @param array<string, mixed>  $options       Dispatch options. Recognized keys:
 	 *                                              `temperature` (float), `max_tokens` (int),
-	 *                                              `prompt_input_provider` (callable). Only keys
+	 *                                              `prompt_input_provider` (callable),
+	 *                                              `dispatch_provider` (callable). Only keys
 	 *                                              the wp-ai-client builder supports are wired.
 	 */
 	public function __construct( string $provider_id, string $model_id, string $system_prompt = '', array $options = array() ) {
@@ -67,10 +84,12 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 		$this->system_prompt = $system_prompt;
 
 		$prompt_input_provider = $options['prompt_input_provider'] ?? null;
-		unset( $options['prompt_input_provider'] );
+		$dispatch_provider     = $options['dispatch_provider'] ?? null;
+		unset( $options['prompt_input_provider'], $options['dispatch_provider'] );
 		$this->options = $options;
 
 		$this->prompt_input_provider = is_callable( $prompt_input_provider ) ? $prompt_input_provider : null;
+		$this->dispatch_provider     = is_callable( $dispatch_provider ) ? $dispatch_provider : null;
 	}
 
 	/**
@@ -90,16 +109,59 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	}
 
 	/**
+	 * Set the pluggable dispatch provider.
+	 *
+	 * When set, the adapter delegates request construction and dispatch to the
+	 * provider instead of building and dispatching the bare `wp_ai_client_prompt()`
+	 * builder. The adapter still owns the generic mapping that precedes dispatch
+	 * (prompt-input resolution, provider/model/system resolution, the canonical
+	 * message split, and tool-declaration mapping) and the generic tail that
+	 * follows it (tool-call extraction, text/usage normalization, result-shape
+	 * assembly). The provider owns only request construction, authentication,
+	 * transport tuning, caching, model-config, multimodal parts, and the actual
+	 * dispatch call.
+	 *
+	 * Passing `null` restores the default bare-builder dispatch.
+	 *
+	 * The provider is called as `$dispatcher( array $payload )` and receives a
+	 * single associative array with these keys (the mapped builder inputs, not a
+	 * pre-built builder, so the consumer fully owns construction):
+	 *
+	 * - `provider_id`           (string)              Resolved provider identifier.
+	 * - `model_id`              (string)              Resolved model identifier.
+	 * - `system_prompt`         (string)              Resolved system prompt ('' when none).
+	 * - `messages`              (array<int,array>)    The resolved canonical messages
+	 *                                                 (post prompt-input provider), so the
+	 *                                                 consumer can map them however it needs.
+	 * - `prompt_parts`          (array<int,object>)   wp-ai-client MessagePart objects for the
+	 *                                                 latest user turn (the current prompt).
+	 * - `history`               (array<int,object>)   wp-ai-client Message DTOs for earlier turns.
+	 * - `function_declarations` (array<int,object>)   wp-ai-client FunctionDeclaration objects.
+	 * - `options`               (array<string,mixed>) Adapter options (`temperature`, `max_tokens`).
+	 * - `request`               (WP_Agent_Provider_Turn_Request) The full request, for
+	 *                                                 runtime/context/model/budget/metadata access.
+	 *
+	 * The provider MUST return a wp-ai-client `GenerativeAiResult` (any object the
+	 * shipped normalizers understand — `toText()`, `getCandidates()`,
+	 * `getTokenUsage()`). To signal failure it may return a `WP_Error` or throw;
+	 * both are handled identically to the bare-builder failure path (a thrown
+	 * `RuntimeException` the conversation loop catches).
+	 *
+	 * @param callable|null $dispatch_provider Dispatch strategy.
+	 * @return self
+	 */
+	public function set_dispatch_provider( ?callable $dispatch_provider ): self {
+		$this->dispatch_provider = $dispatch_provider;
+		return $this;
+	}
+
+	/**
 	 * Run one provider turn through the upstream wp-ai-client builder.
 	 *
 	 * @param WP_Agent_Provider_Turn_Request $request Provider-turn request.
 	 * @return array<string, mixed> Normalized provider-turn result.
 	 */
 	public function run_turn( WP_Agent_Provider_Turn_Request $request ): array {
-		if ( ! function_exists( 'wp_ai_client_prompt' ) ) {
-			throw new \RuntimeException( 'wp-ai-client is unavailable: wp_ai_client_prompt() is not defined.' );
-		}
-
 		$resolved      = $this->resolve_prompt_input( $request );
 		$system_prompt = $resolved['system_prompt'];
 		$messages      = $resolved['messages'];
@@ -107,7 +169,48 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 		$provider_id = $this->resolve_provider_id( $request );
 		$model_id    = $this->resolve_model_id( $request );
 
-		$prompt_context = self::split_prompt_context( $messages );
+		$prompt_context        = self::split_prompt_context( $messages );
+		$function_declarations = self::function_declarations( $request->toolDeclarations() );
+
+		if ( null !== $this->dispatch_provider ) {
+			$result = $this->dispatch_via_provider( $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations );
+		} else {
+			$result = $this->dispatch_via_bare_builder( $provider_id, $model_id, $system_prompt, $prompt_context, $function_declarations );
+		}
+
+		if ( function_exists( 'is_wp_error' ) && is_wp_error( $result ) ) {
+			throw new \RuntimeException( 'wp-ai-client request failed: ' . $result->get_error_message() );
+		}
+
+		return array(
+			'content'          => WP_Agent_Provider_Turn_Result::result_text( $result ),
+			'tool_calls'       => WP_Agent_Provider_Turn_Result::extract_tool_calls( $result ),
+			'usage'            => WP_Agent_Provider_Turn_Result::result_usage( $result ),
+			'request_metadata' => array(
+				'provider_id' => $provider_id,
+				'model_id'    => $model_id,
+			),
+		);
+	}
+
+	/**
+	 * Build and dispatch the bare wp-ai-client builder (default dispatch path).
+	 *
+	 * This is the original, unmodified dispatch: it constructs a
+	 * `wp_ai_client_prompt()` builder from the mapped inputs and calls
+	 * `generate_text_result()`. It runs only when no dispatch provider is injected.
+	 *
+	 * @param string                                                          $provider_id           Resolved provider id.
+	 * @param string                                                          $model_id              Resolved model id.
+	 * @param string                                                          $system_prompt         Resolved system prompt.
+	 * @param array{prompt_parts:array<int,object>,history:array<int,object>} $prompt_context        Mapped prompt context.
+	 * @param array<int,object>                                               $function_declarations Mapped function declarations.
+	 * @return mixed wp-ai-client GenerativeAiResult or WP_Error.
+	 */
+	private function dispatch_via_bare_builder( string $provider_id, string $model_id, string $system_prompt, array $prompt_context, array $function_declarations ) {
+		if ( ! function_exists( 'wp_ai_client_prompt' ) ) {
+			throw new \RuntimeException( 'wp-ai-client is unavailable: wp_ai_client_prompt() is not defined.' );
+		}
 
 		$builder = wp_ai_client_prompt();
 
@@ -139,26 +242,49 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			$builder = $builder->with_history( ...$prompt_context['history'] );
 		}
 
-		$function_declarations = self::function_declarations( $request->toolDeclarations() );
 		if ( ! empty( $function_declarations ) ) {
 			$builder = $builder->using_function_declarations( ...$function_declarations );
 		}
 
-		$result = $builder->generate_text_result();
+		return $builder->generate_text_result();
+	}
 
-		if ( function_exists( 'is_wp_error' ) && is_wp_error( $result ) ) {
-			throw new \RuntimeException( 'wp-ai-client request failed: ' . $result->get_error_message() );
+	/**
+	 * Delegate request construction and dispatch to the injected dispatch provider.
+	 *
+	 * The provider receives the mapped builder inputs (see {@see self::set_dispatch_provider()}
+	 * for the exact payload contract) and returns a wp-ai-client GenerativeAiResult
+	 * (or a WP_Error / throws on failure). The adapter retains ownership of the
+	 * generic tail in {@see self::run_turn()}.
+	 *
+	 * @param WP_Agent_Provider_Turn_Request                                  $request               Provider-turn request.
+	 * @param string                                                          $provider_id           Resolved provider id.
+	 * @param string                                                          $model_id              Resolved model id.
+	 * @param string                                                          $system_prompt         Resolved system prompt.
+	 * @param array<int,array<string,mixed>>                                  $messages              Resolved canonical messages.
+	 * @param array{prompt_parts:array<int,object>,history:array<int,object>} $prompt_context        Mapped prompt context.
+	 * @param array<int,object>                                               $function_declarations Mapped function declarations.
+	 * @return mixed wp-ai-client GenerativeAiResult or WP_Error.
+	 */
+	private function dispatch_via_provider( WP_Agent_Provider_Turn_Request $request, string $provider_id, string $model_id, string $system_prompt, array $messages, array $prompt_context, array $function_declarations ) {
+		$dispatcher = $this->dispatch_provider;
+		if ( ! is_callable( $dispatcher ) ) {
+			throw new \RuntimeException( 'Dispatch provider is unavailable.' );
 		}
 
-		return array(
-			'content'          => self::result_text( $result ),
-			'tool_calls'       => WP_Agent_Provider_Turn_Result::extract_tool_calls( $result ),
-			'usage'            => self::result_usage( $result ),
-			'request_metadata' => array(
-				'provider_id' => $provider_id,
-				'model_id'    => $model_id,
-			),
+		$payload = array(
+			'provider_id'           => $provider_id,
+			'model_id'              => $model_id,
+			'system_prompt'         => $system_prompt,
+			'messages'              => $messages,
+			'prompt_parts'          => $prompt_context['prompt_parts'],
+			'history'               => $prompt_context['history'],
+			'function_declarations' => $function_declarations,
+			'options'               => $this->options,
+			'request'               => $request,
 		);
+
+		return call_user_func( $dispatcher, $payload );
 	}
 
 	/**
@@ -468,70 +594,5 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 		}
 
 		return $declarations;
-	}
-
-	/**
-	 * Extract assistant text from a wp-ai-client result.
-	 *
-	 * @param mixed $result wp-ai-client GenerativeAiResult.
-	 * @return string
-	 */
-	private static function result_text( $result ): string {
-		if ( is_object( $result ) && method_exists( $result, 'toText' ) ) {
-			try {
-				$text = $result->toText();
-
-				return is_string( $text ) ? $text : '';
-			} catch ( \Throwable $error ) {
-				// Results without text content (tool-only turns) throw; treat as empty.
-				if ( false !== strpos( $error->getMessage(), 'No text content found' ) ) {
-					return '';
-				}
-
-				throw $error;
-			}
-		}
-
-		return '';
-	}
-
-	/**
-	 * Normalize token usage from a wp-ai-client result.
-	 *
-	 * @param mixed $result wp-ai-client GenerativeAiResult.
-	 * @return array{prompt_tokens:int,completion_tokens:int,total_tokens:int}
-	 */
-	private static function result_usage( $result ): array {
-		$usage = array(
-			'prompt_tokens'     => 0,
-			'completion_tokens' => 0,
-			'total_tokens'      => 0,
-		);
-
-		if ( ! is_object( $result ) || ! method_exists( $result, 'getTokenUsage' ) ) {
-			return $usage;
-		}
-
-		$token_usage = $result->getTokenUsage();
-		if ( ! is_object( $token_usage ) ) {
-			return $usage;
-		}
-
-		if ( method_exists( $token_usage, 'getPromptTokens' ) ) {
-			$prompt_tokens          = $token_usage->getPromptTokens();
-			$usage['prompt_tokens'] = is_numeric( $prompt_tokens ) ? (int) $prompt_tokens : 0;
-		}
-
-		if ( method_exists( $token_usage, 'getCompletionTokens' ) ) {
-			$completion_tokens          = $token_usage->getCompletionTokens();
-			$usage['completion_tokens'] = is_numeric( $completion_tokens ) ? (int) $completion_tokens : 0;
-		}
-
-		if ( method_exists( $token_usage, 'getTotalTokens' ) ) {
-			$total_tokens          = $token_usage->getTotalTokens();
-			$usage['total_tokens'] = is_numeric( $total_tokens ) ? (int) $total_tokens : 0;
-		}
-
-		return $usage;
 	}
 }

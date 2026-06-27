@@ -127,6 +127,80 @@ class WP_Agent_Provider_Turn_Result {
 	}
 
 	/**
+	 * Extract assistant text from a wp-ai-client result.
+	 *
+	 * Consumers that own dispatch (via the default adapter's dispatch-provider
+	 * seam, or entirely outside the adapter) can reuse this normalization so they
+	 * do not duplicate the result-text extraction boilerplate. Results without
+	 * text content (tool-only turns) yield an empty string.
+	 *
+	 * @param mixed $result wp-ai-client GenerativeAiResult.
+	 * @return string
+	 */
+	public static function result_text( $result ): string {
+		if ( is_object( $result ) && method_exists( $result, 'toText' ) ) {
+			try {
+				$text = $result->toText();
+
+				return is_string( $text ) ? $text : '';
+			} catch ( \Throwable $error ) {
+				// Results without text content (tool-only turns) throw; treat as empty.
+				if ( false !== strpos( $error->getMessage(), 'No text content found' ) ) {
+					return '';
+				}
+
+				throw $error;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Normalize token usage from a wp-ai-client result.
+	 *
+	 * Consumers that own dispatch can reuse this normalization to produce the
+	 * canonical `{prompt_tokens, completion_tokens, total_tokens}` usage shape
+	 * without duplicating the token-usage extraction boilerplate.
+	 *
+	 * @param mixed $result wp-ai-client GenerativeAiResult.
+	 * @return array{prompt_tokens:int,completion_tokens:int,total_tokens:int}
+	 */
+	public static function result_usage( $result ): array {
+		$usage = array(
+			'prompt_tokens'     => 0,
+			'completion_tokens' => 0,
+			'total_tokens'      => 0,
+		);
+
+		if ( ! is_object( $result ) || ! method_exists( $result, 'getTokenUsage' ) ) {
+			return $usage;
+		}
+
+		$token_usage = $result->getTokenUsage();
+		if ( ! is_object( $token_usage ) ) {
+			return $usage;
+		}
+
+		if ( method_exists( $token_usage, 'getPromptTokens' ) ) {
+			$prompt_tokens          = $token_usage->getPromptTokens();
+			$usage['prompt_tokens'] = is_numeric( $prompt_tokens ) ? (int) $prompt_tokens : 0;
+		}
+
+		if ( method_exists( $token_usage, 'getCompletionTokens' ) ) {
+			$completion_tokens          = $token_usage->getCompletionTokens();
+			$usage['completion_tokens'] = is_numeric( $completion_tokens ) ? (int) $completion_tokens : 0;
+		}
+
+		if ( method_exists( $token_usage, 'getTotalTokens' ) ) {
+			$total_tokens          = $token_usage->getTotalTokens();
+			$usage['total_tokens'] = is_numeric( $total_tokens ) ? (int) $total_tokens : 0;
+		}
+
+		return $usage;
+	}
+
+	/**
 	 * Normalize provider tool calls.
 	 *
 	 * @param array<mixed> $tool_calls Raw tool calls.
