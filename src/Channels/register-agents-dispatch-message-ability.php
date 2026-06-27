@@ -140,11 +140,11 @@ function agents_dispatch_message_input_schema(): array {
 		'properties' => array(
 			'channel'         => array(
 				'type'        => 'string',
-				'description' => 'Outbound channel identifier, e.g. whatsapp, wacli, slack, sms, or a product-defined channel id.',
+				'description' => 'Outbound channel/transport identifier — an opaque, product-defined id.',
 			),
 			'recipient'       => array(
 				'type'        => 'string',
-				'description' => 'Transport-specific destination id, e.g. phone number, WhatsApp JID, channel id, or email address.',
+				'description' => 'Transport-specific destination id, as defined by the channel implementation (e.g. an account id, address, or handle).',
 			),
 			'message'         => array(
 				'type'        => 'string',
