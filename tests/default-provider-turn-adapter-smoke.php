@@ -427,5 +427,157 @@ namespace {
 	agents_api_smoke_assert_equals( 11, $conversation['usage']['total_tokens'], 'run_conversation accumulates adapter usage across turns', $failures, $passes );
 	agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STATUS_COMPLETED, $conversation['run_outcome']['status'] ?? '', 'run_conversation completes the run', $failures, $passes );
 
+	echo "\n[5] Dispatch seam: injected dispatcher receives the documented payload and its result drives the shared tail:\n";
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'should-not-be-used', array(), array( 99, 99, 99 ) );
+
+	$dispatch_payload  = null;
+	$dispatcher_result = $make_result(
+		'Dispatched answer.',
+		array( array( 'name' => 'client/lookup', 'parameters' => array( 'query' => 'gamma' ), 'id' => 'call-dispatch-1' ) ),
+		array( 8, 9, 17 )
+	);
+
+	$dispatch_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'dispatch-system', array( 'temperature' => 0.5, 'max_tokens' => 256 ) );
+	$dispatch_adapter->set_dispatch_provider(
+		static function ( array $payload ) use ( &$dispatch_payload, $dispatcher_result ) {
+			$dispatch_payload = $payload;
+			return $dispatcher_result;
+		}
+	);
+
+	$dispatch_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+		array(
+			array( 'role' => 'user', 'content' => 'earlier turn' ),
+			array( 'role' => 'assistant', 'content' => 'earlier answer' ),
+			array( 'role' => 'user', 'content' => 'look up gamma' ),
+		),
+		array(
+			'client/lookup' => array(
+				'name'        => 'client/lookup',
+				'source'      => 'client',
+				'description' => 'Look up one value.',
+				'parameters'  => array(
+					'type'       => 'object',
+					'required'   => array( 'query' ),
+					'properties' => array( 'query' => array( 'type' => 'string' ) ),
+				),
+				'executor'    => 'client',
+				'scope'       => 'run',
+			),
+		),
+		array( 'provider_id' => 'fake-provider', 'model_id' => 'fake-model' )
+	);
+
+	$dispatch_raw    = $dispatch_adapter->run_turn( $dispatch_request );
+	$dispatch_result = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize( $dispatch_raw );
+
+	// The injected dispatcher's result must drive the shared tail, NOT the bare builder.
+	agents_api_smoke_assert_equals( 'Dispatched answer.', $dispatch_result['content'], 'dispatch seam: adapter normalizes the dispatcher result text', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client/lookup', $dispatch_result['tool_calls'][0]['name'] ?? '', 'dispatch seam: adapter still extracts tool calls from the dispatcher result', $failures, $passes );
+	agents_api_smoke_assert_equals( 'gamma', $dispatch_result['tool_calls'][0]['parameters']['query'] ?? '', 'dispatch seam: adapter decodes tool-call args from the dispatcher result', $failures, $passes );
+	agents_api_smoke_assert_equals( 17, $dispatch_result['usage']['total_tokens'], 'dispatch seam: adapter normalizes usage from the dispatcher result', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-provider', $dispatch_result['request_metadata']['provider_id'] ?? '', 'dispatch seam: adapter assembles request metadata', $failures, $passes );
+	// The bare builder must NOT have been invoked (its recorded result is unused).
+	agents_api_smoke_assert_equals( true, ! isset( $GLOBALS['__adapter_smoke']['provider'] ), 'dispatch seam: bare builder is bypassed entirely when a dispatcher is set', $failures, $passes );
+
+	// The documented payload contract.
+	agents_api_smoke_assert_equals( 'fake-provider', $dispatch_payload['provider_id'] ?? '', 'dispatch payload carries provider_id', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-model', $dispatch_payload['model_id'] ?? '', 'dispatch payload carries model_id', $failures, $passes );
+	agents_api_smoke_assert_equals( 'dispatch-system', $dispatch_payload['system_prompt'] ?? '', 'dispatch payload carries the resolved system prompt', $failures, $passes );
+	agents_api_smoke_assert_equals( 3, count( $dispatch_payload['messages'] ?? array() ), 'dispatch payload carries the resolved canonical messages', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, count( $dispatch_payload['prompt_parts'] ?? array() ), 'dispatch payload carries the current-prompt message parts', $failures, $passes );
+	agents_api_smoke_assert_equals( 2, count( $dispatch_payload['history'] ?? array() ), 'dispatch payload carries the history messages', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, count( $dispatch_payload['function_declarations'] ?? array() ), 'dispatch payload carries the function declarations', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client/lookup', $dispatch_payload['function_declarations'][0]->name ?? '', 'dispatch payload function declaration carries the logical tool name', $failures, $passes );
+	agents_api_smoke_assert_equals( 0.5, $dispatch_payload['options']['temperature'] ?? null, 'dispatch payload carries adapter options (temperature)', $failures, $passes );
+	agents_api_smoke_assert_equals( 256, $dispatch_payload['options']['max_tokens'] ?? null, 'dispatch payload carries adapter options (max_tokens)', $failures, $passes );
+	agents_api_smoke_assert_equals( true, ( $dispatch_payload['request'] ?? null ) instanceof AgentsAPI\AI\WP_Agent_Provider_Turn_Request, 'dispatch payload carries the WP_Agent_Provider_Turn_Request', $failures, $passes );
+
+	echo "\n[6] Dispatch seam honors the prompt-input seam (mapping runs before dispatch):\n";
+	$GLOBALS['__adapter_smoke'] = array();
+	$seam_payload              = null;
+	$composed_adapter          = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter(
+		'fake-provider',
+		'fake-model',
+		'base-system',
+		array(
+			'prompt_input_provider' => static function ( string $system_prompt, array $messages, array $context ): array {
+				unset( $messages, $context );
+				return array(
+					'system_prompt' => 'composed-before-dispatch',
+					'messages'      => array( array( 'role' => 'user', 'content' => 'composed for dispatch' ) ),
+				);
+			},
+			'dispatch_provider'     => static function ( array $payload ) use ( &$seam_payload, $make_result ) {
+				$seam_payload = $payload;
+				return $make_result( 'composed dispatched', array(), array( 1, 1, 2 ) );
+			},
+		)
+	);
+	$composed_adapter->run_turn(
+		new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+			array( array( 'role' => 'user', 'content' => 'original' ) )
+		)
+	);
+	agents_api_smoke_assert_equals( 'composed-before-dispatch', $seam_payload['system_prompt'] ?? '', 'dispatch payload reflects the prompt-input seam transform', $failures, $passes );
+
+	echo "\n[7] Dispatch seam: dispatcher failure (WP_Error and throw) is handled like the bare path:\n";
+	$wp_error_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'sys' );
+	$wp_error_adapter->set_dispatch_provider(
+		static function ( array $payload ) {
+			unset( $payload );
+			return new WP_Error( 'wp_ai_client_text_exception', 'dispatcher exploded' );
+		}
+	);
+	$wp_error_threw = false;
+	try {
+		$wp_error_adapter->run_turn(
+			new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'fail' ) ) )
+		);
+	} catch ( \RuntimeException $error ) {
+		$wp_error_threw = false !== strpos( $error->getMessage(), 'dispatcher exploded' );
+	}
+	agents_api_smoke_assert_equals( true, $wp_error_threw, 'dispatch seam: a WP_Error from the dispatcher throws a RuntimeException', $failures, $passes );
+
+	$throw_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'sys' );
+	$throw_adapter->set_dispatch_provider(
+		static function ( array $payload ) {
+			unset( $payload );
+			throw new \RuntimeException( 'dispatcher threw directly' );
+		}
+	);
+	$throw_propagated = false;
+	try {
+		$throw_adapter->run_turn(
+			new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'fail' ) ) )
+		);
+	} catch ( \RuntimeException $error ) {
+		$throw_propagated = false !== strpos( $error->getMessage(), 'dispatcher threw directly' );
+	}
+	agents_api_smoke_assert_equals( true, $throw_propagated, 'dispatch seam: a thrown error from the dispatcher propagates to the caller', $failures, $passes );
+
+	echo "\n[8] set_dispatch_provider( null ) restores the default bare-builder dispatch:\n";
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'bare again', array(), array( 1, 2, 3 ) );
+	$restore_adapter                           = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'restore-system' );
+	$restore_adapter->set_dispatch_provider( static fn ( array $payload ) => $make_result( 'via dispatcher', array(), array( 0, 0, 0 ) ) );
+	$restore_adapter->set_dispatch_provider( null );
+	$restore_raw = $restore_adapter->run_turn(
+		new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'hi' ) ) )
+	);
+	agents_api_smoke_assert_equals( 'bare again', $restore_raw['content'], 'set_dispatch_provider(null) falls back to the bare builder', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-provider', $GLOBALS['__adapter_smoke']['provider'] ?? '', 'restored bare path drives the wp_ai_client builder again', $failures, $passes );
+
+	echo "\n[9] Public result normalization helpers on WP_Agent_Provider_Turn_Result:\n";
+	$helper_result = $make_result( 'helper text', array(), array( 4, 6, 10 ) );
+	agents_api_smoke_assert_equals( 'helper text', AgentsAPI\AI\WP_Agent_Provider_Turn_Result::result_text( $helper_result ), 'public result_text() extracts assistant text', $failures, $passes );
+	$helper_usage = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::result_usage( $helper_result );
+	agents_api_smoke_assert_equals( 4, $helper_usage['prompt_tokens'], 'public result_usage() extracts prompt tokens', $failures, $passes );
+	agents_api_smoke_assert_equals( 6, $helper_usage['completion_tokens'], 'public result_usage() extracts completion tokens', $failures, $passes );
+	agents_api_smoke_assert_equals( 10, $helper_usage['total_tokens'], 'public result_usage() extracts total tokens', $failures, $passes );
+	$tool_only_result = $make_result( '', array( array( 'name' => 'client/lookup', 'parameters' => array( 'q' => 'x' ), 'id' => 'tc-1' ) ), array( 1, 0, 1 ) );
+	agents_api_smoke_assert_equals( '', AgentsAPI\AI\WP_Agent_Provider_Turn_Result::result_text( $tool_only_result ), 'public result_text() returns empty for a tool-only turn', $failures, $passes );
+
 	agents_api_smoke_finish( 'Agents API default provider-turn adapter', $failures, $passes );
 }
