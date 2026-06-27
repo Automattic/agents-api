@@ -178,6 +178,7 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-result.p
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-chat-run-control.php';
 require_once AGENTS_API_PATH . 'src/Tasks/class-wp-agent-task-run-control.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-loop.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-default-provider-turn-adapter.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-call.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-result.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-executor.php';

@@ -512,6 +512,60 @@ class WP_Agent_Conversation_Loop {
 	}
 
 	/**
+	 * One-call conversation convenience that supplies the default adapter.
+	 *
+	 * Fulfills the {@see WP_Agent_Conversation_Runner} contract intent: a caller
+	 * provides messages, tool declarations, and a provider/model, and the loop
+	 * runs end-to-end through {@see WP_Agent_Default_Provider_Turn_Adapter}
+	 * without the caller hand-building a turn runner.
+	 *
+	 * The adapter is supplied through the mediated path (as `provider_turn_adapter`),
+	 * so when a `tool_executor` is provided the loop executes tools and assembles
+	 * the canonical envelopes itself — the adapter never executes tools.
+	 *
+	 * Recognized `$options` keys (all optional):
+	 *
+	 * - `system_prompt` (string): Default system instruction for the adapter.
+	 * - `temperature` (float) / `max_tokens` (int): Forwarded to the adapter.
+	 * - `prompt_input_provider` (callable): Pluggable prompt-input strategy.
+	 * - `tool_executor` (WP_Agent_Tool_Executor): Enables mediated tool execution.
+	 * - `completion_policy`, `max_turns`, `context`, `should_continue`, and any
+	 *   other {@see WP_Agent_Conversation_Loop::run()} option are passed through.
+	 *
+	 * @param array<int, array<string, mixed>>    $messages          Initial transcript messages.
+	 * @param array<mixed>                        $tool_declarations Tool declarations keyed by name.
+	 * @param string                              $provider_id       Provider identifier.
+	 * @param string                              $model_id          Model identifier.
+	 * @param array<string, mixed>                $options           Loop and adapter options.
+	 * @return array<string, mixed> Normalized conversation result.
+	 */
+	public static function run_conversation( array $messages, array $tool_declarations, string $provider_id, string $model_id, array $options = array() ): array {
+		$system_prompt = is_string( $options['system_prompt'] ?? null ) ? $options['system_prompt'] : '';
+
+		$adapter_options = array();
+		foreach ( array( 'temperature', 'max_tokens', 'prompt_input_provider' ) as $adapter_key ) {
+			if ( array_key_exists( $adapter_key, $options ) ) {
+				$adapter_options[ $adapter_key ] = $options[ $adapter_key ];
+			}
+		}
+
+		$adapter = new WP_Agent_Default_Provider_Turn_Adapter( $provider_id, $model_id, $system_prompt, $adapter_options );
+
+		$loop_options                          = $options;
+		$loop_options['provider_turn_adapter'] = $adapter;
+		$loop_options['tool_declarations']     = $tool_declarations;
+		unset( $loop_options['temperature'], $loop_options['max_tokens'], $loop_options['prompt_input_provider'], $loop_options['system_prompt'] );
+
+		if ( '' !== $system_prompt ) {
+			$context                  = self::normalize_assoc_array( $loop_options['context'] ?? array() );
+			$context['system_prompt'] = $context['system_prompt'] ?? $system_prompt;
+			$loop_options['context']  = $context;
+		}
+
+		return self::run( $messages, null, $loop_options );
+	}
+
+	/**
 	 * Mediate tool calls extracted from the turn runner result.
 	 *
 	 * Handles the tool-call → validate → execute → message assembly cycle.

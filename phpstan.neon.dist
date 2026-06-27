@@ -12,3 +12,6 @@ parameters:
 		- stubs/class-wp-filter-sentinel.php
 		- stubs/abilities-api-functions.php
 		- stubs/action-scheduler-functions.php
+		- stubs/wp-ai-client-functions.php
+		- stubs/class-wp-ai-client-prompt-builder.php
+		- stubs/wp-ai-client-dtos.php
