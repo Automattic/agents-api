@@ -2,9 +2,9 @@
 /**
  * Abstract base class for agent messaging channels.
  *
- * A "channel" is a transport that connects an external messaging surface
- * (Telegram, Slack, WhatsApp, Email, …) to a chat ability registered through
- * the WordPress Abilities API. The channel handles transport-specific I/O
+ * A "channel" is a transport adapter, registered by a consuming product,
+ * that connects an external messaging surface to a chat ability registered
+ * through the WordPress Abilities API. The channel handles transport-specific I/O
  * (how to extract a user message from a webhook payload, how to send a reply
  * back) while delegating the actual agent run to the configured chat ability.
  *
@@ -21,7 +21,7 @@
  * `agents/chat`); override `run_agent()` to plug in a different runtime.
  *
  * Mirrors a similar pattern used internally at WordPress.com to drive
- * Telegram, Slack, and other agent surfaces. The host-specific orchestration
+ * a range of agent surfaces. The host-specific orchestration
  * (multi-tenant user resolution, blog switching, internal agent runtime) is
  * intentionally not part of this contract — implementations that need those
  * concerns should add their own subclass layer between this base class and
@@ -86,18 +86,18 @@ abstract class WP_Agent_Channel {
 	 * Stable identifier for the channel type and instance. Used together with
 	 * the per-conversation `external_id` to scope sessions across redeploys.
 	 *
-	 * Convention: `<channel-type>` for single-instance channels (`slack`,
-	 * `whatsapp`); `<channel-type>_<bot-or-account>` when one site runs
-	 * multiple instances of the same channel (`telegram_<bot-name>`).
+	 * Convention: `<channel-type>` for single-instance channels;
+	 * `<channel-type>_<instance>` when one site runs multiple instances
+	 * of the same channel (e.g. `<channel-type>_<bot-or-account>`).
 	 *
 	 * @return string
 	 */
 	abstract public function get_external_id_provider(): string;
 
 	/**
-	 * The channel-side ID of the conversation. Telegram chat ID, Slack
-	 * channel ID, WhatsApp JID — whatever the channel uses to address a
-	 * single thread. Returning null disables per-conversation isolation.
+	 * The channel-side ID of the conversation — whatever the channel uses
+	 * to address a single thread (a conversation id, channel id, or
+	 * address). Returning null disables per-conversation isolation.
 	 *
 	 * @return string|null
 	 */
@@ -457,8 +457,9 @@ abstract class WP_Agent_Channel {
 
 	/**
 	 * Conversation kind: `dm`, `group`, `channel`, or null when unknown.
-	 * Override per transport — WhatsApp can derive from the JID suffix,
-	 * Slack from the channel type, Telegram from the chat type.
+	 * Override per transport — derive it from whatever metadata the
+	 * channel exposes about the conversation (e.g. an address suffix or a
+	 * channel/chat type field).
 	 *
 	 * @param array<mixed> $data
 	 * @return string|null

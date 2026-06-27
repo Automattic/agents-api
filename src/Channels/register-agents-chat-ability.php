@@ -402,11 +402,11 @@ function agents_chat_input_schema(): array {
 					),
 					'external_provider'         => array(
 						'type'        => array( 'string', 'null' ),
-						'description' => 'External network identifier (e.g. "whatsapp", "slack", "email"). Null if not applicable.',
+						'description' => 'External network identifier defined by the consuming product; null if not applicable.',
 					),
 					'external_conversation_id'  => array(
 						'type'        => array( 'string', 'null' ),
-						'description' => 'Opaque external conversation id (chat JID, channel id, thread root). Null if the source has no per-conversation isolation.',
+						'description' => 'Opaque external conversation id (e.g. a conversation id, channel id, or thread root). Null if the source has no per-conversation isolation.',
 					),
 					'external_message_id'       => array(
 						'type'        => array( 'string', 'null' ),
