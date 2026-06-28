@@ -7,6 +7,7 @@
 
 namespace AgentsAPI\AI\Approvals;
 
+use AgentsAPI\AI\WP_Agent_Message;
 use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 
 defined( 'ABSPATH' ) || exit;
@@ -68,6 +69,44 @@ class WP_Agent_Pending_Action {
 	 */
 	public function to_array(): array {
 		return $this->data;
+	}
+
+	/**
+	 * Build the canonical `approval_required` message envelope for this action.
+	 *
+	 * The envelope payload carries the full canonical pending-action shape — the
+	 * same fields {@see self::to_array()} returns (action_id, kind, summary,
+	 * preview, status, expires_at, …) — so every producer emits and every
+	 * consumer reads one shape. Two optional standardized slots give a product's
+	 * orchestration a canonical home without forking the envelope contract:
+	 *
+	 * - `instruction`: a natural-language directive describing how the host
+	 *   wants the agent to handle the pending approval (for example, preview the
+	 *   change and wait for explicit confirmation before resolving).
+	 * - `grants`: structured non-human resolver grants the host attaches so a
+	 *   downstream resolver can authorize the decision.
+	 *
+	 * Both slots are omitted when empty so the canonical shape stays minimal for
+	 * hosts that do not use them.
+	 *
+	 * @param string|null         $instruction Optional operator instruction.
+	 * @param array<int,mixed>    $grants      Optional resolver grants; non-array entries are dropped.
+	 * @param array<string,mixed> $metadata    Optional envelope metadata.
+	 * @return array<string,mixed> Canonical approval_required envelope.
+	 */
+	public function to_approval_envelope( ?string $instruction = null, array $grants = array(), array $metadata = array() ): array {
+		$payload = $this->data;
+
+		if ( null !== $instruction && '' !== trim( $instruction ) ) {
+			$payload['instruction'] = trim( $instruction );
+		}
+
+		$grants = array_values( array_filter( $grants, 'is_array' ) );
+		if ( array() !== $grants ) {
+			$payload['grants'] = $grants;
+		}
+
+		return WP_Agent_Message::approvalRequired( $this->get_summary(), $payload, $metadata );
 	}
 
 	public function get_action_id(): string {
