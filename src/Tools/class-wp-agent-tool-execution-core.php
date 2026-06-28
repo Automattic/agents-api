@@ -17,6 +17,23 @@ class WP_Agent_Tool_Execution_Core {
 	public const EXECUTOR_CLIENT   = WP_Agent_Tool_Declaration::EXECUTOR_CLIENT;
 
 	/**
+	 * Per-target executor registry, or null until first resolved.
+	 *
+	 * @var WP_Agent_Tool_Executor_Registry|null
+	 */
+	private ?WP_Agent_Tool_Executor_Registry $executor_registry;
+
+	/**
+	 * @param WP_Agent_Tool_Executor_Registry|null $executor_registry Optional registry of
+	 *        target-keyed executors. When omitted, it is resolved lazily from the
+	 *        `agents_api_tool_executors` filter on first use so callers that never
+	 *        register a target keep the single-executor path unchanged.
+	 */
+	public function __construct( ?WP_Agent_Tool_Executor_Registry $executor_registry = null ) {
+		$this->executor_registry = $executor_registry;
+	}
+
+	/**
 	 * Prepare a tool call for a caller-supplied execution adapter.
 	 *
 	 * @param string $tool_name       Tool identifier.
@@ -87,6 +104,7 @@ class WP_Agent_Tool_Execution_Core {
 	 */
 	public function executePreparedTool( array $tool_call, array $tool_definition, WP_Agent_Tool_Executor $executor, array $context = array() ): array {
 		$tool_call = WP_Agent_Tool_Call::normalize( $tool_call );
+		$executor  = $this->resolveExecutorForTool( $tool_definition, $executor, $context );
 		try {
 			$result = $executor->executeWP_Agent_Tool_Call( $tool_call, $tool_definition, $context );
 		} catch ( \Throwable $throwable ) {
@@ -144,5 +162,34 @@ class WP_Agent_Tool_Execution_Core {
 		}
 
 		return $this->executePreparedTool( $tool_call, $tool_def, $executor, $context );
+	}
+
+	/**
+	 * Resolve the executor for a single tool call.
+	 *
+	 * When the tool declaration names an execution target (`runtime.executor_target`)
+	 * that a consumer registered through the `agents_api_tool_executors` filter, the
+	 * registered executor handles the call. Any tool with no target, or a target with
+	 * no registered executor, dispatches through the caller-provided default executor
+	 * exactly as before — the single-executor path and existing ability-backed tools
+	 * are unchanged.
+	 *
+	 * @param array<mixed>           $tool_definition  Tool declaration selected for the call.
+	 * @param WP_Agent_Tool_Executor $default_executor Caller-provided default executor.
+	 * @param array<mixed>           $context          Host runtime context for this invocation.
+	 * @return WP_Agent_Tool_Executor Executor to dispatch the tool call to.
+	 */
+	private function resolveExecutorForTool( array $tool_definition, WP_Agent_Tool_Executor $default_executor, array $context ): WP_Agent_Tool_Executor {
+		// Skip registry resolution entirely when the tool names no target, so the
+		// common ability-backed path never builds or consults a registry.
+		if ( '' === WP_Agent_Tool_Executor_Registry::targetIdFromDeclaration( $tool_definition ) ) {
+			return $default_executor;
+		}
+
+		if ( null === $this->executor_registry ) {
+			$this->executor_registry = WP_Agent_Tool_Executor_Registry::fromFilters( $context );
+		}
+
+		return $this->executor_registry->resolveForTool( $tool_definition, $default_executor );
 	}
 }
