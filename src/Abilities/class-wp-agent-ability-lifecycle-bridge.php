@@ -169,7 +169,7 @@ class WP_Agent_Ability_Lifecycle_Bridge {
 			? $decision_array['instruction']
 			: null;
 		$grants      = isset( $decision_array['grants'] ) && is_array( $decision_array['grants'] )
-			? $decision_array['grants']
+			? array_values( $decision_array['grants'] )
 			: array();
 
 		return $pending->to_approval_envelope(
