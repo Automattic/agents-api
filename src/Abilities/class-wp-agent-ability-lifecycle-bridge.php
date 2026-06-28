@@ -10,7 +10,6 @@ namespace AgentsAPI\AI\Abilities;
 
 use AgentsAPI\AI\Approvals\WP_Agent_Pending_Action;
 use AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Store;
-use AgentsAPI\AI\WP_Agent_Message;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -151,27 +150,31 @@ class WP_Agent_Ability_Lifecycle_Bridge {
 			return $pre;
 		}
 
+		$decision_array = is_array( $decision ) ? self::string_keyed_array( $decision ) : array();
+
 		$pending = $decision instanceof WP_Agent_Pending_Action
 			? $decision
-			: WP_Agent_Pending_Action::from_array( self::string_keyed_array( $decision ) );
+			: WP_Agent_Pending_Action::from_array( $decision_array );
 
 		$store = apply_filters( self::FILTER_PENDING_ACTION_STORE, null );
 		if ( $store instanceof WP_Agent_Pending_Action_Store ) {
 			$store->store( $pending );
 		}
 
-		$pending_data = $pending->to_array();
-		$summary      = $pending->get_summary();
+		// A host that hands the bridge a raw decision array may attach the
+		// optional canonical orchestration slots alongside the pending-action
+		// fields. They are routed into the standardized envelope slots rather
+		// than the action value object, which only models the action itself.
+		$instruction = isset( $decision_array['instruction'] ) && is_string( $decision_array['instruction'] )
+			? $decision_array['instruction']
+			: null;
+		$grants      = isset( $decision_array['grants'] ) && is_array( $decision_array['grants'] )
+			? $decision_array['grants']
+			: array();
 
-		return WP_Agent_Message::approvalRequired(
-			$summary,
-			array(
-				'action_id'  => $pending_data['action_id'],
-				'kind'       => $pending_data['kind'],
-				'summary'    => $pending_data['summary'],
-				'preview'    => $pending_data['preview'],
-				'expires_at' => $pending_data['expires_at'],
-			),
+		return $pending->to_approval_envelope(
+			$instruction,
+			$grants,
 			array(
 				'ability_name' => $ability_name,
 			)

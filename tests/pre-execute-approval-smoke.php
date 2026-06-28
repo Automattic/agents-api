@@ -136,6 +136,41 @@ agents_api_smoke_assert_equals( 'Delete post #42.', $envelope['payload']['summar
 agents_api_smoke_assert_equals( 'core/delete-post', $envelope['metadata']['ability_name'] ?? '', 'envelope metadata carries ability_name', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $stored ), 'pending action staged via host store', $failures, $passes );
 agents_api_smoke_assert_equals( 'pa-smoke-001', $stored[0]->to_array()['action_id'], 'staged pending action matches the minted shape', $failures, $passes );
+// The envelope payload now carries the full canonical pending-action shape, not
+// a hand-picked subset, so consumers read one shape regardless of producer.
+agents_api_smoke_assert_equals( $stored[0]->to_array(), $envelope['payload'], 'envelope payload carries the full canonical pending-action shape', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'post_id' => 42 ), $envelope['payload']['apply_input'] ?? null, 'envelope payload carries apply_input', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Pending_Action::from_array( $pending_input )->get_status(), $envelope['payload']['status'] ?? null, 'envelope payload carries status', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'instruction', $envelope['payload'] ), 'instruction slot is omitted when the decision did not supply one', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'grants', $envelope['payload'] ), 'grants slot is omitted when the decision did not supply one', $failures, $passes );
+
+// Reset for the optional-slots case.
+$GLOBALS['__agents_api_smoke_actions'] = array();
+WP_Agent_Ability_Lifecycle_Bridge::register();
+
+echo "\n[3b] A decision array can attach the canonical instruction and grants slots:\n";
+$grant = array( 'resolver' => 'service:publisher', 'scope' => 'publish' );
+add_filter(
+	WP_Agent_Ability_Lifecycle_Bridge::FILTER_PRE_EXECUTE_DECISION,
+	static function ( $decision, string $ability_name ) use ( $pending_input, $grant ) {
+		if ( 'core/delete-post' !== $ability_name ) {
+			return $decision;
+		}
+		return array_merge(
+			$pending_input,
+			array(
+				'instruction' => 'Preview the deletion and wait for explicit approval.',
+				'grants'      => array( $grant ),
+			)
+		);
+	},
+	10,
+	2
+);
+$slots_envelope = apply_filters( 'wp_pre_execute_ability', new WP_Filter_Sentinel(), 'core/delete-post', array( 'post_id' => 42 ), null );
+agents_api_smoke_assert_equals( 'Preview the deletion and wait for explicit approval.', $slots_envelope['payload']['instruction'] ?? '', 'decision instruction flows into the canonical instruction slot', $failures, $passes );
+agents_api_smoke_assert_equals( array( $grant ), $slots_envelope['payload']['grants'] ?? null, 'decision grants flow into the canonical grants slot', $failures, $passes );
+agents_api_smoke_assert_equals( 'pa-smoke-001', $slots_envelope['payload']['action_id'] ?? '', 'slot-carrying envelope still carries the canonical action_id', $failures, $passes );
 
 // Reset for the coexistence case.
 $GLOBALS['__agents_api_smoke_actions'] = array();

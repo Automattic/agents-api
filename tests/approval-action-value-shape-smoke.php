@@ -139,4 +139,44 @@ foreach ( $invalid_cases as $name => $invalid_action ) {
 	agents_api_smoke_assert_equals( true, $thrown, $name . ' throws contract exception', $failures, $passes );
 }
 
+echo "\n[5] to_approval_envelope() emits the canonical flat envelope with optional slots:\n";
+$envelope_action = AgentsAPI\AI\Approvals\WP_Agent_Pending_Action::from_array(
+	array(
+		'action_id'   => 'approve-200',
+		'kind'        => 'content_update',
+		'summary'     => 'Publish the revised landing copy.',
+		'preview'     => array( 'after' => 'Revised copy' ),
+		'apply_input' => array( 'post_id' => 99 ),
+		'status'      => AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status::PENDING,
+		'created_at'  => '2026-05-03T15:00:00Z',
+		'expires_at'  => '2026-05-04T15:00:00Z',
+	)
+);
+
+$bare_envelope = $envelope_action->to_approval_envelope();
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Message::TYPE_APPROVAL_REQUIRED, $bare_envelope['type'] ?? '', 'envelope is approval_required', $failures, $passes );
+agents_api_smoke_assert_equals( 'tool', $bare_envelope['role'] ?? '', 'envelope uses the tool role', $failures, $passes );
+agents_api_smoke_assert_equals( 'Publish the revised landing copy.', $bare_envelope['content'] ?? '', 'envelope content carries the summary', $failures, $passes );
+agents_api_smoke_assert_equals( $envelope_action->to_array(), $bare_envelope['payload'] ?? array(), 'payload carries the full canonical pending-action shape', $failures, $passes );
+agents_api_smoke_assert_equals( 'approve-200', $bare_envelope['payload']['action_id'] ?? '', 'payload carries action_id at the top level', $failures, $passes );
+agents_api_smoke_assert_equals( '2026-05-04T15:00:00Z', $bare_envelope['payload']['expires_at'] ?? '', 'payload carries expires_at', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\Approvals\WP_Agent_Pending_Action_Status::PENDING, $bare_envelope['payload']['status'] ?? '', 'payload carries status', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'instruction', $bare_envelope['payload'] ), 'instruction slot is omitted when not supplied', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'grants', $bare_envelope['payload'] ), 'grants slot is omitted when not supplied', $failures, $passes );
+agents_api_smoke_assert_equals( array(), $bare_envelope['metadata'] ?? null, 'metadata defaults to empty when not supplied', $failures, $passes );
+
+$grant         = array( 'resolver' => 'service:publisher', 'scope' => 'publish' );
+$rich_envelope = $envelope_action->to_approval_envelope(
+	'  Preview the change and wait for explicit approval.  ',
+	array( $grant, 'drop-non-array' ),
+	array( 'ability_name' => 'content/publish' )
+);
+agents_api_smoke_assert_equals( 'Preview the change and wait for explicit approval.', $rich_envelope['payload']['instruction'] ?? '', 'instruction slot is trimmed and carried in payload', $failures, $passes );
+agents_api_smoke_assert_equals( array( $grant ), $rich_envelope['payload']['grants'] ?? null, 'grants slot keeps array grants and drops non-array entries', $failures, $passes );
+agents_api_smoke_assert_equals( 'content/publish', $rich_envelope['metadata']['ability_name'] ?? '', 'metadata is forwarded onto the envelope', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'instruction', $envelope_action->to_array() ), 'instruction slot does not leak back into the action value object', $failures, $passes );
+
+$blank_instruction = $envelope_action->to_approval_envelope( '   ' );
+agents_api_smoke_assert_equals( false, array_key_exists( 'instruction', $blank_instruction['payload'] ), 'whitespace-only instruction is omitted', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API approval action value shape', $failures, $passes );
