@@ -73,6 +73,18 @@ class WP_Agent_Tool_Result {
 		$success = (bool) ( $result['success'] ?? false );
 		$metadata = WP_Agent_Citation_Metadata::normalize_metadata( $result['metadata'] ?? array() );
 
+		// Preserve a machine-readable error code. Executors may either place
+		// error_type under metadata (the canonical home consumers read from) or
+		// return it as a top-level field; promote a top-level code into metadata
+		// so it survives normalization without clobbering an explicit metadata code.
+		if ( ! isset( $metadata['error_type'] )
+			&& isset( $result['error_type'] )
+			&& is_string( $result['error_type'] )
+			&& '' !== trim( $result['error_type'] )
+		) {
+			$metadata['error_type'] = trim( $result['error_type'] );
+		}
+
 		$runtime = WP_Agent_Tool_Declaration::normalizeRuntimeMetadata( $result['runtime'] ?? array() );
 
 		$normalized = array(
