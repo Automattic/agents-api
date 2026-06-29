@@ -90,6 +90,30 @@ namespace WordPress\AiClient\Providers\Models\Contracts {
 	}
 }
 
+namespace WordPress\AiClient\Providers\Http\DTO {
+	if ( ! class_exists( __NAMESPACE__ . '\\RequestOptions' ) ) {
+		/**
+		 * Minimal stand-in for the wp-ai-client RequestOptions DTO so the adapter's
+		 * per-request timeout path (using_request_options + RequestOptions::fromArray
+		 * keyed on KEY_TIMEOUT) is exercised exactly as it is against the shipped DTO.
+		 */
+		class RequestOptions {
+			public const KEY_TIMEOUT = 'timeout';
+			private ?float $timeout = null;
+			public static function fromArray( array $array ): self {
+				$instance = new self();
+				if ( isset( $array[ self::KEY_TIMEOUT ] ) ) {
+					$instance->timeout = (float) $array[ self::KEY_TIMEOUT ];
+				}
+				return $instance;
+			}
+			public function getTimeout(): ?float {
+				return $this->timeout;
+			}
+		}
+	}
+}
+
 namespace WordPress\AiClient\Providers {
 	if ( ! class_exists( __NAMESPACE__ . '\\ProviderRegistry' ) ) {
 		/**
@@ -263,6 +287,10 @@ namespace {
 			$GLOBALS['__adapter_smoke']['declarations'] = $declarations;
 			return $this;
 		}
+		public function using_request_options( \WordPress\AiClient\Providers\Http\DTO\RequestOptions $options ): self {
+			$GLOBALS['__adapter_smoke']['request_timeout'] = $options->getTimeout();
+			return $this;
+		}
 		public function generate_text_result() {
 			if ( isset( $GLOBALS['__adapter_smoke']['select_next'] ) && is_callable( $GLOBALS['__adapter_smoke']['select_next'] ) ) {
 				return call_user_func( $GLOBALS['__adapter_smoke']['select_next'] );
@@ -357,6 +385,43 @@ namespace {
 	agents_api_smoke_assert_equals( 2, count( $GLOBALS['__adapter_smoke']['history'] ?? array() ), 'run_turn sends earlier turns as history', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__adapter_smoke']['declarations'] ?? array() ), 'run_turn maps tool declarations to function declarations', $failures, $passes );
 	agents_api_smoke_assert_equals( 'client/lookup', $GLOBALS['__adapter_smoke']['declarations'][0]->name ?? '', 'function declaration carries the logical tool name', $failures, $passes );
+	agents_api_smoke_assert_equals( 600.0, $GLOBALS['__adapter_smoke']['request_timeout'] ?? null, 'run_turn applies the raised 600s agentic per-request timeout to the builder by default', $failures, $passes );
+
+	echo "\n[1b] request timeout is configurable and honors a caller-supplied override + filter:\n";
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'ok', array(), array( 1, 1, 2 ) );
+	$override_timeout_adapter                  = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter(
+		'fake-provider',
+		'fake-model',
+		'sys',
+		array( 'request_timeout' => 900 )
+	);
+	$override_timeout_adapter->run_turn(
+		new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'hi' ) ) )
+	);
+	agents_api_smoke_assert_equals( 900.0, $GLOBALS['__adapter_smoke']['request_timeout'] ?? null, 'request_timeout option overrides the default and reaches the request', $failures, $passes );
+
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'ok', array(), array( 1, 1, 2 ) );
+	$filter_seen                               = array();
+	add_filter(
+		'agents_api_provider_turn_request_timeout',
+		static function ( $timeout, $provider_id, $model_id ) use ( &$filter_seen ) {
+			$filter_seen[] = array( $timeout, $provider_id, $model_id );
+			return 1200;
+		},
+		10,
+		3
+	);
+	$filter_timeout_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'sys' );
+	$filter_timeout_adapter->run_turn(
+		new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'hi' ) ) )
+	);
+	agents_api_smoke_assert_equals( 1200.0, $GLOBALS['__adapter_smoke']['request_timeout'] ?? null, 'agents_api_provider_turn_request_timeout filter overrides the timeout reaching the request', $failures, $passes );
+	agents_api_smoke_assert_equals( 600.0, $filter_seen[0][0] ?? null, 'timeout filter receives the resolved default as the incoming value', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-provider', $filter_seen[0][1] ?? '', 'timeout filter receives the provider id as context', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-model', $filter_seen[0][2] ?? '', 'timeout filter receives the model id as context', $failures, $passes );
+	$GLOBALS['__agents_api_smoke_actions']['agents_api_provider_turn_request_timeout'] = array();
 
 	echo "\n[2] Prompt-input seam defaults to identity and applies an override:\n";
 	$GLOBALS['__adapter_smoke']                = array();

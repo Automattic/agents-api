@@ -50,6 +50,30 @@ defined( 'ABSPATH' ) || exit;
 // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Turn-dispatch exceptions are caught by the conversation loop and returned as structured arrays, never rendered.
 class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_Adapter {
 
+	/**
+	 * Default per-request HTTP timeout, in seconds, for one agentic provider turn.
+	 *
+	 * wp-ai-client defaults the request timeout to 30s (see
+	 * WP_AI_Client_Prompt_Builder), which is tuned for a single short completion.
+	 * One turn of an agentic loop is a different shape of request: a large system
+	 * prompt, many tool declarations, accumulated transcript, and — for reasoning
+	 * models — extended server-side thinking before any bytes return. A single
+	 * such turn routinely runs for several minutes, so the 30s ceiling aborts the
+	 * request mid-generation with a transport timeout (cURL error 28) and zero
+	 * completion tokens.
+	 *
+	 * This is the PER-REQUEST (per-turn) timeout only. It bounds one provider
+	 * response, not the whole agentic session — the conversation loop bounds the
+	 * session separately via its own turn count and time budget. 600s (10 minutes)
+	 * is a generous ceiling for a single long reasoning turn while still failing
+	 * fast on a genuinely hung connection; callers needing more can raise it via
+	 * the `request_timeout` option or the
+	 * `agents_api_provider_turn_request_timeout` filter.
+	 *
+	 * @var float
+	 */
+	private const DEFAULT_REQUEST_TIMEOUT = 600.0;
+
 	/** @var string Provider identifier passed to the wp-ai-client builder. */
 	private string $provider_id;
 
@@ -74,6 +98,9 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 * @param string                $system_prompt Default system prompt.
 	 * @param array<string, mixed>  $options       Dispatch options. Recognized keys:
 	 *                                              `temperature` (float), `max_tokens` (int),
+	 *                                              `request_timeout` (float, seconds; per-turn
+	 *                                              HTTP timeout, defaults to
+	 *                                              self::DEFAULT_REQUEST_TIMEOUT),
 	 *                                              `prompt_input_provider` (callable),
 	 *                                              `dispatch_provider` (callable). Only keys
 	 *                                              the wp-ai-client builder supports are wired.
@@ -263,7 +290,102 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			$builder = $builder->using_function_declarations( ...$function_declarations );
 		}
 
+		$builder = $this->apply_request_timeout( $builder );
+
 		return $builder->generate_text_result();
+	}
+
+	/**
+	 * Apply the agentic per-request HTTP timeout to the bare wp-ai-client builder.
+	 *
+	 * Scopes the raised timeout to this adapter's own provider turn through the
+	 * builder's per-request transport options (`using_request_options()` →
+	 * `RequestOptions::KEY_TIMEOUT`), rather than mutating the global
+	 * `wp_ai_client_default_request_timeout` filter, so every other wp-ai-client
+	 * consumer in the process keeps its own default. Replacing the builder's
+	 * RequestOptions overrides the 30s default wp-ai-client sets in its
+	 * constructor (the only field that default populates is the timeout).
+	 *
+	 * No-ops when the wp-ai-client RequestOptions DTO or the builder's
+	 * `using_request_options()` setter is unavailable, leaving the default
+	 * dispatch unchanged.
+	 *
+	 * Typed via docblock only (no PHP type hint) so the duck-typed builder the
+	 * bare path constructs is accepted exactly as the surrounding dispatch code
+	 * accepts it.
+	 *
+	 * @param \WP_AI_Client_Prompt_Builder $builder wp-ai-client prompt builder.
+	 * @return \WP_AI_Client_Prompt_Builder The builder, with the per-request timeout applied when supported.
+	 */
+	private function apply_request_timeout( $builder ) {
+		$timeout = $this->resolve_request_timeout();
+		if ( $timeout <= 0.0 ) {
+			return $builder;
+		}
+
+		/*
+		 * The RequestOptions DTO and the builder's usingRequestOptions() setter ship
+		 * together in the same wp-ai-client/php-ai-client version, so the DTO's
+		 * presence is the honest capability signal. (The builder proxies setters
+		 * through __call, which makes a method_exists/is_callable probe unreliable.)
+		 * When the DTO is absent, leave the default dispatch untouched.
+		 */
+		if ( ! class_exists( \WordPress\AiClient\Providers\Http\DTO\RequestOptions::class ) ) {
+			return $builder;
+		}
+
+		return $builder->using_request_options(
+			\WordPress\AiClient\Providers\Http\DTO\RequestOptions::fromArray(
+				array(
+					\WordPress\AiClient\Providers\Http\DTO\RequestOptions::KEY_TIMEOUT => $timeout,
+				)
+			)
+		);
+	}
+
+	/**
+	 * Resolve the per-request HTTP timeout (seconds) for one agentic provider turn.
+	 *
+	 * Resolution order, each layer overriding the previous only with a positive
+	 * numeric value:
+	 *
+	 * 1. {@see self::DEFAULT_REQUEST_TIMEOUT} — the adequate out-of-the-box default.
+	 * 2. The `request_timeout` adapter option — an explicit caller/agent-config override.
+	 * 3. The `agents_api_provider_turn_request_timeout` filter — the runtime/site lever.
+	 *
+	 * Provider-agnostic: provider and model ids are passed to the filter purely as
+	 * context for callers that want to tune by deployment, never branched on here.
+	 *
+	 * @return float Timeout in seconds.
+	 */
+	private function resolve_request_timeout(): float {
+		$timeout = self::DEFAULT_REQUEST_TIMEOUT;
+
+		if ( isset( $this->options['request_timeout'] ) && is_numeric( $this->options['request_timeout'] ) && (float) $this->options['request_timeout'] > 0.0 ) {
+			$timeout = (float) $this->options['request_timeout'];
+		}
+
+		if ( function_exists( 'apply_filters' ) ) {
+			/**
+			 * Filters the per-request HTTP timeout for one agentic provider turn.
+			 *
+			 * Scopes only to the default provider-turn adapter's own request, not
+			 * to every wp-ai-client request in the process. The value bounds a
+			 * single provider response; the conversation loop bounds the overall
+			 * session separately.
+			 *
+			 * @param float  $timeout     Timeout in seconds.
+			 * @param string $provider_id Resolved provider identifier (context only).
+			 * @param string $model_id    Resolved model identifier (context only).
+			 */
+			/** @var mixed $filtered Filters may return anything; validate before trusting it. */
+			$filtered = apply_filters( 'agents_api_provider_turn_request_timeout', $timeout, $this->provider_id, $this->model_id );
+			if ( is_numeric( $filtered ) && (float) $filtered > 0.0 ) {
+				$timeout = (float) $filtered;
+			}
+		}
+
+		return $timeout;
 	}
 
 	/**

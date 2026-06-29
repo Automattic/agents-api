@@ -80,3 +80,23 @@ namespace WordPress\AiClient\Tools\DTO {
 		}
 	}
 }
+
+namespace WordPress\AiClient\Providers\Http\DTO {
+
+	class RequestOptions {
+
+		public const KEY_TIMEOUT = 'timeout';
+
+		/**
+		 * @param array<string, mixed> $array Request option values keyed by RequestOptions constants.
+		 */
+		public static function fromArray( array $array ): self {
+			unset( $array );
+			return new self();
+		}
+
+		public function getTimeout(): ?float {
+			return null;
+		}
+	}
+}
