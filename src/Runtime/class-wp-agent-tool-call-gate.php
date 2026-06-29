@@ -37,6 +37,21 @@ if ( ! defined( 'ABSPATH' ) ) {
  *     'gate_completion' => true,                        // block completion until satisfied (default true)
  *   )
  *
+ * A second, anchor-independent rule shape enforces "do not finish without doing
+ * real work". It blocks completion whenever the run is about to end with fewer
+ * than `min_tool_calls` qualifying tool calls in the whole transcript — even on
+ * turn one, with no anchor required. This catches the failure mode where a model
+ * narrates its intended action as prose ("List root.") instead of emitting a
+ * tool call, which the loop would otherwise treat as natural completion:
+ *
+ *   array(
+ *     'id'               => 'require-tool-use',
+ *     'require_tool_use' => true,                       // unconditional commit guarantee
+ *     'min_tool_calls'   => 1,                          // minimum qualifying calls (default 1)
+ *     'require_one_of'   => array( 'workspace_write' ), // optional: only these calls qualify;
+ *                                                       // omit to count ANY tool call
+ *   )
+ *
  * Field aliases accepted for portability with prior bundle shapes:
  *   `then_require_one_of` => `require_one_of`, `limited_tool_names` => `limited_tools`.
  */
@@ -48,7 +63,7 @@ class WP_Agent_Tool_Call_Gate {
 	public const ERROR_TYPE_CALL_REJECTED      = 'tool_call_gate_rejected';
 	public const ERROR_TYPE_COMPLETION_BLOCKED = 'tool_call_gate_completion_blocked';
 
-	/** @var array<int,array{id:string,after_tool:string,limited_tools:list<string>,max_calls:int,require_one_of:list<string>,gate_calls:bool,gate_completion:bool}> Normalized rules. */
+	/** @var array<int,array{id:string,after_tool:string,limited_tools:list<string>,max_calls:int,require_one_of:list<string>,require_tool_use:bool,min_tool_calls:int,gate_calls:bool,gate_completion:bool}> Normalized rules. */
 	private array $rules;
 
 	/**
@@ -165,6 +180,39 @@ class WP_Agent_Tool_Call_Gate {
 				continue;
 			}
 
+			// Anchor-independent "do real work before finishing" rule. Blocks
+			// completion until at least `min_tool_calls` qualifying tool calls
+			// have run, with no anchor required — so a turn-one stop with zero
+			// tool calls (the model narrated instead of acting) is refused.
+			if ( ! empty( $rule['require_tool_use'] ) ) {
+				$qualifying = empty( $rule['require_one_of'] ) ? null : $rule['require_one_of'];
+				$seen       = self::count_any_tool_calls( $messages, $qualifying );
+				if ( $seen >= $rule['min_tool_calls'] ) {
+					continue;
+				}
+
+				if ( null !== $qualifying ) {
+					$reason = sprintf(
+						'COMPLETION BLOCKED: the task is not finished and you have not used the required tools yet. Make concrete progress now by calling one of these tools: %s. Perform actions as tool calls rather than describing them in text.',
+						implode( ', ', $rule['require_one_of'] )
+					);
+				} else {
+					$reason = 'COMPLETION BLOCKED: the task is not finished and you have not used any tools yet. Make concrete progress now by calling one of your available tools. Perform actions as tool calls rather than describing them in text.';
+				}
+
+				return array(
+					'allowed' => false,
+					'reason'  => $reason,
+					'context' => array(
+						'rule_id'          => $rule['id'],
+						'require_tool_use' => true,
+						'min_tool_calls'   => $rule['min_tool_calls'],
+						'tool_calls_seen'  => $seen,
+						'require_one_of'   => $rule['require_one_of'],
+					),
+				);
+			}
+
 			$anchor_index = self::first_tool_call_index( $messages, $rule['after_tool'] );
 			if ( $anchor_index < 0 ) {
 				continue;
@@ -238,7 +286,7 @@ class WP_Agent_Tool_Call_Gate {
 	 * Normalize raw rules to a deterministic internal shape.
 	 *
 	 * @param array<mixed> $rules Raw rules.
-	 * @return array<int,array{id:string,after_tool:string,limited_tools:list<string>,max_calls:int,require_one_of:list<string>,gate_calls:bool,gate_completion:bool}>
+	 * @return array<int,array{id:string,after_tool:string,limited_tools:list<string>,max_calls:int,require_one_of:list<string>,require_tool_use:bool,min_tool_calls:int,gate_calls:bool,gate_completion:bool}>
 	 */
 	private static function normalize_rules( array $rules ): array {
 		$normalized = array();
@@ -247,38 +295,71 @@ class WP_Agent_Tool_Call_Gate {
 				continue;
 			}
 
-			$max_raw        = $rule['max_calls'] ?? 0;
-			$after_tool     = self::sanitize_tool_name( $rule['after_tool'] ?? '' );
-			$limited_tools  = self::sanitize_tool_list( $rule['limited_tools'] ?? ( $rule['limited_tool_names'] ?? array() ) );
-			$require_one_of = self::sanitize_tool_list( $rule['require_one_of'] ?? ( $rule['then_require_one_of'] ?? array() ) );
-			$max_calls      = max( 0, is_numeric( $max_raw ) ? (int) $max_raw : 0 );
-			$gate_calls     = self::bool_flag( $rule['gate_calls'] ?? true );
-			$gate_complete  = self::bool_flag( $rule['gate_completion'] ?? true );
+			$max_raw          = $rule['max_calls'] ?? 0;
+			$min_raw          = $rule['min_tool_calls'] ?? 1;
+			$after_tool       = self::sanitize_tool_name( $rule['after_tool'] ?? '' );
+			$limited_tools    = self::sanitize_tool_list( $rule['limited_tools'] ?? ( $rule['limited_tool_names'] ?? array() ) );
+			$require_one_of   = self::sanitize_tool_list( $rule['require_one_of'] ?? ( $rule['then_require_one_of'] ?? array() ) );
+			$max_calls        = max( 0, is_numeric( $max_raw ) ? (int) $max_raw : 0 );
+			$min_tool_calls   = max( 1, is_numeric( $min_raw ) ? (int) $min_raw : 1 );
+			$require_tool_use = self::bool_flag( $rule['require_tool_use'] ?? false );
+			$gate_calls       = self::bool_flag( $rule['gate_calls'] ?? true );
+			$gate_complete    = self::bool_flag( $rule['gate_completion'] ?? true );
 
-			// A rule must declare an anchor and at least one required commit tool.
-			if ( '' === $after_tool || empty( $require_one_of ) ) {
+			// A `require_tool_use` rule is anchor-independent: it needs no anchor
+			// or commit set and enforces only completion. Every other rule must
+			// declare an anchor and at least one required commit tool.
+			if ( $require_tool_use ) {
+				if ( ! $gate_complete ) {
+					continue;
+				}
+			} elseif ( '' === $after_tool || empty( $require_one_of ) ) {
 				continue;
 			}
 
-			// Per-call gating needs a bounded limited-tool budget; without one,
-			// only completion gating remains meaningful.
-			$can_gate_calls = $gate_calls && ! empty( $limited_tools ) && $max_calls > 0;
-			if ( ! $can_gate_calls && ! $gate_complete ) {
+			// Per-call gating needs an anchor and a bounded limited-tool budget;
+			// without one, only completion gating remains meaningful.
+			$can_gate_calls = $gate_calls && '' !== $after_tool && ! empty( $limited_tools ) && $max_calls > 0;
+			if ( ! $require_tool_use && ! $can_gate_calls && ! $gate_complete ) {
 				continue;
 			}
 
 			$normalized[] = array(
-				'id'              => self::sanitize_rule_id( $rule['id'] ?? ( 'tool-call-rule-' . $index ) ),
-				'after_tool'      => $after_tool,
-				'limited_tools'   => $limited_tools,
-				'max_calls'       => $max_calls,
-				'require_one_of'  => $require_one_of,
-				'gate_calls'      => $can_gate_calls,
-				'gate_completion' => $gate_complete,
+				'id'               => self::sanitize_rule_id( $rule['id'] ?? ( 'tool-call-rule-' . $index ) ),
+				'after_tool'       => $after_tool,
+				'limited_tools'    => $limited_tools,
+				'max_calls'        => $max_calls,
+				'require_one_of'   => $require_one_of,
+				'require_tool_use' => $require_tool_use,
+				'min_tool_calls'   => $min_tool_calls,
+				'gate_calls'       => $can_gate_calls,
+				'gate_completion'  => $gate_complete,
 			);
 		}
 
 		return $normalized;
+	}
+
+	/**
+	 * Count tool-call messages across the whole transcript.
+	 *
+	 * @param array<int,mixed>       $messages   Transcript messages.
+	 * @param array<int,string>|null $tool_names Tool names to count, or null to count any tool call.
+	 * @return int
+	 */
+	private static function count_any_tool_calls( array $messages, ?array $tool_names ): int {
+		$count = 0;
+		foreach ( array_values( $messages ) as $message ) {
+			$name = self::tool_call_name( $message );
+			if ( '' === $name ) {
+				continue;
+			}
+			if ( null === $tool_names || in_array( $name, $tool_names, true ) ) {
+				++$count;
+			}
+		}
+
+		return $count;
 	}
 
 	/**
