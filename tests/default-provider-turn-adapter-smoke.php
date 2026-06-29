@@ -308,12 +308,17 @@ namespace {
 
 	if ( ! class_exists( 'WP_Error' ) ) {
 		class WP_Error {
-			public function __construct( private string $code = '', private string $message = '' ) {}
+			/** @param array<string, mixed> $data */
+			public function __construct( private string $code = '', private string $message = '', private array $data = array() ) {}
 			public function get_error_code(): string {
 				return $this->code;
 			}
 			public function get_error_message(): string {
 				return $this->message;
+			}
+			/** @return array<string, mixed> */
+			public function get_error_data() {
+				return $this->data;
 			}
 		}
 	}
@@ -479,6 +484,196 @@ namespace {
 		$threw = false !== strpos( $error->getMessage(), 'provider exploded' );
 	}
 	agents_api_smoke_assert_equals( true, $threw, 'run_turn throws on a WP_Error dispatch result', $failures, $passes );
+
+	echo "\n[3b] Retry-on-transient: a 429 rate limit is retried with exponential backoff, then succeeds:\n";
+	$GLOBALS['__adapter_smoke'] = array();
+	$retry_attempts            = 0;
+	$retry_sleeps              = array();
+	// Fail the first two dispatches with HTTP 429, then succeed on the third.
+	$GLOBALS['__adapter_smoke']['select_next'] = static function () use ( &$retry_attempts, $make_result ) {
+		++$retry_attempts;
+		if ( $retry_attempts <= 2 ) {
+			return new WP_Error( 'prompt_client_error', 'Too Many Requests (429)', array( 'status' => 429 ) );
+		}
+		return $make_result( 'recovered after backoff', array(), array( 1, 1, 2 ) );
+	};
+	$retry_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter(
+		'fake-provider',
+		'fake-model',
+		'sys',
+		array(
+			'retry_base_delay'   => 2,
+			'retry_max_attempts' => 5,
+			// Non-sleeping spy: record the requested wait without ever sleeping.
+			'retry_sleeper'      => static function ( $seconds ) use ( &$retry_sleeps ) {
+				$retry_sleeps[] = $seconds;
+			},
+			// Zero jitter so the backoff schedule is the deterministic half-of-capped sequence.
+			'retry_randomizer'   => static function () {
+				return 0.0;
+			},
+		)
+	);
+	$retry_raw    = $retry_adapter->run_turn(
+		new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'hi' ) ) )
+	);
+	$retry_result = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize( $retry_raw );
+	agents_api_smoke_assert_equals( 'recovered after backoff', $retry_result['content'], 'run_turn retries past transient 429s and returns the eventual success', $failures, $passes );
+	agents_api_smoke_assert_equals( 3, $retry_attempts, 'run_turn dispatched 3 times (2 retried 429s + 1 success)', $failures, $passes );
+	agents_api_smoke_assert_equals( 2, count( $retry_sleeps ), 'run_turn waited once before each of the 2 retries (and never after success)', $failures, $passes );
+	agents_api_smoke_assert_equals( 2.0, $retry_sleeps[0] ?? null, 'first backoff wait is the 2s exponential floor (zero jitter)', $failures, $passes );
+	agents_api_smoke_assert_equals( 4.0, $retry_sleeps[1] ?? null, 'second backoff wait doubles to the 4s exponential floor', $failures, $passes );
+	agents_api_smoke_assert_equals( true, ( $retry_sleeps[1] ?? 0 ) > ( $retry_sleeps[0] ?? 0 ), 'backoff waits strictly increase across retries', $failures, $passes );
+
+	echo "\n[3c] Fail-fast: a deterministic 400 is NOT retried:\n";
+	$GLOBALS['__adapter_smoke'] = array();
+	$ff_attempts               = 0;
+	$ff_sleeps                 = array();
+	$GLOBALS['__adapter_smoke']['select_next'] = static function () use ( &$ff_attempts ) {
+		++$ff_attempts;
+		return new WP_Error( 'prompt_client_error', 'Bad Request (400)', array( 'status' => 400 ) );
+	};
+	$ff_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter(
+		'fake-provider',
+		'fake-model',
+		'sys',
+		array(
+			'retry_sleeper'    => static function ( $seconds ) use ( &$ff_sleeps ) {
+				$ff_sleeps[] = $seconds;
+			},
+			'retry_randomizer' => static function () {
+				return 0.0;
+			},
+		)
+	);
+	$ff_threw = false;
+	try {
+		$ff_adapter->run_turn(
+			new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'hi' ) ) )
+		);
+	} catch ( \RuntimeException $error ) {
+		$ff_threw = false !== strpos( $error->getMessage(), '400' );
+	}
+	agents_api_smoke_assert_equals( true, $ff_threw, 'a 400 fails fast as a RuntimeException carrying the real message', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, $ff_attempts, 'a 400 is dispatched exactly once (never retried)', $failures, $passes );
+	agents_api_smoke_assert_equals( 0, count( $ff_sleeps ), 'a 400 never triggers a backoff wait', $failures, $passes );
+
+	echo "\n[3d] Transient 5xx is retried; exhausting the attempt budget surfaces the original error:\n";
+	$GLOBALS['__adapter_smoke'] = array();
+	$exhaust_attempts          = 0;
+	$exhaust_sleeps            = array();
+	$GLOBALS['__adapter_smoke']['select_next'] = static function () use ( &$exhaust_attempts ) {
+		++$exhaust_attempts;
+		return new WP_Error( 'prompt_upstream_server_error', 'Service Unavailable (503)', array( 'status' => 503 ) );
+	};
+	$exhaust_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter(
+		'fake-provider',
+		'fake-model',
+		'sys',
+		array(
+			'retry_max_attempts' => 3,
+			'retry_base_delay'   => 2,
+			'retry_sleeper'      => static function ( $seconds ) use ( &$exhaust_sleeps ) {
+				$exhaust_sleeps[] = $seconds;
+			},
+			'retry_randomizer'   => static function () {
+				return 0.0;
+			},
+		)
+	);
+	$exhaust_threw = false;
+	try {
+		$exhaust_adapter->run_turn(
+			new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'hi' ) ) )
+		);
+	} catch ( \RuntimeException $error ) {
+		$exhaust_threw = false !== strpos( $error->getMessage(), '503' );
+	}
+	agents_api_smoke_assert_equals( true, $exhaust_threw, 'an unrecovered 5xx surfaces the original error after the budget is exhausted', $failures, $passes );
+	agents_api_smoke_assert_equals( 3, $exhaust_attempts, 'a persistent 5xx is dispatched exactly retry_max_attempts (3) times', $failures, $passes );
+	agents_api_smoke_assert_equals( 2, count( $exhaust_sleeps ), 'a persistent 5xx waits between attempts but not after the final one', $failures, $passes );
+
+	echo "\n[3e] A provider Retry-After hint is honored as the wait when present:\n";
+	$GLOBALS['__adapter_smoke'] = array();
+	$ra_attempts               = 0;
+	$ra_sleeps                 = array();
+	$GLOBALS['__adapter_smoke']['select_next'] = static function () use ( &$ra_attempts, $make_result ) {
+		++$ra_attempts;
+		if ( 1 === $ra_attempts ) {
+			return new WP_Error( 'prompt_client_error', 'Too Many Requests (429)', array( 'status' => 429, 'retry_after' => 5 ) );
+		}
+		return $make_result( 'recovered after retry-after', array(), array( 1, 1, 2 ) );
+	};
+	$ra_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter(
+		'fake-provider',
+		'fake-model',
+		'sys',
+		array(
+			'retry_base_delay' => 2,
+			'retry_sleeper'    => static function ( $seconds ) use ( &$ra_sleeps ) {
+				$ra_sleeps[] = $seconds;
+			},
+			'retry_randomizer' => static function () {
+				return 0.0;
+			},
+		)
+	);
+	$ra_adapter->run_turn(
+		new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'hi' ) ) )
+	);
+	agents_api_smoke_assert_equals( 5.0, $ra_sleeps[0] ?? null, 'a Retry-After hint (5s) is used as the wait instead of the exponential step', $failures, $passes );
+
+	echo "\n[3f] Retry policy is configurable via filters, and each retry emits a diagnostic event:\n";
+	$GLOBALS['__adapter_smoke'] = array();
+	$filter_attempts           = 0;
+	$filter_sleeps             = array();
+	$retry_events              = array();
+	add_action(
+		'agents_api_provider_turn_retry',
+		static function ( $context ) use ( &$retry_events ) {
+			$retry_events[] = $context;
+		}
+	);
+	add_filter(
+		'agents_api_provider_turn_retry_max_attempts',
+		static function ( $attempts, $provider_id, $model_id ) {
+			unset( $provider_id, $model_id );
+			return 2;
+		},
+		10,
+		3
+	);
+	$GLOBALS['__adapter_smoke']['select_next'] = static function () use ( &$filter_attempts ) {
+		++$filter_attempts;
+		return new WP_Error( 'prompt_client_error', 'Too Many Requests (429)', array( 'status' => 429 ) );
+	};
+	$filter_retry_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter(
+		'fake-provider',
+		'fake-model',
+		'sys',
+		array(
+			'retry_sleeper'    => static function ( $seconds ) use ( &$filter_sleeps ) {
+				$filter_sleeps[] = $seconds;
+			},
+			'retry_randomizer' => static function () {
+				return 0.0;
+			},
+		)
+	);
+	try {
+		$filter_retry_adapter->run_turn(
+			new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'hi' ) ) )
+		);
+	} catch ( \RuntimeException $error ) {
+		unset( $error );
+	}
+	agents_api_smoke_assert_equals( 2, $filter_attempts, 'the retry_max_attempts filter caps the dispatch count (2)', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, count( $retry_events ), 'one retry diagnostic event fires before the single retry wait', $failures, $passes );
+	agents_api_smoke_assert_equals( 429, $retry_events[0]['status'] ?? null, 'the retry event reports the transient HTTP status', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, $retry_events[0]['attempt'] ?? null, 'the retry event reports the failed attempt number', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-provider', $retry_events[0]['provider_id'] ?? '', 'the retry event carries the provider id', $failures, $passes );
+	$GLOBALS['__agents_api_smoke_actions']['agents_api_provider_turn_retry']             = array();
+	$GLOBALS['__agents_api_smoke_actions']['agents_api_provider_turn_retry_max_attempts'] = array();
 
 	echo "\n[4] run_conversation() drives the loop end-to-end through the default adapter:\n";
 	$turn = 0;
