@@ -218,12 +218,29 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			$builder = $builder->with_message_parts( ...$prompt_context['prompt_parts'] );
 		}
 
-		if ( '' !== $provider_id ) {
-			$builder = $builder->using_provider( $provider_id );
-		}
-
+		/*
+		 * wp-ai-client's PromptBuilder::usingModel() requires a resolved
+		 * ModelInterface, not a model-id string. Passing the raw string raises a
+		 * TypeError before any request is dispatched, so the model id must be
+		 * resolved to the concrete model object through the provider registry
+		 * first. Resolution is provider-agnostic: any provider/model registered
+		 * in the wp-ai-client registry resolves the same way, with no
+		 * provider-specific branching.
+		 */
 		if ( '' !== $model_id ) {
-			$builder = $builder->using_model( $model_id );
+			if ( '' !== $provider_id ) {
+				$builder = $builder->using_model( $this->resolve_model_interface( $provider_id, $model_id ) );
+			} else {
+				/*
+				 * No provider context: hand the model id to the registry as a
+				 * model preference so it can discover the owning provider. This
+				 * is the string-accepting sibling of usingModel() and keeps the
+				 * path provider-agnostic.
+				 */
+				$builder = $builder->using_model_preference( $model_id );
+			}
+		} elseif ( '' !== $provider_id ) {
+			$builder = $builder->using_provider( $provider_id );
 		}
 
 		if ( '' !== $system_prompt ) {
@@ -247,6 +264,44 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 		}
 
 		return $builder->generate_text_result();
+	}
+
+	/**
+	 * Resolve a provider id + model id string pair into a concrete wp-ai-client ModelInterface.
+	 *
+	 * wp-ai-client's `PromptBuilder::usingModel()` requires a resolved
+	 * {@see \WordPress\AiClient\Providers\Models\Contracts\ModelInterface}, never
+	 * a model-id string. The provider registry (`AiClient::defaultRegistry()`,
+	 * the same registry the bare builder is constructed from) is the canonical
+	 * resolver: `getProviderModel()` maps a registered provider id + model id to
+	 * the concrete model object. This stays provider-agnostic — it never special
+	 * cases a provider or model id; any registered provider/model resolves
+	 * through the identical call.
+	 *
+	 * @param string $provider_id Provider identifier.
+	 * @param string $model_id    Model identifier.
+	 * @return \WordPress\AiClient\Providers\Models\Contracts\ModelInterface Resolved model instance.
+	 * @throws \RuntimeException When wp-ai-client is unavailable or the provider/model cannot be resolved.
+	 */
+	private function resolve_model_interface( string $provider_id, string $model_id ): \WordPress\AiClient\Providers\Models\Contracts\ModelInterface {
+		if ( ! class_exists( \WordPress\AiClient\AiClient::class ) ) {
+			throw new \RuntimeException( 'wp-ai-client is unavailable: WordPress\\AiClient\\AiClient is not loaded.' );
+		}
+
+		try {
+			$model = \WordPress\AiClient\AiClient::defaultRegistry()->getProviderModel( $provider_id, $model_id );
+		} catch ( \Throwable $error ) {
+			throw new \RuntimeException(
+				sprintf(
+					'Unable to resolve model "%s" for provider "%s" through the wp-ai-client provider registry: %s',
+					$model_id,
+					$provider_id,
+					$error->getMessage()
+				)
+			);
+		}
+
+		return $model;
 	}
 
 	/**
