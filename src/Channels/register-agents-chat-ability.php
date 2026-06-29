@@ -8,8 +8,10 @@
  * itself is a dispatcher: it validates the canonical input/output shape from
  * https://github.com/Automattic/agents-api/issues/100 and routes execution
  * to whichever runtime registered itself via the `wp_agent_chat_handler` filter.
- * Consumers register a runtime in their own bootstrap; agents-api itself ships
- * no chat runtime.
+ * Agents API ships a provider-agnostic default runtime as a low-priority
+ * fallback (see register-default-agents-chat-handler.php), so a vanilla install
+ * runs an agent loop natively. Consumers register their own runtime in their
+ * bootstrap at the default priority to take over.
  *
  * Consumers register a runtime by hooking the filter:
  *

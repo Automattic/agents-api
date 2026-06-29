@@ -222,6 +222,7 @@ require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-option-bridge-store.
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-ability.php';
+require_once AGENTS_API_PATH . 'src/Channels/register-default-agents-chat-handler.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-run-control-abilities.php';
 require_once AGENTS_API_PATH . 'src/Runtime/register-runtime-package-run-ability.php';
 require_once AGENTS_API_PATH . 'src/Tasks/register-agents-task-abilities.php';

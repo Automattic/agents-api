@@ -85,6 +85,9 @@ use const AgentsAPI\AI\Channels\AGENTS_CHAT_ABILITY;
 smoke_assert( 'agents/chat', AGENTS_CHAT_ABILITY, 'slug_is_agents_chat', $failures, $passes );
 
 // 2. No handler registered → WP_Error agents_chat_no_handler + observability fires.
+// Agents API now ships a default fallback runtime on this filter, so clear it
+// first to exercise the dispatcher's genuine no-handler branch in isolation.
+smoke_reset_chat_filters();
 $dispatch_failures = array();
 add_filter( 'agents_chat_dispatch_failed', static function ( $reason, $input ) use ( &$dispatch_failures ) {
 	$dispatch_failures[] = array( 'reason' => $reason, 'agent' => $input['agent'] ?? null );
