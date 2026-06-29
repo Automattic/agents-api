@@ -64,6 +64,11 @@ class WP_AI_Client_Prompt_Builder {
 		return $this;
 	}
 
+	public function using_request_options( \WordPress\AiClient\Providers\Http\DTO\RequestOptions $options ): self {
+		unset( $options );
+		return $this;
+	}
+
 	/**
 	 * @return object|\WP_Error wp-ai-client GenerativeAiResult or a WP_Error on failure.
 	 */
