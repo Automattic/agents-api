@@ -128,6 +128,7 @@ class WP_Agent_Default_Chat_Handler {
 		$system_prompt     = self::resolve_system_prompt( $config );
 		$tool_declarations = self::resolve_tool_declarations( $config );
 		$max_turns         = self::resolve_max_turns( $input, $config );
+		$tool_call_rules   = self::resolve_tool_call_rules( $config );
 
 		$store      = WP_Agent_Conversation_Sessions::get_store( $input );
 		$session_id = is_string( $input['session_id'] ?? null ) ? trim( $input['session_id'] ) : '';
@@ -166,6 +167,13 @@ class WP_Agent_Default_Chat_Handler {
 			// (`agents_api_tool_executors`) for declarations that select another
 			// execution environment, so consumers can override per tool target.
 			$loop_options['tool_executor'] = new WP_Agent_Ability_Tool_Executor();
+		}
+		if ( ! empty( $tool_call_rules ) ) {
+			// Declarative deterministic tool-call gating. The loop enforces these
+			// rules natively ({@see WP_Agent_Tool_Call_Gate}) — bounded discovery
+			// before a required commit, and a completion block until the commit
+			// tool runs — so the guarantee is the runtime's, not a prompt's.
+			$loop_options['tool_call_rules'] = $tool_call_rules;
 		}
 
 		$result = WP_Agent_Conversation_Loop::run_conversation(
@@ -304,6 +312,33 @@ class WP_Agent_Default_Chat_Handler {
 		}
 
 		return $declarations;
+	}
+
+	/**
+	 * Resolve declarative deterministic tool-call rules from the agent config.
+	 *
+	 * The agent's bundle declares `tool_call_rules` (bounded discovery + required
+	 * commit) and the loop enforces them natively. The handler only forwards the
+	 * declared list of rule arrays; {@see WP_Agent_Tool_Call_Gate} normalizes and
+	 * enforces them deterministically.
+	 *
+	 * @param array<string,mixed> $config Agent default config.
+	 * @return list<array<mixed>> Declared rule arrays.
+	 */
+	private static function resolve_tool_call_rules( array $config ): array {
+		$raw = $config['tool_call_rules'] ?? null;
+		if ( ! is_array( $raw ) ) {
+			return array();
+		}
+
+		$rules = array();
+		foreach ( $raw as $rule ) {
+			if ( is_array( $rule ) ) {
+				$rules[] = $rule;
+			}
+		}
+
+		return $rules;
 	}
 
 	/**

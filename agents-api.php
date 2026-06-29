@@ -149,6 +149,7 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-transcript-persister.
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-null-transcript-persister.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-compaction.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-tool-pair-validator.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-tool-call-gate.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-markdown-section-compaction-adapter.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-iteration-budget.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-spin-signature.php';
