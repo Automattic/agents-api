@@ -740,5 +740,74 @@ namespace {
 	agents_api_smoke_assert_equals( true, false !== strpos( $bad_model_message, 'Unable to resolve model' ), 'an unresolvable model id throws an actionable RuntimeException (not a TypeError)', $failures, $passes );
 	agents_api_smoke_assert_equals( true, false !== strpos( $bad_model_message, '__unregistered__' ), 'the resolution error names the unresolvable model id', $failures, $passes );
 
+	echo "\n[12] Regression: a no-parameter tool's function declaration serializes 'parameters' as a JSON OBJECT, never an array:\n";
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'ok', array(), array( 1, 1, 2 ) );
+
+	$params_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'sys' );
+	$params_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+		array( array( 'role' => 'user', 'content' => 'use the tools' ) ),
+		array(
+			// A no-arg tool whose registered schema resolved empty — the exact native-runtime
+			// case (workspace_*, *_github_* tools) that produced `"parameters":[]` → OpenAI 400.
+			'workspace_show' => array(
+				'name'        => 'workspace_show',
+				'source'      => 'agents',
+				'description' => 'Show a workspace.',
+				'parameters'  => array(),
+				'executor'    => 'host',
+				'scope'       => 'run',
+			),
+			// A tool that already carries a real object schema — must pass through unchanged.
+			'client/lookup'  => array(
+				'name'        => 'client/lookup',
+				'source'      => 'client',
+				'description' => 'Look up one value.',
+				'parameters'  => array(
+					'type'       => 'object',
+					'required'   => array( 'query' ),
+					'properties' => array( 'query' => array( 'type' => 'string' ) ),
+				),
+				'executor'    => 'client',
+				'scope'       => 'run',
+			),
+		),
+		array( 'provider_id' => 'fake-provider', 'model_id' => 'fake-model' )
+	);
+
+	$params_adapter->run_turn( $params_request );
+	$mapped_declarations = $GLOBALS['__adapter_smoke']['declarations'] ?? array();
+	agents_api_smoke_assert_equals( 2, count( $mapped_declarations ), 'both tool declarations are mapped to function declarations', $failures, $passes );
+
+	$decls_by_name = array();
+	foreach ( $mapped_declarations as $decl ) {
+		$decls_by_name[ $decl->name ?? '' ] = $decl;
+	}
+
+	// The no-arg tool: parameters MUST json-encode to an object, never `[]`.
+	$empty_json = json_encode( $decls_by_name['workspace_show']->parameters ?? null );
+	agents_api_smoke_assert_equals( '{"type":"object","properties":{}}', $empty_json, 'no-parameter tool emits the minimal valid empty-object schema', $failures, $passes );
+	agents_api_smoke_assert_equals( true, false !== strpos( $empty_json, '"properties":{' ), 'empty parameters serialize properties as an object ({), not an array ([)', $failures, $passes );
+	agents_api_smoke_assert_equals( false, '[]' === $empty_json, "no-parameter tool never serializes 'parameters' as []", $failures, $passes );
+	agents_api_smoke_assert_equals( true, '{' === substr( $empty_json, 0, 1 ), 'no-parameter tool parameters JSON begins with { (an object)', $failures, $passes );
+
+	// Prove the exact provider-facing payload shape: `"parameters":{` must appear and
+	// `"parameters":[` must never appear when the declaration is wrapped for the API.
+	$wrapped_empty = json_encode(
+		array(
+			'type'       => 'function',
+			'name'       => $decls_by_name['workspace_show']->name ?? '',
+			'parameters' => $decls_by_name['workspace_show']->parameters ?? null,
+		)
+	);
+	agents_api_smoke_assert_equals( true, false !== strpos( $wrapped_empty, '"parameters":{' ), 'wrapped tool payload contains "parameters":{ (an object)', $failures, $passes );
+	agents_api_smoke_assert_equals( false, false !== strpos( $wrapped_empty, '"parameters":[' ), 'wrapped tool payload never contains "parameters":[ (the OpenAI 400 shape)', $failures, $passes );
+
+	// The real-schema tool: object stays an object and the declared schema is preserved verbatim.
+	$real_json = json_encode( $decls_by_name['client/lookup']->parameters ?? null );
+	agents_api_smoke_assert_equals( true, '{' === substr( $real_json, 0, 1 ), 'real-schema tool parameters remain a JSON object', $failures, $passes );
+	agents_api_smoke_assert_equals( true, false !== strpos( $real_json, '"query"' ), 'real-schema tool preserves its declared properties unchanged', $failures, $passes );
+	agents_api_smoke_assert_equals( 'object', $decls_by_name['client/lookup']->parameters['type'] ?? '', 'real-schema tool keeps its declared type', $failures, $passes );
+
 	agents_api_smoke_finish( 'Agents API default provider-turn adapter', $failures, $passes );
 }

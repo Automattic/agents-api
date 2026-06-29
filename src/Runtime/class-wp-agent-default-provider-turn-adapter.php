@@ -766,10 +766,46 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			$declarations[] = new \WordPress\AiClient\Tools\DTO\FunctionDeclaration(
 				$tool_name,
 				$description,
-				$parameters
+				self::function_declaration_parameters( $parameters )
 			);
 		}
 
 		return $declarations;
+	}
+
+	/**
+	 * Guarantee a function declaration's parameter schema serializes as a JSON object.
+	 *
+	 * The tools API contract (OpenAI and other JSON-Schema providers) requires each
+	 * `tools[].parameters` to be a JSON Schema OBJECT. A tool with no parameters — or
+	 * whose registered ability schema resolves empty — yields an empty PHP `array()`,
+	 * which `json_encode`s to `[]` (an array, not an object). The provider then rejects
+	 * the whole request (`Invalid type for 'tools[0].parameters': expected an object,
+	 * but got an array instead`), so every turn fails before any tool can run.
+	 *
+	 * This normalizes the empty/missing case to the minimal valid empty-object schema
+	 * (`{"type":"object","properties":{}}`), using a `stdClass` for `properties` so the
+	 * inner collection also encodes as `{}` rather than `[]`. A declaration that already
+	 * carries a real schema is passed through unchanged; only an empty `properties`
+	 * collection inside an otherwise-real schema is cast to an object for the same
+	 * reason. The normalization is provider-agnostic and keys on schema shape, never on
+	 * specific tool names.
+	 *
+	 * @param array<mixed> $parameters Resolved tool parameter schema.
+	 * @return array<mixed> Schema guaranteed to JSON-encode as an object.
+	 */
+	private static function function_declaration_parameters( array $parameters ): array {
+		if ( array() === $parameters ) {
+			return array(
+				'type'       => 'object',
+				'properties' => new \stdClass(),
+			);
+		}
+
+		if ( array_key_exists( 'properties', $parameters ) && array() === $parameters['properties'] ) {
+			$parameters['properties'] = new \stdClass();
+		}
+
+		return $parameters;
 	}
 }
