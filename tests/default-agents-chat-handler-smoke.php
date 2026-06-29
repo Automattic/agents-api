@@ -80,10 +80,57 @@ namespace WordPress\AiClient\Tools\DTO {
 	}
 }
 
+namespace WordPress\AiClient\Providers\Models\Contracts {
+	if ( ! interface_exists( __NAMESPACE__ . '\\ModelInterface' ) ) {
+		interface ModelInterface {}
+	}
+}
+
+namespace WordPress\AiClient\Providers {
+	if ( ! class_exists( __NAMESPACE__ . '\\ProviderRegistry' ) ) {
+		/**
+		 * Fake provider registry mirroring the resolver surface the adapter calls.
+		 *
+		 * Resolves any provider id + model id string pair into a concrete
+		 * ModelInterface, exactly like the real registry, so provider-agnostic
+		 * dispatch can be exercised without the php-ai-client SDK.
+		 */
+		class ProviderRegistry {
+			/**
+			 * @param mixed $model_config Optional model config.
+			 */
+			public function getProviderModel( string $provider_id, string $model_id, $model_config = null ): Models\Contracts\ModelInterface {
+				unset( $model_config );
+				return new \Agents_Chat_Fake_Model( $provider_id, $model_id );
+			}
+		}
+	}
+}
+
+namespace WordPress\AiClient {
+	if ( ! class_exists( __NAMESPACE__ . '\\AiClient' ) ) {
+		class AiClient {
+			public static function defaultRegistry(): Providers\ProviderRegistry {
+				return new Providers\ProviderRegistry();
+			}
+		}
+	}
+}
+
 namespace {
 
 	if ( ! defined( 'ABSPATH' ) ) {
 		define( 'ABSPATH', __DIR__ . '/' );
+	}
+
+	/**
+	 * Fake resolved model: a real ModelInterface instance (never a string),
+	 * carrying the provider/model ids it was resolved from.
+	 */
+	if ( ! class_exists( 'Agents_Chat_Fake_Model' ) ) {
+		class Agents_Chat_Fake_Model implements \WordPress\AiClient\Providers\Models\Contracts\ModelInterface {
+			public function __construct( public string $provider_id, public string $model_id ) {}
+		}
 	}
 
 	$failures = array();
@@ -254,8 +301,12 @@ namespace {
 			$GLOBALS['__adapter_smoke']['provider'] = $provider;
 			return $this;
 		}
-		public function using_model( string $model ): self {
+		public function using_model( $model ): self {
 			$GLOBALS['__adapter_smoke']['model'] = $model;
+			return $this;
+		}
+		public function using_model_preference( ...$preferred_models ): self {
+			$GLOBALS['__adapter_smoke']['model_preference'] = $preferred_models;
 			return $this;
 		}
 		public function using_system_instruction( string $system ): self {
@@ -363,8 +414,10 @@ namespace {
 	agents_api_smoke_assert_equals( true, $output['completed'] ?? false, 'output marks the turn completed', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__chat_handler_ability_calls'] ), 'the loop mediated exactly one tool call through the ability executor', $failures, $passes );
 	agents_api_smoke_assert_equals( 'risotto', $GLOBALS['__chat_handler_ability_calls'][0]['query'] ?? '', 'the mediated tool received the model-supplied parameters', $failures, $passes );
-	agents_api_smoke_assert_equals( 'fake-provider', $GLOBALS['__adapter_smoke']['provider'] ?? '', 'dispatch is provider-agnostic: the builder was keyed by the requested provider id', $failures, $passes );
-	agents_api_smoke_assert_equals( 'fake-model', $GLOBALS['__adapter_smoke']['model'] ?? '', 'dispatch is provider-agnostic: the builder was keyed by the requested model id', $failures, $passes );
+	$kitchen_model = $GLOBALS['__adapter_smoke']['model'] ?? null;
+	agents_api_smoke_assert_equals( true, $kitchen_model instanceof \WordPress\AiClient\Providers\Models\Contracts\ModelInterface, 'dispatch resolved the model id to a ModelInterface before using_model() (not a string)', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-provider', $kitchen_model->provider_id ?? '', 'dispatch is provider-agnostic: the resolved model carries the requested provider id', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-model', $kitchen_model->model_id ?? '', 'dispatch is provider-agnostic: the resolved model carries the requested model id', $failures, $passes );
 	agents_api_smoke_assert_equals( 'You are the kitchen brain.', $GLOBALS['__adapter_smoke']['system'] ?? '', 'the agent default-config system prompt drove the turn', $failures, $passes );
 	agents_api_smoke_assert_equals( 2, (int) ( $output['metadata']['agents_api']['turn_count'] ?? 0 ), 'metadata records the two-turn native loop', $failures, $passes );
 	$canonical_roles = array_map( static fn( array $m ): string => $m['role'], $output['messages'] ?? array() );
@@ -390,7 +443,10 @@ namespace {
 		)
 	);
 	agents_api_smoke_assert_equals( false, $request_provider_output instanceof WP_Error, 'request-supplied provider/model drive an agent without configured defaults', $failures, $passes );
-	agents_api_smoke_assert_equals( 'request-provider', $GLOBALS['__adapter_smoke']['provider'] ?? '', 'request provider overrides/supplies the dispatch provider', $failures, $passes );
+	$request_model = $GLOBALS['__adapter_smoke']['model'] ?? null;
+	agents_api_smoke_assert_equals( true, $request_model instanceof \WordPress\AiClient\Providers\Models\Contracts\ModelInterface, 'request-supplied provider/model resolve to a ModelInterface for dispatch', $failures, $passes );
+	agents_api_smoke_assert_equals( 'request-provider', $request_model->provider_id ?? '', 'request provider overrides/supplies the dispatch provider', $failures, $passes );
+	agents_api_smoke_assert_equals( 'request-model', $request_model->model_id ?? '', 'request model overrides/supplies the dispatch model', $failures, $passes );
 
 	echo "\n[3] Error contracts: empty message, unknown agent, missing provider:\n";
 	$empty = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute( array( 'agent' => 'kitchen-brain', 'message' => '   ' ) );

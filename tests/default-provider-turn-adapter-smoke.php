@@ -84,10 +84,61 @@ namespace WordPress\AiClient\Tools\DTO {
 	}
 }
 
+namespace WordPress\AiClient\Providers\Models\Contracts {
+	if ( ! interface_exists( __NAMESPACE__ . '\\ModelInterface' ) ) {
+		interface ModelInterface {}
+	}
+}
+
+namespace WordPress\AiClient\Providers {
+	if ( ! class_exists( __NAMESPACE__ . '\\ProviderRegistry' ) ) {
+		/**
+		 * Fake provider registry mirroring the resolver surface the adapter calls.
+		 *
+		 * The real registry resolves a provider id + model id string into a
+		 * concrete ModelInterface. This double does the same for any pair and
+		 * throws InvalidArgumentException for the sentinel unregistered model id,
+		 * so the adapter's resolution + failure paths can be driven without the
+		 * real php-ai-client SDK.
+		 */
+		class ProviderRegistry {
+			/**
+			 * @param mixed $model_config Optional model config.
+			 */
+			public function getProviderModel( string $provider_id, string $model_id, $model_config = null ): Models\Contracts\ModelInterface {
+				unset( $model_config );
+				if ( '__unregistered__' === $model_id ) {
+					throw new \InvalidArgumentException( sprintf( 'Provider model not registered: %s/%s', $provider_id, $model_id ) );
+				}
+				return new \Agents_API_Fake_Model( $provider_id, $model_id );
+			}
+		}
+	}
+}
+
+namespace WordPress\AiClient {
+	if ( ! class_exists( __NAMESPACE__ . '\\AiClient' ) ) {
+		class AiClient {
+			public static function defaultRegistry(): Providers\ProviderRegistry {
+				return new Providers\ProviderRegistry();
+			}
+		}
+	}
+}
+
 namespace {
 
 	if ( ! defined( 'ABSPATH' ) ) {
 		define( 'ABSPATH', __DIR__ . '/' );
+	}
+
+	/**
+	 * Fake resolved model: a real ModelInterface instance (never a string) that
+	 * carries the provider/model ids it was resolved from, so assertions can
+	 * prove using_model() received an object with the requested identity.
+	 */
+	class Agents_API_Fake_Model implements \WordPress\AiClient\Providers\Models\Contracts\ModelInterface {
+		public function __construct( public string $provider_id, public string $model_id ) {}
 	}
 
 	$failures = array();
@@ -184,8 +235,12 @@ namespace {
 			$GLOBALS['__adapter_smoke']['provider'] = $provider;
 			return $this;
 		}
-		public function using_model( string $model ): self {
+		public function using_model( $model ): self {
 			$GLOBALS['__adapter_smoke']['model'] = $model;
+			return $this;
+		}
+		public function using_model_preference( ...$preferred_models ): self {
+			$GLOBALS['__adapter_smoke']['model_preference'] = $preferred_models;
 			return $this;
 		}
 		public function using_system_instruction( string $system ): self {
@@ -292,8 +347,11 @@ namespace {
 	agents_api_smoke_assert_equals( 'client/lookup', $result['tool_calls'][0]['name'] ?? '', 'run_turn extracts tool calls via shipped extractor', $failures, $passes );
 	agents_api_smoke_assert_equals( 'alpha', $result['tool_calls'][0]['parameters']['query'] ?? '', 'run_turn decodes tool-call arguments', $failures, $passes );
 	agents_api_smoke_assert_equals( 12, $result['usage']['total_tokens'], 'run_turn normalizes token usage', $failures, $passes );
-	agents_api_smoke_assert_equals( 'fake-provider', $GLOBALS['__adapter_smoke']['provider'] ?? '', 'run_turn passes provider id to the builder', $failures, $passes );
-	agents_api_smoke_assert_equals( 'fake-model', $GLOBALS['__adapter_smoke']['model'] ?? '', 'run_turn passes model id to the builder', $failures, $passes );
+	$recorded_model = $GLOBALS['__adapter_smoke']['model'] ?? null;
+	agents_api_smoke_assert_equals( true, $recorded_model instanceof \WordPress\AiClient\Providers\Models\Contracts\ModelInterface, 'run_turn resolves the model id to a ModelInterface before calling using_model() (not a string)', $failures, $passes );
+	agents_api_smoke_assert_equals( false, is_string( $recorded_model ), 'run_turn never hands using_model() a raw model-id string', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-provider', $recorded_model->provider_id ?? '', 'the resolved model carries the requested provider id', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-model', $recorded_model->model_id ?? '', 'the resolved model carries the requested model id', $failures, $passes );
 	agents_api_smoke_assert_equals( 'You are a test agent.', $GLOBALS['__adapter_smoke']['system'] ?? '', 'run_turn passes default system prompt to the builder', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__adapter_smoke']['prompt_parts'] ?? array() ), 'run_turn sends the latest user turn as the current prompt', $failures, $passes );
 	agents_api_smoke_assert_equals( 2, count( $GLOBALS['__adapter_smoke']['history'] ?? array() ), 'run_turn sends earlier turns as history', $failures, $passes );
@@ -567,7 +625,7 @@ namespace {
 		new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'hi' ) ) )
 	);
 	agents_api_smoke_assert_equals( 'bare again', $restore_raw['content'], 'set_dispatch_provider(null) falls back to the bare builder', $failures, $passes );
-	agents_api_smoke_assert_equals( 'fake-provider', $GLOBALS['__adapter_smoke']['provider'] ?? '', 'restored bare path drives the wp_ai_client builder again', $failures, $passes );
+	agents_api_smoke_assert_equals( true, ( $GLOBALS['__adapter_smoke']['model'] ?? null ) instanceof \WordPress\AiClient\Providers\Models\Contracts\ModelInterface, 'restored bare path drives the wp_ai_client builder again with a resolved ModelInterface', $failures, $passes );
 
 	echo "\n[9] Public result normalization helpers on WP_Agent_Provider_Turn_Result:\n";
 	$helper_result = $make_result( 'helper text', array(), array( 4, 6, 10 ) );
@@ -578,6 +636,44 @@ namespace {
 	agents_api_smoke_assert_equals( 10, $helper_usage['total_tokens'], 'public result_usage() extracts total tokens', $failures, $passes );
 	$tool_only_result = $make_result( '', array( array( 'name' => 'client/lookup', 'parameters' => array( 'q' => 'x' ), 'id' => 'tc-1' ) ), array( 1, 0, 1 ) );
 	agents_api_smoke_assert_equals( '', AgentsAPI\AI\WP_Agent_Provider_Turn_Result::result_text( $tool_only_result ), 'public result_text() returns empty for a tool-only turn', $failures, $passes );
+
+	echo "\n[10] Regression: a STRING model id is resolved to a ModelInterface and the turn dispatches (no TypeError):\n";
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'resolved-and-dispatched', array(), array( 1, 2, 3 ) );
+
+	$regression_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'regression-system' );
+	$regression_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+		array( array( 'role' => 'user', 'content' => 'resolve my model' ) ),
+		array(),
+		// Model metadata supplied as plain STRINGS, exactly like the native runtime.
+		array( 'provider_id' => 'gpt-provider', 'model_id' => 'gpt-5.5' )
+	);
+	$regression_raw   = $regression_adapter->run_turn( $regression_request );
+	$regression_model = $GLOBALS['__adapter_smoke']['model'] ?? null;
+
+	agents_api_smoke_assert_equals( true, $regression_model instanceof \WordPress\AiClient\Providers\Models\Contracts\ModelInterface, 'string model id "gpt-5.5" is resolved to a ModelInterface (the exact TypeError regression)', $failures, $passes );
+	agents_api_smoke_assert_equals( 'gpt-provider', $regression_model->provider_id ?? '', 'resolution is provider-agnostic: an arbitrary provider id resolves the same way', $failures, $passes );
+	agents_api_smoke_assert_equals( 'gpt-5.5', $regression_model->model_id ?? '', 'the resolved ModelInterface carries the requested string model id', $failures, $passes );
+	agents_api_smoke_assert_equals( 'resolved-and-dispatched', $regression_raw['content'], 'the turn dispatches and produces content (no TypeError, no empty completion)', $failures, $passes );
+
+	echo "\n[11] Regression: an unresolvable model id surfaces a clear RuntimeException, not a TypeError:\n";
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'unused', array(), array( 0, 0, 0 ) );
+	$bad_model_adapter                         = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'sys' );
+	$bad_model_message                         = '';
+	try {
+		$bad_model_adapter->run_turn(
+			new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+				array( array( 'role' => 'user', 'content' => 'bad model' ) ),
+				array(),
+				array( 'provider_id' => 'fake-provider', 'model_id' => '__unregistered__' )
+			)
+		);
+	} catch ( \RuntimeException $error ) {
+		$bad_model_message = $error->getMessage();
+	}
+	agents_api_smoke_assert_equals( true, false !== strpos( $bad_model_message, 'Unable to resolve model' ), 'an unresolvable model id throws an actionable RuntimeException (not a TypeError)', $failures, $passes );
+	agents_api_smoke_assert_equals( true, false !== strpos( $bad_model_message, '__unregistered__' ), 'the resolution error names the unresolvable model id', $failures, $passes );
 
 	agents_api_smoke_finish( 'Agents API default provider-turn adapter', $failures, $passes );
 }

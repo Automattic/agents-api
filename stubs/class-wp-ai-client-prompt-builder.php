@@ -26,8 +26,16 @@ class WP_AI_Client_Prompt_Builder {
 		return $this;
 	}
 
-	public function using_model( string $model ): self {
+	public function using_model( \WordPress\AiClient\Providers\Models\Contracts\ModelInterface $model ): self {
 		unset( $model );
+		return $this;
+	}
+
+	/**
+	 * @param string|\WordPress\AiClient\Providers\Models\Contracts\ModelInterface|array{0:string,1:string} ...$preferred_models Preferred models.
+	 */
+	public function using_model_preference( ...$preferred_models ): self {
+		unset( $preferred_models );
 		return $this;
 	}
 
