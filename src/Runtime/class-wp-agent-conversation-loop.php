@@ -107,7 +107,8 @@ class WP_Agent_Conversation_Loop {
 		$spin_detector         = self::resolve_spin_detector( $options );
 		$failure_tracker       = self::resolve_identical_failure_tracker( $options );
 		$result_truncator      = self::resolve_tool_result_truncator( $options );
-		$pre_tool_mediator     = self::resolve_pre_tool_mediator( $options );
+		$tool_call_gate        = self::resolve_tool_call_gate( $options );
+		$pre_tool_mediator     = self::compose_tool_call_gate_mediator( $tool_call_gate, self::resolve_pre_tool_mediator( $options ) );
 		$post_tool_diagnostics = self::resolve_post_tool_result_diagnostics( $options );
 		$interrupt_source      = self::resolve_interrupt_source( $options );
 		$request               = self::resolve_request( $messages, $options );
@@ -178,6 +179,7 @@ class WP_Agent_Conversation_Loop {
 				}
 
 				$turns_run            = $turn;
+				$force_continue       = false;
 				$turn_context         = $context;
 				$turn_context['turn'] = $turn;
 				$interrupt            = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
@@ -351,6 +353,40 @@ class WP_Agent_Conversation_Loop {
 						$interrupted = $interrupt['metadata'];
 						break;
 					}
+
+					// Deterministic completion gate. When the model stops calling
+					// tools (natural completion) but a configured tool-call rule
+					// still requires a commit tool, the loop refuses to finish and
+					// re-prompts with a runtime-owned, model-visible reason. The
+					// enforcement is the loop's -- the model cannot opt out of it.
+					if (
+						null !== $tool_call_gate
+						&& $conversation_complete
+						&& empty( $result['tool_calls'] )
+						&& null === $exceeded_budget
+						&& null === $stalled
+						&& null === $approval_required
+						&& null === $runtime_tool_pending
+					) {
+						$completion_gate = $tool_call_gate->evaluate_completion( $messages );
+						if ( ! $completion_gate['allowed'] ) {
+							$conversation_complete = false;
+							$force_continue        = true;
+							$messages[]            = WP_Agent_Message::text(
+								'user',
+								$completion_gate['reason'],
+								array(
+									'type'           => WP_Agent_Tool_Call_Gate::EVENT_COMPLETION_BLOCKED,
+									'tool_call_gate' => $completion_gate['context'],
+								)
+							);
+							$events[] = array(
+								'type'     => WP_Agent_Tool_Call_Gate::EVENT_COMPLETION_BLOCKED,
+								'metadata' => $completion_gate['context'],
+							);
+							self::emit_event( $on_event, WP_Agent_Tool_Call_Gate::EVENT_COMPLETION_BLOCKED, $completion_gate['context'] );
+						}
+					}
 				} else {
 					// Caller-managed path: turn runner handles everything internally.
 					$result       = self::normalize_conversation_result( $result );
@@ -434,7 +470,10 @@ class WP_Agent_Conversation_Loop {
 					break;
 				}
 
-				if ( ! is_callable( $should_continue ) || ! call_user_func( $should_continue, $result, $turn_context ) ) {
+				// A blocked completion gate forces another turn so the model can
+				// satisfy the required commit tool, overriding the natural-completion
+				// stop signal the turn runner would otherwise trigger.
+				if ( ! $force_continue && ( ! is_callable( $should_continue ) || ! call_user_func( $should_continue, $result, $turn_context ) ) ) {
 					break;
 				}
 			}
@@ -2260,6 +2299,61 @@ class WP_Agent_Conversation_Loop {
 	private static function resolve_pre_tool_mediator( array $options ): ?callable {
 		$mediator = $options['pre_tool_mediator'] ?? null;
 		return is_callable( $mediator ) ? $mediator : null;
+	}
+
+	/**
+	 * Resolve the deterministic tool-call gate from declarative loop options.
+	 *
+	 * @param array<string, mixed> $options Loop options.
+	 * @return WP_Agent_Tool_Call_Gate|null
+	 */
+	private static function resolve_tool_call_gate( array $options ): ?WP_Agent_Tool_Call_Gate {
+		return WP_Agent_Tool_Call_Gate::from_config( $options['tool_call_rules'] ?? null );
+	}
+
+	/**
+	 * Compose a pre-tool mediator that enforces the tool-call gate before any
+	 * caller-supplied mediator runs.
+	 *
+	 * The gate runs first so a configured rule deterministically rejects a
+	 * disallowed call regardless of what a downstream mediator would decide. When
+	 * the gate allows the call, control passes to the inner mediator (or the
+	 * default proceed) so existing mediation behavior is preserved untouched.
+	 *
+	 * @param WP_Agent_Tool_Call_Gate|null $gate  Resolved gate, or null when none configured.
+	 * @param callable|null                $inner Caller-supplied pre-tool mediator.
+	 * @return callable|null
+	 */
+	private static function compose_tool_call_gate_mediator( ?WP_Agent_Tool_Call_Gate $gate, ?callable $inner ): ?callable {
+		if ( null === $gate ) {
+			return $inner;
+		}
+
+		return static function ( array $context ) use ( $gate, $inner ) {
+			$tool_name = is_string( $context['tool_name'] ?? null ) ? $context['tool_name'] : '';
+			if ( '' !== $tool_name ) {
+				$messages     = is_array( $context['messages'] ?? null ) ? $context['messages'] : array();
+				$tool_call_id = is_string( $context['tool_call_id'] ?? null ) ? $context['tool_call_id'] : '';
+				$prior        = WP_Agent_Tool_Call_Gate::messages_before_tool_call( $messages, $tool_call_id );
+				$evaluation   = $gate->evaluate_call( $tool_name, $prior );
+				if ( ! $evaluation['allowed'] ) {
+					return array(
+						'action'   => 'reject',
+						'error'    => $evaluation['reason'],
+						'metadata' => array(
+							'error_type'     => WP_Agent_Tool_Call_Gate::ERROR_TYPE_CALL_REJECTED,
+							'tool_call_gate' => $evaluation['context'],
+						),
+					);
+				}
+			}
+
+			if ( null !== $inner ) {
+				return call_user_func( $inner, $context );
+			}
+
+			return array( 'action' => 'proceed' );
+		};
 	}
 
 	/**
