@@ -79,6 +79,7 @@
       "php tests/conversation-loop-smoke.php",
       "php tests/provider-turn-adapter-smoke.php",
       "php tests/default-provider-turn-adapter-smoke.php",
+      "php tests/default-agents-chat-handler-smoke.php",
       "php tests/ability-tool-executor-smoke.php",
       "php tests/tool-mediation-runner-smoke.php",
       "php tests/conversation-loop-tool-execution-smoke.php",
