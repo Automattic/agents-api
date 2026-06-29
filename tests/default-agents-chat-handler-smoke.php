@@ -425,6 +425,40 @@ namespace {
 	agents_api_smoke_assert_equals( true, in_array( 'assistant', $canonical_roles, true ), 'canonical messages include the assistant reply', $failures, $passes );
 	agents_api_smoke_assert_equals( true, ! in_array( 'tool', $canonical_roles, true ), 'canonical messages omit raw tool envelopes', $failures, $passes );
 
+	echo "\n[1b] Runtime-bundle agents declare their toolset as `enabled_tools` and the loop wires it:\n";
+	// Native runtime agent bundles place their toolset under
+	// `agent_config.enabled_tools` (the field the bundle schema/validators use),
+	// which the importer forwards verbatim as the agent default config. The
+	// default handler must recognize it, or the agent runs with zero tools, the
+	// model narrates instead of acting, and the loop stops after one tool-less turn.
+	$registry->register(
+		'bundle-brain',
+		array(
+			'label'          => 'Bundle Brain',
+			'default_config' => array(
+				'provider'      => 'fake-provider',
+				'model'         => 'fake-model',
+				'system_prompt' => 'You are the bundle brain.',
+				'enabled_tools' => array( 'kitchen/lookup' ),
+			),
+		)
+	);
+
+	$GLOBALS['__chat_handler_ability_calls'] = array();
+	$reset_provider();
+
+	$bundle_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array(
+			'agent'   => 'bundle-brain',
+			'message' => 'How do I prep risotto?',
+		)
+	);
+
+	agents_api_smoke_assert_equals( false, $bundle_output instanceof WP_Error, 'enabled_tools agent returns canonical output, not WP_Error', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__chat_handler_ability_calls'] ), 'enabled_tools wired the toolset so the loop mediated the tool call', $failures, $passes );
+	agents_api_smoke_assert_equals( 'risotto', $GLOBALS['__chat_handler_ability_calls'][0]['query'] ?? '', 'the enabled_tools-declared tool received the model-supplied parameters', $failures, $passes );
+	agents_api_smoke_assert_equals( 2, (int) ( $bundle_output['metadata']['agents_api']['turn_count'] ?? 0 ), 'enabled_tools agent ran the full tool-mediated loop, not a single tool-less turn', $failures, $passes );
+
 	echo "\n[2] Provider/model fall back to the request when the agent config omits them:\n";
 	$registry->register(
 		'bare-brain',

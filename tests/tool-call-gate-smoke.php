@@ -235,4 +235,97 @@ $injected = array_values( array_filter(
 agents_api_smoke_assert_equals( 2, count( $injected ), 'each block injects a model-visible correction message', $failures, $passes );
 agents_api_smoke_assert_equals( true, str_contains( (string) ( $injected[0]['content'] ?? '' ), 'COMPLETION BLOCKED' ), 'injected correction states the completion is blocked', $failures, $passes );
 
+// ---------------------------------------------------------------------------
+// Anchor-independent require_tool_use rule: do not finish without doing real
+// work. Reproduces the native failure mode where a model narrates its intent
+// ("List root.") as text on turn one instead of emitting a tool call, which the
+// loop would otherwise treat as natural completion and stop with zero work.
+// ---------------------------------------------------------------------------
+$require_tool_use_rules = array(
+	array(
+		'id'               => 'require-tool-use',
+		'require_tool_use' => true,
+	),
+);
+
+echo "\n[5] require_tool_use rule blocks completion until at least one tool runs:\n";
+$rtu_gate = WP_Agent_Tool_Call_Gate::from_config( $require_tool_use_rules );
+agents_api_smoke_assert_equals( true, $rtu_gate instanceof WP_Agent_Tool_Call_Gate, 'gate builds from an anchor-less require_tool_use rule', $failures, $passes );
+
+$no_tools_yet = array(
+	WP_Agent_Message::text( 'user', 'List the workspace root then document it.' ),
+	WP_Agent_Message::text( 'assistant', '_List root._' ),
+);
+$rtu_blocked = $rtu_gate->evaluate_completion( $no_tools_yet );
+agents_api_smoke_assert_equals( false, $rtu_blocked['allowed'], 'completion is blocked when the transcript has zero tool calls', $failures, $passes );
+agents_api_smoke_assert_equals( 'require-tool-use', $rtu_blocked['context']['rule_id'] ?? '', 'block names the require_tool_use rule', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $rtu_blocked['context']['tool_calls_seen'] ?? -1, 'block reports zero tool calls seen', $failures, $passes );
+
+$one_tool = array_merge( $no_tools_yet, array( tool_call_gate_smoke_call( 'read' ) ) );
+agents_api_smoke_assert_equals( true, $rtu_gate->evaluate_completion( $one_tool )['allowed'], 'completion is allowed once any tool call has run', $failures, $passes );
+
+echo "\n[6] Loop does not prematurely complete a turn-one narration with zero tool calls:\n";
+$executor->executed = array();
+$rtu_turns_seen     = array();
+$rtu_gate_events    = array();
+$rtu_result = WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'List the workspace root then document it.' ) ),
+	static function ( array $messages, array $context ) use ( &$rtu_turns_seen ): array {
+		$turn               = (int) ( $context['turn'] ?? 0 );
+		$rtu_turns_seen[]   = $turn;
+
+		if ( 1 === $turn ) {
+			// The exact native repro: the model narrates its intended action as
+			// prose instead of emitting a tool call. The runtime must refuse to
+			// treat this as a finished run.
+			return array(
+				'messages'   => $messages,
+				'content'    => '_List root._',
+				'tool_calls' => array(),
+			);
+		}
+
+		if ( 2 === $turn ) {
+			// After the nudge, the model finally acts.
+			return array(
+				'messages'   => $messages,
+				'tool_calls' => array(
+					array( 'id' => 't2-read', 'name' => 'read', 'parameters' => array() ),
+				),
+			);
+		}
+
+		// Turn 3: a tool has run, so finishing is now allowed.
+		return array(
+			'messages'   => $messages,
+			'content'    => 'Documented the workspace root.',
+			'tool_calls' => array(),
+		);
+	},
+	array(
+		'max_turns'         => 8,
+		'tool_executor'     => $executor,
+		'tool_declarations' => $tools,
+		'tool_call_rules'   => $require_tool_use_rules,
+		'on_event'          => static function ( string $event, array $payload ) use ( &$rtu_gate_events ): void {
+			if ( WP_Agent_Tool_Call_Gate::EVENT_COMPLETION_BLOCKED === $event ) {
+				$rtu_gate_events[] = $payload;
+			}
+		},
+	)
+);
+
+agents_api_smoke_assert_equals( array( 1, 2, 3 ), $rtu_turns_seen, 'loop forced another turn instead of stopping after the turn-one narration', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $rtu_gate_events ), 'completion was blocked exactly once, on the zero-tool turn', $failures, $passes );
+agents_api_smoke_assert_equals( true, in_array( 'read', $executor->executed, true ), 'the model executed a real tool after the nudge', $failures, $passes );
+agents_api_smoke_assert_equals( true, (bool) ( $rtu_result['completed'] ?? false ), 'loop completes once a tool has actually run', $failures, $passes );
+agents_api_smoke_assert_equals( 'Documented the workspace root.', $rtu_result['final_content'] ?? '', 'final content is the post-work answer, not the narration', $failures, $passes );
+
+$rtu_injected = array_values( array_filter(
+	$rtu_result['messages'],
+	static fn( array $m ): bool => WP_Agent_Tool_Call_Gate::EVENT_COMPLETION_BLOCKED === ( $m['metadata']['type'] ?? '' )
+) );
+agents_api_smoke_assert_equals( 1, count( $rtu_injected ), 'a single model-visible nudge was injected', $failures, $passes );
+agents_api_smoke_assert_equals( true, str_contains( (string) ( $rtu_injected[0]['content'] ?? '' ), 'COMPLETION BLOCKED' ), 'the nudge tells the model its completion was blocked', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API tool-call gate', $failures, $passes );
