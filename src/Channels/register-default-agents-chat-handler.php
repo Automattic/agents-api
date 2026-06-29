@@ -261,17 +261,19 @@ class WP_Agent_Default_Chat_Handler {
 	/**
 	 * Build host-mediated tool declarations from the agent's declared abilities.
 	 *
-	 * The agent config lists the ability names the agent may call (under `tools`
-	 * or `abilities`). Each becomes a server tool declaration whose model-facing
-	 * name is the ability name; {@see WP_Agent_Ability_Tool_Executor} dispatches
-	 * it back through the Abilities API.
+	 * The agent config lists the ability names the agent may call. Runtime agent
+	 * bundles declare this set as `enabled_tools` (the field the bundle schema and
+	 * validators standardize on); `tools`, `abilities`, and `tool_names` are also
+	 * accepted as aliases. Each name becomes a server tool declaration whose
+	 * model-facing name is the ability name; {@see WP_Agent_Ability_Tool_Executor}
+	 * dispatches it back through the Abilities API.
 	 *
 	 * @param array<string,mixed> $config Agent default config.
 	 * @return array<string,array<string,mixed>> Declarations keyed by tool name.
 	 */
 	private static function resolve_tool_declarations( array $config ): array {
 		$names = array();
-		foreach ( array( 'tools', 'abilities', 'tool_names' ) as $key ) {
+		foreach ( array( 'enabled_tools', 'tools', 'abilities', 'tool_names' ) as $key ) {
 			if ( is_array( $config[ $key ] ?? null ) ) {
 				$names = array_merge( $names, $config[ $key ] );
 			}
