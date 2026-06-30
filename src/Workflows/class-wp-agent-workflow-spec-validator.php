@@ -35,7 +35,7 @@ defined( 'ABSPATH' ) || exit;
 final class WP_Agent_Workflow_Spec_Validator {
 
 	/** @since 0.103.0 */
-	public const KNOWN_STEP_TYPES = array( 'ability', 'agent', 'foreach' );
+	public const KNOWN_STEP_TYPES = array( 'ability', 'agent', 'foreach', 'parallel' );
 
 	/** @since 0.103.0 */
 	public const KNOWN_TRIGGER_TYPES = array( 'on_demand', 'wp_action', 'cron' );
@@ -227,6 +227,124 @@ final class WP_Agent_Workflow_Spec_Validator {
 					}
 				}
 			}
+
+			if ( 'parallel' === $step['type'] ) {
+				$errors = array_merge( $errors, self::validate_parallel_step( $step, $path ) );
+			}
+		}
+
+		return $errors;
+	}
+
+	/**
+	 * Validate a `parallel` (agent fanout) step. The one step type expresses
+	 * two shapes; exactly one must be present:
+	 *
+	 *   - parallel-map: `items` + a non-empty nested `steps` list.
+	 *   - parallel-roles: a non-empty `branches` list, each branch a role
+	 *     contract with a `role` + nested `steps`, and exactly one branch
+	 *     flagged `can_write_final_bundle` (the aggregator).
+	 *
+	 * @since 0.4.0
+	 *
+	 * @param array<mixed> $step Raw parallel step.
+	 * @param string       $path Error path prefix for this step.
+	 * @return array<int,array{path:string,code:string,message:string}>
+	 */
+	private static function validate_parallel_step( array $step, string $path ): array {
+		$errors       = array();
+		$has_branches = isset( $step['branches'] );
+		$has_items    = array_key_exists( 'items', $step );
+
+		if ( $has_branches === $has_items ) {
+			$errors[] = array(
+				'path'    => $path,
+				'code'    => 'invalid_parallel_shape',
+				'message' => 'parallel step must declare exactly one of `branches` (roles+aggregate) or `items` (map)',
+			);
+			// Without a clear shape there's nothing further to validate.
+			if ( ! $has_branches && ! $has_items ) {
+				return $errors;
+			}
+		}
+
+		// parallel-map shape.
+		if ( $has_items ) {
+			if ( empty( $step['steps'] ) || ! is_array( $step['steps'] ) || array_values( $step['steps'] ) !== $step['steps'] ) {
+				$errors[] = array(
+					'path'    => "{$path}.steps",
+					'code'    => 'missing_required',
+					'message' => 'parallel-map step must declare a non-empty `steps` list',
+				);
+			} else {
+				foreach ( self::validate_steps( $step['steps'] ) as $inner_error ) {
+					$inner_path          = (string) preg_replace( '/^steps\./', '', $inner_error['path'] );
+					$inner_error['path'] = "{$path}.steps." . $inner_path;
+					$errors[]            = $inner_error;
+				}
+			}
+		}
+
+		// parallel-roles shape.
+		if ( $has_branches ) {
+			if ( ! is_array( $step['branches'] ) || array_values( $step['branches'] ) !== $step['branches'] || empty( $step['branches'] ) ) {
+				$errors[] = array(
+					'path'    => "{$path}.branches",
+					'code'    => 'missing_required',
+					'message' => 'parallel-roles step must declare a non-empty list of `branches`',
+				);
+				return $errors;
+			}
+
+			$aggregator_count = 0;
+			foreach ( $step['branches'] as $branch_idx => $branch ) {
+				$branch_path = "{$path}.branches.{$branch_idx}";
+				if ( ! is_array( $branch ) ) {
+					$errors[] = array(
+						'path'    => $branch_path,
+						'code'    => 'invalid_type',
+						'message' => 'parallel branch entry must be an array',
+					);
+					continue;
+				}
+
+				if ( empty( $branch['role'] ) || ! is_string( $branch['role'] ) ) {
+					$errors[] = array(
+						'path'    => "{$branch_path}.role",
+						'code'    => 'missing_required',
+						'message' => 'parallel branch is missing a non-empty `role`',
+					);
+				}
+
+				if ( empty( $branch['steps'] ) || ! is_array( $branch['steps'] ) || array_values( $branch['steps'] ) !== $branch['steps'] ) {
+					$errors[] = array(
+						'path'    => "{$branch_path}.steps",
+						'code'    => 'missing_required',
+						'message' => 'parallel branch must declare a non-empty `steps` list',
+					);
+				} else {
+					foreach ( self::validate_steps( $branch['steps'] ) as $inner_error ) {
+						$inner_path          = (string) preg_replace( '/^steps\./', '', $inner_error['path'] );
+						$inner_error['path'] = "{$branch_path}.steps." . $inner_path;
+						$errors[]            = $inner_error;
+					}
+				}
+
+				if ( ! empty( $branch['can_write_final_bundle'] ) ) {
+					++$aggregator_count;
+				}
+			}
+
+			if ( 1 !== $aggregator_count ) {
+				$errors[] = array(
+					'path'    => "{$path}.branches",
+					'code'    => 'invalid_parallel_aggregator',
+					'message' => sprintf(
+						'parallel-roles step must flag exactly one branch with `can_write_final_bundle` (the aggregator); found %d',
+						$aggregator_count
+					),
+				);
+			}
 		}
 
 		return $errors;
@@ -284,9 +402,17 @@ final class WP_Agent_Workflow_Spec_Validator {
 	 * @return array<int,string>
 	 */
 	private static function extract_top_level_step_binding_ids( array $step ): array {
-		$ids = array();
+		$type = $step['type'] ?? '';
+		$ids  = array();
 		foreach ( $step as $key => $value ) {
-			if ( 'steps' === $key && 'foreach' === ( $step['type'] ?? '' ) ) {
+			// foreach + parallel-map defer their nested `steps`, and
+			// parallel-roles defers each branch's nested `steps`, to
+			// branch-scoped resolution; those bodies don't reference the
+			// outer step order so they're excluded from this cheap pass.
+			if ( 'steps' === $key && in_array( $type, array( 'foreach', 'parallel' ), true ) ) {
+				continue;
+			}
+			if ( 'branches' === $key && 'parallel' === $type ) {
 				continue;
 			}
 			$ids = array_merge( $ids, self::extract_step_binding_ids( $value ) );
