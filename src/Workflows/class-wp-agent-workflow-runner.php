@@ -16,10 +16,17 @@
  *   4. Return a final {@see WP_Agent_Workflow_Run_Result}.
  *
  * What the runner does NOT do:
- *   - Branching, parallelism, nested workflows. Step-handler map is the
- *     extension point for those — a consumer can register a `branch`
- *     handler that runs a sub-list, or a `workflow` handler that calls
- *     this runner recursively.
+ *   - Branching, nested workflows. Step-handler map is the extension point
+ *     for those — a consumer can register a `branch` handler that runs a
+ *     sub-list, or a `workflow` handler that calls this runner recursively.
+ *   - Real concurrency. The runner is synchronous and single-process; PHP
+ *     ships no threads here. The `parallel` step type expresses *fanout
+ *     orchestration* (declare N branches, propagate a shared immutable
+ *     context to each, collect every branch output, hand them to an
+ *     aggregator) — not parallel execution. Whether branches actually run on
+ *     separate processes (Action Scheduler, WP Codebox, loopback) is a
+ *     consumer-supplied executor concern; the substrate owns the
+ *     dispatch/collect/aggregate contract, not the concurrency mechanism.
  *   - Triggering. Triggers are wired separately
  *     ({@see WP_Agent_Workflow_Action_Scheduler_Bridge} for cron, and a
  *     consumer-registered listener for `wp_action`). The runner only
@@ -65,9 +72,10 @@ class WP_Agent_Workflow_Runner {
 		array $step_handlers = array()
 	) {
 		$defaults = array(
-			'ability' => array( __CLASS__, 'default_ability_handler' ),
-			'agent'   => array( __CLASS__, 'default_agent_handler' ),
-			'foreach' => array( __CLASS__, 'default_foreach_handler' ),
+			'ability'  => array( __CLASS__, 'default_ability_handler' ),
+			'agent'    => array( __CLASS__, 'default_agent_handler' ),
+			'foreach'  => array( __CLASS__, 'default_foreach_handler' ),
+			'parallel' => array( __CLASS__, 'default_parallel_handler' ),
 		);
 
 		/**
@@ -552,6 +560,444 @@ class WP_Agent_Workflow_Runner {
 	}
 
 	/**
+	 * Default `parallel` step handler — generic agent fanout.
+	 *
+	 * This is the substrate's fanout-orchestration primitive. It is NOT real
+	 * concurrency: PHP ships no threads here and this runner is synchronous.
+	 * What the handler owns is the reusable contract that two product plugins
+	 * independently reinvented — declare a set of branches, give every branch
+	 * the SAME shared immutable context, run them through the same step-handler
+	 * dispatch the runner already uses, collect each branch output keyed by its
+	 * role, then hand all sibling outputs to a designated aggregator branch that
+	 * fuses them into the final result. Whether branches *physically* run in
+	 * parallel (Action Scheduler, WP Codebox sandboxes, loopback requests) is a
+	 * consumer-provided executor concern layered on top of this contract; the
+	 * substrate declares the dispatch/collect/aggregate flow, not the
+	 * concurrency mechanism. The reusable, real part is the fanout
+	 * orchestration, and that is all this claims.
+	 *
+	 * One declarative step expresses BOTH proven fanout shapes:
+	 *
+	 *   1. parallel-map — run the same nested `steps` across N resolved `items`
+	 *      (the non-sequential sibling of `foreach`); collect each branch result.
+	 *      Shape: { type:'parallel', items, steps, as?, index_as? }.
+	 *
+	 *   2. parallel-roles + aggregate — run a set of role-scoped `branches` in
+	 *      parallel, each receiving a shared immutable `context`, then hand all
+	 *      branch outputs to the branch flagged `can_write_final_bundle` (the
+	 *      aggregator), which emits the fused final output.
+	 *      Shape: { type:'parallel', context, branches:[ <branch contract> ] }.
+	 *
+	 * Branch / role contract (parallel-roles shape):
+	 *
+	 *   {
+	 *     role:                    string,            // branch identifier
+	 *     goal_focus:              string,            // what this branch is responsible for
+	 *     shared_context_contract: string,            // how the branch must consume the shared context
+	 *     expected_output:         { ref, shape },    // declared output ref + shape
+	 *     required:                bool,              // a failing required branch fails the step
+	 *     can_write_final_bundle:  bool,              // exactly one branch is the aggregator
+	 *     steps:                   array              // nested steps the branch runs
+	 *   }
+	 *
+	 * Every branch reads the shared context under `${vars.context.*}`; a
+	 * branch CANNOT mutate it for siblings — each branch gets its own
+	 * deep-copied snapshot. The aggregator additionally receives every
+	 * sibling's collected output under `${vars.branch_outputs.*}` (keyed by
+	 * role) and its own role focus under `${vars.role.*}`.
+	 *
+	 * Adaptive gate: before fanning out, the `wp_agent_workflow_should_fanout`
+	 * filter is consulted ( default true ) so a consumer can decide WHETHER to
+	 * fan out for a given step + context (e.g. a complexity score). The
+	 * substrate embeds no heuristic of its own; when the gate returns false the
+	 * step short-circuits to a skipped, non-fused result.
+	 *
+	 * @since 0.4.0
+	 *
+	 * @param array<mixed> $step    Resolved parallel step.
+	 * @param array<mixed> $context Resolution context.
+	 * @return array<mixed>|WP_Error
+	 */
+	public static function default_parallel_handler( array $step, array $context ) {
+		$handlers = is_array( $context['_workflow_step_handlers'] ?? null )
+			? $context['_workflow_step_handlers']
+			: self::default_step_handlers();
+		/** @var array<string,mixed> $handlers */
+
+		// Adaptive gate: a consumer can decide whether to fan out at all.
+		// Default true — the substrate ships no complexity heuristic.
+		$should_fanout = (bool) apply_filters( 'wp_agent_workflow_should_fanout', true, $step, $context );
+		if ( ! $should_fanout ) {
+			return array(
+				'fanned_out' => false,
+				'reason'     => 'fanout_gate_declined',
+			);
+		}
+
+		$has_branches = isset( $step['branches'] ) && is_array( $step['branches'] );
+		$has_items    = array_key_exists( 'items', $step );
+
+		if ( $has_branches ) {
+			return self::run_parallel_roles( $step, $context, $handlers );
+		}
+
+		if ( $has_items ) {
+			return self::run_parallel_map( $step, $context, $handlers );
+		}
+
+		return new \WP_Error(
+			'workflow_parallel_shape_invalid',
+			'parallel step must declare either `branches` (roles+aggregate) or `items` (map).'
+		);
+	}
+
+	/**
+	 * parallel-map shape: run the same nested `steps` across every resolved
+	 * `item`, collecting each branch's outputs. Same scoped-vars contract as
+	 * `foreach` (`${vars.<as>.*}`), but framed as independent branches rather
+	 * than an ordered iteration.
+	 *
+	 * @since 0.4.0
+	 *
+	 * @param array<mixed>        $step     Resolved parallel step.
+	 * @param array<mixed>        $context  Resolution context.
+	 * @param array<string,mixed> $handlers Step-type handler map.
+	 * @return array<mixed>|WP_Error
+	 */
+	private static function run_parallel_map( array $step, array $context, array $handlers ) {
+		$items = $step['items'] ?? array();
+		if ( ! is_array( $items ) ) {
+			return new \WP_Error(
+				'workflow_parallel_items_invalid',
+				'parallel-map step `items` must resolve to an array.'
+			);
+		}
+
+		$steps = $step['steps'] ?? array();
+		if ( empty( $steps ) || ! is_array( $steps ) ) {
+			return new \WP_Error(
+				'workflow_parallel_steps_invalid',
+				'parallel-map step must include a non-empty nested `steps` list.'
+			);
+		}
+
+		$as_value          = self::string_value( $step['as'] ?? null );
+		$index_as_value    = self::string_value( $step['index_as'] ?? null );
+		$as                = '' !== $as_value ? $as_value : 'item';
+		$index_as          = '' !== $index_as_value ? $index_as_value : 'index';
+		$continue_on_error = ! empty( $step['continue_on_error'] );
+		$executor          = new WP_Agent_Workflow_Step_Executor( $handlers );
+		$branches          = array();
+
+		foreach ( array_values( $items ) as $index => $item ) {
+			if ( self::foreach_cancel_requested( $context ) ) {
+				return new \WP_Error( 'cancel_requested', 'Workflow run cancellation was requested.' );
+			}
+
+			$branch_context = self::branch_context( $context )->with_vars(
+				array(
+					$as       => $item,
+					$index_as => $index,
+				)
+			);
+
+			$branch_result = self::run_branch_steps( $steps, $branch_context, $executor, $handlers, $continue_on_error, (string) $index );
+			if ( is_wp_error( $branch_result ) ) {
+				return $branch_result;
+			}
+
+			$branches[] = array(
+				'index'  => $index,
+				'item'   => $item,
+				'steps'  => $branch_result['steps'],
+				'output' => $branch_result['last'],
+			);
+		}
+
+		return array(
+			'shape'    => 'map',
+			'count'    => count( $branches ),
+			'branches' => $branches,
+		);
+	}
+
+	/**
+	 * parallel-roles + aggregate shape: run each role-scoped branch against a
+	 * shared immutable context, collect outputs keyed by role, then run the
+	 * aggregator branch (`can_write_final_bundle` true) with sibling outputs
+	 * available so it can fuse the final result.
+	 *
+	 * @since 0.4.0
+	 *
+	 * @param array<mixed>        $step     Resolved parallel step.
+	 * @param array<mixed>        $context  Resolution context.
+	 * @param array<string,mixed> $handlers Step-type handler map.
+	 * @return array<mixed>|WP_Error
+	 */
+	private static function run_parallel_roles( array $step, array $context, array $handlers ) {
+		$branch_specs = array();
+		foreach ( (array) $step['branches'] as $branch_spec ) {
+			if ( ! is_array( $branch_spec ) ) {
+				return new \WP_Error(
+					'workflow_parallel_branch_invalid',
+					'parallel branch entries must be arrays.'
+				);
+			}
+			$branch_specs[] = $branch_spec;
+		}
+
+		if ( empty( $branch_specs ) ) {
+			return new \WP_Error(
+				'workflow_parallel_branches_empty',
+				'parallel-roles step must declare a non-empty `branches` list.'
+			);
+		}
+
+		// Exactly one branch must be the aggregator.
+		$aggregator_roles = array();
+		foreach ( $branch_specs as $branch_spec ) {
+			if ( ! empty( $branch_spec['can_write_final_bundle'] ) ) {
+				$aggregator_roles[] = self::string_value( $branch_spec['role'] ?? '' );
+			}
+		}
+		if ( 1 !== count( $aggregator_roles ) ) {
+			return new \WP_Error(
+				'workflow_parallel_aggregator_invalid',
+				sprintf(
+					'parallel-roles step must declare exactly one aggregator branch (`can_write_final_bundle` true); found %d.',
+					count( $aggregator_roles )
+				)
+			);
+		}
+
+		// Shared immutable context: deep-copied per branch so a branch cannot
+		// mutate it for its siblings or the aggregator. Arrays are copied by
+		// value in PHP, so a fresh array per branch is a genuine snapshot.
+		$shared_context = is_array( $step['context'] ?? null ) ? $step['context'] : array();
+		$executor       = new WP_Agent_Workflow_Step_Executor( $handlers );
+
+		$branch_outputs = array();
+		$branch_records = array();
+		$aggregator     = null;
+
+		// First pass: every non-aggregator branch, each against its own
+		// snapshot of the shared context.
+		foreach ( $branch_specs as $branch_spec ) {
+			if ( ! empty( $branch_spec['can_write_final_bundle'] ) ) {
+				$aggregator = $branch_spec;
+				continue;
+			}
+
+			$run = self::run_role_branch( $branch_spec, $shared_context, array(), $context, $executor, $handlers );
+			if ( is_wp_error( $run ) ) {
+				return $run;
+			}
+
+			$role                    = self::string_value( $branch_spec['role'] ?? '' );
+			$branch_outputs[ $role ] = $run['output'];
+			$branch_records[ $role ] = $run['record'];
+		}
+
+		// Aggregator pass: same shared context snapshot plus every sibling's
+		// collected output under `${vars.branch_outputs.*}`.
+		if ( null === $aggregator ) {
+			return new \WP_Error(
+				'workflow_parallel_aggregator_missing',
+				'parallel-roles step is missing its aggregator branch.'
+			);
+		}
+
+		$aggregator_run = self::run_role_branch( $aggregator, $shared_context, $branch_outputs, $context, $executor, $handlers );
+		if ( is_wp_error( $aggregator_run ) ) {
+			return $aggregator_run;
+		}
+
+		$aggregator_role                    = self::string_value( $aggregator['role'] ?? '' );
+		$branch_outputs[ $aggregator_role ] = $aggregator_run['output'];
+		$branch_records[ $aggregator_role ] = $aggregator_run['record'];
+
+		return array(
+			'shape'           => 'roles',
+			'aggregator'      => $aggregator_role,
+			'branch_outputs'  => $branch_outputs,
+			'branch_records'  => $branch_records,
+			'final'           => $aggregator_run['output'],
+		);
+	}
+
+	/**
+	 * Run a single role-scoped branch. Exposes the shared immutable context
+	 * under `${vars.context.*}`, the branch's own role contract under
+	 * `${vars.role.*}`, and (for the aggregator) sibling outputs under
+	 * `${vars.branch_outputs.*}`. Returns the branch's collected step outputs
+	 * and a normalized last output.
+	 *
+	 * @since 0.4.0
+	 *
+	 * @param array<mixed>        $branch_spec    Branch / role contract.
+	 * @param array<mixed>        $shared_context Shared immutable context (snapshot).
+	 * @param array<mixed>        $sibling_outputs Sibling branch outputs keyed by role (aggregator only).
+	 * @param array<mixed>        $context        Resolution context.
+	 * @param WP_Agent_Workflow_Step_Executor $executor Step executor.
+	 * @param array<string,mixed> $handlers       Step-type handler map.
+	 * @return array{output:mixed,record:array<mixed>}|WP_Error
+	 */
+	private static function run_role_branch( array $branch_spec, array $shared_context, array $sibling_outputs, array $context, WP_Agent_Workflow_Step_Executor $executor, array $handlers ) {
+		$role = self::string_value( $branch_spec['role'] ?? '' );
+		if ( '' === $role ) {
+			return new \WP_Error(
+				'workflow_parallel_branch_role_missing',
+				'each parallel branch must declare a non-empty `role`.'
+			);
+		}
+
+		$steps = $branch_spec['steps'] ?? array();
+		if ( empty( $steps ) || ! is_array( $steps ) ) {
+			return new \WP_Error(
+				'workflow_parallel_branch_steps_invalid',
+				sprintf( 'parallel branch `%s` must include a non-empty nested `steps` list.', $role )
+			);
+		}
+
+		$continue_on_error = ! empty( $branch_spec['continue_on_error'] );
+
+		// Snapshot the shared context by value so branch step execution cannot
+		// leak mutations to siblings. The role contract (minus its nested
+		// steps) and sibling outputs round out the scoped vars.
+		$role_contract = $branch_spec;
+		unset( $role_contract['steps'] );
+
+		$branch_vars = array(
+			'context' => $shared_context,
+			'role'    => $role_contract,
+		);
+		if ( ! empty( $sibling_outputs ) ) {
+			$branch_vars['branch_outputs'] = $sibling_outputs;
+		}
+
+		$branch_context = self::branch_context( $context )->with_vars( $branch_vars );
+
+		$branch_result = self::run_branch_steps( $steps, $branch_context, $executor, $handlers, $continue_on_error, $role );
+		if ( is_wp_error( $branch_result ) ) {
+			// A failing required branch fails the whole step; a non-required
+			// branch surfaces its error as the branch output instead.
+			if ( empty( $branch_spec['required'] ) ) {
+				return array(
+					'output' => array(
+						'error' => array(
+							'code'    => $branch_result->get_error_code(),
+							'message' => $branch_result->get_error_message(),
+						),
+					),
+					'record' => array(
+						'role'   => $role,
+						'steps'  => array(),
+						'status' => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
+					),
+				);
+			}
+			return $branch_result;
+		}
+
+		return array(
+			'output' => $branch_result['last'],
+			'record' => array(
+				'role'   => $role,
+				'steps'  => $branch_result['steps'],
+				'status' => WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED,
+			),
+		);
+	}
+
+	/**
+	 * Run an inline list of nested steps for one branch and collect their
+	 * outputs. Shared by both fanout shapes. Returns the per-step outputs
+	 * keyed by step id plus the last output, or a WP_Error.
+	 *
+	 * @since 0.4.0
+	 *
+	 * @param array<mixed>        $steps             Nested step list.
+	 * @param WP_Agent_Workflow_Run_Context $branch_context Branch run context.
+	 * @param WP_Agent_Workflow_Step_Executor $executor    Step executor.
+	 * @param array<string,mixed> $handlers          Step-type handler map.
+	 * @param bool                $continue_on_error Keep running after a nested failure.
+	 * @param string              $branch_label      Branch identifier for error messages.
+	 * @return array{steps:array<string,mixed>,last:mixed}|WP_Error
+	 */
+	private static function run_branch_steps( array $steps, WP_Agent_Workflow_Run_Context $branch_context, WP_Agent_Workflow_Step_Executor $executor, array $handlers, bool $continue_on_error, string $branch_label ) {
+		$step_outputs = array();
+		$last_output  = null;
+
+		foreach ( $steps as $nested_step ) {
+			if ( ! is_array( $nested_step ) ) {
+				return new \WP_Error(
+					'workflow_parallel_step_invalid',
+					sprintf( 'parallel branch `%s` nested step must be an array.', $branch_label )
+				);
+			}
+
+			$nested_id = self::string_value( $nested_step['id'] ?? null );
+			$type      = self::string_value( $nested_step['type'] ?? null );
+			$handler   = $handlers[ $type ] ?? null;
+			if ( '' === $nested_id || ! is_callable( $handler ) ) {
+				$error = new \WP_Error(
+					'workflow_parallel_step_unhandled',
+					sprintf( 'parallel branch `%s` nested step `%s` cannot be handled.', $branch_label, '' !== $nested_id ? $nested_id : '(unnamed)' )
+				);
+				if ( ! $continue_on_error ) {
+					return $error;
+				}
+				$last_output                = array(
+					'error' => array(
+						'code'    => $error->get_error_code(),
+						'message' => $error->get_error_message(),
+					),
+				);
+				$step_outputs[ $nested_id ] = $last_output;
+				continue;
+			}
+
+			$nested_record = $executor->execute( $nested_step, $branch_context );
+
+			if ( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED !== $nested_record['status'] ) {
+				$error = is_array( $nested_record['error'] ?? null ) ? $nested_record['error'] : array();
+				if ( ! $continue_on_error ) {
+					return new \WP_Error(
+						self::string_value( $error['code'] ?? 'workflow_parallel_step_failed' ),
+						self::string_value( $error['message'] ?? 'parallel branch nested step failed.' ),
+						$error['data'] ?? null
+					);
+				}
+				$last_output = array( 'error' => $error );
+			} else {
+				$last_output = $nested_record['output'];
+			}
+
+			$step_outputs[ $nested_id ] = $last_output;
+		}
+
+		return array(
+			'steps' => $step_outputs,
+			'last'  => $last_output,
+		);
+	}
+
+	/**
+	 * Build a fresh branch run context from the outer resolution context.
+	 * Branch step outputs are isolated per branch (a fresh `steps` map) so
+	 * sibling branches never see each other's `${steps.*}` bindings; the
+	 * coherence channel between branches is the explicit shared context and,
+	 * for the aggregator, `${vars.branch_outputs.*}`.
+	 *
+	 * @param array<mixed> $context Outer resolution context.
+	 */
+	private static function branch_context( array $context ): WP_Agent_Workflow_Run_Context {
+		$context['steps'] = array();
+		$context['vars']  = array();
+		return new WP_Agent_Workflow_Run_Context( $context );
+	}
+
+	/**
 	 * @param array<mixed> $context Resolution context.
 	 * @phpstan-impure
 	 */
@@ -571,9 +1017,10 @@ class WP_Agent_Workflow_Runner {
 		$handlers = (array) apply_filters(
 			'wp_agent_workflow_step_handlers',
 			array(
-				'ability' => array( __CLASS__, 'default_ability_handler' ),
-				'agent'   => array( __CLASS__, 'default_agent_handler' ),
-				'foreach' => array( __CLASS__, 'default_foreach_handler' ),
+				'ability'  => array( __CLASS__, 'default_ability_handler' ),
+				'agent'    => array( __CLASS__, 'default_agent_handler' ),
+				'foreach'  => array( __CLASS__, 'default_foreach_handler' ),
+				'parallel' => array( __CLASS__, 'default_parallel_handler' ),
 			)
 		);
 
