@@ -24,8 +24,8 @@
  *     orchestration* (declare N branches, propagate a shared immutable
  *     context to each, collect every branch output, hand them to an
  *     aggregator) — not parallel execution. Whether branches actually run on
- *     separate processes (Action Scheduler, WP Codebox, loopback) is a
- *     consumer-supplied executor concern; the substrate owns the
+ *     separate processes (Action Scheduler, sandboxed subprocesses, loopback)
+ *     is a consumer-supplied executor concern; the substrate owns the
  *     dispatch/collect/aggregate contract, not the concurrency mechanism.
  *   - Triggering. Triggers are wired separately
  *     ({@see WP_Agent_Workflow_Action_Scheduler_Bridge} for cron, and a
@@ -570,7 +570,7 @@ class WP_Agent_Workflow_Runner {
 	 * dispatch the runner already uses, collect each branch output keyed by its
 	 * role, then hand all sibling outputs to a designated aggregator branch that
 	 * fuses them into the final result. Whether branches *physically* run in
-	 * parallel (Action Scheduler, WP Codebox sandboxes, loopback requests) is a
+	 * parallel (Action Scheduler, sandboxed subprocesses, loopback requests) is a
 	 * consumer-provided executor concern layered on top of this contract; the
 	 * substrate declares the dispatch/collect/aggregate flow, not the
 	 * concurrency mechanism. The reusable, real part is the fanout

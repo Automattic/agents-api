@@ -133,12 +133,15 @@ class WP_Agent_Workflow_Step_Executor {
 		$nested_steps    = $step['steps'] ?? null;
 		$branch_step_map = array();
 		if ( isset( $step['branches'] ) && is_array( $step['branches'] ) ) {
-			foreach ( $step['branches'] as $branch_index => $branch ) {
+			$branches = $step['branches'];
+			foreach ( $branches as $branch_index => $branch ) {
 				if ( is_array( $branch ) && array_key_exists( 'steps', $branch ) ) {
 					$branch_step_map[ $branch_index ] = $branch['steps'];
-					unset( $step['branches'][ $branch_index ]['steps'] );
+					unset( $branch['steps'] );
+					$branches[ $branch_index ] = $branch;
 				}
 			}
+			$step['branches'] = $branches;
 		}
 		unset( $step['steps'] );
 
@@ -150,10 +153,17 @@ class WP_Agent_Workflow_Step_Executor {
 		if ( null !== $nested_steps ) {
 			$expanded['steps'] = $nested_steps;
 		}
-		foreach ( $branch_step_map as $branch_index => $branch_steps ) {
-			if ( isset( $expanded['branches'][ $branch_index ] ) && is_array( $expanded['branches'][ $branch_index ] ) ) {
-				$expanded['branches'][ $branch_index ]['steps'] = $branch_steps;
+		if ( $branch_step_map && isset( $expanded['branches'] ) && is_array( $expanded['branches'] ) ) {
+			$expanded_branches = $expanded['branches'];
+			foreach ( $branch_step_map as $branch_index => $branch_steps ) {
+				if ( isset( $expanded_branches[ $branch_index ] ) && is_array( $expanded_branches[ $branch_index ] ) ) {
+					$branch          = $expanded_branches[ $branch_index ];
+					$branch['steps'] = $branch_steps;
+
+					$expanded_branches[ $branch_index ] = $branch;
+				}
 			}
+			$expanded['branches'] = $expanded_branches;
 		}
 
 		return $expanded;
