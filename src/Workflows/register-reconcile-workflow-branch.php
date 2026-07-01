@@ -104,6 +104,20 @@ function agents_reconcile_workflow_branch_ability( array $input ) {
  *      final output into that step's record, then resume the step loop from
  *      `step_index + 1`.
  *
+ * CONCURRENCY. Steps 1–3 are a read-modify-write on the shared per-run frame's
+ * `completed[]` map. When N branches finish CONCURRENTLY in N separate processes
+ * (the async Action Scheduler path), two reconciles reading the frame before
+ * either writes would lose an update — the later write clobbers the earlier
+ * merge, the frame never reaches all-terminal, and the run hangs SUSPENDED
+ * forever (observed in a real MySQL fanout A/B). So the whole load → merge →
+ * all-terminal? → aggregate → resume-dispatch section runs under a per-run
+ * cross-process lock ({@see agents_workflow_reconcile_with_lock()}), serializing
+ * concurrent reconciles so each reads the frame AFTER the previous one committed.
+ * The lock is table-free (`add_option()` CAS) and pluggable via the
+ * `wp_agent_workflow_reconcile_lock` filter. AS's atomic action-claim remains the
+ * resume-DEDUP guard; the lock closes the completed[]-ACCOUNTING gap it never
+ * covered.
+ *
  * @since 0.5.0
  *
  * @param string              $run_id        Suspended run id.
@@ -117,6 +131,34 @@ function agents_reconcile_workflow_branch( string $run_id, string $handle_id, ar
 		return new \WP_Error( 'agents_reconcile_workflow_branch_no_recorder', 'A recorder is required to reconcile a suspended run. Register one via the `wp_agent_workflow_run_recorder` filter.' );
 	}
 
+	// Serialize the merge → all-terminal? → aggregate → resume-dispatch section
+	// per run so concurrent reconciles from separate processes cannot lose a
+	// completion. Every recorder read below happens INSIDE the lock, so each
+	// reconcile observes the previous one's committed frame.
+	return agents_workflow_reconcile_with_lock(
+		$run_id,
+		static function () use ( $recorder, $run_id, $handle_id, $branch_result ) {
+			return agents_reconcile_workflow_branch_locked( $recorder, $run_id, $handle_id, $branch_result );
+		}
+	);
+}
+
+/**
+ * The reconcile critical section, run under the per-run lock. Loads the run FRESH
+ * (inside the lock), merges the branch, decides all-terminal, and aggregates +
+ * dispatches resume when it was the last branch. Extracted from
+ * {@see agents_reconcile_workflow_branch()} so the lock wraps exactly the
+ * load-modify-decide window and nothing more.
+ *
+ * @since 0.5.0
+ *
+ * @param WP_Agent_Workflow_Run_Recorder $recorder      Resolved recorder.
+ * @param string                         $run_id        Suspended run id.
+ * @param string                         $handle_id     The completed branch's handle id.
+ * @param array<string,mixed>            $branch_result BranchResult.
+ * @return WP_Agent_Workflow_Run_Result|\WP_Error
+ */
+function agents_reconcile_workflow_branch_locked( WP_Agent_Workflow_Run_Recorder $recorder, string $run_id, string $handle_id, array $branch_result ) {
 	$result = $recorder->find( $run_id );
 	if ( null === $result ) {
 		return new \WP_Error( 'agents_reconcile_workflow_branch_not_found', sprintf( 'No suspended run was found for run_id `%s`.', $run_id ) );
@@ -255,6 +297,45 @@ function agents_workflow_defer_resume( string $run_id, WP_Agent_Workflow_Run_Res
 	 * @param WP_Agent_Workflow_Run_Result $result      The aggregate-spliced, still-suspended run.
 	 */
 	return (bool) apply_filters( 'wp_agent_workflow_resume_dispatch', false, $run_id, $executor_id, $result );
+}
+
+/**
+ * Run the reconcile critical section under a per-run cross-process lock so
+ * concurrent branch completions cannot lose an update on the frame's
+ * `completed[]` map (the silent-stall root cause). The lock is table-free and
+ * pluggable: a consumer may replace it via the `wp_agent_workflow_reconcile_lock`
+ * filter (e.g. a MySQL `GET_LOCK` or Redis lock); the default is an
+ * `add_option()`-backed atomic CAS lock ({@see WP_Agent_Workflow_Reconcile_Lock}).
+ *
+ * A filter override receives ( $run_id, $critical ) and MUST invoke `$critical`
+ * exactly once under mutual exclusion for `$run_id`, returning its result. A
+ * falsey filter return means "no override" and the default lock is used.
+ *
+ * @since 0.5.0
+ *
+ * @template T
+ * @param string       $run_id   Suspended run id whose reconcile is serialized.
+ * @param callable():T $critical The load → merge → decide → resume-dispatch section.
+ * @return T
+ */
+function agents_workflow_reconcile_with_lock( string $run_id, callable $critical ) {
+	/**
+	 * Filter the per-run reconcile lock. Return the critical section's result to
+	 * take over serialization with a custom primitive; return a falsey value (the
+	 * default) to use the built-in `add_option()` CAS lock.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param mixed        $override No override by default (null → built-in lock runs).
+	 * @param string       $run_id   The suspended run id.
+	 * @param callable():T $critical The critical section to run under mutual exclusion.
+	 */
+	$override = apply_filters( 'wp_agent_workflow_reconcile_lock', null, $run_id, $critical );
+	if ( null !== $override && false !== $override ) {
+		return $override;
+	}
+
+	return WP_Agent_Workflow_Reconcile_Lock::with_lock( $run_id, $critical );
 }
 
 /**

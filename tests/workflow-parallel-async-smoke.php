@@ -167,6 +167,7 @@ require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-runner.php';
 // Reconcile references agents_run_workflow_output_schema / agents_workflow_string
 // / agents_workflow_run_cancel_permission from the abilities file.
 require_once __DIR__ . '/../src/Workflows/register-agents-workflow-abilities.php';
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-reconcile-lock.php';
 require_once __DIR__ . '/../src/Workflows/register-reconcile-workflow-branch.php';
 
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result;
