@@ -194,14 +194,118 @@ class WP_Agent_Workflow_Runner {
 				'_workflow_store_key' => self::RUN_CONTROL_STORE,
 			)
 		);
-		$executor = new WP_Agent_Workflow_Step_Executor( $this->step_handlers );
 
-		$step_records      = array();
+		return $this->run_step_loop( $spec, $context, $result, array(), 0, ! empty( $options['continue_on_error'] ) );
+	}
+
+	/**
+	 * Resume a suspended run from its persisted suspension frame.
+	 *
+	 * Reloads the run via the recorder, rebuilds the run context from the
+	 * frame's `context_snapshot`, restores the already-executed step records,
+	 * and continues the step loop from `step_index` (the suspended step's
+	 * final output must already be spliced into its record by the caller —
+	 * see {@see agents_reconcile_workflow_branch()}). The `_suspension`
+	 * metadata is cleared so the resumed run is not treated as still parked.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string       $run_id  The suspended run's id.
+	 * @param array<mixed> $options Runtime options. Recognized: `continue_on_error`.
+	 * @return WP_Agent_Workflow_Run_Result
+	 */
+	public function resume( string $run_id, array $options = array() ): WP_Agent_Workflow_Run_Result {
+		if ( null === $this->recorder ) {
+			return self::resume_error_result( $run_id, 'workflow_resume_no_recorder', 'A recorder is required to resume a suspended run.' );
+		}
+
+		$result = $this->recorder->find( $run_id );
+		if ( null === $result ) {
+			return self::resume_error_result( $run_id, 'workflow_resume_run_not_found', sprintf( 'No suspended run was found for run_id `%s`.', $run_id ) );
+		}
+		if ( ! $result->is_suspended() ) {
+			// Idempotency guard: an already-resumed (or never-suspended) run is
+			// returned as-is so a duplicate resume is a harmless no-op.
+			return $result;
+		}
+
+		$suspension = $result->get_suspension();
+		$spec       = self::spec_from_result( $result );
+		if ( null === $spec ) {
+			return self::resume_error_result( $run_id, 'workflow_resume_spec_unavailable', 'The suspended run has no replayable spec snapshot to resume from.' );
+		}
+
+		$snapshot = is_array( $suspension['context_snapshot'] ?? null ) ? $suspension['context_snapshot'] : array();
+		$context  = new WP_Agent_Workflow_Run_Context(
+			array(
+				'inputs'              => is_array( $snapshot['inputs'] ?? null ) ? $snapshot['inputs'] : $result->get_inputs(),
+				'steps'               => is_array( $snapshot['steps'] ?? null ) ? $snapshot['steps'] : array(),
+				'vars'                => is_array( $snapshot['vars'] ?? null ) ? $snapshot['vars'] : array(),
+				'_workflow_run_id'    => $run_id,
+				'_workflow_store_key' => self::RUN_CONTROL_STORE,
+			)
+		);
+
+		/** @var array<int,array<string,mixed>> $step_records */
+		$step_records = array();
+		foreach ( $result->get_steps() as $record ) {
+			if ( is_array( $record ) ) {
+				$step_records[] = self::string_keyed_array( $record );
+			}
+		}
+
+		$resume_index      = self::int_value( $suspension['step_index'] ?? 0 ) + 1;
 		$continue_on_error = ! empty( $options['continue_on_error'] );
-		$failed            = false;
-		$failure_error     = array();
 
-		foreach ( $spec->get_steps() as $step ) {
+		// Clear the suspension frame so the resumed run is no longer parked and
+		// the table-free per-run row (metadata._suspension) is not carried
+		// forward once the run reaches a terminal outcome.
+		$metadata = $result->get_metadata();
+		unset( $metadata['_suspension'] );
+		$result = $result->with(
+			array(
+				'status'   => WP_Agent_Workflow_Run_Result::STATUS_RUNNING,
+				'metadata' => $metadata,
+				'steps'    => $step_records,
+			)
+		);
+
+		return $this->run_step_loop( $spec, $context, $result, $step_records, $resume_index, $continue_on_error );
+	}
+
+	/**
+	 * The shared, indexed, resumable step loop. Both `run()` (start at 0) and
+	 * `resume()` (start at `step_index + 1`) drive it. Walks the spec's steps
+	 * from `$start_index`, records each outcome, gates on the `'pending'`
+	 * suspend marker BEFORE the failure gate, and finalizes the run.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param WP_Agent_Workflow_Spec        $spec              Workflow spec.
+	 * @param WP_Agent_Workflow_Run_Context $context           Run context (already rebuilt on resume).
+	 * @param WP_Agent_Workflow_Run_Result  $result            Current run result.
+	 * @param array<int,array<string,mixed>> $step_records     Step records completed so far.
+	 * @param int                           $start_index       Index in $spec->get_steps() to begin at.
+	 * @param bool                          $continue_on_error Keep running after a failed step.
+	 * @return WP_Agent_Workflow_Run_Result
+	 */
+	private function run_step_loop( WP_Agent_Workflow_Spec $spec, WP_Agent_Workflow_Run_Context $context, WP_Agent_Workflow_Run_Result $result, array $step_records, int $start_index, bool $continue_on_error ): WP_Agent_Workflow_Run_Result {
+		$executor = new WP_Agent_Workflow_Step_Executor( $this->step_handlers );
+		$steps    = array_values( $spec->get_steps() );
+
+		$failed        = false;
+		$failure_error = array();
+		foreach ( $step_records as $existing ) {
+			if ( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED !== ( $existing['status'] ?? '' ) && 'pending' !== ( $existing['status'] ?? '' ) ) {
+				$failed        = true;
+				$failure_error = is_array( $existing['error'] ?? null ) ? $existing['error'] : array();
+			}
+		}
+
+		$step_count = count( $steps );
+		for ( $step_index = $start_index; $step_index < $step_count; $step_index++ ) {
+			$step = $steps[ $step_index ];
+
 			if ( self::is_cancel_requested( $result->get_run_id() ) ) {
 				$result = self::cancelled_result( $result, $step_records );
 				if ( $this->recorder ) {
@@ -210,11 +314,33 @@ class WP_Agent_Workflow_Runner {
 				return $result;
 			}
 
-			$record         = $executor->execute( $step, $context );
+			$record         = self::string_keyed_array( $executor->execute( $step, $context ) );
 			$step_records[] = $record;
 
 			if ( self::is_cancel_requested( $result->get_run_id() ) ) {
 				$result = self::cancelled_result( $result, $step_records );
+				if ( $this->recorder ) {
+					$this->recorder->update( $result );
+				}
+				return $result;
+			}
+
+			// Pending / suspend gate — BEFORE the failure gate. The step asked
+			// to park the run mid-flight (its handler returned a `_suspend`
+			// directive; the step executor recorded status `'pending'`). Persist
+			// a table-free suspension frame in metadata._suspension and return
+			// SUSPENDED. The addressable run stays live (RUNNING at the
+			// run-control layer) — it is finished only after resume reaches a
+			// terminal step-loop exit.
+			if ( 'pending' === ( $record['status'] ?? '' ) ) {
+				$suspension = self::build_suspension_frame( $step_index, $step, $record, $context );
+				$result     = $result->with(
+					array(
+						'status'   => WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED,
+						'steps'    => $step_records,
+						'metadata' => $result->get_metadata() + array( '_suspension' => $suspension ),
+					)
+				);
 				if ( $this->recorder ) {
 					$this->recorder->update( $result );
 				}
@@ -276,6 +402,82 @@ class WP_Agent_Workflow_Runner {
 			$failed ? WP_Agent_Run_Control::STATUS_FAILED : WP_Agent_Run_Control::STATUS_SUCCEEDED
 		);
 		return $result;
+	}
+
+	/**
+	 * Build the table-free suspension frame persisted under
+	 * `metadata._suspension`. Everything a later reconcile + resume needs to
+	 * continue deterministically: the position to resume AT, the dispatched
+	 * branch handles, the aggregate plan, and a frozen context snapshot. The
+	 * already-executed step records live in the run result's `steps[]` (via
+	 * the recorder), so they are not duplicated here.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param int                           $step_index The suspended step's index.
+	 * @param array<mixed>                  $step       The suspended step (resolved).
+	 * @param array<mixed>                  $record     The `'pending'` step record (carries `suspend`).
+	 * @param WP_Agent_Workflow_Run_Context $context    The run context at suspend time.
+	 * @return array<string,mixed>
+	 */
+	private static function build_suspension_frame( int $step_index, array $step, array $record, WP_Agent_Workflow_Run_Context $context ): array {
+		$directive = is_array( $record['suspend'] ?? null ) ? $record['suspend'] : array();
+		$snapshot  = $context->to_array();
+
+		return array(
+			'step_index'       => $step_index,
+			'step_id'          => self::string_value( $record['id'] ?? ( $step['id'] ?? '' ) ),
+			'executor_id'      => self::string_value( $directive['executor'] ?? '' ),
+			'reason'           => self::string_value( $directive['reason'] ?? '' ),
+			'handles'          => is_array( $directive['handles'] ?? null ) ? array_values( $directive['handles'] ) : array(),
+			'aggregate'        => is_array( $directive['aggregate'] ?? null ) ? $directive['aggregate'] : array(),
+			'context_snapshot' => array(
+				'inputs' => is_array( $snapshot['inputs'] ?? null ) ? $snapshot['inputs'] : array(),
+				'steps'  => is_array( $snapshot['steps'] ?? null ) ? $snapshot['steps'] : array(),
+				'vars'   => is_array( $snapshot['vars'] ?? null ) ? $snapshot['vars'] : array(),
+			),
+			'completed'        => array(),
+		);
+	}
+
+	/**
+	 * Rebuild the spec from a run result's replay snapshot so a resume can
+	 * walk the exact steps the run started with.
+	 *
+	 * @since 0.5.0
+	 */
+	private static function spec_from_result( WP_Agent_Workflow_Run_Result $result ): ?WP_Agent_Workflow_Spec {
+		$replay   = $result->get_replay_metadata();
+		$snapshot = is_array( $replay['workflow_spec_snapshot'] ?? null ) ? $replay['workflow_spec_snapshot'] : array();
+		if ( empty( $snapshot ) ) {
+			return null;
+		}
+
+		$spec = WP_Agent_Workflow_Spec::from_array( $snapshot );
+		return $spec instanceof WP_Agent_Workflow_Spec ? $spec : null;
+	}
+
+	/**
+	 * Build a terminal failed result for an un-resumable run.
+	 *
+	 * @since 0.5.0
+	 */
+	private static function resume_error_result( string $run_id, string $code, string $message ): WP_Agent_Workflow_Run_Result {
+		return new WP_Agent_Workflow_Run_Result(
+			$run_id,
+			'',
+			WP_Agent_Workflow_Run_Result::STATUS_FAILED,
+			array(),
+			array(),
+			array(),
+			array(
+				'code'    => $code,
+				'message' => $message,
+			),
+			time(),
+			time(),
+			array()
+		);
 	}
 
 	/** @phpstan-impure */
@@ -637,17 +839,312 @@ class WP_Agent_Workflow_Runner {
 		$has_branches = isset( $step['branches'] ) && is_array( $step['branches'] );
 		$has_items    = array_key_exists( 'items', $step );
 
-		if ( $has_branches ) {
-			return self::run_parallel_roles( $step, $context, $handlers );
+		if ( ! $has_branches && ! $has_items ) {
+			return new \WP_Error(
+				'workflow_parallel_shape_invalid',
+				'parallel step must declare either `branches` (roles+aggregate) or `items` (map).'
+			);
 		}
 
-		if ( $has_items ) {
-			return self::run_parallel_map( $step, $context, $handlers );
+		// Resolve the branch executor (the concurrency seam). Core supplies a
+		// low-priority default that returns null unless Action Scheduler (or a
+		// caller override) is present. When no executor is selected the handler
+		// runs the in-process v0.5.0 loops — byte-for-byte today's behavior, no
+		// suspend, no reconcile.
+		$executor = apply_filters( 'wp_agent_workflow_step_executor', null, $step, $context );
+		if ( ! $executor instanceof WP_Agent_Workflow_Branch_Executor ) {
+			return $has_branches
+				? self::run_parallel_roles( $step, $context, $handlers )
+				: self::run_parallel_map( $step, $context, $handlers );
 		}
 
-		return new \WP_Error(
-			'workflow_parallel_shape_invalid',
-			'parallel step must declare either `branches` (roles+aggregate) or `items` (map).'
+		// An executor is selected: dispatch the branches for out-of-band
+		// execution and return a `_suspend` directive so the runner parks the
+		// run mid-flight and resumes it once the branches reconcile.
+		return self::dispatch_parallel_async( $executor, $step, $context, $handlers, $has_branches );
+	}
+
+	/**
+	 * Build branch descriptors for the selected executor, dispatch them, and
+	 * return the `_suspend` directive the step executor recognizes. If the
+	 * executor returns handles that are already all-complete (a synchronous
+	 * executor), the run never suspends — collect + aggregate inline and return
+	 * a terminal result, exactly like the sync loops.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param WP_Agent_Workflow_Branch_Executor $executor     Selected branch executor.
+	 * @param array<mixed>                      $step         Resolved parallel step.
+	 * @param array<mixed>                      $context      Resolution context.
+	 * @param array<string,mixed>               $handlers     Step-type handler map.
+	 * @param bool                              $has_branches Whether this is the roles shape.
+	 * @return array<mixed>|\WP_Error
+	 */
+	private static function dispatch_parallel_async( WP_Agent_Workflow_Branch_Executor $executor, array $step, array $context, array $handlers, bool $has_branches ) {
+		$plan = $has_branches
+			? self::build_roles_dispatch_plan( $step )
+			: self::build_map_dispatch_plan( $step );
+		if ( is_wp_error( $plan ) ) {
+			return $plan;
+		}
+
+		$handles = $executor->dispatch( $plan['branches'], $plan['shared_context'] );
+
+		// A synchronous executor may return already-complete handles; then the
+		// run must NOT suspend — collect + aggregate inline and return terminal.
+		if ( $executor->are_all_complete( $handles ) ) {
+			$branch_results = $executor->collect( $handles );
+			return self::aggregate_branch_results( $plan['aggregate'], $branch_results, $handlers );
+		}
+
+		return array(
+			'_suspend' => array(
+				'reason'    => 'parallel_branches_dispatched',
+				'executor'  => $executor->id(),
+				'handles'   => array_values( $handles ),
+				'aggregate' => $plan['aggregate'],
+			),
+		);
+	}
+
+	/**
+	 * Build the dispatch plan for the roles+aggregate shape: one branch
+	 * descriptor per sibling role, the deferred aggregator plan, and the shared
+	 * immutable context. Mirrors the sync `run_parallel_roles()` validation so
+	 * the async path rejects the same malformed specs.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param array<mixed> $step Resolved parallel step.
+	 * @return array{branches:array<int,array<string,mixed>>,shared_context:array<string,mixed>,aggregate:array<string,mixed>}|\WP_Error
+	 */
+	private static function build_roles_dispatch_plan( array $step ) {
+		$branch_specs = array();
+		foreach ( (array) $step['branches'] as $branch_spec ) {
+			if ( ! is_array( $branch_spec ) ) {
+				return new \WP_Error(
+					'workflow_parallel_branch_invalid',
+					'parallel branch entries must be arrays.'
+				);
+			}
+			$branch_specs[] = $branch_spec;
+		}
+
+		if ( empty( $branch_specs ) ) {
+			return new \WP_Error(
+				'workflow_parallel_branches_empty',
+				'parallel-roles step must declare a non-empty `branches` list.'
+			);
+		}
+
+		$aggregator       = null;
+		$aggregator_roles = array();
+		$sibling_branches = array();
+		foreach ( $branch_specs as $branch_spec ) {
+			if ( ! empty( $branch_spec['can_write_final_bundle'] ) ) {
+				$aggregator         = $branch_spec;
+				$aggregator_roles[] = self::string_value( $branch_spec['role'] ?? '' );
+				continue;
+			}
+			$sibling_branches[] = $branch_spec;
+		}
+		if ( 1 !== count( $aggregator_roles ) || null === $aggregator ) {
+			return new \WP_Error(
+				'workflow_parallel_aggregator_invalid',
+				sprintf(
+					'parallel-roles step must declare exactly one aggregator branch (`can_write_final_bundle` true); found %d.',
+					count( $aggregator_roles )
+				)
+			);
+		}
+
+		$shared_context = is_array( $step['context'] ?? null ) ? self::string_keyed_array( $step['context'] ) : array();
+
+		/** @var array<int,array<string,mixed>> $descriptors */
+		$descriptors = array();
+		foreach ( $sibling_branches as $branch_spec ) {
+			$role = self::string_value( $branch_spec['role'] ?? '' );
+			if ( '' === $role ) {
+				return new \WP_Error(
+					'workflow_parallel_branch_role_missing',
+					'each parallel branch must declare a non-empty `role`.'
+				);
+			}
+			$descriptors[] = self::role_branch_descriptor( self::string_keyed_array( $branch_spec ), $shared_context );
+		}
+
+		return array(
+			'branches'       => $descriptors,
+			'shared_context' => $shared_context,
+			'aggregate'      => array(
+				'mode'            => 'roles',
+				'aggregator_role' => self::string_value( $aggregator['role'] ?? '' ),
+				'aggregator_spec' => $aggregator,
+				'shared_context'  => $shared_context,
+				'shape'           => 'roles',
+			),
+		);
+	}
+
+	/**
+	 * Build the dispatch plan for the map shape: one branch descriptor per
+	 * resolved item, no aggregator (reconcile just collects).
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param array<mixed> $step Resolved parallel step.
+	 * @return array{branches:array<int,array<string,mixed>>,shared_context:array<string,mixed>,aggregate:array<string,mixed>}|\WP_Error
+	 */
+	private static function build_map_dispatch_plan( array $step ) {
+		$items = $step['items'] ?? array();
+		if ( ! is_array( $items ) ) {
+			return new \WP_Error(
+				'workflow_parallel_items_invalid',
+				'parallel-map step `items` must resolve to an array.'
+			);
+		}
+
+		$steps = $step['steps'] ?? array();
+		if ( empty( $steps ) || ! is_array( $steps ) ) {
+			return new \WP_Error(
+				'workflow_parallel_steps_invalid',
+				'parallel-map step must include a non-empty nested `steps` list.'
+			);
+		}
+
+		$as_value          = self::string_value( $step['as'] ?? null );
+		$index_as_value    = self::string_value( $step['index_as'] ?? null );
+		$as                = '' !== $as_value ? $as_value : 'item';
+		$index_as          = '' !== $index_as_value ? $index_as_value : 'index';
+		$continue_on_error = ! empty( $step['continue_on_error'] );
+
+		$descriptors = array();
+		foreach ( array_values( $items ) as $index => $item ) {
+			$descriptors[] = array(
+				'key'               => (string) $index,
+				'index'            => $index,
+				'item'             => $item,
+				'steps'            => $steps,
+				'branch_vars'      => array(
+					$as       => $item,
+					$index_as => $index,
+				),
+				'continue_on_error' => $continue_on_error,
+			);
+		}
+
+		return array(
+			'branches'       => $descriptors,
+			'shared_context' => array(),
+			'aggregate'      => array(
+				'mode'  => 'map',
+				'shape' => 'map',
+			),
+		);
+	}
+
+	/**
+	 * Build a self-contained descriptor for one role-scoped branch. The
+	 * descriptor is the payload an executor runs later; it carries the branch's
+	 * nested steps, its scoped vars (shared context + role contract), and the
+	 * required / continue-on-error policy.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param array<mixed>        $branch_spec    Branch / role contract.
+	 * @param array<string,mixed> $shared_context Shared immutable context snapshot.
+	 * @return array<string,mixed>
+	 */
+	private static function role_branch_descriptor( array $branch_spec, array $shared_context ): array {
+		$role          = self::string_value( $branch_spec['role'] ?? '' );
+		$role_contract = $branch_spec;
+		unset( $role_contract['steps'] );
+
+		return array(
+			'key'               => $role,
+			'role'             => $role,
+			'required'         => ! empty( $branch_spec['required'] ),
+			'steps'            => is_array( $branch_spec['steps'] ?? null ) ? $branch_spec['steps'] : array(),
+			'branch_vars'      => array(
+				'context' => $shared_context,
+				'role'    => $role_contract,
+			),
+			'continue_on_error' => ! empty( $branch_spec['continue_on_error'] ),
+		);
+	}
+
+	/**
+	 * Run the aggregate plan once every branch has reconciled, producing the
+	 * parallel step's final output in the SAME shape the sync loops return.
+	 * Shared by the reconcile entry point ({@see agents_reconcile_workflow_branch()})
+	 * and the synchronous-executor inline path. For `roles`, the aggregator
+	 * branch runs synchronously (aggregation is cheap fusion, not N slow AI
+	 * calls) with `${vars.branch_outputs.*}` populated from the reconciled
+	 * sibling results. For `map`, there is no aggregator — collect into the
+	 * `{ shape:'map', count, branches }` envelope.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param array<string,mixed> $aggregate      Aggregate plan (§2.5).
+	 * @param array<string,mixed> $branch_results Reconciled BranchResult[] keyed by role|index.
+	 * @param array<string,mixed> $handlers       Step-type handler map.
+	 * @return array<mixed>|\WP_Error
+	 */
+	public static function aggregate_branch_results( array $aggregate, array $branch_results, array $handlers ) {
+		$mode = self::string_value( $aggregate['mode'] ?? '' );
+
+		if ( 'map' === $mode ) {
+			$branches = array();
+			foreach ( $branch_results as $key => $result ) {
+				$result     = is_array( $result ) ? $result : array();
+				$branches[] = array(
+					'index'  => is_numeric( $key ) ? (int) $key : $key,
+					'item'   => $result['item'] ?? null,
+					'steps'  => is_array( $result['steps'] ?? null ) ? $result['steps'] : array(),
+					'output' => $result['output'] ?? null,
+				);
+			}
+			return array(
+				'shape'    => 'map',
+				'count'    => count( $branches ),
+				'branches' => $branches,
+			);
+		}
+
+		// roles: fuse sibling outputs through the aggregator branch.
+		$aggregator = is_array( $aggregate['aggregator_spec'] ?? null ) ? self::string_keyed_array( $aggregate['aggregator_spec'] ) : array();
+		if ( empty( $aggregator ) ) {
+			return new \WP_Error(
+				'workflow_parallel_aggregator_missing',
+				'parallel-roles reconcile is missing its aggregator branch.'
+			);
+		}
+
+		$shared_context = is_array( $aggregate['shared_context'] ?? null ) ? self::string_keyed_array( $aggregate['shared_context'] ) : array();
+		$aggregator_key = self::string_value( $aggregate['aggregator_role'] ?? '' );
+
+		$branch_outputs = array();
+		foreach ( $branch_results as $key => $result ) {
+			if ( (string) $key === $aggregator_key ) {
+				continue;
+			}
+			$result                          = is_array( $result ) ? $result : array();
+			$branch_outputs[ (string) $key ] = $result['output'] ?? null;
+		}
+
+		$executor = new WP_Agent_Workflow_Step_Executor( $handlers );
+		$run      = self::run_role_branch( $aggregator, $shared_context, $branch_outputs, array(), $executor, $handlers );
+		if ( is_wp_error( $run ) ) {
+			return $run;
+		}
+
+		$branch_outputs[ $aggregator_key ] = $run['output'];
+
+		return array(
+			'shape'          => 'roles',
+			'aggregator'     => $aggregator_key,
+			'branch_outputs' => $branch_outputs,
+			'final'          => $run['output'],
 		);
 	}
 
@@ -924,7 +1421,7 @@ class WP_Agent_Workflow_Runner {
 	 * @param string              $branch_label      Branch identifier for error messages.
 	 * @return array{steps:array<string,mixed>,last:mixed}|WP_Error
 	 */
-	private static function run_branch_steps( array $steps, WP_Agent_Workflow_Run_Context $branch_context, WP_Agent_Workflow_Step_Executor $executor, array $handlers, bool $continue_on_error, string $branch_label ) {
+	public static function run_branch_steps( array $steps, WP_Agent_Workflow_Run_Context $branch_context, WP_Agent_Workflow_Step_Executor $executor, array $handlers, bool $continue_on_error, string $branch_label ) {
 		$step_outputs = array();
 		$last_output  = null;
 
@@ -1052,5 +1549,31 @@ class WP_Agent_Workflow_Runner {
 		}
 
 		return '';
+	}
+
+	/**
+	 * Coerce a value to an int for numeric-only frame fields.
+	 *
+	 * @param mixed $value Value to normalize.
+	 */
+	private static function int_value( $value ): int {
+		return is_numeric( $value ) ? (int) $value : 0;
+	}
+
+	/**
+	 * Keep only string keys, giving PHPStan a precise `array<string,mixed>`.
+	 *
+	 * @param array<mixed> $value Raw array.
+	 * @return array<string,mixed>
+	 */
+	private static function string_keyed_array( array $value ): array {
+		$result = array();
+		foreach ( $value as $key => $item ) {
+			if ( is_string( $key ) ) {
+				$result[ $key ] = $item;
+			}
+		}
+
+		return $result;
 	}
 }

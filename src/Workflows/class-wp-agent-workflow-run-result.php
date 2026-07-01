@@ -14,6 +14,10 @@
  *   `failed`    — at least one step returned a WP_Error or threw.
  *   `skipped`   — the runner declined to execute (e.g. unknown step
  *                 type that no consumer registered a handler for).
+ *   `suspended` — the run dispatched one or more parallel branches for
+ *                 out-of-band execution and parked mid-flight, waiting on
+ *                 a reconcile to complete + resume it. The suspension frame
+ *                 rides in `metadata._suspension` (see {@see self::get_suspension()}).
  *
  * Step records have the same statuses minus `pending` (steps either ran
  * or didn't), plus a `started_at` / `ended_at` pair for timing.
@@ -36,6 +40,7 @@ final class WP_Agent_Workflow_Run_Result {
 	public const STATUS_FAILED    = 'failed';
 	public const STATUS_SKIPPED   = 'skipped';
 	public const STATUS_CANCELLED = 'cancelled';
+	public const STATUS_SUSPENDED = 'suspended';
 
 	/**
 	 * @since 0.103.0
@@ -176,6 +181,42 @@ final class WP_Agent_Workflow_Run_Result {
 
 	public function is_failed(): bool {
 		return self::STATUS_FAILED === $this->status;
+	}
+
+	/**
+	 * Whether this run is suspended mid-flight waiting on a branch reconcile.
+	 *
+	 * @since 0.5.0
+	 */
+	public function is_suspended(): bool {
+		return self::STATUS_SUSPENDED === $this->status;
+	}
+
+	/**
+	 * Return the suspension frame carried in `metadata._suspension`, or an
+	 * empty array when the run is not suspended. No new constructor argument
+	 * is needed — the frame rides the existing `metadata` field, so it
+	 * round-trips through `to_array()`/`from_array()`/`with()` for free.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @return array<string,mixed>
+	 */
+	public function get_suspension(): array {
+		$suspension = $this->metadata['_suspension'] ?? array();
+		if ( ! is_array( $suspension ) ) {
+			return array();
+		}
+
+		/** @var array<string,mixed> $result */
+		$result = array();
+		foreach ( $suspension as $key => $value ) {
+			if ( is_string( $key ) ) {
+				$result[ $key ] = $value;
+			}
+		}
+
+		return $result;
 	}
 
 	public function to_run_result_envelope(): WP_Agent_Run_Result_Envelope {

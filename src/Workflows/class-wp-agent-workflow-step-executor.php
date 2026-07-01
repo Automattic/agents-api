@@ -89,6 +89,24 @@ class WP_Agent_Workflow_Step_Executor {
 			return $record;
 		}
 
+		// Suspend directive: a successful handler MAY ask the run to park
+		// mid-flight by returning an array carrying a reserved `_suspend`
+		// envelope key (see WP_Agent_Workflow_Runner suspend/resume model).
+		// This is invisible to existing handlers (none emit it), so it is
+		// purely additive. The step is NOT ended and NOT marked succeeded;
+		// it is parked. The runner recognizes the `'pending'` step status and
+		// persists a suspension frame instead of advancing. We deliberately
+		// skip set_step_output(): the step has no output yet — its real output
+		// lands later, on resume, once the dispatched branches reconcile.
+		if ( is_array( $step_output ) && isset( $step_output['_suspend'] ) && is_array( $step_output['_suspend'] ) ) {
+			$record['status']   = 'pending';
+			$record['suspend']  = $step_output['_suspend'];
+			$record['output']   = null;
+			$record['ended_at'] = 0;
+
+			return $record;
+		}
+
 		$record['status']   = WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED;
 		$record['output']   = is_array( $step_output ) ? $step_output : array( 'value' => $step_output );
 		$record['ended_at'] = time();
