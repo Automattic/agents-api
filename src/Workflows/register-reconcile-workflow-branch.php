@@ -190,14 +190,71 @@ function agents_reconcile_workflow_branch( string $run_id, string $handle_id, ar
 
 	// Splice the parallel step's final output (or failure) into its record so
 	// resume sees a terminal step and downstream `${steps.<id>.output}`
-	// bindings resolve against the aggregated result.
+	// bindings resolve against the aggregated result. The run is still
+	// SUSPENDED at this point (the frame is intact); resume() is what clears it.
 	$result = agents_workflow_splice_step_output( $result, $step_index, $step_output );
 	$recorder->update( $result );
 
-	// Resume the step loop from step_index + 1. resume() clears the suspension
-	// frame and continues (or fails) from the aggregated output.
+	// The "all terminal → resume" transition is the ONE place two branches
+	// finishing near-simultaneously in separate processes can race. Rather than
+	// hand-roll a cross-process lock (unsafe / forbidden), the transition is
+	// pluggable: the owning executor may DEFER resume to an atomically-claimed
+	// out-of-band action so exactly one resume runs. The default (Phase 1, and
+	// any synchronous / in-process executor) resumes inline right here.
+	//
+	// A deferring handler enqueues its claimed resume action and returns true;
+	// reconcile then returns the aggregate-spliced-but-still-SUSPENDED run. The
+	// deferred handler, when its claimed action fires, re-checks the run is
+	// still SUSPENDED and calls resume() exactly once (§3.4, §4.3).
+	if ( agents_workflow_defer_resume( $run_id, $result ) ) {
+		return $result;
+	}
+
+	// Resume the step loop from step_index + 1 inline. resume() clears the
+	// suspension frame and continues (or fails) from the aggregated output.
 	$runner = agents_workflow_resolve_runner( $recorder );
 	return $runner->resume( $run_id );
+}
+
+/**
+ * Ask whether the "all branches terminal → resume" transition should be
+ * deferred to an out-of-band, atomically-claimed action rather than resumed
+ * inline. This is the single seam that keeps the AS async path from duplicating
+ * any reconcile / aggregate logic: reconcile still owns merge → all-terminal? →
+ * aggregate → splice; only the FINAL resume dispatch is pluggable.
+ *
+ * The default is `false` — resume inline (Phase 1 behavior, and correct for any
+ * synchronous / in-process executor). The Action Scheduler executor hooks the
+ * `wp_agent_workflow_resume_dispatch` filter to enqueue a claimed RESUME action
+ * and return `true`, so exactly one resume runs even under a simultaneous
+ * multi-branch finish (AS's atomic action-claim is the cross-process guard).
+ *
+ * @since 0.5.0
+ *
+ * @param string                       $run_id The suspended run id.
+ * @param WP_Agent_Workflow_Run_Result $result The aggregate-spliced, still-suspended run.
+ * @return bool True when a handler claimed the resume (reconcile must NOT resume inline).
+ */
+function agents_workflow_defer_resume( string $run_id, WP_Agent_Workflow_Run_Result $result ): bool {
+	$suspension  = $result->get_suspension();
+	$executor_id = agents_workflow_string( $suspension['executor_id'] ?? '' );
+
+	/**
+	 * Filter whether resume is deferred to an out-of-band claimed action.
+	 *
+	 * A handler that owns the run's executor enqueues its atomically-claimed
+	 * resume action and returns `true`; core then returns the still-suspended
+	 * run and the claimed action performs the one-and-only resume. Returning a
+	 * falsey value (the default) resumes inline in the reconcile request.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param bool                         $deferred    Whether resume is deferred. Default false.
+	 * @param string                       $run_id      The suspended run id.
+	 * @param string                       $executor_id The frame's owning executor id.
+	 * @param WP_Agent_Workflow_Run_Result $result      The aggregate-spliced, still-suspended run.
+	 */
+	return (bool) apply_filters( 'wp_agent_workflow_resume_dispatch', false, $run_id, $executor_id, $result );
 }
 
 /**
