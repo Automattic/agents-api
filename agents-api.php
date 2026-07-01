@@ -238,12 +238,15 @@ require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-store.php'
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-lifecycle.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-run-recorder.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-run-context.php';
+require_once AGENTS_API_PATH . 'src/Workflows/interface-wp-agent-workflow-branch-executor.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-step-executor.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-runner.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-registry.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-action-scheduler-bridge.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflows.php';
+require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-step-executor.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-agents-workflow-abilities.php';
+require_once AGENTS_API_PATH . 'src/Workflows/register-reconcile-workflow-branch.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-bridge-sync.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-action-scheduler-listener.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine.php';

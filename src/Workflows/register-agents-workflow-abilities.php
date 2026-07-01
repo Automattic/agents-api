@@ -486,7 +486,7 @@ function agents_run_workflow_output_schema(): array {
 			'workflow_id'   => array( 'type' => 'string' ),
 			'status'        => array(
 				'type' => 'string',
-				'enum' => array( 'pending', 'running', 'succeeded', 'failed', 'skipped' ),
+				'enum' => array( 'pending', 'running', 'succeeded', 'failed', 'skipped', 'suspended' ),
 			),
 			'output'        => array( 'type' => 'object' ),
 			'steps'         => array( 'type' => 'array' ),
