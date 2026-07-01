@@ -343,7 +343,7 @@ function async_smoke_roles_spec(): WP_Agent_Workflow_Spec {
 						array(
 							'role'                   => 'headline',
 							'required'               => true,
-							'can_write_final_bundle' => false,
+							'is_aggregator' => false,
 							'steps'                  => array(
 								array( 'id' => 'h', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array() ),
 							),
@@ -351,7 +351,7 @@ function async_smoke_roles_spec(): WP_Agent_Workflow_Spec {
 						array(
 							'role'                   => 'body',
 							'required'               => true,
-							'can_write_final_bundle' => false,
+							'is_aggregator' => false,
 							'steps'                  => array(
 								array( 'id' => 'b', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array() ),
 							),
@@ -359,7 +359,7 @@ function async_smoke_roles_spec(): WP_Agent_Workflow_Spec {
 						array(
 							'role'                   => 'fuse',
 							'required'               => true,
-							'can_write_final_bundle' => true,
+							'is_aggregator' => true,
 							'steps'                  => array(
 								array(
 									'id'      => 'agg',
@@ -491,13 +491,13 @@ function async_smoke_optional_spec(): WP_Agent_Workflow_Spec {
 						array(
 							'role'                   => 'flaky',
 							'required'               => false,
-							'can_write_final_bundle' => false,
+							'is_aggregator' => false,
 							'steps'                  => array( array( 'id' => 'f', 'type' => 'ability', 'ability' => 'demo/aggregate', 'args' => array() ) ),
 						),
 						array(
 							'role'                   => 'fuse',
 							'required'               => true,
-							'can_write_final_bundle' => true,
+							'is_aggregator' => true,
 							'steps'                  => array(
 								array( 'id' => 'agg', 'type' => 'ability', 'ability' => 'demo/aggregate', 'args' => array( 'headline' => 'x', 'body' => 'y' ) ),
 							),
@@ -581,6 +581,63 @@ smoke_assert_true( $selected instanceof WP_Agent_Workflow_Branch_Executor, 'sele
 $GLOBALS['__fake_executor'] = null;
 $selected_null = apply_filters( 'wp_agent_workflow_step_executor', null, array( 'id' => 'x', 'type' => 'parallel' ), array() );
 smoke_assert( null, $selected_null, 'selection rule: no override + no AS → null (sync)', $failures, $passes );
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 9. ZERO-aggregator roles on the ASYNC suspend/resume path: fan out, suspend,
+//    reconcile every branch, resume → the step returns the collected
+//    branch_outputs with NO aggregator invoked (scatter-collect-return).
+// ═════════════════════════════════════════════════════════════════════════════
+
+function async_smoke_no_aggregator_spec(): WP_Agent_Workflow_Spec {
+	return WP_Agent_Workflow_Spec::from_array(
+		array(
+			'id'    => 'demo/async-no-aggregator',
+			'steps' => array(
+				array(
+					'id'       => 'scatter',
+					'type'     => 'parallel',
+					'context'  => array( 'marker' => 'M' ),
+					'branches' => array(
+						array(
+							'role'     => 'headline',
+							'required' => true,
+							'steps'    => array( array( 'id' => 'h', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array() ) ),
+						),
+						array(
+							'role'     => 'body',
+							'required' => true,
+							'steps'    => array( array( 'id' => 'b', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array() ) ),
+						),
+					),
+				),
+			),
+		)
+	);
+}
+
+$recorder6 = new Async_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder6 ) { return $recorder6; } );
+$GLOBALS['__fake_executor'] = new Fake_Branch_Executor();
+
+$run6   = ( new WP_Agent_Workflow_Runner( $recorder6 ) )->run( async_smoke_no_aggregator_spec(), array(), array( 'run_id' => 'run-F' ) );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $run6->get_status(), 'zero-aggregator async: run suspends after dispatch', $failures, $passes );
+$frame6 = $run6->get_suspension();
+smoke_assert( 'roles', $frame6['aggregate']['mode'] ?? '', 'zero-aggregator async: frame carries the roles collect plan', $failures, $passes );
+smoke_assert( '', $frame6['aggregate']['aggregator_role'] ?? 'x', 'zero-aggregator async: collect plan names no aggregator role', $failures, $passes );
+
+$hk6 = array();
+foreach ( $frame6['handles'] as $h ) {
+	$hk6[ $h['key'] ] = $h['id'];
+}
+async_smoke_complete( 'run-F', $hk6['headline'], 'headline', 'succeeded', array( 'fragment' => 'HEAD' ) );
+$res6 = async_smoke_complete( 'run-F', $hk6['body'], 'body', 'succeeded', array( 'fragment' => 'BODY' ) );
+
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $res6->get_status(), 'zero-aggregator async: last branch resumes → run SUCCEEDED', $failures, $passes );
+$scatter6 = $res6->get_output()['steps']['scatter'] ?? array();
+smoke_assert( false, array_key_exists( 'final', $scatter6 ), 'zero-aggregator async: no final key (no aggregator invoked)', $failures, $passes );
+smoke_assert( 'HEAD', $scatter6['branch_outputs']['headline']['fragment'] ?? '', 'zero-aggregator async: collected headline branch output on resume', $failures, $passes );
+smoke_assert( 'BODY', $scatter6['branch_outputs']['body']['fragment'] ?? '', 'zero-aggregator async: collected body branch output on resume', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
