@@ -246,6 +246,7 @@ require_once __DIR__ . '/../src/Workflows/interface-wp-agent-workflow-branch-exe
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-executor.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-runner.php';
 require_once __DIR__ . '/../src/Workflows/register-agents-workflow-abilities.php';
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-reconcile-lock.php';
 require_once __DIR__ . '/../src/Workflows/register-reconcile-workflow-branch.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-action-scheduler-bridge.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-action-scheduler-branch-executor.php';
