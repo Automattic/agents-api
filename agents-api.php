@@ -243,10 +243,12 @@ require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-step-execu
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-runner.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-registry.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-action-scheduler-bridge.php';
+require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-action-scheduler-branch-executor.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflows.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-step-executor.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-agents-workflow-abilities.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-reconcile-workflow-branch.php';
+require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-branch-executor.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-bridge-sync.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-action-scheduler-listener.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine.php';

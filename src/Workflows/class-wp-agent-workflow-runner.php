@@ -888,7 +888,29 @@ class WP_Agent_Workflow_Runner {
 			return $plan;
 		}
 
-		$handles = $executor->dispatch( $plan['branches'], $plan['shared_context'] );
+		// Stamp the run + step identity onto every branch descriptor so a
+		// self-contained descriptor riding in an out-of-band payload (e.g. the AS
+		// action payload) knows which run/step to reconcile against without
+		// re-reading the spec. This is the durable-descriptor contract the
+		// executor depends on (§2.4 / §3.1).
+		$run_id  = self::string_value( $context['_workflow_run_id'] ?? '' );
+		$step_id = self::string_value( $step['id'] ?? '' );
+		foreach ( $plan['branches'] as $branch_index => $descriptor ) {
+			$descriptor['run_id']              = $run_id;
+			$descriptor['step_id']             = $step_id;
+			$plan['branches'][ $branch_index ] = $descriptor;
+		}
+
+		// Pass the run/step identity alongside the shared context (in a reserved
+		// envelope, not merged into it) so an executor's dispatch() can address
+		// the run without the identity leaking into `${vars.context.*}`.
+		$dispatch_context = array(
+			'_workflow_run_id'  => $run_id,
+			'_workflow_step_id' => $step_id,
+			'shared_context'    => $plan['shared_context'],
+		);
+
+		$handles = $executor->dispatch( $plan['branches'], $dispatch_context );
 
 		// A synchronous executor may return already-complete handles; then the
 		// run must NOT suspend — collect + aggregate inline and return terminal.
