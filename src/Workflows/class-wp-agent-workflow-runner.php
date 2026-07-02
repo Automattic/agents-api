@@ -402,6 +402,25 @@ class WP_Agent_Workflow_Runner {
 			$result->get_run_id(),
 			$failed ? WP_Agent_Run_Control::STATUS_FAILED : WP_Agent_Run_Control::STATUS_SUCCEEDED
 		);
+
+		/**
+		 * Fires when a workflow run reaches a terminal state through the step loop.
+		 *
+		 * This is the single funnel for a run finishing — whether it ran straight
+		 * through in one request ({@see run()}) or completed via an async resume
+		 * after its parallel branches reconciled ({@see resume()}). It lets an
+		 * async consumer react to completion WITHOUT block-polling the recorder:
+		 * a consumer that dispatched an async fanout can return immediately from
+		 * its own worker and do its finalization here instead, so it never holds a
+		 * queue claim while waiting on the very branches it dispatched.
+		 *
+		 * @since 0.5.0
+		 *
+		 * @param WP_Agent_Workflow_Run_Result $result The terminal run result.
+		 * @param string                       $run_id The run id.
+		 */
+		do_action( 'wp_agent_workflow_run_completed', $result, $result->get_run_id() );
+
 		return $result;
 	}
 
