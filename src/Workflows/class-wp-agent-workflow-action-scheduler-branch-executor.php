@@ -391,7 +391,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		// request_multiple uses curl_multi under the hood. The `timeout` only needs to
 		// outlast connection establishment (~1s on this TLS `php -S` runtime), not the
 		// branch AI calls — the workers run their queue independently of our response.
-		if ( class_exists( '\WpOrg\Requests\Requests' ) && method_exists( '\WpOrg\Requests\Requests', 'request_multiple' ) ) {
+		if ( class_exists( '\WpOrg\Requests\Requests' ) ) {
 			$requests = array();
 			for ( $i = 0; $i < $workers; $i++ ) {
 				$requests[] = array(
@@ -408,8 +408,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			// its queue independently of our response, so a request that "times out"
 			// waiting for the response has already handed its branch to a worker.
 			// Filterable so a slower or faster runtime can tune it.
-			$options = array(
-				'timeout'         => (float) apply_filters( 'agents_workflow_async_runner_dispatch_timeout', 10 ),
+			$dispatch_timeout = apply_filters( 'agents_workflow_async_runner_dispatch_timeout', 10 );
+			$options          = array(
+				'timeout'         => is_numeric( $dispatch_timeout ) ? (float) $dispatch_timeout : 10.0,
 				'connect_timeout' => 10,
 				'verify'          => $sslverify,
 			);
@@ -453,7 +454,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			'timeout'   => 0.01,
 			'blocking'  => false,
 			'body'      => array(),
-			'cookies'   => isset( $_COOKIE ) && is_array( $_COOKIE ) ? $_COOKIE : array(), // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- forwarding the current request's cookies to the loopback worker, not reading input.
+			'cookies'   => $_COOKIE, // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- forwarding the current request's cookies to the loopback worker, not reading input.
 			'sslverify' => $sslverify,
 		);
 

@@ -140,10 +140,16 @@ $agents_workflow_branch_reaper_window = static function ( $period ) {
 	 *
 	 * @param int $period The AS failure/timeout period (seconds).
 	 */
-	$branch_window = (int) apply_filters( 'agents_workflow_branch_failure_period', 3600 );
+	// absint() coerces a filtered value (a third party may return anything) to a
+	// non-negative int; a 0 from a garbage value is harmless here (max() below
+	// keeps the incoming period).
+	$branch_window = absint( apply_filters( 'agents_workflow_branch_failure_period', 3600 ) );
 
-	// Never shorten the operator's configured window; only extend it.
-	return max( (int) $period, $branch_window );
+	// Never shorten the operator's configured window; only extend it. The AS
+	// period is numeric; a non-numeric value (a misbehaving filter) coerces to 0,
+	// which max() below discards in favor of the branch window.
+	$incoming = is_numeric( $period ) ? (int) $period : 0;
+	return max( $incoming, $branch_window );
 };
 add_filter( 'action_scheduler_failure_period', $agents_workflow_branch_reaper_window, 20 );
 add_filter( 'action_scheduler_timeout_period', $agents_workflow_branch_reaper_window, 20 );
@@ -188,13 +194,14 @@ add_filter(
 	 * @return int
 	 */
 	static function ( $batches ) {
-		$pending = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::pending_branch_count();
+		$incoming = is_numeric( $batches ) ? (int) $batches : 1;
+		$pending  = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::pending_branch_count();
 		if ( $pending < 1 ) {
-			return (int) $batches;
+			return $incoming;
 		}
 		$target = min( $pending, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::MAX_BRANCH_CONCURRENCY );
 		// Only ever RAISE — never lower a ceiling another plugin set higher.
-		return max( (int) $batches, $target );
+		return max( $incoming, $target );
 	},
 	100
 );
@@ -209,7 +216,10 @@ add_filter(
 		// Pin to 1 while branches are pending so each worker claims exactly one branch;
 		// otherwise pass the incoming value through so ordinary AS throughput (25) is
 		// untouched.
-		return WP_Agent_Workflow_Action_Scheduler_Branch_Executor::pending_branch_count() > 0 ? 1 : (int) $batch_size;
+		if ( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::pending_branch_count() > 0 ) {
+			return 1;
+		}
+		return is_numeric( $batch_size ) ? (int) $batch_size : 25;
 	},
 	100
 );
