@@ -343,7 +343,7 @@ function as_smoke_roles_spec(): WP_Agent_Workflow_Spec {
 						array(
 							'role'                   => 'headline',
 							'required'               => true,
-							'can_write_final_bundle' => false,
+							'is_aggregator' => false,
 							'steps'                  => array(
 								array( 'id' => 'h', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'head' ) ),
 							),
@@ -351,7 +351,7 @@ function as_smoke_roles_spec(): WP_Agent_Workflow_Spec {
 						array(
 							'role'                   => 'body',
 							'required'               => true,
-							'can_write_final_bundle' => false,
+							'is_aggregator' => false,
 							'steps'                  => array(
 								array( 'id' => 'b', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'body' ) ),
 							),
@@ -359,7 +359,7 @@ function as_smoke_roles_spec(): WP_Agent_Workflow_Spec {
 						array(
 							'role'                   => 'fuse',
 							'required'               => true,
-							'can_write_final_bundle' => true,
+							'is_aggregator' => true,
 							'steps'                  => array(
 								array(
 									'id'      => 'agg',
@@ -577,7 +577,7 @@ function as_smoke_failing_spec(): WP_Agent_Workflow_Spec {
 						array(
 							'role'                   => 'headline',
 							'required'               => true,
-							'can_write_final_bundle' => false,
+							'is_aggregator' => false,
 							// An ability that isn't registered → run_branch_steps fails at
 							// runtime → required-branch failure (passes spec validation).
 							'steps'                  => array( array( 'id' => 'x', 'type' => 'ability', 'ability' => 'demo/does-not-exist', 'args' => array() ) ),
@@ -585,7 +585,7 @@ function as_smoke_failing_spec(): WP_Agent_Workflow_Spec {
 						array(
 							'role'                   => 'fuse',
 							'required'               => true,
-							'can_write_final_bundle' => true,
+							'is_aggregator' => true,
 							'steps'                  => array(
 								array( 'id' => 'agg', 'type' => 'ability', 'ability' => 'demo/aggregate', 'args' => array( 'headline' => 'x', 'body' => 'y' ) ),
 							),

@@ -22,11 +22,12 @@
  *   - Real concurrency. The runner is synchronous and single-process; PHP
  *     ships no threads here. The `parallel` step type expresses *fanout
  *     orchestration* (declare N branches, propagate a shared immutable
- *     context to each, collect every branch output, hand them to an
- *     aggregator) — not parallel execution. Whether branches actually run on
- *     separate processes (Action Scheduler, sandboxed subprocesses, loopback)
- *     is a consumer-supplied executor concern; the substrate owns the
- *     dispatch/collect/aggregate contract, not the concurrency mechanism.
+ *     context to each, collect every branch output, and optionally run one
+ *     aggregator branch over the collected outputs) — not parallel execution.
+ *     Whether branches actually run on separate processes (Action Scheduler,
+ *     sandboxed subprocesses, loopback) is a consumer-supplied executor
+ *     concern; the substrate owns the scatter/collect/return contract (plus
+ *     the optional aggregate pass), not the concurrency mechanism.
  *   - Triggering. Triggers are wired separately
  *     ({@see WP_Agent_Workflow_Action_Scheduler_Bridge} for cron, and a
  *     consumer-registered listener for `wp_action`). The runner only
@@ -764,30 +765,35 @@ class WP_Agent_Workflow_Runner {
 	/**
 	 * Default `parallel` step handler — generic agent fanout.
 	 *
-	 * This is the substrate's fanout-orchestration primitive. It is NOT real
-	 * concurrency: PHP ships no threads here and this runner is synchronous.
-	 * What the handler owns is the reusable contract that two product plugins
-	 * independently reinvented — declare a set of branches, give every branch
-	 * the SAME shared immutable context, run them through the same step-handler
-	 * dispatch the runner already uses, collect each branch output keyed by its
-	 * role, then hand all sibling outputs to a designated aggregator branch that
-	 * fuses them into the final result. Whether branches *physically* run in
-	 * parallel (Action Scheduler, sandboxed subprocesses, loopback requests) is a
-	 * consumer-provided executor concern layered on top of this contract; the
-	 * substrate declares the dispatch/collect/aggregate flow, not the
-	 * concurrency mechanism. The reusable, real part is the fanout
-	 * orchestration, and that is all this claims.
+	 * This is the substrate's fanout-orchestration primitive: a scatter, collect,
+	 * and return over role-scoped branches, with an OPTIONAL in-run aggregator
+	 * branch. It is NOT real concurrency: PHP ships no threads here and this
+	 * runner is synchronous. What the handler owns is the reusable contract —
+	 * declare a set of branches, give every branch the SAME shared immutable
+	 * context, run them through the same step-handler dispatch the runner already
+	 * uses, and collect each branch output keyed by its role. A branch MAY be
+	 * flagged `is_aggregator`, in which case it runs AFTER its siblings and
+	 * receives their collected outputs, and its output becomes the step's final
+	 * output; when no branch is an aggregator the step simply returns the
+	 * collected branch outputs and any composition is the consumer's concern.
+	 * Whether branches *physically* run in parallel (Action Scheduler, sandboxed
+	 * subprocesses, loopback requests) is a consumer-provided executor concern
+	 * layered on top of this contract; the substrate declares the
+	 * scatter/collect/return flow (plus the optional aggregate pass), not the
+	 * concurrency mechanism.
 	 *
-	 * One declarative step expresses BOTH proven fanout shapes:
+	 * One declarative step expresses BOTH fanout shapes:
 	 *
 	 *   1. parallel-map — run the same nested `steps` across N resolved `items`
 	 *      (the non-sequential sibling of `foreach`); collect each branch result.
 	 *      Shape: { type:'parallel', items, steps, as?, index_as? }.
 	 *
-	 *   2. parallel-roles + aggregate — run a set of role-scoped `branches` in
-	 *      parallel, each receiving a shared immutable `context`, then hand all
-	 *      branch outputs to the branch flagged `can_write_final_bundle` (the
-	 *      aggregator), which emits the fused final output.
+	 *   2. parallel-roles — run a set of role-scoped `branches` in parallel, each
+	 *      receiving a shared immutable `context`, and collect their outputs keyed
+	 *      by role. If AT MOST ONE branch is flagged `is_aggregator`, that branch
+	 *      runs after the siblings, receives `${vars.branch_outputs.*}`, and its
+	 *      output becomes the step's final output. With zero aggregators the step
+	 *      returns the collected branch outputs for the consumer to compose.
 	 *      Shape: { type:'parallel', context, branches:[ <branch contract> ] }.
 	 *
 	 * Branch / role contract (parallel-roles shape):
@@ -798,13 +804,13 @@ class WP_Agent_Workflow_Runner {
 	 *     shared_context_contract: string,            // how the branch must consume the shared context
 	 *     expected_output:         { ref, shape },    // declared output ref + shape
 	 *     required:                bool,              // a failing required branch fails the step
-	 *     can_write_final_bundle:  bool,              // exactly one branch is the aggregator
+	 *     is_aggregator:           bool,              // OPTIONAL: at most one branch is the aggregator
 	 *     steps:                   array              // nested steps the branch runs
 	 *   }
 	 *
 	 * Every branch reads the shared context under `${vars.context.*}`; a
 	 * branch CANNOT mutate it for siblings — each branch gets its own
-	 * deep-copied snapshot. The aggregator additionally receives every
+	 * deep-copied snapshot. An aggregator branch additionally receives every
 	 * sibling's collected output under `${vars.branch_outputs.*}` (keyed by
 	 * role) and its own role focus under `${vars.role.*}`.
 	 *
@@ -812,7 +818,7 @@ class WP_Agent_Workflow_Runner {
 	 * filter is consulted ( default true ) so a consumer can decide WHETHER to
 	 * fan out for a given step + context (e.g. a complexity score). The
 	 * substrate embeds no heuristic of its own; when the gate returns false the
-	 * step short-circuits to a skipped, non-fused result.
+	 * step short-circuits to a skipped result.
 	 *
 	 * @since 0.4.0
 	 *
@@ -842,7 +848,7 @@ class WP_Agent_Workflow_Runner {
 		if ( ! $has_branches && ! $has_items ) {
 			return new \WP_Error(
 				'workflow_parallel_shape_invalid',
-				'parallel step must declare either `branches` (roles+aggregate) or `items` (map).'
+				'parallel step must declare either `branches` (roles) or `items` (map).'
 			);
 		}
 
@@ -930,10 +936,10 @@ class WP_Agent_Workflow_Runner {
 	}
 
 	/**
-	 * Build the dispatch plan for the roles+aggregate shape: one branch
-	 * descriptor per sibling role, the deferred aggregator plan, and the shared
-	 * immutable context. Mirrors the sync `run_parallel_roles()` validation so
-	 * the async path rejects the same malformed specs.
+	 * Build the dispatch plan for the roles shape: one branch descriptor per
+	 * sibling role, the collect plan (with its OPTIONAL aggregator branch), and
+	 * the shared immutable context. Mirrors the sync `run_parallel_roles()`
+	 * validation so the async path rejects the same malformed specs.
 	 *
 	 * @since 0.5.0
 	 *
@@ -959,22 +965,25 @@ class WP_Agent_Workflow_Runner {
 			);
 		}
 
+		// At most one branch may be the aggregator. Zero aggregators is valid
+		// (scatter-collect-return); one aggregator runs after the siblings over
+		// their collected outputs.
 		$aggregator       = null;
 		$aggregator_roles = array();
 		$sibling_branches = array();
 		foreach ( $branch_specs as $branch_spec ) {
-			if ( ! empty( $branch_spec['can_write_final_bundle'] ) ) {
+			if ( ! empty( $branch_spec['is_aggregator'] ) ) {
 				$aggregator         = $branch_spec;
 				$aggregator_roles[] = self::string_value( $branch_spec['role'] ?? '' );
 				continue;
 			}
 			$sibling_branches[] = $branch_spec;
 		}
-		if ( 1 !== count( $aggregator_roles ) || null === $aggregator ) {
+		if ( count( $aggregator_roles ) > 1 ) {
 			return new \WP_Error(
 				'workflow_parallel_aggregator_invalid',
 				sprintf(
-					'parallel-roles step must declare exactly one aggregator branch (`can_write_final_bundle` true); found %d.',
+					'parallel-roles step may declare at most one aggregator branch (`is_aggregator` true); found %d.',
 					count( $aggregator_roles )
 				)
 			);
@@ -1000,8 +1009,8 @@ class WP_Agent_Workflow_Runner {
 			'shared_context' => $shared_context,
 			'aggregate'      => array(
 				'mode'            => 'roles',
-				'aggregator_role' => self::string_value( $aggregator['role'] ?? '' ),
-				'aggregator_spec' => $aggregator,
+				'aggregator_role' => null !== $aggregator ? self::string_value( $aggregator['role'] ?? '' ) : '',
+				'aggregator_spec' => null !== $aggregator ? $aggregator : array(),
 				'shared_context'  => $shared_context,
 				'shape'           => 'roles',
 			),
@@ -1096,14 +1105,19 @@ class WP_Agent_Workflow_Runner {
 	}
 
 	/**
-	 * Run the aggregate plan once every branch has reconciled, producing the
-	 * parallel step's final output in the SAME shape the sync loops return.
-	 * Shared by the reconcile entry point ({@see agents_reconcile_workflow_branch()})
-	 * and the synchronous-executor inline path. For `roles`, the aggregator
-	 * branch runs synchronously (aggregation is cheap fusion, not N slow AI
-	 * calls) with `${vars.branch_outputs.*}` populated from the reconciled
-	 * sibling results. For `map`, there is no aggregator — collect into the
-	 * `{ shape:'map', count, branches }` envelope.
+	 * Collect the reconciled branch outputs once every branch is terminal,
+	 * producing the parallel step's output in the SAME shape the sync loops
+	 * return. Shared by the reconcile entry point
+	 * ({@see agents_reconcile_workflow_branch()}) and the synchronous-executor
+	 * inline path.
+	 *
+	 * For `roles`: collect each branch output keyed by role. When the plan names
+	 * an OPTIONAL aggregator branch, that branch runs after the siblings (cheap
+	 * synthesis, not N slow AI calls) with `${vars.branch_outputs.*}` populated
+	 * from the reconciled sibling results, and its output becomes the step's
+	 * `final`. With no aggregator the step just returns the collected
+	 * `branch_outputs` for the consumer to compose. For `map`: collect into the
+	 * `{ shape:'map', count, branches }` envelope (never an aggregator).
 	 *
 	 * @since 0.5.0
 	 *
@@ -1133,29 +1147,33 @@ class WP_Agent_Workflow_Runner {
 			);
 		}
 
-		// roles: fuse sibling outputs through the aggregator branch.
-		$aggregator = is_array( $aggregate['aggregator_spec'] ?? null ) ? self::string_keyed_array( $aggregate['aggregator_spec'] ) : array();
-		if ( empty( $aggregator ) ) {
-			return new \WP_Error(
-				'workflow_parallel_aggregator_missing',
-				'parallel-roles reconcile is missing its aggregator branch.'
-			);
-		}
-
-		$shared_context = is_array( $aggregate['shared_context'] ?? null ) ? self::string_keyed_array( $aggregate['shared_context'] ) : array();
+		// roles: collect sibling outputs keyed by role.
+		$aggregator     = is_array( $aggregate['aggregator_spec'] ?? null ) ? self::string_keyed_array( $aggregate['aggregator_spec'] ) : array();
 		$aggregator_key = self::string_value( $aggregate['aggregator_role'] ?? '' );
 
 		$branch_outputs = array();
 		foreach ( $branch_results as $key => $result ) {
-			if ( (string) $key === $aggregator_key ) {
+			if ( '' !== $aggregator_key && (string) $key === $aggregator_key ) {
 				continue;
 			}
 			$result                          = is_array( $result ) ? $result : array();
 			$branch_outputs[ (string) $key ] = $result['output'] ?? null;
 		}
 
-		$executor = new WP_Agent_Workflow_Step_Executor( $handlers );
-		$run      = self::run_role_branch( $aggregator, $shared_context, $branch_outputs, array(), $executor, $handlers );
+		// No aggregator branch: scatter-collect-return. The consumer composes the
+		// collected branch outputs downstream.
+		if ( empty( $aggregator ) ) {
+			return array(
+				'shape'          => 'roles',
+				'branch_outputs' => $branch_outputs,
+			);
+		}
+
+		// Optional aggregator branch: run it over the collected sibling outputs;
+		// its output becomes the step's final output.
+		$shared_context = is_array( $aggregate['shared_context'] ?? null ) ? self::string_keyed_array( $aggregate['shared_context'] ) : array();
+		$executor       = new WP_Agent_Workflow_Step_Executor( $handlers );
+		$run            = self::run_role_branch( $aggregator, $shared_context, $branch_outputs, array(), $executor, $handlers );
 		if ( is_wp_error( $run ) ) {
 			return $run;
 		}
@@ -1241,10 +1259,12 @@ class WP_Agent_Workflow_Runner {
 	}
 
 	/**
-	 * parallel-roles + aggregate shape: run each role-scoped branch against a
-	 * shared immutable context, collect outputs keyed by role, then run the
-	 * aggregator branch (`can_write_final_bundle` true) with sibling outputs
-	 * available so it can fuse the final result.
+	 * parallel-roles shape: run each role-scoped branch against a shared
+	 * immutable context and collect outputs keyed by role. If at most one branch
+	 * is flagged `is_aggregator`, run that branch AFTER the siblings with their
+	 * collected outputs under `${vars.branch_outputs.*}` so it can synthesize the
+	 * final result; with no aggregator, return the collected branch outputs for
+	 * the consumer to compose.
 	 *
 	 * @since 0.4.0
 	 *
@@ -1272,25 +1292,25 @@ class WP_Agent_Workflow_Runner {
 			);
 		}
 
-		// Exactly one branch must be the aggregator.
+		// At most one branch may be the aggregator (optional).
 		$aggregator_roles = array();
 		foreach ( $branch_specs as $branch_spec ) {
-			if ( ! empty( $branch_spec['can_write_final_bundle'] ) ) {
+			if ( ! empty( $branch_spec['is_aggregator'] ) ) {
 				$aggregator_roles[] = self::string_value( $branch_spec['role'] ?? '' );
 			}
 		}
-		if ( 1 !== count( $aggregator_roles ) ) {
+		if ( count( $aggregator_roles ) > 1 ) {
 			return new \WP_Error(
 				'workflow_parallel_aggregator_invalid',
 				sprintf(
-					'parallel-roles step must declare exactly one aggregator branch (`can_write_final_bundle` true); found %d.',
+					'parallel-roles step may declare at most one aggregator branch (`is_aggregator` true); found %d.',
 					count( $aggregator_roles )
 				)
 			);
 		}
 
 		// Shared immutable context: deep-copied per branch so a branch cannot
-		// mutate it for its siblings or the aggregator. Arrays are copied by
+		// mutate it for its siblings or an aggregator. Arrays are copied by
 		// value in PHP, so a fresh array per branch is a genuine snapshot.
 		$shared_context = is_array( $step['context'] ?? null ) ? $step['context'] : array();
 		$executor       = new WP_Agent_Workflow_Step_Executor( $handlers );
@@ -1299,10 +1319,10 @@ class WP_Agent_Workflow_Runner {
 		$branch_records = array();
 		$aggregator     = null;
 
-		// First pass: every non-aggregator branch, each against its own
-		// snapshot of the shared context.
+		// Scatter: every non-aggregator branch, each against its own snapshot of
+		// the shared context.
 		foreach ( $branch_specs as $branch_spec ) {
-			if ( ! empty( $branch_spec['can_write_final_bundle'] ) ) {
+			if ( ! empty( $branch_spec['is_aggregator'] ) ) {
 				$aggregator = $branch_spec;
 				continue;
 			}
@@ -1317,15 +1337,18 @@ class WP_Agent_Workflow_Runner {
 			$branch_records[ $role ] = $run['record'];
 		}
 
-		// Aggregator pass: same shared context snapshot plus every sibling's
-		// collected output under `${vars.branch_outputs.*}`.
+		// No aggregator branch: return the collected outputs for the consumer to
+		// compose downstream.
 		if ( null === $aggregator ) {
-			return new \WP_Error(
-				'workflow_parallel_aggregator_missing',
-				'parallel-roles step is missing its aggregator branch.'
+			return array(
+				'shape'          => 'roles',
+				'branch_outputs' => $branch_outputs,
+				'branch_records' => $branch_records,
 			);
 		}
 
+		// Optional aggregator pass: same shared context snapshot plus every
+		// sibling's collected output under `${vars.branch_outputs.*}`.
 		$aggregator_run = self::run_role_branch( $aggregator, $shared_context, $branch_outputs, $context, $executor, $handlers );
 		if ( is_wp_error( $aggregator_run ) ) {
 			return $aggregator_run;
@@ -1336,11 +1359,11 @@ class WP_Agent_Workflow_Runner {
 		$branch_records[ $aggregator_role ] = $aggregator_run['record'];
 
 		return array(
-			'shape'           => 'roles',
-			'aggregator'      => $aggregator_role,
-			'branch_outputs'  => $branch_outputs,
-			'branch_records'  => $branch_records,
-			'final'           => $aggregator_run['output'],
+			'shape'          => 'roles',
+			'aggregator'     => $aggregator_role,
+			'branch_outputs' => $branch_outputs,
+			'branch_records' => $branch_records,
+			'final'          => $aggregator_run['output'],
 		);
 	}
 

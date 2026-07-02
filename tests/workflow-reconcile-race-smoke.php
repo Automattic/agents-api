@@ -298,13 +298,13 @@ function race_roles_spec(): WP_Agent_Workflow_Spec {
 					'type'     => 'parallel',
 					'context'  => array( 'marker' => 'M' ),
 					'branches' => array(
-						array( 'role' => 'a', 'required' => true, 'can_write_final_bundle' => false, 'steps' => array( array( 'id' => 'sa', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'a' ) ) ) ),
-						array( 'role' => 'b', 'required' => true, 'can_write_final_bundle' => false, 'steps' => array( array( 'id' => 'sb', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'b' ) ) ) ),
-						array( 'role' => 'c', 'required' => true, 'can_write_final_bundle' => false, 'steps' => array( array( 'id' => 'sc', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'c' ) ) ) ),
+						array( 'role' => 'a', 'required' => true, 'is_aggregator' => false, 'steps' => array( array( 'id' => 'sa', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'a' ) ) ) ),
+						array( 'role' => 'b', 'required' => true, 'is_aggregator' => false, 'steps' => array( array( 'id' => 'sb', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'b' ) ) ) ),
+						array( 'role' => 'c', 'required' => true, 'is_aggregator' => false, 'steps' => array( array( 'id' => 'sc', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'c' ) ) ) ),
 						array(
 							'role'                   => 'fuse',
 							'required'               => true,
-							'can_write_final_bundle' => true,
+							'is_aggregator' => true,
 							'steps'                  => array(
 								array(
 									'id'      => 'agg',

@@ -261,7 +261,7 @@ $roles_spec = WP_Agent_Workflow_Spec::from_array(
 						'shared_context_contract' => 'read context.marker only',
 						'expected_output'         => array( 'ref' => 'headline.fragment', 'shape' => 'string' ),
 						'required'                => true,
-						'can_write_final_bundle'  => false,
+						'is_aggregator'  => false,
 						'steps'                   => array(
 							array(
 								'id'      => 'h',
@@ -281,7 +281,7 @@ $roles_spec = WP_Agent_Workflow_Spec::from_array(
 						'shared_context_contract' => 'read context.marker only',
 						'expected_output'         => array( 'ref' => 'body.fragment', 'shape' => 'string' ),
 						'required'                => true,
-						'can_write_final_bundle'  => false,
+						'is_aggregator'  => false,
 						'steps'                   => array(
 							array(
 								'id'      => 'b',
@@ -301,7 +301,7 @@ $roles_spec = WP_Agent_Workflow_Spec::from_array(
 						'shared_context_contract' => 'consume branch_outputs + context.marker',
 						'expected_output'         => array( 'ref' => 'final_bundle', 'shape' => 'string' ),
 						'required'                => true,
-						'can_write_final_bundle'  => true,
+						'is_aggregator'  => true,
 						'steps'                   => array(
 							array(
 								'id'      => 'agg',
@@ -381,7 +381,7 @@ $immut_spec = WP_Agent_Workflow_Spec::from_array(
 					array(
 						'role'                   => 'first',
 						'required'               => true,
-						'can_write_final_bundle' => false,
+						'is_aggregator' => false,
 						'steps'                  => array(
 							array(
 								'id'      => 'm1',
@@ -394,7 +394,7 @@ $immut_spec = WP_Agent_Workflow_Spec::from_array(
 					array(
 						'role'                   => 'second',
 						'required'               => true,
-						'can_write_final_bundle' => false,
+						'is_aggregator' => false,
 						'steps'                  => array(
 							array(
 								'id'      => 'm2',
@@ -407,7 +407,7 @@ $immut_spec = WP_Agent_Workflow_Spec::from_array(
 					array(
 						'role'                   => 'agg',
 						'required'               => true,
-						'can_write_final_bundle' => true,
+						'is_aggregator' => true,
 						'steps'                  => array(
 							array(
 								'id'      => 'm3',
@@ -485,7 +485,7 @@ $optional_fail_spec = WP_Agent_Workflow_Spec::from_array(
 					array(
 						'role'                   => 'flaky',
 						'required'               => false,
-						'can_write_final_bundle' => false,
+						'is_aggregator' => false,
 						'steps'                  => array(
 							array( 'id' => 'f', 'type' => 'ability', 'ability' => 'demo/fail' ),
 						),
@@ -493,7 +493,7 @@ $optional_fail_spec = WP_Agent_Workflow_Spec::from_array(
 					array(
 						'role'                   => 'agg',
 						'required'               => true,
-						'can_write_final_bundle' => true,
+						'is_aggregator' => true,
 						'steps'                  => array(
 							array(
 								'id'      => 'a',
@@ -520,6 +520,77 @@ smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $optional_result->
 smoke_assert( 'demo_branch_boom', $optional_out['branch_outputs']['flaky']['error']['code'] ?? '', 'non-required branch surfaces its error in collected output', $failures, $passes );
 smoke_assert( 'FUSED[x|y]', $optional_out['final']['final_bundle'] ?? '', 'aggregator still fuses despite a tolerated branch failure', $failures, $passes );
 
+// ── 5b. ZERO aggregators: roles fans out, collects, and RETURNS the branch
+//        outputs (scatter-collect-return). The aggregator is OPTIONAL; with
+//        none declared the step returns collected outputs with no `final` /
+//        `aggregator` key, and the consumer composes them downstream. ────────
+
+$no_agg_spec = WP_Agent_Workflow_Spec::from_array(
+	array(
+		'id'    => 'demo/parallel-no-aggregator',
+		'steps' => array(
+			array(
+				'id'       => 'scatter',
+				'type'     => 'parallel',
+				'context'  => array( 'marker' => $shared_marker ),
+				'branches' => array(
+					array(
+						'role'     => 'headline',
+						'required' => true,
+						'steps'    => array(
+							array( 'id' => 'h', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'role' => '${vars.role.role}', 'shared' => '${vars.context.marker}' ) ),
+						),
+					),
+					array(
+						'role'     => 'body',
+						'required' => true,
+						'steps'    => array(
+							array( 'id' => 'b', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'role' => '${vars.role.role}', 'shared' => '${vars.context.marker}' ) ),
+						),
+					),
+				),
+			),
+			// Consumer-side composition over the RETURNED branch_outputs — this is
+			// what a consumer does when it does NOT use the optional aggregator.
+			array(
+				'id'      => 'compose',
+				'type'    => 'ability',
+				'ability' => 'demo/aggregate',
+				'args'    => array(
+					'headline' => '${steps.scatter.output.branch_outputs.headline.fragment}',
+					'body'     => '${steps.scatter.output.branch_outputs.body.fragment}',
+					'shared'   => '${inputs.marker}',
+				),
+			),
+		),
+		'inputs' => array( 'marker' => array( 'type' => 'string' ) ),
+	)
+);
+
+$no_agg_validation = WP_Agent_Workflow_Spec_Validator::validate( $no_agg_spec->to_array() );
+smoke_assert( array(), $no_agg_validation, 'validator accepts a roles step with ZERO aggregators', $failures, $passes );
+
+$no_agg_result = ( new WP_Agent_Workflow_Runner( null ) )->run( $no_agg_spec, array( 'marker' => $shared_marker ) );
+$no_agg_out    = $no_agg_result->get_output()['steps']['scatter'] ?? array();
+
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $no_agg_result->get_status(), 'zero-aggregator roles run succeeds', $failures, $passes );
+smoke_assert( 'roles', $no_agg_out['shape'] ?? '', 'zero-aggregator roles reports roles shape', $failures, $passes );
+smoke_assert( false, array_key_exists( 'aggregator', $no_agg_out ), 'zero-aggregator roles output has no aggregator key', $failures, $passes );
+smoke_assert( false, array_key_exists( 'final', $no_agg_out ), 'zero-aggregator roles output has no final key', $failures, $passes );
+smoke_assert(
+	array( 'headline', 'body' ),
+	array_keys( $no_agg_out['branch_outputs'] ?? array() ),
+	'zero-aggregator roles fans out + returns collected branch outputs keyed by role',
+	$failures,
+	$passes
+);
+smoke_assert( $shared_marker, $no_agg_out['branch_outputs']['headline']['saw_context'] ?? '', 'zero-aggregator branch saw shared context', $failures, $passes );
+
+// Consumer-side composition ran downstream over the RETURNED branch_outputs.
+$no_agg_compose = $no_agg_result->get_output()['steps']['compose'] ?? array();
+$expected_no_agg = 'FUSED[headline:' . $shared_marker . '|body:' . $shared_marker . ']';
+smoke_assert( $expected_no_agg, $no_agg_compose['final_bundle'] ?? '', 'consumer-side step composed the returned branch outputs (no in-run aggregator)', $failures, $passes );
+
 // ── 6. Validator rejects malformed parallel specs ────────────────────────
 
 $no_shape  = WP_Agent_Workflow_Spec_Validator::validate(
@@ -544,8 +615,8 @@ $two_aggregators = WP_Agent_Workflow_Spec_Validator::validate(
 				'id'       => 'p',
 				'type'     => 'parallel',
 				'branches' => array(
-					array( 'role' => 'a', 'can_write_final_bundle' => true, 'steps' => array( array( 'id' => 's1', 'type' => 'ability', 'ability' => 'demo/double' ) ) ),
-					array( 'role' => 'b', 'can_write_final_bundle' => true, 'steps' => array( array( 'id' => 's2', 'type' => 'ability', 'ability' => 'demo/double' ) ) ),
+					array( 'role' => 'a', 'is_aggregator' => true, 'steps' => array( array( 'id' => 's1', 'type' => 'ability', 'ability' => 'demo/double' ) ) ),
+					array( 'role' => 'b', 'is_aggregator' => true, 'steps' => array( array( 'id' => 's2', 'type' => 'ability', 'ability' => 'demo/double' ) ) ),
 				),
 			),
 		),

@@ -242,8 +242,8 @@ final class WP_Agent_Workflow_Spec_Validator {
 	 *
 	 *   - parallel-map: `items` + a non-empty nested `steps` list.
 	 *   - parallel-roles: a non-empty `branches` list, each branch a role
-	 *     contract with a `role` + nested `steps`, and exactly one branch
-	 *     flagged `can_write_final_bundle` (the aggregator).
+	 *     contract with a `role` + nested `steps`. At most one branch may be
+	 *     flagged `is_aggregator` (the optional aggregator); zero is valid.
 	 *
 	 * @since 0.4.0
 	 *
@@ -260,7 +260,7 @@ final class WP_Agent_Workflow_Spec_Validator {
 			$errors[] = array(
 				'path'    => $path,
 				'code'    => 'invalid_parallel_shape',
-				'message' => 'parallel step must declare exactly one of `branches` (roles+aggregate) or `items` (map)',
+				'message' => 'parallel step must declare exactly one of `branches` (roles) or `items` (map)',
 			);
 			// Without a clear shape there's nothing further to validate.
 			if ( ! $has_branches && ! $has_items ) {
@@ -330,17 +330,19 @@ final class WP_Agent_Workflow_Spec_Validator {
 					}
 				}
 
-				if ( ! empty( $branch['can_write_final_bundle'] ) ) {
+				if ( ! empty( $branch['is_aggregator'] ) ) {
 					++$aggregator_count;
 				}
 			}
 
-			if ( 1 !== $aggregator_count ) {
+			// The aggregator branch is OPTIONAL: zero or one is valid, more than
+			// one is ambiguous (which output is the step's final?).
+			if ( $aggregator_count > 1 ) {
 				$errors[] = array(
 					'path'    => "{$path}.branches",
 					'code'    => 'invalid_parallel_aggregator',
 					'message' => sprintf(
-						'parallel-roles step must flag exactly one branch with `can_write_final_bundle` (the aggregator); found %d',
+						'parallel-roles step may flag at most one branch with `is_aggregator` (the aggregator); found %d',
 						$aggregator_count
 					),
 				);
