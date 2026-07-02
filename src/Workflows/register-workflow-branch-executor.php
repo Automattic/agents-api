@@ -111,3 +111,105 @@ add_filter(
 	10,
 	3
 );
+
+// 4. Long-branch reaping window. Action Scheduler's QueueCleaner marks any action
+//    still RUNNING past `action_scheduler_failure_period` (default 300s) as a
+//    failed/abandoned action, on the assumption an uncatchable fatal killed it. A
+//    workflow branch is the opposite case: it is EXPECTED to run long — a branch
+//    is often a multi-minute AI generation, code execution, or remote call, which
+//    is the whole reason it was fanned out asynchronously. At 300s AS reaps a
+//    still-healthy branch mid-flight and the run thrashes on retries. Raise the
+//    window so a legitimately long branch survives, while still reaping a truly
+//    dead one eventually. The reaper runs in a DIFFERENT process than the branch,
+//    so this must be a persistent filter (registered here at load), not something
+//    set inside the running branch. Callers whose branches are shorter or longer
+//    can retune via `agents_workflow_branch_failure_period`.
+//
+//    Registered UNCONDITIONALLY (not gated on is_available()): these AS filters
+//    only ever fire from inside Action Scheduler's own QueueCleaner, so they are
+//    inert no-ops on a no-AS install. Gating registration on is_available() at
+//    require-time would race plugin load order — if Action Scheduler loads AFTER
+//    agents-api, the gate reads false and the filter is never added, leaving the
+//    branch reaper at the 300s default. Registering here at load, before AS's
+//    cleaner ever runs, avoids that race.
+$agents_workflow_branch_reaper_window = static function ( $period ) {
+	/**
+	 * The seconds a workflow branch may run before Action Scheduler treats it
+	 * as abandoned. Defaults to 3600 (1 hour) so multi-minute branches are not
+	 * reaped, while a genuinely stuck branch is still eventually failed.
+	 *
+	 * @param int $period The AS failure/timeout period (seconds).
+	 */
+	$branch_window = (int) apply_filters( 'agents_workflow_branch_failure_period', 3600 );
+
+	// Never shorten the operator's configured window; only extend it.
+	return max( (int) $period, $branch_window );
+};
+add_filter( 'action_scheduler_failure_period', $agents_workflow_branch_reaper_window, 20 );
+add_filter( 'action_scheduler_timeout_period', $agents_workflow_branch_reaper_window, 20 );
+
+// 5. Concurrent branch execution policy. Action Scheduler's queue runner defaults to
+//    ONE concurrent batch of 25 actions: a single worker claims a batch of pending
+//    actions and runs them one after another in one PHP process. For a parallel
+//    fan-out that is exactly wrong — N branches enqueued under BRANCH_HOOK would drain
+//    serially in one worker instead of N workers each running one branch. The two
+//    filters below flip that WHILE — and only while — this executor's own branches are
+//    pending:
+//
+//      - `concurrent_batches` is RAISED to the pending BRANCH count (capped at
+//        MAX_BRANCH_CONCURRENCY) so up to N workers may each hold a claim at once.
+//      - `batch_size` is pinned to 1 so each of those workers claims exactly ONE
+//        branch and leaves the rest for its peers.
+//
+//    Together (concurrent_batches=N + batch_size=1) they turn N running workers into N
+//    DISTINCT branches instead of one worker draining a batch of them serially. On
+//    MySQL each worker's stake_claim uses FOR UPDATE SKIP LOCKED, so the concurrent
+//    claims pick distinct branches.
+//
+//    BLAST RADIUS. Both filters are process-global — Action Scheduler has no per-group
+//    concurrency knob — so a naive permanent raise would change concurrency for ALL AS
+//    workloads. To keep the blast radius bounded, BOTH callbacks are GATED on this
+//    executor's OWN branches being pending ({@see pending_branch_count()}): when zero
+//    branches are pending they pass the incoming value through UNCHANGED, so every
+//    other AS workload keeps stock behavior (concurrent_batches 1, batch_size 25). The
+//    elevated policy exists only for the span of a fan-out (seconds to a few minutes).
+//
+//    concurrent_batches only ever RAISES (max of incoming and target) so it never
+//    lowers another plugin's already-higher ceiling. Priority 100 so it runs after
+//    most callers. Registered UNCONDITIONALLY (not gated on is_available()) for the
+//    same reason as the reaper window above: these AS filters only ever fire from
+//    inside Action Scheduler's own queue runner, so they are inert on a no-AS install,
+//    and registering here at load avoids a plugin-load-order race where AS loading
+//    after agents-api would leave the gate reading false and the filter never added.
+add_filter(
+	'action_scheduler_queue_runner_concurrent_batches',
+	/**
+	 * @param mixed $batches Incoming concurrent-batch ceiling.
+	 * @return int
+	 */
+	static function ( $batches ) {
+		$pending = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::pending_branch_count();
+		if ( $pending < 1 ) {
+			return (int) $batches;
+		}
+		$target = min( $pending, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::MAX_BRANCH_CONCURRENCY );
+		// Only ever RAISE — never lower a ceiling another plugin set higher.
+		return max( (int) $batches, $target );
+	},
+	100
+);
+
+add_filter(
+	'action_scheduler_queue_runner_batch_size',
+	/**
+	 * @param mixed $batch_size Incoming batch size.
+	 * @return int
+	 */
+	static function ( $batch_size ) {
+		// Pin to 1 while branches are pending so each worker claims exactly one branch;
+		// otherwise pass the incoming value through so ordinary AS throughput (25) is
+		// untouched.
+		return WP_Agent_Workflow_Action_Scheduler_Branch_Executor::pending_branch_count() > 0 ? 1 : (int) $batch_size;
+	},
+	100
+);
