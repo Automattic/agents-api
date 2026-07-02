@@ -249,6 +249,7 @@ require_once __DIR__ . '/../src/Workflows/register-agents-workflow-abilities.php
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-reconcile-lock.php';
 require_once __DIR__ . '/../src/Workflows/register-reconcile-workflow-branch.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-action-scheduler-bridge.php';
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-branch-store.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-action-scheduler-branch-executor.php';
 require_once __DIR__ . '/../src/Workflows/register-workflow-branch-executor.php';
 
@@ -414,9 +415,23 @@ smoke_assert( 2, count( $branch_actions ), 'dispatch: one AS action enqueued per
 $first_payload = $branch_actions[0]['args'][0] ?? array();
 smoke_assert( 'agents-api', $branch_actions[0]['group'] ?? '', 'dispatch: branch action uses the agents-api group', $failures, $passes );
 smoke_assert( 'as-A', $first_payload['run_id'] ?? '', 'dispatch: payload carries run_id', $failures, $passes );
-smoke_assert_true( is_array( $first_payload['branch']['steps'] ?? null ), 'dispatch: payload carries the branch descriptor steps', $failures, $passes );
-smoke_assert( 'scatter', $first_payload['branch']['step_id'] ?? '', 'dispatch: descriptor is self-contained (step_id)', $failures, $passes );
-smoke_assert_true( is_array( $first_payload['branch']['branch_vars']['context'] ?? null ), 'dispatch: descriptor carries the shared context in branch_vars', $failures, $passes );
+
+// PAYLOAD OFFLOAD (Bug 1): the AS args are now a SMALL reference — no inline
+// branch descriptor, no inline shared context. The heavy descriptor lives in the
+// branch store, rehydrated by the branch action from the ref.
+smoke_assert_true( '' === (string) ( $first_payload['branch'] ?? '' ), 'dispatch: NO inline branch descriptor in AS args (offloaded to store)', $failures, $passes );
+smoke_assert_true( '' !== (string) ( $first_payload['store_ref'] ?? '' ), 'dispatch: AS args carry a small store_ref', $failures, $passes );
+smoke_assert_true( '' !== (string) ( $first_payload['context_ref'] ?? '' ), 'dispatch: AS args carry a run-scoped context_ref', $failures, $passes );
+
+// The rehydrated descriptor from the store IS self-contained: steps + step_id +
+// re-seated shared context — everything the branch action needs.
+$rehydrated = \AgentsAPI\AI\Workflows\WP_Agent_Workflow_Branch_Store::get_branch(
+	(string) ( $first_payload['store_ref'] ?? '' ),
+	(string) ( $first_payload['context_ref'] ?? '' )
+);
+smoke_assert_true( is_array( $rehydrated['steps'] ?? null ), 'store: rehydrated descriptor carries the branch steps', $failures, $passes );
+smoke_assert( 'scatter', $rehydrated['step_id'] ?? '', 'store: rehydrated descriptor is self-contained (step_id)', $failures, $passes );
+smoke_assert_true( is_array( $rehydrated['branch_vars']['context'] ?? null ), 'store: rehydrated descriptor re-seats the run-scoped shared context', $failures, $passes );
 
 // The handle's ref is the AS action id.
 $frame   = $run->get_suspension();

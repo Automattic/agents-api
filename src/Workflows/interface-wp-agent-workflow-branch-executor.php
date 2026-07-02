@@ -43,11 +43,15 @@ interface WP_Agent_Workflow_Branch_Executor {
 	 *        self-contained payload the executor can run later — `{ key, steps,
 	 *        branch_vars, continue_on_error, run_id, step_id }`.
 	 * @param array<string,mixed>            $context  Serializable shared context snapshot.
-	 * @return array<int,array<string,mixed>> BranchHandle[] — `{ id, key, executor,
-	 *         status, ref }`. Handles MAY be returned already-complete (a
-	 *         synchronous executor), in which case the runner never suspends.
+	 * @return array<int,array<string,mixed>>|\WP_Error BranchHandle[] — `{ id, key,
+	 *         executor, status, ref }`. Handles MAY be returned already-complete (a
+	 *         synchronous executor), in which case the runner never suspends. An
+	 *         executor that cannot durably schedule a branch MUST return a WP_Error
+	 *         so the run fails fast rather than suspending against a branch that was
+	 *         never dispatched — the runner treats a WP_Error dispatch as a hard
+	 *         step failure.
 	 */
-	public function dispatch( array $branches, array $context ): array;
+	public function dispatch( array $branches, array $context );
 
 	/**
 	 * Whether every dispatched handle has reached a terminal state.

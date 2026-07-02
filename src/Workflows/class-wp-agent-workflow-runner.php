@@ -918,6 +918,15 @@ class WP_Agent_Workflow_Runner {
 
 		$handles = $executor->dispatch( $plan['branches'], $dispatch_context );
 
+		// An executor may FAIL the dispatch (e.g. the AS executor when an async
+		// enqueue is rejected). A failed dispatch is a HARD step failure — the run
+		// must NOT suspend against a branch set that was never fully enqueued, or it
+		// would hang draining an empty queue. Surface the error so the step fails
+		// fast with a descriptive message.
+		if ( is_wp_error( $handles ) ) {
+			return $handles;
+		}
+
 		// A synchronous executor may return already-complete handles; then the
 		// run must NOT suspend — collect + aggregate inline and return terminal.
 		if ( $executor->are_all_complete( $handles ) ) {
