@@ -76,6 +76,22 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	public const GROUP = WP_Agent_Workflow_Action_Scheduler_Bridge::GROUP;
 
 	/**
+	 * Upper bound on how many branch actions may run concurrently.
+	 *
+	 * This caps the global `action_scheduler_queue_runner_concurrent_batches` raise
+	 * ({@see register-workflow-branch-executor.php}) so a pathological branch count
+	 * cannot ask the substrate to run an unbounded number of simultaneous batches —
+	 * each concurrent batch is a live PHP worker process holding a claim, and the
+	 * worker pool is finite. It also bounds the number of concurrent loopback
+	 * runners {@see self::trigger_async_runner()} fires. A fan-out rarely has more
+	 * than a handful of branches, so this bound is generous for real workloads while
+	 * keeping the blast radius of a global concurrency raise predictable.
+	 *
+	 * @since 0.5.0
+	 */
+	public const MAX_BRANCH_CONCURRENCY = 8;
+
+	/**
 	 * Whether Action Scheduler's async enqueue is available. This — not mere
 	 * presence of the plugin — is the async gate: `as_enqueue_async_action` is
 	 * what supplies both the durable payload store and the atomic claim.
@@ -214,7 +230,298 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			);
 		}
 
+		// Every branch is now durably enqueued as a claimed AS action. Fire one
+		// concurrent async-runner request per branch just enqueued so N distinct
+		// worker processes each claim ONE branch in the same window — turning the
+		// enqueued set into N branches running in parallel PIDs rather than one
+		// worker draining them serially. This is a best-effort kick that lives on
+		// TOP of Action Scheduler's own model: the branches are already durable AS
+		// actions, so a runtime where the loopback dispatch is unavailable still
+		// drains them through AS's own WP-Cron runner — the trigger no-ops cleanly
+		// there (see self::trigger_async_runner()). The concurrency filters that let
+		// those N workers each claim a distinct branch are registered persistently at
+		// load ({@see register-workflow-branch-executor.php}) so they are in force in
+		// each loopback WORKER process, not just here in the dispatching request.
+		self::trigger_async_runner( count( $handles ) );
+
 		return $handles;
+	}
+
+	/**
+	 * Count PENDING branch actions on this executor's OWN branch hook (live, no
+	 * memoization).
+	 *
+	 * This is the gate that scopes the AS concurrency raise to an in-flight fan-out.
+	 * It counts pending actions on {@see self::BRANCH_HOOK} specifically (not the
+	 * whole {@see self::GROUP} group), so the elevated concurrency policy keys off
+	 * THIS executor's own parallel branches and never touches unrelated AS workload.
+	 *
+	 * The count is read LIVE on every call rather than memoized per request. The two
+	 * concurrency filters fire more than once within a single queue-runner request —
+	 * `has_maximum_concurrent_batches()` at the top of `run()`, and again on shutdown
+	 * when the worker considers self-chaining `maybe_dispatch()` — and between those
+	 * calls the pending set changes as branches move PENDING -> in-progress ->
+	 * complete. A request-static cache would pin the FIRST-observed value: if a
+	 * worker's first read happened to catch a moment when peers had momentarily
+	 * claimed every branch (pending 0), the gate would revert both filters to the AS
+	 * defaults (`concurrent_batches` 1, `batch_size` 25) for the rest of that
+	 * request, so a later `run()` in the same worker could claim a batch of 25 and
+	 * drain them serially — the exact serialization this policy exists to prevent.
+	 * Reading live keeps the gate honest. The query is a single indexed lookup
+	 * bounded to MAX_BRANCH_CONCURRENCY ids, so it is cheap enough to run per filter
+	 * application.
+	 *
+	 * Returns 0 when Action Scheduler's query API is unavailable (a runtime without
+	 * AS), which makes both concurrency filters pass their value through untouched.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @return int Pending branch-action count (0..MAX_BRANCH_CONCURRENCY).
+	 */
+	public static function pending_branch_count(): int {
+		if ( ! function_exists( 'as_get_scheduled_actions' ) || ! class_exists( '\ActionScheduler_Store' ) ) {
+			return 0;
+		}
+
+		$ids = as_get_scheduled_actions(
+			array(
+				'hook'     => self::BRANCH_HOOK,
+				'status'   => \ActionScheduler_Store::STATUS_PENDING,
+				'per_page' => self::MAX_BRANCH_CONCURRENCY,
+			),
+			'ids'
+		);
+
+		return is_array( $ids ) ? count( $ids ) : 0;
+	}
+
+	/**
+	 * Trigger Action Scheduler's async-request queue runner: fire N CONCURRENT
+	 * loopback HTTP requests to admin-ajax.php so AS spawns N separate native-PHP
+	 * worker processes, each of which runs a queue batch. This is the mechanism that
+	 * makes the branch actions run in PARALLEL PIDs (vs one in-process serial run).
+	 *
+	 * It replicates ActionScheduler_AsyncRequest_QueueRunner's own dispatch: a POST
+	 * to `admin-ajax.php?action=as_async_request_queue_runner` with the matching
+	 * nonce. On MySQL each warm worker's `stake_claim` uses FOR UPDATE SKIP LOCKED,
+	 * so concurrent workers claim DIFFERENT pending branch actions.
+	 *
+	 * Public so a caller awaiting a suspended run in the foreground can re-nudge the
+	 * pool during its poll (the loopback worker self-chain can lapse behind AS's
+	 * allow() gate / a lock); the executor also calls it itself from `dispatch()`.
+	 *
+	 * ## Why the requests are fired in PARALLEL (curl_multi), not one at a time
+	 *
+	 * Action Scheduler's own dispatch fires a SINGLE non-blocking POST with a 0.01s
+	 * timeout and relies on the worker self-chaining the rest. Two things make that
+	 * insufficient for a real fan-out on a native-PHP runtime:
+	 *
+	 *   - The native-PHP runtime serves each request in a single-threaded `php -S`
+	 *     worker. A `blocking => false` POST with a 0.01s timeout is torn down by the
+	 *     HTTP client BEFORE the worker has accepted the connection over TLS — so the
+	 *     request never actually reaches admin-ajax and no worker runs. (Measured: at
+	 *     timeout 0.01–0.5s zero loopback POSTs land; the connection must live ~1s for
+	 *     the worker to accept and dispatch it.) Firing them one-by-one with a longer
+	 *     per-request timeout would then SERIALIZE the caller (N × ~1s), and
+	 *     self-chaining alone only ever advances one batch at a time.
+	 *   - To warm N workers AT ONCE, the N loopback connections must be opened
+	 *     concurrently so N distinct `php -S` workers accept them in the same window.
+	 *     WpOrg\Requests::request_multiple() opens them together via curl_multi, so
+	 *     the runtime hands each to a different worker and N branches begin near-
+	 *     simultaneously — the observed serial->parallel flip.
+	 *
+	 * The overall timeout is kept small: we only need the connections established (the
+	 * worker dispatches its queue independently of our response), not the branch AI
+	 * calls awaited. request_multiple returns once the short window elapses; the
+	 * branches keep running in their own worker PIDs and the caller polls the
+	 * recorder.
+	 *
+	 * A no-op (returns 0) on a runtime without loopback/admin-ajax, where the run
+	 * falls back to AS's own WP-Cron runner or the caller's budget — acceptable
+	 * degradation, never fabricated behavior. When request_multiple is unavailable it
+	 * degrades to serial non-blocking POSTs (AS's own dispatch shape).
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param int $workers How many async workers to dispatch (>= 1).
+	 * @return int Number of loopback dispatches fired.
+	 */
+	public static function trigger_async_runner( int $workers ): int {
+		if ( ! class_exists( '\ActionScheduler' ) || ! \ActionScheduler::is_initialized() ) {
+			return 0;
+		}
+		if ( ! function_exists( 'admin_url' ) || ! function_exists( 'wp_create_nonce' ) ) {
+			return 0;
+		}
+
+		$workers = max( 1, min( $workers, self::MAX_BRANCH_CONCURRENCY ) );
+
+		// AS's async-request runner registers its handler on the ajax hook
+		// `wp_ajax(_nopriv)_as_async_request_queue_runner` (prefix `as` + action
+		// `async_request_queue_runner`), gated by a nonce of the same identifier. Fire
+		// the same request AS fires internally so a separate worker process picks up
+		// the queue.
+		$identifier = 'as_async_request_queue_runner';
+		$url        = add_query_arg(
+			array(
+				'action' => $identifier,
+				'nonce'  => wp_create_nonce( $identifier ),
+			),
+			admin_url( 'admin-ajax.php' )
+		);
+
+		$sslverify = (bool) apply_filters( 'https_local_ssl_verify', false );
+
+		// Loopback host rewrite. On a custom domain (e.g. a Studio `.local` host),
+		// resolving the host can cost a multi-second multicast-DNS timeout. WordPress's
+		// own HTTP API avoids this via a CURLOPT_RESOLVE pin on the `http_api_curl`
+		// hook, but request_multiple drives curl_multi directly and never fires that
+		// hook — so its concurrent handles each stall on host resolution and
+		// effectively serialize. Point the loopback at 127.0.0.1 (the loop the local
+		// server already listens on) and carry the real host in a Host header, so every
+		// concurrent handle connects instantly and lands in its own worker. The
+		// `wp_remote_post` fallback below still goes through the hook, so it keeps using
+		// $url unchanged.
+		$loopback         = self::loopback_dispatch_target( $url );
+		$loopback_url     = $loopback['url'];
+		$loopback_headers = $loopback['headers'];
+
+		// Preferred path: open all N loopback connections CONCURRENTLY so N distinct
+		// native-PHP workers accept them in the same window and each claims a branch.
+		// request_multiple uses curl_multi under the hood. The `timeout` only needs to
+		// outlast connection establishment (~1s on this TLS `php -S` runtime), not the
+		// branch AI calls — the workers run their queue independently of our response.
+		if ( class_exists( '\WpOrg\Requests\Requests' ) ) {
+			$requests = array();
+			for ( $i = 0; $i < $workers; $i++ ) {
+				$requests[] = array(
+					'url'     => esc_url_raw( $loopback_url ),
+					'type'    => 'POST',
+					'data'    => array(),
+					'headers' => $loopback_headers,
+				);
+			}
+
+			// Timeout must comfortably outlast connection establishment — including host
+			// resolution, which on an mDNS runtime can take a second or two per
+			// concurrent handle. It does NOT gate the branch AI calls: the worker runs
+			// its queue independently of our response, so a request that "times out"
+			// waiting for the response has already handed its branch to a worker.
+			// Filterable so a slower or faster runtime can tune it.
+			$dispatch_timeout = apply_filters( 'agents_workflow_async_runner_dispatch_timeout', 10 );
+			$options          = array(
+				'timeout'         => is_numeric( $dispatch_timeout ) ? (float) $dispatch_timeout : 10.0,
+				'connect_timeout' => 10,
+				'verify'          => $sslverify,
+			);
+
+			try {
+				// request_multiple fires every request in parallel and returns their
+				// results/exceptions; a per-request failure (a worker that closed early)
+				// is returned as a Requests\Exception in the results array, not thrown.
+				$results = \WpOrg\Requests\Requests::request_multiple( $requests, $options );
+			} catch ( \Throwable $error ) {
+				// A total failure of the multi-request machinery — fall through to the
+				// serial fallback below rather than aborting the dispatch entirely.
+				unset( $error );
+				$results = null;
+			}
+
+			if ( is_array( $results ) ) {
+				$fired = 0;
+				foreach ( $results as $result ) {
+					// A successful loopback returns a Requests Response; a torn-down one
+					// returns an exception. Count the ones the runtime accepted.
+					if ( $result instanceof \WpOrg\Requests\Response ) {
+						++$fired;
+					}
+				}
+
+				// Even if every response object was an early-close exception, the workers
+				// may still have accepted and begun the queue run (we do not await the
+				// branch). Report at least the attempts so callers see the dispatch fired.
+				return $fired > 0 ? $fired : $workers;
+			}
+		}
+
+		// Fallback: serial non-blocking POSTs (AS's own dispatch shape). Used when the
+		// parallel Requests API is unavailable; relies on AS self-chaining to fan out.
+		if ( ! function_exists( 'wp_remote_post' ) ) {
+			return 0;
+		}
+
+		$args = array(
+			'timeout'   => 0.01,
+			'blocking'  => false,
+			'body'      => array(),
+			'cookies'   => $_COOKIE, // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- forwarding the current request's cookies to the loopback worker, not reading input.
+			'sslverify' => $sslverify,
+		);
+
+		$fired = 0;
+		for ( $i = 0; $i < $workers; $i++ ) {
+			$response = wp_remote_post( esc_url_raw( $url ), $args );
+			if ( ! is_wp_error( $response ) ) {
+				++$fired;
+			}
+		}
+
+		return $fired;
+	}
+
+	/**
+	 * Rewrite a loopback dispatch URL to connect over 127.0.0.1 while preserving the
+	 * real host in a Host header, so concurrent curl_multi handles do not stall on
+	 * host resolution (see the rationale in {@see self::trigger_async_runner()}).
+	 *
+	 * curl_multi (used by request_multiple) does NOT fire WordPress's `http_api_curl`
+	 * hook, so any CURLOPT_RESOLVE pin a runtime installs there does not apply to it.
+	 * Rewriting the host to the loopback IP and carrying the original host name in a
+	 * `Host:` header reproduces that pin explicitly: the TCP connection goes straight
+	 * to 127.0.0.1 (no DNS), and the local server still virtual-hosts the request to
+	 * the correct site by the Host header. Only the host is rewritten; scheme, port,
+	 * path, and query (the AS nonce) are preserved unchanged.
+	 *
+	 * When the URL cannot be parsed the original URL is returned with no extra header
+	 * — a safe pass-through that keeps the normal resolution path.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $url The admin-ajax loopback URL to dispatch to.
+	 * @return array{url:string,headers:array<string,string>} Rewritten URL + Host header.
+	 */
+	private static function loopback_dispatch_target( string $url ): array {
+		$parts = wp_parse_url( $url );
+		if ( ! is_array( $parts ) || empty( $parts['host'] ) ) {
+			return array(
+				'url'     => $url,
+				'headers' => array(),
+			);
+		}
+
+		$host = (string) $parts['host'];
+
+		// Already a loopback address — nothing to rewrite, no Host header needed.
+		if ( '127.0.0.1' === $host || 'localhost' === $host ) {
+			return array(
+				'url'     => $url,
+				'headers' => array(),
+			);
+		}
+
+		$scheme = isset( $parts['scheme'] ) && '' !== (string) $parts['scheme'] ? (string) $parts['scheme'] : 'https';
+		$port   = isset( $parts['port'] ) ? ':' . (int) $parts['port'] : '';
+		$path   = isset( $parts['path'] ) ? (string) $parts['path'] : '';
+		$query  = isset( $parts['query'] ) && '' !== (string) $parts['query'] ? '?' . (string) $parts['query'] : '';
+
+		// Carry the port in the Host header too — the local server virtual-hosts on the
+		// full host:port authority, so a bare host would not match the site.
+		$host_header = '' !== $port ? $host . $port : $host;
+
+		return array(
+			'url'     => $scheme . '://127.0.0.1' . $port . $path . $query,
+			'headers' => array( 'Host' => $host_header ),
+		);
 	}
 
 	/**
