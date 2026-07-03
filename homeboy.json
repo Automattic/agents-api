@@ -12,10 +12,6 @@
     {
       "file": "agents-api.php",
       "pattern": "Version:\\s*([0-9.]+)"
-    },
-    {
-      "file": "tests/playground-ci/component/agents-api-docs-agent-driver.php",
-      "pattern": "Version:\\s*([0-9.]+)"
     }
   ]
 }
