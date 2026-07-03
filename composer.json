@@ -115,6 +115,7 @@
       "php tests/workflow-parallel-async-smoke.php",
       "php tests/workflow-as-branch-smoke.php",
       "php tests/workflow-branch-concurrency-gate-smoke.php",
+      "php tests/workflow-scoped-drain-smoke.php",
       "php tests/workflow-async-branch-payload-smoke.php",
       "php tests/workflow-async-loopback-target-smoke.php",
       "php tests/workflow-reconcile-race-smoke.php",

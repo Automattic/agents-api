@@ -76,3 +76,22 @@ function as_has_scheduled_action( string $hook, ?array $args = null, string $gro
 	unset( $hook, $args, $group );
 	return false;
 }
+
+/**
+ * @param array<string,mixed> $args          Query args.
+ * @param string              $return_format Return format (ids|objects|count).
+ * @return array<int,mixed>|int
+ */
+function as_get_scheduled_actions( array $args = array(), string $return_format = 'OBJECT' ) {
+	unset( $args, $return_format );
+	return array();
+}
+
+/**
+ * @param string|null $date_string Date string, or null for "now".
+ * @param string      $timezone    Timezone.
+ */
+function as_get_datetime_object( ?string $date_string = null, string $timezone = 'UTC' ): DateTime {
+	unset( $date_string, $timezone );
+	return new DateTime();
+}
