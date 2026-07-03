@@ -58,6 +58,8 @@ final class WP_Agent_Workflow_Run_Result {
 	 * @param array<mixed>  $metadata      Free-form metadata for recorders / tracers (Langfuse trace ids, etc.).
 	 * @param array<mixed>  $evidence_refs   Neutral JSON-serializable artifact/log references owned by the host.
 	 * @param array<mixed>  $replay_metadata Deterministic metadata needed to replay or audit this run.
+	 * @param array<mixed>  $artifacts       Normalized artifact descriptors produced by this run.
+	 * @param array<mixed>  $logs            Normalized log entries produced by this run.
 	 */
 	public function __construct(
 		private string $run_id,
@@ -71,8 +73,13 @@ final class WP_Agent_Workflow_Run_Result {
 		private int $ended_at,
 		private array $metadata,
 		private array $evidence_refs = array(),
-		private array $replay_metadata = array()
-	) {}
+		private array $replay_metadata = array(),
+		private array $artifacts = array(),
+		private array $logs = array()
+	) {
+		$this->artifacts = self::normalized_list( $this->artifacts );
+		$this->logs      = self::normalized_list( $this->logs );
+	}
 
 	/**
 	 * @param array<mixed> $inputs
@@ -102,7 +109,9 @@ final class WP_Agent_Workflow_Run_Result {
 			self::int_value( $value['ended_at'] ?? 0 ),
 			self::array_value( $value['metadata'] ?? array() ),
 			self::array_value( $value['evidence_refs'] ?? array() ),
-			self::array_value( $value['replay'] ?? array() )
+			self::array_value( $value['replay'] ?? array() ),
+			self::array_value( $value['artifacts'] ?? array() ),
+			self::array_value( $value['logs'] ?? array() )
 		);
 	}
 
@@ -175,6 +184,20 @@ final class WP_Agent_Workflow_Run_Result {
 		return $this->replay_metadata;
 	}
 
+	/**
+	 * @return array<mixed>
+	 */
+	public function get_artifacts(): array {
+		return $this->artifacts;
+	}
+
+	/**
+	 * @return array<mixed>
+	 */
+	public function get_logs(): array {
+		return $this->logs;
+	}
+
 	public function is_succeeded(): bool {
 		return self::STATUS_SUCCEEDED === $this->status;
 	}
@@ -225,7 +248,9 @@ final class WP_Agent_Workflow_Run_Result {
 				'run_id'        => $this->run_id,
 				'status'        => $this->status,
 				'outputs'       => $this->output,
+				'artifact_refs' => $this->artifacts,
 				'evidence_refs' => $this->evidence_refs,
+				'logs'          => $this->logs,
 				'replay'        => $this->replay_metadata,
 				'provenance'    => array( 'workflow_id' => $this->workflow_id ),
 				'timestamps'    => array(
@@ -268,6 +293,8 @@ final class WP_Agent_Workflow_Run_Result {
 			self::array_patch_value( $patch, 'metadata', $this->metadata ),
 			self::array_patch_value( $patch, 'evidence_refs', $this->evidence_refs ),
 			self::array_patch_value( $patch, 'replay', $this->replay_metadata ),
+			self::array_patch_value( $patch, 'artifacts', $this->artifacts ),
+			self::array_patch_value( $patch, 'logs', $this->logs ),
 		);
 	}
 
@@ -310,6 +337,32 @@ final class WP_Agent_Workflow_Run_Result {
 	}
 
 	/**
+	 * @param array<mixed> $value
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function normalized_list( array $value ): array {
+		$normalized = array();
+		foreach ( $value as $entry ) {
+			if ( ! is_array( $entry ) ) {
+				continue;
+			}
+
+			$item = array();
+			foreach ( $entry as $key => $entry_value ) {
+				if ( is_string( $key ) ) {
+					$item[ $key ] = $entry_value;
+				}
+			}
+
+			if ( array() !== $item ) {
+				$normalized[] = $item;
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
 	 * Render to a plain array. Useful for recorders that want to serialise
 	 * the run record verbatim (CPT meta, JSON column, REST response).
 	 *
@@ -331,6 +384,8 @@ final class WP_Agent_Workflow_Run_Result {
 			'metadata'      => $this->metadata,
 			'evidence_refs' => $this->evidence_refs,
 			'replay'        => $this->replay_metadata,
+			'artifacts'     => $this->artifacts,
+			'logs'          => $this->logs,
 		);
 	}
 }

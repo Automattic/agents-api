@@ -462,7 +462,7 @@ function agents_run_workflow_input_schema(): array {
 			),
 			'options'     => array(
 				'type'        => 'object',
-				'description' => 'Runtime options forwarded to the runner. Recognized keys: run_id, continue_on_error, metadata, evidence_refs.',
+				'description' => 'Runtime options forwarded to the runner. Recognized keys: run_id, continue_on_error, metadata, evidence_refs, artifacts, logs.',
 				'default'     => array(),
 			),
 		),
@@ -497,6 +497,14 @@ function agents_run_workflow_output_schema(): array {
 			'evidence_refs' => array(
 				'type'        => 'array',
 				'description' => 'Neutral JSON-serializable artifact/log references owned by the host runtime.',
+			),
+			'artifacts'     => array(
+				'type'        => 'array',
+				'description' => 'Normalized artifact descriptors produced by the workflow run.',
+			),
+			'logs'          => array(
+				'type'        => 'array',
+				'description' => 'Normalized log entries produced by the workflow run.',
 			),
 			'replay'        => array(
 				'type'       => 'object',

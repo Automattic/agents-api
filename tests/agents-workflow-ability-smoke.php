@@ -93,7 +93,11 @@ smoke_assert( false, agents_run_workflow_permission( array() ), 'filter can over
 $input_schema  = agents_run_workflow_input_schema();
 $output_schema = agents_run_workflow_output_schema();
 smoke_assert( true, str_contains( $input_schema['properties']['options']['description'] ?? '', 'evidence_refs' ), 'input schema documents evidence_refs runtime option', $failures, $passes );
+smoke_assert( true, str_contains( $input_schema['properties']['options']['description'] ?? '', 'artifacts' ), 'input schema documents artifacts runtime option', $failures, $passes );
+smoke_assert( true, str_contains( $input_schema['properties']['options']['description'] ?? '', 'logs' ), 'input schema documents logs runtime option', $failures, $passes );
 smoke_assert( 'array', $output_schema['properties']['evidence_refs']['type'] ?? '', 'output schema exposes evidence_refs', $failures, $passes );
+smoke_assert( 'array', $output_schema['properties']['artifacts']['type'] ?? '', 'output schema exposes artifacts', $failures, $passes );
+smoke_assert( 'array', $output_schema['properties']['logs']['type'] ?? '', 'output schema exposes logs', $failures, $passes );
 smoke_assert( 'object', $output_schema['properties']['replay']['type'] ?? '', 'output schema exposes replay metadata', $failures, $passes );
 smoke_assert( 'integer', $output_schema['properties']['replay']['properties']['run_record_schema_version']['type'] ?? '', 'replay schema includes schema version', $failures, $passes );
 smoke_assert( 'string', $output_schema['properties']['replay']['properties']['workflow_spec_hash']['type'] ?? '', 'replay schema includes spec hash', $failures, $passes );
