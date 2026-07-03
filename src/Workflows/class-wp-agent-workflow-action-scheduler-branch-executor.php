@@ -324,6 +324,64 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	}
 
 	/**
+	 * Count the RESUME actions still IN FLIGHT — PENDING *plus* IN-PROGRESS — live,
+	 * no memoization. The terminal-reconcile companion to {@see self::branch_inflight_count()}.
+	 *
+	 * WHY THIS EXISTS — RESUME STARVATION. A parallel fan-out ends with ONE resume
+	 * action ({@see self::RESUME_HOOK}) that agents-api enqueues when the last branch
+	 * reconciles ({@see self::maybe_defer_resume()}); running it drives the suspended
+	 * run to terminal and fires the run-completed hook a caller finalizes on. The
+	 * branch-concurrency raise ({@see register-workflow-branch-executor.php}) keys off
+	 * {@see self::branch_inflight_count()} alone, which counts ONLY branch actions.
+	 * The instant the last branch completes that count hits 0 and the ceiling reverts
+	 * to the AS default (1) — but the resume action is now PENDING and DUE, and it is
+	 * NOT a branch, so nothing keeps a claim slot open for it.
+	 *
+	 * That is fine when the queue is otherwise idle. It is NOT fine when ANY claim is
+	 * still outstanding — for example a still-in-progress branch from an UNRELATED
+	 * earlier fan-out held by AS's long-branch reaper window (up to the 3600s
+	 * `action_scheduler_failure_period` this plugin sets). AS's WP-Cron runner gate,
+	 * `has_maximum_concurrent_batches()`, compares the GLOBAL claim count against the
+	 * ceiling (`get_claim_count() >= concurrent_batches`). With the ceiling back at 1
+	 * and even a single stale claim outstanding the gate stays shut, so the queue
+	 * runner claims NOTHING and the due resume sits unclaimed — the run never
+	 * finalizes — until that stale claim is finally reaped (observed: ~51 minutes).
+	 *
+	 * Counting the in-flight resume lets the concurrency filter add a slot for it
+	 * (see that filter), so the ceiling exceeds the outstanding-claim count by one and
+	 * AS's gate opens far enough for the WP-Cron runner to claim the resume even while
+	 * unrelated stale claims linger. Scoped to RESUME_HOOK so it only opens the extra
+	 * slot when one of THIS executor's own fan-outs has a resume waiting; when none
+	 * does the count is 0 and the ceiling is untouched.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @return int In-flight resume-action count (pending + in-progress).
+	 */
+	public static function resume_inflight_count(): int {
+		if ( ! function_exists( 'as_get_scheduled_actions' ) || ! class_exists( '\ActionScheduler_Store' ) ) {
+			return 0;
+		}
+
+		// A run has exactly one resume action, but several runs can be in flight at
+		// once, so bound the query to MAX_BRANCH_CONCURRENCY — the same order of
+		// magnitude as the branch count. Callers only need "how many extra slots".
+		$ids = as_get_scheduled_actions(
+			array(
+				'hook'     => self::RESUME_HOOK,
+				'status'   => array(
+					\ActionScheduler_Store::STATUS_PENDING,
+					\ActionScheduler_Store::STATUS_RUNNING,
+				),
+				'per_page' => self::MAX_BRANCH_CONCURRENCY,
+			),
+			'ids'
+		);
+
+		return is_array( $ids ) ? count( $ids ) : 0;
+	}
+
+	/**
 	 * Trigger Action Scheduler's async-request queue runner: fire N CONCURRENT
 	 * loopback HTTP requests to admin-ajax.php so AS spawns N separate native-PHP
 	 * worker processes, each of which runs a queue batch. This is the mechanism that

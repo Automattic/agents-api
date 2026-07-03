@@ -165,6 +165,7 @@ require_once __DIR__ . '/../src/Workflows/register-workflow-branch-executor.php'
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Branch_Executor;
 
 $branch_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK;
+$resume_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK;
 $max         = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::MAX_BRANCH_CONCURRENCY;
 
 /** Apply the real concurrent_batches filter against the incoming default (AS default 1). */
@@ -236,13 +237,14 @@ smoke_assert( 4, $concurrent_batches(), 'all in-progress: ceiling STAYS raised (
 smoke_assert( 1, $batch_size(), 'all in-progress: batch_size STAYS pinned to 1 (old gate would revert to 25)', $failures, $passes );
 
 // ═════════════════════════════════════════════════════════════════════════════
-// 5. Cap: a pathological in-flight count is bounded by MAX_BRANCH_CONCURRENCY.
+// 5. Cap: a pathological in-flight BRANCH count is bounded by MAX_BRANCH_CONCURRENCY
+//    (no resume in flight adds no headroom).
 // ═════════════════════════════════════════════════════════════════════════════
 
 AS_Query_Shim::reset();
 AS_Query_Shim::add( $branch_hook, ActionScheduler_Store::STATUS_PENDING, $max + 5 );
 AS_Query_Shim::add( $branch_hook, ActionScheduler_Store::STATUS_RUNNING, $max + 5 );
-smoke_assert( $max, $concurrent_batches(), 'cap: concurrent_batches never exceeds MAX_BRANCH_CONCURRENCY', $failures, $passes );
+smoke_assert( $max, $concurrent_batches(), 'cap: branch ceiling never exceeds MAX_BRANCH_CONCURRENCY', $failures, $passes );
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 6. Only-ever-RAISE: a higher incoming ceiling from another plugin is preserved.
@@ -272,6 +274,52 @@ AS_Query_Shim::add( 'some_other_unrelated_hook', ActionScheduler_Store::STATUS_R
 smoke_assert( 0, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count(), 'inflight=0 — unrelated AS hooks never open the branch gate', $failures, $passes );
 smoke_assert( 1, $concurrent_batches(), 'scoping: unrelated AS workload keeps stock concurrent_batches (1)', $failures, $passes );
 smoke_assert( 25, $batch_size(), 'scoping: unrelated AS workload keeps stock batch_size (25)', $failures, $passes );
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 9. THE RESUME-STARVATION FIX. When every branch has completed, a fan-out ends
+//    with ONE resume action that drives the run to terminal. The resume is NOT a
+//    branch, so branch_inflight_count() drops to 0 — but resume_inflight_count()
+//    keeps the ceiling raised by one so the resume gets a claim slot. Without this,
+//    a lone due resume was starved whenever ANY unrelated claim lingered (observed
+//    ~51 min behind AS's long-branch reaper window).
+// ═════════════════════════════════════════════════════════════════════════════
+
+AS_Query_Shim::reset();
+AS_Query_Shim::add( $resume_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+smoke_assert( 0, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count(), 'branches done: branch_inflight=0', $failures, $passes );
+smoke_assert( 1, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::resume_inflight_count(), 'resume pending: resume_inflight=1', $failures, $passes );
+smoke_assert( 2, $concurrent_batches(), 'RESUME GUARD: ceiling raised to 2 (incoming default 1 + resume slot) so a due resume can win a claim', $failures, $passes );
+
+// The production starvation case, modeled exactly: the 5-page run finished (its
+// branches complete), the resume is pending and DUE, but TWO stale in-progress
+// branches from an UNRELATED earlier fan-out still hold claims (reaper window).
+// get_claim_count() (global) = 2; the OLD ceiling (branch_inflight only) was also 2
+// (those two stale in-progress branches), so has_maximum_concurrent_batches
+// (2 >= 2) stayed shut and the resume was stranded. With the resume counted, the
+// ceiling is 3, so 2 (claimed) < 3 → AS admits the runner and the resume drains.
+AS_Query_Shim::reset();
+AS_Query_Shim::add( $branch_hook, ActionScheduler_Store::STATUS_RUNNING, 2 ); // stale unrelated branches holding claims
+AS_Query_Shim::add( $resume_hook, ActionScheduler_Store::STATUS_PENDING, 1 ); // our due, stranded resume
+$stale_claims = 2;
+smoke_assert( 3, $concurrent_batches(), 'STARVATION REPRO: ceiling = 2 stale branches + 1 resume slot = 3', $failures, $passes );
+smoke_assert( true, $concurrent_batches() > $stale_claims, 'STARVATION FIX: ceiling (3) > global claim count (2) → AS gate opens, resume claimable', $failures, $passes );
+
+// A resume already IN-PROGRESS also counts (its own worker holds the slot); it must
+// not collapse the ceiling mid-drain.
+AS_Query_Shim::reset();
+AS_Query_Shim::add( $resume_hook, ActionScheduler_Store::STATUS_RUNNING, 1 );
+smoke_assert( 1, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::resume_inflight_count(), 'resume in-progress also counts as in flight', $failures, $passes );
+
+// Scoping: a resume in flight does NOT pin batch_size (that gate is branch-only —
+// the resume is a single quick reconcile action, not one of N parallel branches).
+AS_Query_Shim::reset();
+AS_Query_Shim::add( $resume_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+smoke_assert( 25, $batch_size(), 'resume-only: batch_size stays at AS default (resume is not a fanned-out branch)', $failures, $passes );
+
+// No resume, no branches → resume slot never opens (blast radius).
+AS_Query_Shim::reset();
+smoke_assert( 0, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::resume_inflight_count(), 'no fan-out: resume_inflight=0', $failures, $passes );
+smoke_assert( 1, $concurrent_batches(), 'no fan-out: no resume slot added, stock ceiling (1)', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
