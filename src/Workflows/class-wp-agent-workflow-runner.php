@@ -7,8 +7,9 @@
  *   1. Validate inputs against the spec's input schema (presence + type).
  *   2. Walk steps in order. For each step:
  *        a. Resolve `${...}` bindings against `inputs` + earlier step outputs.
- *        b. Dispatch to a step-type handler (`ability` / `agent` ship by
- *           default; consumers register more via the handler map).
+ *        b. Dispatch to a step-type handler (`ability`, `agent`, `foreach`,
+ *           and `parallel` ship by default; consumers register more via the
+ *           handler map).
  *        c. Record the per-step outcome (status, output, error, timing).
  *        d. If the step failed and the spec didn't opt into `continue_on_error`,
  *           short-circuit the run.
@@ -19,15 +20,14 @@
  *   - Branching, nested workflows. Step-handler map is the extension point
  *     for those — a consumer can register a `branch` handler that runs a
  *     sub-list, or a `workflow` handler that calls this runner recursively.
- *   - Real concurrency. The runner is synchronous and single-process; PHP
- *     ships no threads here. The `parallel` step type expresses *fanout
- *     orchestration* (declare N branches, propagate a shared immutable
- *     context to each, collect every branch output, and optionally run one
- *     aggregator branch over the collected outputs) — not parallel execution.
- *     Whether branches actually run on separate processes (Action Scheduler,
- *     sandboxed subprocesses, loopback) is a consumer-supplied executor
- *     concern; the substrate owns the scatter/collect/return contract (plus
- *     the optional aggregate pass), not the concurrency mechanism.
+ *   - Unconditional concurrency. The default `parallel` handler owns fanout
+ *     orchestration (declare N branches, propagate a shared immutable context
+ *     to each, collect every branch output, and optionally run one aggregator
+ *     branch over the collected outputs). Real concurrent branch execution
+ *     happens when `wp_agent_workflow_step_executor` returns a branch executor.
+ *     Agents API ships an Action Scheduler executor that is selected when
+ *     `as_enqueue_async_action()` exists; without that or a caller-supplied
+ *     executor, `parallel` falls back to synchronous in-process execution.
  *   - Triggering. Triggers are wired separately
  *     ({@see WP_Agent_Workflow_Action_Scheduler_Bridge} for cron, and a
  *     consumer-registered listener for `wp_action`). The runner only

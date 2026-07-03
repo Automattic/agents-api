@@ -6,9 +6,9 @@ If you're building a plugin that needs an AI agent — one that can hold a conve
 
 It's a small, focused WordPress package maintained by Automattic. Think of it as the layer that sits *underneath* your product: it owns the boring-but-important parts (agent identity, runtime contracts, tool mediation, sessions, transcripts, memory, workflow scaffolding), so your plugin can focus on what makes it special.
 
-**What you get out of the box:** a way to register agents, a messaging channel base class that plugs into any transport, value objects for the agent lifecycle, contracts for tools and memory and consent, and lightweight workflow plumbing (spec, validator, runner skeleton, three abilities, an optional Action Scheduler bridge).
+**What you get out of the box:** a way to register agents, a fallback provider-agnostic `agents/chat` runtime, a messaging channel base class that plugs into any transport, value objects for the agent lifecycle, contracts for tools and memory and consent, and lightweight workflow plumbing (spec, validator, runner, default `ability`, `agent`, `foreach`, and `parallel` step handlers, three abilities, and optional Action Scheduler-backed async branch execution).
 
-**What you don't get — and shouldn't expect:** a concrete workflow runtime, durable run history, an editor UI, admin screens, or any provider-specific AI client. Those belong to your product. Agents API is the substrate, not the application.
+**What you don't get — and shouldn't expect:** durable workflow history, a workflow editor UI, admin screens, or any provider-specific AI client. Those belong to your product. Agents API is the substrate, not the application.
 
 New here? Start with the [Introduction](docs/introduction.md) — it breaks down the core concepts and vocabulary in plain language — then browse the [developer documentation](docs/README.md).
 
@@ -48,13 +48,13 @@ Agents API sits between tool/action discovery and product-specific automation. I
 - Tool source registration, parameter normalization, tool-call mediation, and execution result contracts.
 - Session and persistence contracts where they are provider-neutral.
 - Retrieved context authority vocabulary, context item shape, and conflict resolution contracts.
-- Workflow spec value object, structural validator, in-memory registry, abstract runner with `ability` and `agent` step types, `Store` and `Run_Recorder` interfaces, optional Action Scheduler bridge, and three canonical abilities (`agents/run-workflow`, `agents/validate-workflow`, `agents/describe-workflow`).
+- Workflow spec value object, structural validator, in-memory registry, runner with default `ability`, `agent`, `foreach`, and `parallel` step handlers, `Store` and `Run_Recorder` interfaces, optional Action Scheduler bridge and branch executor, and three canonical abilities (`agents/run-workflow`, `agents/validate-workflow`, `agents/describe-workflow`).
 - Runtime package workflow execution request/result contracts and the canonical dispatcher ability (`agents/run-runtime-package`) for consumer-owned package materialization and execution adapters.
 
 ## What Agents API Does Not Own
 
 - Provider-specific request code. `wp-ai-client` owns provider/model prompt execution.
-- Concrete workflow runtimes, durable workflow / run history, scheduling adapters beyond the optional Action Scheduler bridge, workflow editor UI, and product-specific step types (`branch`, `parallel`, nested `workflow`). The substrate provides the contract surface; consumers ship the persistence and product UX.
+- Durable workflow / run history, scheduling adapters beyond the optional Action Scheduler bridge and branch executor, workflow editor UI, and product-specific step types (`branch`, nested `workflow`). The substrate provides default in-process step execution plus an optional Action Scheduler path for async `parallel` branches; consumers ship the persistence and product UX.
 - Product UI such as admin pages, settings screens, dashboards, or onboarding.
 - Product CLI commands beyond generic substrate needs.
 - Public REST controllers in v1 unless they are separately designed.
