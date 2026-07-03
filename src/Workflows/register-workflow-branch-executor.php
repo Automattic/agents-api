@@ -195,6 +195,24 @@ add_filter( 'action_scheduler_timeout_period', $agents_workflow_branch_reaper_wi
 //    behavior (concurrent_batches 1, batch_size 25). The elevated policy exists only
 //    for the span of a fan-out (seconds to a few minutes).
 //
+//    RESUME NEEDS A SLOT TOO — the terminal-drain gap. A fan-out ends with ONE resume
+//    action (RESUME_HOOK, enqueued when the last branch reconciles) that drives the
+//    suspended run to terminal. It is NOT a branch, so the branch-only in-flight count
+//    drops to 0 the moment the last branch completes and the ceiling reverts to the AS
+//    default of 1 — right as the resume becomes pending and DUE. When any claim is still
+//    outstanding (e.g. a still-in-progress branch from an UNRELATED earlier fan-out held
+//    by the 3600s long-branch reaper window above), AS's `has_maximum_concurrent_batches()`
+//    (get_claim_count >= concurrent_batches) then stays shut against a ceiling of 1, so
+//    the WP-Cron runner claims NOTHING and the due resume sits unclaimed — the run never
+//    finalizes — until that unrelated claim is finally reaped (observed: ~51 minutes).
+//    Adding the in-flight resume count
+//    ({@see WP_Agent_Workflow_Action_Scheduler_Branch_Executor::resume_inflight_count()})
+//    to the raise gives the resume its own slot on top of the branches: the ceiling
+//    exceeds the outstanding-claim count by one and the gate opens far enough for the
+//    runner to claim the resume even while unrelated stale claims linger. When no fan-out
+//    is active (both counts 0) the raise is inert and every other AS workload sees stock
+//    behavior.
+//
 //    concurrent_batches only ever RAISES (max of incoming and target) so it never
 //    lowers another plugin's already-higher ceiling. Priority 100 so it runs after
 //    most callers. Registered UNCONDITIONALLY (not gated on is_available()) for the
@@ -210,13 +228,31 @@ add_filter(
 	 */
 	static function ( $batches ) {
 		$incoming = is_numeric( $batches ) ? (int) $batches : 1;
-		$inflight = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count();
-		if ( $inflight < 1 ) {
+		$branches = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count();
+		$resumes  = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::resume_inflight_count();
+		if ( $branches < 1 && $resumes < 1 ) {
 			return $incoming;
 		}
-		$target = min( $inflight, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::MAX_BRANCH_CONCURRENCY );
-		// Only ever RAISE — never lower a ceiling another plugin set higher.
-		return max( $incoming, $target );
+
+		$max = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::MAX_BRANCH_CONCURRENCY;
+
+		// Branch ceiling: enough slots for every in-flight branch (capped at MAX),
+		// never lowering a higher ceiling another plugin set. This is the existing
+		// parallel-branch behavior.
+		$branch_ceiling = max( $incoming, min( $branches, $max ) );
+
+		// Resume headroom is ADDITIVE on top of the branch ceiling — the resume needs
+		// a slot BEYOND the branches and beyond any UNRELATED claims that are already
+		// consuming the branch ceiling. If it merely matched the ceiling it would be
+		// starved: AS's has_maximum_concurrent_batches() compares the GLOBAL claim
+		// count against the ceiling, so a lone due resume with even one unrelated claim
+		// outstanding would sit at claim_count >= ceiling and never be admitted. Adding
+		// the resume count lifts the ceiling above the outstanding claims so the WP-Cron
+		// runner is admitted and claims the resume. Bounded (a fan-out has one resume;
+		// concurrent fan-outs are bounded by MAX) so the raise stays sane.
+		$resume_headroom = min( $resumes, $max );
+
+		return $branch_ceiling + $resume_headroom;
 	},
 	100
 );
