@@ -87,6 +87,17 @@ if ( ! function_exists( 'add_action' ) ) {
 		add_filter( $hook, $cb, $priority, $accepted_args );
 	}
 }
+if ( ! function_exists( 'do_action' ) ) {
+	function do_action( string $hook, ...$args ): void {
+		$cbs = $GLOBALS['__filters'][ $hook ] ?? array();
+		ksort( $cbs );
+		foreach ( $cbs as $bucket ) {
+			foreach ( $bucket as $cb ) {
+				call_user_func_array( $cb, $args );
+			}
+		}
+	}
+}
 if ( ! function_exists( 'wp_get_ability' ) ) {
 	function wp_get_ability( string $name ) {
 		return $GLOBALS['__abilities'][ $name ] ?? null;
