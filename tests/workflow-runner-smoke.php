@@ -420,6 +420,60 @@ smoke_assert( $evidence_refs, $last_write['result']['evidence_refs'] ?? array(),
 smoke_assert( $spec->to_array(), $last_write['result']['replay']['workflow_spec_snapshot'] ?? array(), 'recorder update preserves replay metadata', $failures, $passes );
 smoke_assert( true, is_string( json_encode( $evidence_result->get_evidence_refs() ) ), 'evidence refs are JSON-serializable', $failures, $passes );
 
+// ─── Artifacts and logs stay first-class through results and recorders ─
+
+$artifacts          = array(
+	array(
+		'type'  => 'json',
+		'id'    => 'artifact:123',
+		'label' => 'Workflow artifact',
+	),
+	'ignored',
+);
+$logs               = array(
+	array(
+		'level'   => 'info',
+		'message' => 'Workflow run completed.',
+	),
+	'ignored',
+);
+$artifact_metadata  = array(
+	'artifacts' => array( 'legacy metadata artifact stays untouched' ),
+	'logs'      => array( 'legacy metadata log stays untouched' ),
+);
+$artifact_recorder  = new Capture_Recorder();
+$artifact_result    = ( new WP_Agent_Workflow_Runner( $artifact_recorder ) )->run(
+	$spec,
+	array( 'text' => 'artifact' ),
+	array(
+		'run_id'    => 'artifact-run-1',
+		'metadata'  => $artifact_metadata,
+		'artifacts' => $artifacts,
+		'logs'      => $logs,
+	)
+);
+$artifact_roundtrip = WP_Agent_Workflow_Run_Result::from_array( $artifact_result->to_array() );
+$artifact_last      = end( $artifact_recorder->writes );
+$expected_artifacts = array( $artifacts[0] );
+$expected_logs      = array( $logs[0] );
+
+smoke_assert( $expected_artifacts, $artifact_result->get_artifacts(), 'result exposes first-class artifacts', $failures, $passes );
+smoke_assert( $expected_logs, $artifact_result->get_logs(), 'result exposes first-class logs', $failures, $passes );
+smoke_assert( $artifact_metadata, $artifact_result->get_metadata(), 'metadata remains untouched when artifacts/logs are first-class', $failures, $passes );
+smoke_assert( $artifact_result->to_array(), $artifact_roundtrip->to_array(), 'artifacts/logs round-trip through to_array/from_array', $failures, $passes );
+smoke_assert( $expected_artifacts, $artifact_last['result']['artifacts'] ?? array(), 'recorder update preserves first-class artifacts', $failures, $passes );
+smoke_assert( $expected_logs, $artifact_last['result']['logs'] ?? array(), 'recorder update preserves first-class logs', $failures, $passes );
+
+$legacy_result = WP_Agent_Workflow_Run_Result::from_array(
+	array(
+		'run_id'      => 'legacy-run',
+		'workflow_id' => 'demo/legacy',
+		'status'      => WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED,
+	)
+);
+smoke_assert( array(), $legacy_result->get_artifacts(), 'legacy result defaults artifacts to empty array', $failures, $passes );
+smoke_assert( array(), $legacy_result->get_logs(), 'legacy result defaults logs to empty array', $failures, $passes );
+
 // ─── Failed step short-circuits ───────────────────────────────────────
 
 $bad_spec = WP_Agent_Workflow_Spec::from_array(

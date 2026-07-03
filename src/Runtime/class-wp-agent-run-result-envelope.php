@@ -43,6 +43,7 @@ final class WP_Agent_Run_Result_Envelope {
 	 * @param array<string,mixed>            $error         Stable error envelope.
 	 * @param array<string,mixed>            $cancellation  Cancellation request/result metadata.
 	 * @param array<string,mixed>            $metadata      Host/runtime metadata.
+	 * @param array<int,array<string,mixed>> $logs          Canonical log entries.
 	 */
 	public function __construct(
 		private string $run_id,
@@ -55,12 +56,14 @@ final class WP_Agent_Run_Result_Envelope {
 		private array $timestamps = array(),
 		private array $error = array(),
 		private array $cancellation = array(),
-		private array $metadata = array()
+		private array $metadata = array(),
+		private array $logs = array()
 	) {
 		$this->status        = self::normalize_status( $this->status );
 		$this->outputs       = self::map_value( $this->outputs );
 		$this->artifact_refs = self::normalize_refs( $this->artifact_refs );
 		$this->evidence_refs = self::normalize_refs( $this->evidence_refs );
+		$this->logs          = self::normalize_entries( $this->logs );
 		$this->replay        = self::map_value( $this->replay );
 		$this->provenance    = self::map_value( $this->provenance );
 		$this->timestamps    = self::timestamps_value( $this->timestamps );
@@ -112,7 +115,8 @@ final class WP_Agent_Run_Result_Envelope {
 			$timestamps,
 			self::map_value( $value['error'] ?? array() ),
 			self::map_value( $value['cancellation'] ?? array() ),
-			self::map_value( $value['metadata'] ?? array() )
+			self::map_value( $value['metadata'] ?? array() ),
+			self::normalize_entries( $value['logs'] ?? array() )
 		);
 	}
 
@@ -179,6 +183,11 @@ final class WP_Agent_Run_Result_Envelope {
 		return $this->evidence_refs;
 	}
 
+	/** @return array<int,array<string,mixed>> */
+	public function get_logs(): array {
+		return $this->logs;
+	}
+
 	/** @return array<string,mixed> */
 	public function get_replay(): array {
 		return $this->replay;
@@ -219,6 +228,7 @@ final class WP_Agent_Run_Result_Envelope {
 			'outputs'       => $this->outputs,
 			'artifact_refs' => $this->artifact_refs,
 			'evidence_refs' => $this->evidence_refs,
+			'logs'          => $this->logs,
 			'replay'        => $this->replay,
 			'provenance'    => $this->provenance,
 			'timestamps'    => $this->timestamps,
@@ -246,6 +256,26 @@ final class WP_Agent_Run_Result_Envelope {
 		}
 
 		return $map;
+	}
+
+	/**
+	 * @param mixed $value Raw entries.
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function normalize_entries( mixed $value ): array {
+		if ( ! is_array( $value ) ) {
+			return array();
+		}
+
+		$entries = array();
+		foreach ( $value as $entry ) {
+			$entry = self::map_value( $entry );
+			if ( array() !== $entry ) {
+				$entries[] = $entry;
+			}
+		}
+
+		return $entries;
 	}
 
 	/**

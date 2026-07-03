@@ -110,6 +110,8 @@ class WP_Agent_Workflow_Runner {
 	 *                                        - `continue_on_error` (bool): keep running after a failed step. Default false.
 	 *                                        - `metadata` (array): forwarded to the run result.
 	 *                                        - `evidence_refs` (array): neutral artifact/log references forwarded to the run result.
+	 *                                        - `artifacts` (array): artifact descriptors forwarded to the run result.
+	 *                                        - `logs` (array): log entries forwarded to the run result.
 	 * @return WP_Agent_Workflow_Run_Result
 	 */
 	public function run( WP_Agent_Workflow_Spec $spec, array $inputs = array(), array $options = array() ): WP_Agent_Workflow_Run_Result {
@@ -117,6 +119,8 @@ class WP_Agent_Workflow_Runner {
 		$run_id        = self::string_value( $options['run_id'] ?? self::generate_run_id() );
 		$metadata      = (array) ( $options['metadata'] ?? array() );
 		$evidence_refs = (array) ( $options['evidence_refs'] ?? array() );
+		$artifacts     = (array) ( $options['artifacts'] ?? array() );
+		$logs          = (array) ( $options['logs'] ?? array() );
 		$replay        = self::build_replay_metadata( $spec );
 
 		// Build the initial RUNNING result and persist via recorder->start()
@@ -135,7 +139,9 @@ class WP_Agent_Workflow_Runner {
 			0,
 			$metadata,
 			$evidence_refs,
-			$replay
+			$replay,
+			$artifacts,
+			$logs
 		);
 
 		if ( $this->recorder ) {

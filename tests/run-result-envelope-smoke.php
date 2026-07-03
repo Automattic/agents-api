@@ -45,6 +45,7 @@ $envelope = WP_Agent_Run_Result_Envelope::from_array(
 			'ignored',
 		),
 		'evidence_refs' => array( array( 'type' => 'log', 'label' => 'runner' ) ),
+		'logs'          => array( array( 'level' => 'info', 'message' => 'started' ), 'ignored' ),
 		'replay'        => array( 'seed' => 42 ),
 		'provenance'    => array( 'producer' => 'smoke' ),
 		'started_at'    => '2026-06-19T00:00:00Z',
@@ -56,6 +57,7 @@ agents_api_smoke_assert_equals( 'created', $envelope->get_outputs()['summary'] ?
 agents_api_smoke_assert_equals( 1, count( $envelope->get_artifact_refs() ), 'artifact refs drop non-array items', $failures, $passes );
 agents_api_smoke_assert_equals( 'transcript', $envelope->get_artifact_refs()[0]['label'] ?? '', 'artifact ref string fields trim', $failures, $passes );
 agents_api_smoke_assert_equals( 'runner', $envelope->get_evidence_refs()[0]['label'] ?? '', 'evidence refs normalize with same vocabulary', $failures, $passes );
+agents_api_smoke_assert_equals( 'started', $envelope->get_logs()[0]['message'] ?? '', 'logs drop non-array items and preserve string-keyed entries', $failures, $passes );
 agents_api_smoke_assert_equals( '2026-06-19T00:00:00Z', $envelope->get_timestamps()['started_at'] ?? '', 'top-level started_at folds into timestamps', $failures, $passes );
 
 echo "\n[2] Runtime package results convert without changing legacy arrays:\n";
@@ -90,13 +92,17 @@ $workflow = new WP_Agent_Workflow_Run_Result(
 	110,
 	array( 'trace_id' => 'trace-1' ),
 	array( array( 'type' => 'log', 'label' => 'workflow log' ) ),
-	array( 'workflow_version' => 2 )
+	array( 'workflow_version' => 2 ),
+	array( array( 'type' => 'json', 'label' => 'workflow artifact' ) ),
+	array( array( 'level' => 'error', 'message' => 'workflow failed' ) )
 );
 $workflow_envelope = $workflow->to_run_result_envelope();
 agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_FAILED, $workflow_envelope->get_status(), 'workflow status maps to canonical failed', $failures, $passes );
 agents_api_smoke_assert_equals( 'build-site', $workflow_envelope->get_provenance()['workflow_id'] ?? '', 'workflow id maps to provenance', $failures, $passes );
 agents_api_smoke_assert_equals( 2, $workflow_envelope->get_replay()['workflow_version'] ?? 0, 'workflow replay metadata is preserved', $failures, $passes );
 agents_api_smoke_assert_equals( 'workflow log', $workflow_envelope->get_evidence_refs()[0]['label'] ?? '', 'workflow evidence refs are preserved', $failures, $passes );
+agents_api_smoke_assert_equals( 'workflow artifact', $workflow_envelope->get_artifact_refs()[0]['label'] ?? '', 'workflow artifacts map to canonical artifact refs', $failures, $passes );
+agents_api_smoke_assert_equals( 'workflow failed', $workflow_envelope->get_logs()[0]['message'] ?? '', 'workflow logs map to canonical logs', $failures, $passes );
 
 echo "\n[4] Task run-control arrays convert to the canonical envelope:\n";
 $task_envelope = WP_Agent_Task_Run_Control::to_run_result_envelope(
