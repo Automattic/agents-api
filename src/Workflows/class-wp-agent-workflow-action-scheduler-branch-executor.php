@@ -248,46 +248,74 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	}
 
 	/**
-	 * Count PENDING branch actions on this executor's OWN branch hook (live, no
-	 * memoization).
+	 * Count the branch actions still IN FLIGHT for an active fan-out on this
+	 * executor's OWN branch hook — PENDING *plus* IN-PROGRESS — live, no memoization.
 	 *
 	 * This is the gate that scopes the AS concurrency raise to an in-flight fan-out.
-	 * It counts pending actions on {@see self::BRANCH_HOOK} specifically (not the
-	 * whole {@see self::GROUP} group), so the elevated concurrency policy keys off
-	 * THIS executor's own parallel branches and never touches unrelated AS workload.
+	 * It counts actions on {@see self::BRANCH_HOOK} specifically (not the whole
+	 * {@see self::GROUP} group), so the elevated concurrency policy keys off THIS
+	 * executor's own parallel branches and never touches unrelated AS workload.
+	 *
+	 * WHY IN-PROGRESS COUNTS, NOT JUST PENDING. The whole point of the fan-out is N
+	 * branches running AT ONCE. But the instant a worker claims a branch, that
+	 * action transitions PENDING -> in-progress, so a pending-only count collapses
+	 * toward 0 the moment claiming starts — even though every branch is still in
+	 * flight. If the gate keyed off pending alone, the first worker to claim a branch
+	 * would drop the count enough to revert both concurrency filters to the AS
+	 * defaults (`concurrent_batches` 1, `batch_size` 25), and
+	 * `has_maximum_concurrent_batches()` (get_claim_count 1 >= concurrent_batches 1)
+	 * would then BLOCK any further worker from claiming the remaining pending
+	 * branches while that first branch runs its multi-minute AI call. The fan-out
+	 * would drain SERIALLY — one branch at a time, ~the branch duration apart —
+	 * defeating the entire mechanism. Compounded by the intentional 3600s long-branch
+	 * reaper window ({@see register-workflow-branch-executor.php}), a single
+	 * in-progress branch could hold the one claim slot for up to an hour.
+	 *
+	 * Counting PENDING + IN-PROGRESS keeps the ceiling raised to cover EVERY branch
+	 * still in flight, so while some branches are running additional workers can still
+	 * claim the ones that are pending — the ceiling stays open until the last branch
+	 * leaves the in-flight set (both counts drain to 0), at which point the filters
+	 * pass through unchanged and every other AS workload sees stock behavior.
 	 *
 	 * The count is read LIVE on every call rather than memoized per request. The two
 	 * concurrency filters fire more than once within a single queue-runner request —
 	 * `has_maximum_concurrent_batches()` at the top of `run()`, and again on shutdown
 	 * when the worker considers self-chaining `maybe_dispatch()` — and between those
-	 * calls the pending set changes as branches move PENDING -> in-progress ->
-	 * complete. A request-static cache would pin the FIRST-observed value: if a
-	 * worker's first read happened to catch a moment when peers had momentarily
-	 * claimed every branch (pending 0), the gate would revert both filters to the AS
-	 * defaults (`concurrent_batches` 1, `batch_size` 25) for the rest of that
-	 * request, so a later `run()` in the same worker could claim a batch of 25 and
-	 * drain them serially — the exact serialization this policy exists to prevent.
-	 * Reading live keeps the gate honest. The query is a single indexed lookup
-	 * bounded to MAX_BRANCH_CONCURRENCY ids, so it is cheap enough to run per filter
-	 * application.
+	 * calls the in-flight set changes as branches move PENDING -> in-progress ->
+	 * complete. A request-static cache would pin the FIRST-observed value and go stale
+	 * as the set drains, so a later `run()` in the same worker could see the wrong
+	 * ceiling and either over- or under-claim. Reading live keeps the gate honest. The
+	 * query is a small indexed lookup bounded to 2*MAX_BRANCH_CONCURRENCY ids, so it
+	 * is cheap enough to run per filter application.
 	 *
 	 * Returns 0 when Action Scheduler's query API is unavailable (a runtime without
 	 * AS), which makes both concurrency filters pass their value through untouched.
 	 *
 	 * @since 0.5.0
 	 *
-	 * @return int Pending branch-action count (0..MAX_BRANCH_CONCURRENCY).
+	 * @return int In-flight branch-action count (pending + in-progress).
 	 */
-	public static function pending_branch_count(): int {
+	public static function branch_inflight_count(): int {
 		if ( ! function_exists( 'as_get_scheduled_actions' ) || ! class_exists( '\ActionScheduler_Store' ) ) {
 			return 0;
 		}
 
+		// Query PENDING and IN-PROGRESS in one call. Passing an array of statuses to
+		// as_get_scheduled_actions() OR-matches them, so the returned ids are every
+		// branch action that is either waiting to be claimed or currently running —
+		// i.e. still in flight for this fan-out. per_page is bounded to twice
+		// MAX_BRANCH_CONCURRENCY because at the boundary the in-flight set can hold up
+		// to MAX_BRANCH_CONCURRENCY in-progress plus that many still pending; the
+		// callers only need to know whether the count is >= their target, so a bound
+		// that comfortably exceeds MAX_BRANCH_CONCURRENCY is sufficient.
 		$ids = as_get_scheduled_actions(
 			array(
 				'hook'     => self::BRANCH_HOOK,
-				'status'   => \ActionScheduler_Store::STATUS_PENDING,
-				'per_page' => self::MAX_BRANCH_CONCURRENCY,
+				'status'   => array(
+					\ActionScheduler_Store::STATUS_PENDING,
+					\ActionScheduler_Store::STATUS_RUNNING,
+				),
+				'per_page' => self::MAX_BRANCH_CONCURRENCY * 2,
 			),
 			'ids'
 		);

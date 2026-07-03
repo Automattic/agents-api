@@ -160,9 +160,9 @@ add_filter( 'action_scheduler_timeout_period', $agents_workflow_branch_reaper_wi
 //    fan-out that is exactly wrong — N branches enqueued under BRANCH_HOOK would drain
 //    serially in one worker instead of N workers each running one branch. The two
 //    filters below flip that WHILE — and only while — this executor's own branches are
-//    pending:
+//    still IN FLIGHT:
 //
-//      - `concurrent_batches` is RAISED to the pending BRANCH count (capped at
+//      - `concurrent_batches` is RAISED to the IN-FLIGHT branch count (capped at
 //        MAX_BRANCH_CONCURRENCY) so up to N workers may each hold a claim at once.
 //      - `batch_size` is pinned to 1 so each of those workers claims exactly ONE
 //        branch and leaves the rest for its peers.
@@ -172,13 +172,28 @@ add_filter( 'action_scheduler_timeout_period', $agents_workflow_branch_reaper_wi
 //    MySQL each worker's stake_claim uses FOR UPDATE SKIP LOCKED, so the concurrent
 //    claims pick distinct branches.
 //
+//    IN FLIGHT = PENDING + IN-PROGRESS, NOT PENDING ALONE. The gate keys off
+//    {@see WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count()}
+//    — the count of branch actions that are pending OR in-progress — not the pending
+//    count alone. This is the crux of the fix. The instant a worker claims a branch it
+//    transitions PENDING -> in-progress, so a pending-only gate collapses toward 0 as
+//    soon as claiming starts: the first claim drops the count enough to revert both
+//    filters to the AS defaults (concurrent_batches 1, batch_size 25), and AS's
+//    `has_maximum_concurrent_batches()` (get_claim_count 1 >= concurrent_batches 1)
+//    then blocks any further worker from claiming the still-pending branches while that
+//    first branch runs its multi-minute AI call — the fan-out drains SERIALLY. Keying
+//    off pending + in-progress keeps the ceiling raised to cover every branch still in
+//    flight, so a second/third worker CAN claim a pending branch while the first is
+//    in-progress (get_claim_count < concurrent_batches, so the AS gate lets it
+//    through). The ceiling stays open until the LAST branch leaves the in-flight set.
+//
 //    BLAST RADIUS. Both filters are process-global — Action Scheduler has no per-group
 //    concurrency knob — so a naive permanent raise would change concurrency for ALL AS
 //    workloads. To keep the blast radius bounded, BOTH callbacks are GATED on this
-//    executor's OWN branches being pending ({@see pending_branch_count()}): when zero
-//    branches are pending they pass the incoming value through UNCHANGED, so every
-//    other AS workload keeps stock behavior (concurrent_batches 1, batch_size 25). The
-//    elevated policy exists only for the span of a fan-out (seconds to a few minutes).
+//    executor's OWN branches being in flight: when zero branches are in flight they
+//    pass the incoming value through UNCHANGED, so every other AS workload keeps stock
+//    behavior (concurrent_batches 1, batch_size 25). The elevated policy exists only
+//    for the span of a fan-out (seconds to a few minutes).
 //
 //    concurrent_batches only ever RAISES (max of incoming and target) so it never
 //    lowers another plugin's already-higher ceiling. Priority 100 so it runs after
@@ -195,11 +210,11 @@ add_filter(
 	 */
 	static function ( $batches ) {
 		$incoming = is_numeric( $batches ) ? (int) $batches : 1;
-		$pending  = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::pending_branch_count();
-		if ( $pending < 1 ) {
+		$inflight = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count();
+		if ( $inflight < 1 ) {
 			return $incoming;
 		}
-		$target = min( $pending, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::MAX_BRANCH_CONCURRENCY );
+		$target = min( $inflight, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::MAX_BRANCH_CONCURRENCY );
 		// Only ever RAISE — never lower a ceiling another plugin set higher.
 		return max( $incoming, $target );
 	},
@@ -213,10 +228,10 @@ add_filter(
 	 * @return int
 	 */
 	static function ( $batch_size ) {
-		// Pin to 1 while branches are pending so each worker claims exactly one branch;
-		// otherwise pass the incoming value through so ordinary AS throughput (25) is
-		// untouched.
-		if ( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::pending_branch_count() > 0 ) {
+		// Pin to 1 while branches are in flight (pending or in-progress) so each worker
+		// claims exactly one branch; otherwise pass the incoming value through so
+		// ordinary AS throughput (25) is untouched.
+		if ( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count() > 0 ) {
 			return 1;
 		}
 		return is_numeric( $batch_size ) ? (int) $batch_size : 25;
