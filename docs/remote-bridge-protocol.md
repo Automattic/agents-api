@@ -2,7 +2,7 @@
 
 Remote bridge clients are out-of-process processes that relay messages between an external surface and a WordPress agent runtime. They differ from direct `WP_Agent_Channel` subclasses because the client may be offline, webhook delivery may fail, and replies need a queue-first recovery path.
 
-Agents API provides the generic PHP primitives for that protocol. It does not ship platform-specific clients, REST routes, product onboarding UI, or a chat runtime. See [Bridge Authorization And Onboarding](bridge-authorization.md) for the auth boundary.
+Agents API provides the generic PHP primitives for that protocol and a fallback provider-agnostic `agents/chat` runtime. It does not ship platform-specific clients, REST routes, or product onboarding UI. Consumers can replace the fallback by registering their own `wp_agent_chat_handler`. See [Bridge Authorization And Onboarding](bridge-authorization.md) for the auth boundary.
 
 ## Relationship To Core Connectors
 

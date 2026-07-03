@@ -64,6 +64,8 @@ array(
 
 The channel can consume either a single `reply` or assistant `messages` from the ability result. It stores a returned `session_id` before sending replies so delivery failures do not lose session continuity. `agents/chat` also exposes a canonical `run_id`; runtimes receive a generated `run_id` in the input when callers omit one, and responses include that same ID unless the runtime returns its own.
 
+Agents API registers a default `agents/chat` runtime as a fallback at `wp_agent_chat_handler` priority 1000. The fallback resolves provider and model from the chat input first, then from the registered agent's default config, and returns a validation error when either value is missing. Consumer runtimes normally register their own handler at the default priority 10, so they win before the fallback runs.
+
 ## Chat run control
 
 Agents API owns the generic run-control ability contracts and default run-control storage. Every `agents/chat` run receives a `run_id`, stores status when a session is known, accepts best-effort cancellation, and accepts queued follow-up messages. Runtimes may override the hooks below only when they can provide stronger behavior such as immediate provider aborts or a custom queue worker.
@@ -224,7 +226,7 @@ Bridge authorization is intentionally separate from queue state. Connectors can 
 
 ## Workflow specs and validation
 
-Workflows are deterministic recipes composed of inputs, triggers, and steps. Agents API provides the spec value object, structural validator, in-memory registry, runner skeleton, store/recorder interfaces, optional Action Scheduler bridge, and canonical abilities. It does not ship a concrete durable workflow runtime, editor UI, product step types, or run-history database.
+Workflows are deterministic recipes composed of inputs, triggers, and steps. Agents API provides the spec value object, structural validator, in-memory registry, runner, default step handlers, store/recorder interfaces, optional Action Scheduler bridge and branch executor, and canonical abilities. It does not ship a durable workflow runtime, editor UI, product-specific step types, or run-history database.
 
 `WP_Agent_Workflow_Spec_Validator::validate( array $spec ): array` performs structural validation only:
 
@@ -232,7 +234,7 @@ Workflows are deterministic recipes composed of inputs, triggers, and steps. Age
 - `inputs`, when present, must be a map;
 - `steps` must be a non-empty list;
 - each step needs an `id` and `type`;
-- built-in step types are `ability` and `agent`;
+- built-in step types are `ability`, `agent`, `foreach`, and `parallel`;
 - consumers can extend known step types through `wp_agent_workflow_known_step_types`;
 - `wp_action` and `cron` trigger shapes are checked;
 - forward or unknown `${steps.<id>.output.*}` binding references are reported.
@@ -257,8 +259,12 @@ Default step handlers:
 
 - `ability`: calls a registered Abilities API ability with resolved `args`.
 - `agent`: calls the canonical `agents/chat` ability with `agent`, `message`, and optional `session_id`.
+- `foreach`: runs nested `steps` once for each resolved item in process.
+- `parallel`: fans out either role-scoped `branches` or mapped `items`, collects branch outputs, and optionally runs one aggregator branch.
 
-Consumers extend the runner through the constructor or the `wp_agent_workflow_step_handlers` filter. Product-specific steps such as `branch`, `parallel`, or nested `workflow` belong in consumers.
+The default `parallel` handler uses `wp_agent_workflow_step_executor` as its concurrency seam. When an executor is available, it dispatches branches out of band and returns a `_suspend` directive so the run can resume after reconciliation. Agents API ships an Action Scheduler branch executor that is selected when `as_enqueue_async_action()` exists; it enqueues one async action per branch, raises branch-specific Action Scheduler concurrency while branches are in flight, and triggers loopback runners for faster drain. Without Action Scheduler or a caller-supplied executor, `parallel` falls back to synchronous in-process branch execution.
+
+Consumers extend the runner through the constructor or the `wp_agent_workflow_step_handlers` filter. Product-specific steps such as `branch` or nested `workflow` belong in consumers.
 
 Recorder behavior is conservative: `start()` runs before input validation, per-step `update()` calls follow state changes, and recorder-start failure returns a failed run result without executing steps.
 
