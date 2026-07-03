@@ -565,8 +565,30 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * Rewriting the host to the loopback IP and carrying the original host name in a
 	 * `Host:` header reproduces that pin explicitly: the TCP connection goes straight
 	 * to 127.0.0.1 (no DNS), and the local server still virtual-hosts the request to
-	 * the correct site by the Host header. Only the host is rewritten; scheme, port,
-	 * path, and query (the AS nonce) are preserved unchanged.
+	 * the correct site by the Host header. By default only the host is rewritten;
+	 * scheme, port, path, and query (the AS nonce) are preserved unchanged.
+	 *
+	 * ## Why scheme + port must come from the INTERNAL server, not the public URL
+	 *
+	 * The dispatch URL is derived from `admin_url( 'admin-ajax.php' )`, i.e. the
+	 * site's PUBLIC front door. On a single-server site the loopback and the public
+	 * URL share a scheme/port, so blindly reusing them is correct. But on a SPLIT
+	 * runtime — a public HTTPS front door on `.local:443` fronting an internal
+	 * plain-HTTP worker pool on `localhost:8882` — they diverge. There, reusing the
+	 * public `https://…:443` points the loopback at a TLS listener that does not
+	 * exist on 127.0.0.1, so every concurrent async-runner POST fails the TLS
+	 * handshake and the fan-out silently collapses to the serial WP-Cron drain.
+	 *
+	 * The loopback must therefore target where the local server is ACTUALLY
+	 * reachable on the loop — its real scheme, host, and port — which only the
+	 * runtime knows. The `agents_workflow_async_runner_loopback_base` filter lets a
+	 * runtime (or an mu-plugin) declare that internal base, e.g.
+	 * `http://localhost:8882`. When set, its scheme/host/port replace the public
+	 * ones and the original path + query (the AS nonce) are carried onto it; the
+	 * canonical Host header still names the PUBLIC host:port so the local server
+	 * virtual-hosts the request to the correct site. When the filter is unset the
+	 * behavior is byte-for-byte the pre-filter default (host → 127.0.0.1, scheme +
+	 * port + Host header from the public URL) so no single-server runtime regresses.
 	 *
 	 * When the URL cannot be parsed the original URL is returned with no extra header
 	 * — a safe pass-through that keeps the normal resolution path.
@@ -585,9 +607,42 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			);
 		}
 
-		$host = (string) $parts['host'];
+		$host  = (string) $parts['host'];
+		$path  = isset( $parts['path'] ) ? (string) $parts['path'] : '';
+		$query = isset( $parts['query'] ) && '' !== (string) $parts['query'] ? '?' . (string) $parts['query'] : '';
 
-		// Already a loopback address — nothing to rewrite, no Host header needed.
+		// The canonical Host authority is always the PUBLIC host (+ its explicit port,
+		// if any) — the local server virtual-hosts on it, so a bare host or the
+		// internal port would not match the site.
+		$public_port = isset( $parts['port'] ) ? ':' . (int) $parts['port'] : '';
+		$host_header = '' !== $public_port ? $host . $public_port : $host;
+
+		// A runtime whose internal loopback listener differs from its public front
+		// door (different scheme/host/port) declares that internal base here. Empty
+		// (the default) keeps the historical behavior below. The base is scheme +
+		// authority only, e.g. `http://localhost:8882`; the path + query (AS nonce)
+		// are always taken from the parsed dispatch URL.
+		$loopback_base = self::string_value( apply_filters( 'agents_workflow_async_runner_loopback_base', '', $url ) );
+		if ( '' !== $loopback_base ) {
+			$base_parts = wp_parse_url( $loopback_base );
+			if ( is_array( $base_parts ) && ! empty( $base_parts['host'] ) ) {
+				$base_scheme = isset( $base_parts['scheme'] ) && '' !== (string) $base_parts['scheme'] ? (string) $base_parts['scheme'] : 'http';
+				$base_host   = (string) $base_parts['host'];
+				$base_port   = isset( $base_parts['port'] ) ? ':' . (int) $base_parts['port'] : '';
+
+				// If the runtime pointed us at a loopback host (localhost / 127.0.0.1),
+				// no Host header rewrite is needed to dodge mDNS — but we STILL carry the
+				// canonical public Host header so the local server routes to the right
+				// site (its listener may serve several by Host).
+				return array(
+					'url'     => $base_scheme . '://' . $base_host . $base_port . $path . $query,
+					'headers' => array( 'Host' => $host_header ),
+				);
+			}
+		}
+
+		// Default (no override): already a loopback address — nothing to rewrite, no
+		// Host header needed.
 		if ( '127.0.0.1' === $host || 'localhost' === $host ) {
 			return array(
 				'url'     => $url,
@@ -595,17 +650,12 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			);
 		}
 
+		// Default (no override): rewrite the host to 127.0.0.1 to dodge mDNS, carrying
+		// the public scheme + port unchanged (correct for a single-server site).
 		$scheme = isset( $parts['scheme'] ) && '' !== (string) $parts['scheme'] ? (string) $parts['scheme'] : 'https';
-		$port   = isset( $parts['port'] ) ? ':' . (int) $parts['port'] : '';
-		$path   = isset( $parts['path'] ) ? (string) $parts['path'] : '';
-		$query  = isset( $parts['query'] ) && '' !== (string) $parts['query'] ? '?' . (string) $parts['query'] : '';
-
-		// Carry the port in the Host header too — the local server virtual-hosts on the
-		// full host:port authority, so a bare host would not match the site.
-		$host_header = '' !== $port ? $host . $port : $host;
 
 		return array(
-			'url'     => $scheme . '://127.0.0.1' . $port . $path . $query,
+			'url'     => $scheme . '://127.0.0.1' . $public_port . $path . $query,
 			'headers' => array( 'Host' => $host_header ),
 		);
 	}
