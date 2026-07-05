@@ -345,6 +345,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 * @return array{processed:int,warnings:int,stop_reason:string} Batch result.
 	 */
 	private function run_batch( int $batch_size, array $hooks, string $group, float $deadline_at, string $execution_context ): array {
+		/** @var \ActionScheduler_Store $store */
 		$store       = \ActionScheduler_Store::instance();
 		$runner      = \ActionScheduler::runner();
 		$processed   = 0;
@@ -416,13 +417,13 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 *
 	 * @since 0.5.2
 	 *
-	 * @param object            $store      Action Scheduler store.
+	 * @param \ActionScheduler_Store $store Action Scheduler store.
 	 * @param int               $batch_size Maximum actions to claim.
 	 * @param array<int,string> $hooks      Hook scope.
 	 * @param string            $group      Group scope.
-	 * @return object Action Scheduler claim.
+	 * @return \ActionScheduler_ActionClaim Action Scheduler claim.
 	 */
-	private function stake_claim( object $store, int $batch_size, array $hooks, string $group ): object {
+	private function stake_claim( \ActionScheduler_Store $store, int $batch_size, array $hooks, string $group ): \ActionScheduler_ActionClaim {
 		try {
 			return $store->stake_claim( $batch_size, null, $hooks, $group );
 		} catch ( \InvalidArgumentException $error ) {
