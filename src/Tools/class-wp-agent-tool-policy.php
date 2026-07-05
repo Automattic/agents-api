@@ -21,6 +21,16 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		public const RUNTIME_SYSTEM   = 'system';
 
 		/**
+		 * Runtime modes without a human in the loop.
+		 *
+		 * In these modes, write-capable tools (declared via the `write`/
+		 * `mutating` tool flag or a write-capable category) are opt-in by
+		 * default rather than ambient. Interactive `chat` mode is excluded —
+		 * it is request-user-scoped and already access-gated.
+		 */
+		public const NON_INTERACTIVE_MODES = array( self::RUNTIME_PIPELINE, self::RUNTIME_SYSTEM );
+
+		/**
 		 * @var WP_Agent_Tool_Policy_Filter
 		 */
 		private WP_Agent_Tool_Policy_Filter $filter;
@@ -94,6 +104,16 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 				$runtime_opt_in['categories'],
 				$preserve_tool
 			);
+
+			if ( $this->is_non_interactive_mode( $mode ) && ! $this->allows_ambient_write_tools( $context, $policies ) ) {
+				$tools = $this->filter->filter_write_capable_by_policy_opt_in(
+					$tools,
+					$runtime_opt_in['tools'],
+					$runtime_opt_in['categories'],
+					$this->filter->write_capable_categories( $context ),
+					$preserve_tool
+				);
+			}
 
 			$deny = $this->filter->string_list( $context['deny'] ?? array() );
 			foreach ( $policies as $policy ) {
@@ -306,6 +326,41 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 				'tools'      => array_values( array_unique( $allowed_tools ) ),
 				'categories' => array_values( array_unique( $allowed_categories ) ),
 			);
+		}
+
+		/**
+		 * Whether a runtime mode is non-interactive (no human in the loop).
+		 *
+		 * @param string $mode Runtime mode.
+		 * @return bool Whether the mode is non-interactive.
+		 */
+		private function is_non_interactive_mode( string $mode ): bool {
+			return in_array( $mode, self::NON_INTERACTIVE_MODES, true );
+		}
+
+		/**
+		 * Whether the context or any policy fragment opts in to ambient write tools.
+		 *
+		 * When true, the write-capable safe-default gate is skipped entirely
+		 * for this resolution. This is the explicit escape hatch for consumers
+		 * that intentionally want ambient write tools in a non-interactive mode.
+		 *
+		 * @param array<string, mixed>             $context  Runtime context.
+		 * @param array<int, array<string, mixed>> $policies Policy fragments.
+		 * @return bool Whether ambient write tools are allowed.
+		 */
+		private function allows_ambient_write_tools( array $context, array $policies ): bool {
+			if ( true === ( $context['allow_write_tools'] ?? false ) ) {
+				return true;
+			}
+
+			foreach ( $policies as $policy ) {
+				if ( true === ( $policy['allow_write_tools'] ?? false ) ) {
+					return true;
+				}
+			}
+
+			return false;
 		}
 	}
 }
