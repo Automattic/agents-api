@@ -345,6 +345,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 * @return array{processed:int,warnings:int,stop_reason:string} Batch result.
 	 */
 	private function run_batch( int $batch_size, array $hooks, string $group, float $deadline_at, string $execution_context ): array {
+		/** @var \ActionScheduler_Store $store */
 		$store       = \ActionScheduler_Store::instance();
 		$runner      = \ActionScheduler::runner();
 		$processed   = 0;
@@ -356,8 +357,10 @@ final class WP_Agent_Workflow_Scoped_Drain {
 			$this->reset_stale_timeouts( $store );
 			// stake_claim( $max, $before_date, $hooks, $group ). Claiming over the
 			// scoped hooks + group means we only ever run THIS caller's scope — never
-			// an unrelated AS workload sharing the queue.
-			$claim = $store->stake_claim( $batch_size, null, $hooks, $group );
+			// an unrelated AS workload sharing the queue. HybridStore can transiently
+			// throw "group does not exist" while actions for that group are readable;
+			// in that case retry hook-scoped only rather than failing the foreground pump.
+			$claim = $this->stake_claim( $store, $batch_size, $hooks, $group );
 		} catch ( \Throwable $throwable ) {
 			unset( $throwable );
 			return array(
@@ -406,6 +409,29 @@ final class WP_Agent_Workflow_Scoped_Drain {
 			'warnings'    => $warnings,
 			'stop_reason' => $stop_reason,
 		);
+	}
+
+	/**
+	 * Stake a scoped claim, falling back to hook-only scope when HybridStore cannot
+	 * resolve an otherwise-readable group.
+	 *
+	 * @since 0.5.2
+	 *
+	 * @param \ActionScheduler_Store $store Action Scheduler store.
+	 * @param int               $batch_size Maximum actions to claim.
+	 * @param array<int,string> $hooks      Hook scope.
+	 * @param string            $group      Group scope.
+	 * @return \ActionScheduler_ActionClaim Action Scheduler claim.
+	 */
+	private function stake_claim( \ActionScheduler_Store $store, int $batch_size, array $hooks, string $group ): \ActionScheduler_ActionClaim {
+		try {
+			return $store->stake_claim( $batch_size, null, $hooks, $group );
+		} catch ( \InvalidArgumentException $error ) {
+			if ( '' === $group || false === stripos( $error->getMessage(), 'group' ) ) {
+				throw $error;
+			}
+			return $store->stake_claim( $batch_size, null, $hooks, '' );
+		}
 	}
 
 	/**
