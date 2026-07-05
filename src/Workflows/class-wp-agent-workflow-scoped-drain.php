@@ -271,6 +271,66 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	}
 
 	/**
+	 * Drain this executor's branch/resume scope until a suspended workflow run leaves
+	 * the suspended state, or the supplied drain budget is exhausted.
+	 *
+	 * This is the generic foreground-await contract layered over {@see drain()}: a
+	 * caller that already has the run id and recorder can pump its OWN suspended
+	 * Action Scheduler fan-out without knowing the branch/resume hook names or
+	 * reimplementing the terminal-status callback. Product code still owns WHEN it is
+	 * safe to call this (foreground/status/CLI context, never from a branch worker).
+	 *
+	 * @since 0.5.2
+	 *
+	 * @param string                         $run_id   Suspended workflow run id.
+	 * @param WP_Agent_Workflow_Run_Recorder $recorder Recorder that can reload the run.
+	 * @param array<string,mixed>            $options  Drain options forwarded to {@see drain()}.
+	 * @return array{result:?WP_Agent_Workflow_Run_Result,stats:array<string,int|string|bool>}
+	 */
+	public function drain_suspended_run( string $run_id, WP_Agent_Workflow_Run_Recorder $recorder, array $options = array() ): array {
+		$terminal_status_callback = static function () use ( $recorder, $run_id ): string {
+			$current = $recorder->find( $run_id );
+			if ( null === $current ) {
+				return 'gone';
+			}
+			return $current->is_suspended() ? '' : $current->get_status();
+		};
+
+		$drain_options = array(
+			'terminal_status_callback' => $terminal_status_callback,
+		);
+
+		if ( isset( $options['hooks'] ) && is_array( $options['hooks'] ) ) {
+			$drain_options['hooks'] = array_values(
+				array_filter(
+					$options['hooks'],
+					static function ( $hook ): bool {
+						return is_string( $hook );
+					}
+				)
+			);
+		}
+		if ( isset( $options['group'] ) && is_scalar( $options['group'] ) && '' !== (string) $options['group'] ) {
+			$drain_options['group'] = (string) $options['group'];
+		}
+		foreach ( array( 'batch_size', 'limit', 'time_limit_ms', 'time_limit', 'stop_before_timeout_ms', 'stop_before_timeout' ) as $int_key ) {
+			if ( isset( $options[ $int_key ] ) && is_numeric( $options[ $int_key ] ) ) {
+				$drain_options[ $int_key ] = (int) $options[ $int_key ];
+			}
+		}
+		if ( isset( $options['execution_context'] ) && is_scalar( $options['execution_context'] ) ) {
+			$drain_options['execution_context'] = (string) $options['execution_context'];
+		}
+
+		$stats = $this->drain( $drain_options );
+
+		return array(
+			'result' => $recorder->find( $run_id ),
+			'stats'  => $stats,
+		);
+	}
+
+	/**
 	 * Claim and run one batch of due scoped actions in-process — pure Action
 	 * Scheduler mechanics. Resets stale timeouts first, stakes a claim over the
 	 * scoped hooks + group, then runs each claimed action through AS's own runner.
