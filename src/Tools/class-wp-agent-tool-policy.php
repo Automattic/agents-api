@@ -16,19 +16,32 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		public const MODE_ALLOW = 'allow';
 		public const MODE_DENY  = 'deny';
 
-		public const RUNTIME_CHAT     = 'chat';
-		public const RUNTIME_PIPELINE = 'pipeline';
-		public const RUNTIME_SYSTEM   = 'system';
+		/**
+		 * Canonical interactive runtime mode.
+		 *
+		 * The substrate's OWN interactive vocabulary. The tool policy treats
+		 * any context carrying `interactive => true` OR one of the recognized
+		 * interactive mode markers as a human-in-the-loop flow; every other
+		 * value is non-interactive. See {@see INTERACTIVE_MODES}.
+		 */
+		public const RUNTIME_CHAT = 'chat';
 
 		/**
-		 * Runtime modes without a human in the loop.
+		 * Substrate-recognized interactive runtime mode markers.
 		 *
-		 * In these modes, write-capable tools (declared via the `write`/
-		 * `mutating` tool flag or a write-capable category) are opt-in by
-		 * default rather than ambient. Interactive `chat` mode is excluded —
-		 * it is request-user-scoped and already access-gated.
+		 * This is the substrate's complete interactive vocabulary. It is
+		 * intentionally NOT a list of automation/non-interactive mode names:
+		 * the substrate is mode-name-neutral and never names consumer
+		 * product modes (pipeline, system, editor, ...). A context is
+		 * non-interactive when it carries no recognized interactive signal,
+		 * so the write-capable safe default applies without the substrate
+		 * having to enumerate the consumer's automation modes.
+		 *
+		 * Consumers keep their own product-shaped mode vocabulary and map
+		 * onto this axis at the call site, either by setting the explicit
+		 * `interactive` flag or by passing one of these mode markers.
 		 */
-		public const NON_INTERACTIVE_MODES = array( self::RUNTIME_PIPELINE, self::RUNTIME_SYSTEM );
+		private const INTERACTIVE_MODES = array( self::RUNTIME_CHAT, 'interactive', 'rest' );
 
 		/**
 		 * @var WP_Agent_Tool_Policy_Filter
@@ -105,7 +118,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 				$preserve_tool
 			);
 
-			if ( $this->is_non_interactive_mode( $mode ) && ! $this->allows_ambient_write_tools( $context, $policies ) ) {
+			if ( $this->is_non_interactive_context( $context ) && ! $this->allows_ambient_write_tools( $context, $policies ) ) {
 				$tools = $this->filter->filter_write_capable_by_policy_opt_in(
 					$tools,
 					$runtime_opt_in['tools'],
@@ -329,13 +342,29 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		}
 
 		/**
-		 * Whether a runtime mode is non-interactive (no human in the loop).
+		 * Whether the runtime context is non-interactive (no human in the loop).
 		 *
-		 * @param string $mode Runtime mode.
-		 * @return bool Whether the mode is non-interactive.
+		 * The substrate models only the interactive-vs-non-interactive axis.
+		 * It never enumerates consumer-specific automation mode names. A
+		 * context is interactive when it sets the explicit `interactive` flag
+		 * to true OR carries a mode the substrate recognizes as interactive
+		 * ({@see INTERACTIVE_MODES}) — mirroring the consent policy's
+		 * interactive detection. Anything else is non-interactive, so the
+		 * write-capable safe default applies. Consumers keep their own
+		 * product-shaped mode vocabulary and map onto this axis at the call
+		 * site.
+		 *
+		 * @param array<string, mixed> $context Runtime context.
+		 * @return bool Whether the context is non-interactive.
 		 */
-		private function is_non_interactive_mode( string $mode ): bool {
-			return in_array( $mode, self::NON_INTERACTIVE_MODES, true );
+		private function is_non_interactive_context( array $context ): bool {
+			if ( true === ( $context['interactive'] ?? null ) ) {
+				return false;
+			}
+
+			$mode = strtolower( $this->string_value( $context['mode'] ?? '' ) );
+
+			return '' === $mode || ! in_array( $mode, self::INTERACTIVE_MODES, true );
 		}
 
 		/**

@@ -57,7 +57,7 @@ interface WP_Agent_Conversation_Store {
 	 * @param int                      $user_id   WordPress user ID owning the session.
 	 * @param string                   $agent_slug Registered agent slug, or empty string for agent-less sessions.
 	 * @param array<mixed>                    $metadata  Arbitrary session metadata (JSON-serializable).
-	 * @param string                   $context   Execution mode ('chat', 'pipeline', 'system').
+	 * @param string                   $context   Execution mode. An opaque, consumer-defined string. The substrate treats `chat`/`interactive`/`rest` as interactive and every other value as non-interactive; it never enumerates consumer automation modes.
 	 * @return string Session ID (UUIDv4), or empty string on failure.
 	 */
 	public function create_session( WP_Agent_Workspace_Scope $workspace, int $user_id, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ): string;
