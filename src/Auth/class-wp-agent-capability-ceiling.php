@@ -21,11 +21,13 @@ if ( ! class_exists( 'WP_Agent_Capability_Ceiling' ) ) {
 		 * @param int             $user_id              WordPress user ID that bounds execution.
 		 * @param string[]|null   $allowed_capabilities Optional capability allow-list. Null means unrestricted by token/client.
 		 * @param array<string,mixed> $metadata          Host-owned metadata about how this ceiling was derived.
+		 * @param string[]|null   $denied_capabilities   Optional capability deny-list. Takes precedence over the allow-list.
 		 */
 		public function __construct(
 			public readonly int $user_id,
 			public readonly ?array $allowed_capabilities = null,
 			public readonly array $metadata = array(),
+			public readonly ?array $denied_capabilities = null,
 		) {
 			if ( $this->user_id < 0 ) {
 				throw self::invalid( 'user_id', 'must be zero or a positive integer' );
@@ -35,6 +37,14 @@ if ( ! class_exists( 'WP_Agent_Capability_Ceiling' ) ) {
 				foreach ( $this->allowed_capabilities as $capability ) {
 					if ( '' === trim( $capability ) ) {
 						throw self::invalid( 'allowed_capabilities', 'must contain non-empty capability strings' );
+					}
+				}
+			}
+
+			if ( null !== $this->denied_capabilities ) {
+				foreach ( $this->denied_capabilities as $capability ) {
+					if ( '' === trim( $capability ) ) {
+						throw self::invalid( 'denied_capabilities', 'must contain non-empty capability strings' );
 					}
 				}
 			}
@@ -53,28 +63,41 @@ if ( ! class_exists( 'WP_Agent_Capability_Ceiling' ) ) {
 			return new self(
 				isset( $ceiling['user_id'] ) && is_scalar( $ceiling['user_id'] ) ? self::int_value( $ceiling['user_id'] ) : 0,
 				array_key_exists( 'allowed_capabilities', $ceiling ) && null !== $ceiling['allowed_capabilities'] ? self::string_list( $ceiling['allowed_capabilities'] ) : null,
-				isset( $ceiling['metadata'] ) && is_array( $ceiling['metadata'] ) ? self::string_keyed_array( $ceiling['metadata'] ) : array()
+				isset( $ceiling['metadata'] ) && is_array( $ceiling['metadata'] ) ? self::string_keyed_array( $ceiling['metadata'] ) : array(),
+				array_key_exists( 'denied_capabilities', $ceiling ) && null !== $ceiling['denied_capabilities'] ? self::string_list( $ceiling['denied_capabilities'] ) : null,
 			);
 		}
 
 		/**
-		 * Whether this ceiling has a token/client capability restriction.
+		 * Whether this ceiling has a token/client capability allow-list restriction.
 		 */
 		public function has_capability_restrictions(): bool {
 			return null !== $this->allowed_capabilities;
 		}
 
 		/**
+		 * Whether this ceiling carries a capability deny-list restriction.
+		 */
+		public function has_denied_capabilities(): bool {
+			return null !== $this->denied_capabilities;
+		}
+
+		/**
 		 * Whether token/client restrictions allow the capability.
 		 *
 		 * This does not call WordPress. It only answers whether the local ceiling
-		 * restrictions include the requested capability.
+		 * restrictions include the requested capability. A denied capability is
+		 * never allowed, even when the allow-list is unrestricted.
 		 *
 		 * @param string $capability WordPress capability name.
 		 */
 		public function allows_capability( string $capability ): bool {
 			$capability = trim( $capability );
 			if ( '' === $capability ) {
+				return false;
+			}
+
+			if ( null !== $this->denied_capabilities && in_array( $capability, $this->denied_capabilities, true ) ) {
 				return false;
 			}
 
@@ -91,7 +114,16 @@ if ( ! class_exists( 'WP_Agent_Capability_Ceiling' ) ) {
 		 * @param string[] $allowed_capabilities Allowed capability names.
 		 */
 		public function with_allowed_capabilities( array $allowed_capabilities ): self {
-			return new self( $this->user_id, array_values( $allowed_capabilities ), $this->metadata );
+			return new self( $this->user_id, array_values( $allowed_capabilities ), $this->metadata, $this->denied_capabilities );
+		}
+
+		/**
+		 * Return a copy with an additional capability deny-list.
+		 *
+		 * @param string[] $denied_capabilities Denied capability names.
+		 */
+		public function with_denied_capabilities( array $denied_capabilities ): self {
+			return new self( $this->user_id, $this->allowed_capabilities, $this->metadata, array_values( $denied_capabilities ) );
 		}
 
 		/**
@@ -103,6 +135,7 @@ if ( ! class_exists( 'WP_Agent_Capability_Ceiling' ) ) {
 			return array(
 				'user_id'              => $this->user_id,
 				'allowed_capabilities' => $this->allowed_capabilities,
+				'denied_capabilities'  => $this->denied_capabilities,
 				'metadata'             => $this->metadata,
 			);
 		}

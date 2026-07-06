@@ -402,6 +402,22 @@ final class WP_Agent_Execution_Principal {
 	}
 
 	/**
+	 * Whether this principal represents an autonomous execution.
+	 *
+	 * Autonomous executions are driven by automation rather than a live human
+	 * authorizing each action. The determination delegates to the substrate
+	 * autonomous capability policy so hosts can adjust it through the
+	 * `agents_api_autonomous_auth_sources` and `agents_api_principal_is_autonomous`
+	 * filters.
+	 *
+	 * @return bool
+	 */
+	public function is_autonomous_execution(): bool {
+		return class_exists( 'WP_Agent_Autonomous_Capability_Policy' )
+			&& \WP_Agent_Autonomous_Capability_Policy::is_autonomous( $this );
+	}
+
+	/**
 	 * Whether this principal represents a host-resolved non-user audience.
 	 */
 	public function has_audience(): bool {
