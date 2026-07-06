@@ -19,29 +19,17 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		/**
 		 * Canonical interactive runtime mode.
 		 *
-		 * The substrate's OWN interactive vocabulary. The tool policy treats
-		 * any context carrying `interactive => true` OR one of the recognized
-		 * interactive mode markers as a human-in-the-loop flow; every other
-		 * value is non-interactive. See {@see INTERACTIVE_MODES}.
+		 * Default value for the generic tool `mode` filter
+		 * ({@see WP_Agent_Tool_Policy_Filter::filter_by_mode()}), which lets
+		 * tools declare the modes they are available in. This is a
+		 * substrate-native interactive surface and is intentionally kept.
+		 *
+		 * NOTE: The write-capable curation gate does NOT key off this mode.
+		 * It keys off the execution principal's autonomy instead — see
+		 * {@see is_autonomous_principal_context()}. Mode-name coupling was
+		 * removed from the gate so the substrate names no consumer modes.
 		 */
 		public const RUNTIME_CHAT = 'chat';
-
-		/**
-		 * Substrate-recognized interactive runtime mode markers.
-		 *
-		 * This is the substrate's complete interactive vocabulary. It is
-		 * intentionally NOT a list of automation/non-interactive mode names:
-		 * the substrate is mode-name-neutral and never names consumer
-		 * product modes (pipeline, system, editor, ...). A context is
-		 * non-interactive when it carries no recognized interactive signal,
-		 * so the write-capable safe default applies without the substrate
-		 * having to enumerate the consumer's automation modes.
-		 *
-		 * Consumers keep their own product-shaped mode vocabulary and map
-		 * onto this axis at the call site, either by setting the explicit
-		 * `interactive` flag or by passing one of these mode markers.
-		 */
-		private const INTERACTIVE_MODES = array( self::RUNTIME_CHAT, 'interactive', 'rest' );
 
 		/**
 		 * @var WP_Agent_Tool_Policy_Filter
@@ -118,7 +106,7 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 				$preserve_tool
 			);
 
-			if ( $this->is_non_interactive_context( $context ) && ! $this->allows_ambient_write_tools( $context, $policies ) ) {
+			if ( $this->is_autonomous_principal_context( $context ) && ! $this->allows_ambient_write_tools( $context, $policies ) ) {
 				$tools = $this->filter->filter_write_capable_by_policy_opt_in(
 					$tools,
 					$runtime_opt_in['tools'],
@@ -269,6 +257,34 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		}
 
 		/**
+		 * Convert scalar/Stringable input to a non-negative integer.
+		 *
+		 * @param mixed $value Raw value.
+		 * @return int Integer value (0 for non-stringable/negative input).
+		 */
+		private function int_value( $value ): int {
+			if ( is_int( $value ) ) {
+				return $value < 0 ? 0 : $value;
+			}
+
+			if ( is_bool( $value ) ) {
+				return $value ? 1 : 0;
+			}
+
+			if ( is_float( $value ) ) {
+				return $value > 0 ? (int) $value : 0;
+			}
+
+			if ( is_string( $value ) || $value instanceof Stringable ) {
+				$int = (int) (string) $value;
+
+				return $int < 0 ? 0 : $int;
+			}
+
+			return 0;
+		}
+
+		/**
 		 * Keep only string-keyed entries from a policy map.
 		 *
 		 * @param array<mixed,mixed> $values Raw map.
@@ -342,37 +358,99 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy' ) ) {
 		}
 
 		/**
-		 * Whether the runtime context is non-interactive (no human in the loop).
+		 * Whether the runtime context is driven by an autonomous principal.
 		 *
-		 * The substrate models only the interactive-vs-non-interactive axis.
-		 * It never enumerates consumer-specific automation mode names. A
-		 * context is interactive when it sets the explicit `interactive` flag
-		 * to true OR carries a mode the substrate recognizes as interactive
-		 * ({@see INTERACTIVE_MODES}) — mirroring the consent policy's
-		 * interactive detection. Anything else is non-interactive, so the
-		 * write-capable safe default applies. Consumers keep their own
-		 * product-shaped mode vocabulary and map onto this axis at the call
-		 * site.
+		 * TOOL-SURFACE CURATION (defense-in-depth), NOT the enforcement
+		 * boundary. This gate only decides whether write-capable tools are
+		 * *offered* to the model. It reduces prompt surface and stops an
+		 * autonomous agent from even trying a write tool. The actual
+		 * security boundary is capability-ceiling ENFORCEMENT at
+		 * ability/tool execution — tracked in #412. Consumers must not
+		 * treat this listing gate as authorization.
+		 *
+		 * Autonomy is read from the execution principal — which the
+		 * substrate already models precisely — instead of a mode/interactive
+		 * string. The substrate therefore names no consumer modes here. A
+		 * principal is autonomous when EITHER:
+		 *
+		 *   - its `auth_source` is an automation source
+		 *     (`system` / `runtime` / `agent_token`), OR
+		 *   - it has no human backing it (`acting_user_id` === 0).
+		 *
+		 * The principal is resolved from, in order: a `principal` entry on
+		 * the context (a {@see \AgentsAPI\AI\WP_Agent_Execution_Principal}
+		 * instance or its array shape), or flat `auth_source` /
+		 * `acting_user_id` fields on the context root. When no principal
+		 * information is present at all, the gate falls back SAFE: autonomy
+		 * is assumed and the gate engages. Prefer the principal at the call
+		 * site; the fallback exists so an unannotated context cannot
+		 * silently expose write tools.
 		 *
 		 * @param array<string, mixed> $context Runtime context.
-		 * @return bool Whether the context is non-interactive.
+		 * @return bool Whether the principal is autonomous (gate engages).
 		 */
-		private function is_non_interactive_context( array $context ): bool {
-			if ( true === ( $context['interactive'] ?? null ) ) {
-				return false;
+		private function is_autonomous_principal_context( array $context ): bool {
+			$signals = $this->principal_autonomy_signals( $context );
+
+			if ( ! $signals['present'] ) {
+				return true;
 			}
 
-			$mode = strtolower( $this->string_value( $context['mode'] ?? '' ) );
+			if ( 0 === $signals['acting_user_id'] ) {
+				return true;
+			}
 
-			return '' === $mode || ! in_array( $mode, self::INTERACTIVE_MODES, true );
+			return in_array( $signals['auth_source'], array( 'system', 'runtime', 'agent_token' ), true );
+		}
+
+		/**
+		 * Resolve principal autonomy signals from the runtime context.
+		 *
+		 * @param array<string, mixed> $context Runtime context.
+		 * @return array{auth_source: string, acting_user_id: int, present: bool} Resolved signals.
+		 */
+		private function principal_autonomy_signals( array $context ): array {
+			$principal = $context['principal'] ?? null;
+
+			if ( $principal instanceof AgentsAPI\AI\WP_Agent_Execution_Principal ) {
+				return array(
+					'auth_source'    => $principal->auth_source,
+					'acting_user_id' => $principal->acting_user_id,
+					'present'        => true,
+				);
+			}
+
+			if ( is_array( $principal ) && ( array_key_exists( 'auth_source', $principal ) || array_key_exists( 'acting_user_id', $principal ) ) ) {
+				return array(
+					'auth_source'    => $this->string_value( $principal['auth_source'] ?? '' ),
+					'acting_user_id' => $this->int_value( $principal['acting_user_id'] ?? 0 ),
+					'present'        => true,
+				);
+			}
+
+			if ( array_key_exists( 'auth_source', $context ) || array_key_exists( 'acting_user_id', $context ) ) {
+				return array(
+					'auth_source'    => $this->string_value( $context['auth_source'] ?? '' ),
+					'acting_user_id' => $this->int_value( $context['acting_user_id'] ?? 0 ),
+					'present'        => true,
+				);
+			}
+
+			return array(
+				'auth_source'    => '',
+				'acting_user_id' => 0,
+				'present'        => false,
+			);
 		}
 
 		/**
 		 * Whether the context or any policy fragment opts in to ambient write tools.
 		 *
-		 * When true, the write-capable safe-default gate is skipped entirely
+		 * When true, the write-capable curation gate is skipped entirely
 		 * for this resolution. This is the explicit escape hatch for consumers
-		 * that intentionally want ambient write tools in a non-interactive mode.
+		 * that intentionally want ambient write tools surfaced to an
+		 * autonomous principal (defense-in-depth curation only; capability
+		 * enforcement is tracked in #412).
 		 *
 		 * @param array<string, mixed>             $context  Runtime context.
 		 * @param array<int, array<string, mixed>> $policies Policy fragments.

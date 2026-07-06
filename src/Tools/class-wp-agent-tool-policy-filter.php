@@ -258,9 +258,12 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		/**
 		 * Exclude write-capable tools unless explicitly opted in or preserved.
 		 *
-		 * Applied only in non-interactive runtime modes as a safe default.
-		 * Read-only tools, mandatory plumbing, and explicitly opted-in tools
-		 * are unaffected.
+		 * Applied only for autonomous principals (no human in the loop) as a
+		 * tool-surface CURATION default — see
+		 * {@see WP_Agent_Tool_Policy::is_autonomous_principal_context()}.
+		 * This is defense-in-depth, NOT the enforcement boundary; capability
+		 * enforcement is tracked in #412. Read-only tools, mandatory
+		 * plumbing, and explicitly opted-in tools are unaffected.
 		 *
 		 * @param array<string, array<string, mixed>> $tools              Tool definitions keyed by tool name.
 		 * @param string[]            $allowed_tools      Tool names explicitly allowed.
