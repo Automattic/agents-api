@@ -141,10 +141,18 @@ $resolved = $resolver->resolve(
 agents_api_smoke_assert_equals( array( 'client/read' ), array_keys( $resolved ), 'explicit deny removes mandatory provider tool', $failures, $passes );
 
 echo "\n[5] Runtime/client tools require explicit opt-in while non-runtime tools remain visible:\n";
+// This section exercises generic runtime-tool opt-in. It models an
+// interactive human session via a user principal so the write-capable
+// curation gate (now keyed off principal autonomy) stays out of the way:
+// the host `client/write` tool remains ambient and the assertions can
+// focus on runtime-tool opt-in behavior.
+$user_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::user_session( 1, 'contracts-agent' );
+
 $resolved = $resolver->resolve(
 	$tools,
 	array(
-		'mode' => 'chat',
+		'mode'      => 'chat',
+		'principal' => $user_principal,
 	)
 );
 $resolved_names = array_keys( $resolved );
@@ -155,6 +163,7 @@ $resolved = $resolver->resolve(
 	$tools,
 	array(
 		'mode'         => 'chat',
+		'principal'    => $user_principal,
 		'agent_config' => array(
 			'tool_policy' => array(
 				'mode'  => 'allow',
@@ -171,6 +180,7 @@ $resolved = $resolver->resolve(
 	$tools,
 	array(
 		'mode'        => 'chat',
+		'principal'   => $user_principal,
 		'tool_policy' => array(
 			'mode'          => 'deny',
 			'tools'         => array( 'client/write' ),
@@ -186,6 +196,7 @@ $resolved = $resolver->resolve(
 	$tools,
 	array(
 		'mode'       => 'chat',
+		'principal'  => $user_principal,
 		'allow_only' => array( 'client/read', 'client/runtime' ),
 	)
 );
@@ -197,6 +208,7 @@ $resolved = $resolver->resolve(
 	$tools,
 	array(
 		'mode'        => 'chat',
+		'principal'   => $user_principal,
 		'tool_policy' => array(
 			'mode'               => 'deny',
 			'runtime_categories' => array( 'read' ),

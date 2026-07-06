@@ -186,6 +186,22 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		}
 
 		/**
+		 * Default write-capable category slugs.
+		 *
+		 * Generic classification vocabulary — not consumer tool names. The
+		 * substrate classifies by declared nature (the `write`/`mutating` tool
+		 * flag) or by membership in one of these generic category slugs.
+		 * Consumers and Core can extend or replace this set via the
+		 * `agents_api_write_capable_categories` filter.
+		 */
+		private const DEFAULT_WRITE_CAPABLE_CATEGORIES = array(
+			'write',
+			'publishing',
+			'mutating',
+			'destructive',
+		);
+
+		/**
 		 * Whether a declaration represents a caller-provided runtime tool.
 		 *
 		 * @param array<string, mixed> $tool Tool definition.
@@ -194,6 +210,100 @@ if ( ! class_exists( 'WP_Agent_Tool_Policy_Filter' ) ) {
 		public function is_runtime_tool( array $tool ): bool {
 			return true === ( $tool['runtime_tool'] ?? false )
 				|| 'client' === ( $tool['executor'] ?? null );
+		}
+
+		/**
+		 * Return the filterable set of write-capable category slugs.
+		 *
+		 * The built-in list is intentionally conservative and generic. Extend
+		 * it through the `agents_api_write_capable_categories` filter rather
+		 * than hardcoding consumer vocabulary in the substrate.
+		 *
+		 * @param array<string, mixed> $context Runtime context.
+		 * @return string[] Write-capable category slugs.
+		 */
+		public function write_capable_categories( array $context = array() ): array {
+			$categories = self::DEFAULT_WRITE_CAPABLE_CATEGORIES;
+
+			if ( function_exists( 'apply_filters' ) ) {
+				$filtered = apply_filters( 'agents_api_write_capable_categories', $categories, $context, $this );
+				if ( is_array( $filtered ) ) {
+					$categories = $filtered;
+				}
+			}
+
+			return $this->string_list( $categories );
+		}
+
+		/**
+		 * Whether a tool declaration is classified as write-capable.
+		 *
+		 * A tool is write-capable when it declares a `write` or `mutating`
+		 * flag set to true (the layer-pure path — the tool declares its own
+		 * nature), OR when one of its categories matches a write-capable
+		 * category slug.
+		 *
+		 * @param array<string, mixed> $tool        Tool definition.
+		 * @param string[]             $categories  Write-capable category slugs.
+		 * @return bool Whether the tool is write-capable.
+		 */
+		public function is_write_capable_tool( array $tool, array $categories = array() ): bool {
+			if ( true === ( $tool['write'] ?? false ) || true === ( $tool['mutating'] ?? false ) ) {
+				return true;
+			}
+
+			return $this->tool_matches_categories( $tool, $this->string_list( $categories ) );
+		}
+
+		/**
+		 * Exclude write-capable tools unless explicitly opted in or preserved.
+		 *
+		 * Applied only for autonomous principals (no human in the loop) as a
+		 * tool-surface CURATION default — see
+		 * {@see WP_Agent_Tool_Policy::is_autonomous_principal_context()}.
+		 * This is defense-in-depth, NOT the enforcement boundary; capability
+		 * enforcement is tracked in #412. Read-only tools, mandatory
+		 * plumbing, and explicitly opted-in tools are unaffected.
+		 *
+		 * @param array<string, array<string, mixed>> $tools              Tool definitions keyed by tool name.
+		 * @param string[]            $allowed_tools      Tool names explicitly allowed.
+		 * @param string[]            $allowed_categories Tool categories explicitly allowed.
+		 * @param string[]            $write_categories   Write-capable category slugs.
+		 * @param callable|null       $preserve_tool      Optional callback for mandatory tools.
+		 * @return array<string, array<string, mixed>> Filtered tools.
+		 */
+		public function filter_write_capable_by_policy_opt_in( array $tools, array $allowed_tools, array $allowed_categories, array $write_categories, ?callable $preserve_tool = null ): array {
+			$allowed_tools      = $this->string_list( $allowed_tools );
+			$allowed_categories = $this->string_list( $allowed_categories );
+			$write_categories   = $this->string_list( $write_categories );
+
+			if ( empty( $write_categories ) ) {
+				return $tools;
+			}
+
+			$filtered = array();
+			foreach ( $tools as $name => $tool ) {
+				if ( ! $this->is_write_capable_tool( $tool, $write_categories ) ) {
+					$filtered[ $name ] = $tool;
+					continue;
+				}
+
+				if ( in_array( $name, $allowed_tools, true ) ) {
+					$filtered[ $name ] = $tool;
+					continue;
+				}
+
+				if ( $this->tool_matches_categories( $tool, $allowed_categories ) ) {
+					$filtered[ $name ] = $tool;
+					continue;
+				}
+
+				if ( $preserve_tool && $preserve_tool( $tool, $name ) ) {
+					$filtered[ $name ] = $tool;
+				}
+			}
+
+			return $filtered;
 		}
 
 		/**
