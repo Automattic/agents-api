@@ -25,6 +25,21 @@ class WP_Agent_Tool_Declaration {
 	public const SCOPE_RUN       = 'run';
 
 	/**
+	 * Top-level declaration field naming the WordPress capability an
+	 * ability-backed tool requires.
+	 *
+	 * When a host/ability tool declaration sets this field, the ability tool
+	 * executor asks the authorization policy whether the execution principal's
+	 * capability ceiling permits the capability before dispatching the ability.
+	 * Absent or empty means no capability gate, preserving the default behavior.
+	 *
+	 * This is a declarative, product-neutral convention: the substrate never
+	 * special-cases consumer tool names. The capability vocabulary is owned by
+	 * WordPress core and the host.
+	 */
+	public const REQUIRED_CAPABILITY = 'required_capability';
+
+	/**
 	 * Fields owned by the canonical declaration envelope.
 	 */
 	private const CANONICAL_FIELDS = array(
@@ -209,7 +224,35 @@ class WP_Agent_Tool_Declaration {
 
 		$normalized = array_merge( $normalized, self::normalizeExtensionFields( $declaration ), self::normalizeParameterBindingFields( $declaration ) );
 
+		$required_capability = self::requiredCapability( $declaration );
+		if ( '' !== $required_capability ) {
+			$normalized[ self::REQUIRED_CAPABILITY ] = $required_capability;
+		} else {
+			unset( $normalized[ self::REQUIRED_CAPABILITY ] );
+		}
+
 		return $normalized;
+	}
+
+	/**
+	 * Resolve the required WordPress capability for a tool declaration.
+	 *
+	 * Returns the trimmed capability string, or an empty string when the
+	 * declaration does not declare one. The empty-string sentinel means "no
+	 * capability gate," so consumers can distinguish an unset gate from a real
+	 * capability without a separate null check.
+	 *
+	 * @param array<mixed> $tool_declaration Normalized (or raw) tool declaration.
+	 * @return string Trimmed capability name, or empty string when unset/non-string.
+	 */
+	public static function requiredCapability( array $tool_declaration ): string {
+		$value = $tool_declaration[ self::REQUIRED_CAPABILITY ] ?? null;
+		if ( ! is_string( $value ) ) {
+			return '';
+		}
+
+		$value = trim( $value );
+		return '' === $value ? '' : $value;
 	}
 
 	/**

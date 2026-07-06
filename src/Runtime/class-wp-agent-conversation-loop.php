@@ -112,6 +112,14 @@ class WP_Agent_Conversation_Loop {
 		$post_tool_diagnostics = self::resolve_post_tool_result_diagnostics( $options );
 		$interrupt_source      = self::resolve_interrupt_source( $options );
 		$request               = self::resolve_request( $messages, $options );
+		$principal             = $request->principal();
+		if ( $principal instanceof WP_Agent_Execution_Principal && ! isset( $context['principal'] ) ) {
+			// Thread the resolved execution principal into the run context so it
+			// reaches tool execution (turn context -> tool context -> executor).
+			// Ability-backed tools that declare a required capability consult the
+			// principal's capability ceiling before dispatching.
+			$context['principal'] = $principal;
+		}
 		$lock_session_id       = self::resolve_lock_session_id( $options, $request );
 		$run_id                = self::resolve_run_id( $options, $request );
 		$lock_ttl              = self::resolve_lock_ttl( $options );
