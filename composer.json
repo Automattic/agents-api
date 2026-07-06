@@ -36,6 +36,7 @@
       "php tests/effective-agent-resolver-smoke.php",
       "php tests/caller-context-smoke.php",
       "php tests/authorization-smoke.php",
+      "php tests/autonomous-capability-ceiling-smoke.php",
       "php tests/agents-access-ability-smoke.php",
       "php tests/agents-conversation-session-abilities-smoke.php",
       "php tests/conversation-session-store-contract-smoke.php",
