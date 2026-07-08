@@ -121,6 +121,13 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 		/**
 		 * List registered agents accessible to a principal.
 		 *
+		 * Iterates every registered agent through the same
+		 * {@see WP_Agent_WordPress_Authorization_Policy::can_access_agent()}
+		 * decision used by the check path. This guarantees that
+		 * `agents/list-accessible-agents` and `agents/can-access-agent` can
+		 * never disagree: the list is literally the set of agents for which
+		 * the check returns true.
+		 *
 		 * @param AgentsAPI\AI\WP_Agent_Execution_Principal $principal    Execution principal.
 		 * @param string                                    $minimum_role Minimum access role.
 		 * @param array<string,mixed>                       $context      Host-owned request context.
@@ -131,29 +138,26 @@ if ( ! class_exists( 'WP_Agent_Access' ) ) {
 				return array();
 			}
 
-			$agent_ids = array();
-			$store     = self::get_store( $context );
-			if ( $store instanceof WP_Agent_Access_Store && $principal->acting_user_id > 0 ) {
-				$agent_ids = array_merge( $agent_ids, $store->get_agent_ids_for_user( $principal->acting_user_id, $minimum_role, $principal->workspace_id ) );
-			}
+			$store  = self::get_store( $context );
+			$policy = new WP_Agent_WordPress_Authorization_Policy( $store );
 
-			if ( $store instanceof WP_Agent_Principal_Access_Store ) {
-				foreach ( self::access_principals_for( $principal, $context ) as $access_principal ) {
-					$agent_ids = array_merge( $agent_ids, $store->get_agent_ids_for_principal( $access_principal, $minimum_role, $principal->workspace_id ) );
+			$agents = array();
+			$seen   = array();
+
+			$registered = function_exists( 'wp_get_agents' ) ? wp_get_agents() : array();
+			foreach ( $registered as $agent ) {
+				$slug = sanitize_title( $agent->get_slug() );
+				if ( '' === $slug || isset( $seen[ $slug ] ) ) {
+					continue;
 				}
-			}
 
-			if ( null === $principal->audience_id && self::CURRENT_USER_EFFECTIVE_AGENT_ID !== $principal->effective_agent_id ) {
-				$agent_ids[] = $principal->effective_agent_id;
-			}
+				$seen[ $slug ] = true;
 
-			$agent_ids = array_values( array_unique( array_filter( array_map( 'sanitize_title', $agent_ids ) ) ) );
-			$agents    = array();
-			foreach ( $agent_ids as $agent_id ) {
-				$agent = function_exists( 'wp_get_agent' ) ? wp_get_agent( $agent_id ) : null;
-				if ( $agent instanceof WP_Agent ) {
-					$agents[] = self::agent_to_access_summary( $agent );
+				if ( ! $policy->can_access_agent( $principal, $slug, $minimum_role, $context ) ) {
+					continue;
 				}
+
+				$agents[] = self::agent_to_access_summary( $agent );
 			}
 
 			return $agents;

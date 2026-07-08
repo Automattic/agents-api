@@ -55,6 +55,11 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 		/**
 		 * Check whether a principal can access an agent at a minimum role.
 		 *
+		 * The store-derived decision — including the effective-agent
+		 * short-circuit — is wrapped in the {@see 'wp_agent_can_access_agent'}
+		 * filter so hosts can tighten as well as widen access without
+		 * materializing grant rows.
+		 *
 		 * @param AgentsAPI\AI\WP_Agent_Execution_Principal $principal    Execution principal.
 		 * @param string                               $agent_id     Agent identifier.
 		 * @param string                               $minimum_role Minimum access role.
@@ -65,6 +70,42 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 				return false;
 			}
 
+			$allowed = $this->resolve_default_access_decision( $principal, $agent_id, $minimum_role, $context );
+
+			if ( function_exists( 'apply_filters' ) ) {
+				/**
+				 * Filters the final agent access decision.
+				 *
+				 * Hosts that derive access from live state (capabilities, roles,
+				 * memberships) can grant or deny access without materializing
+				 * grant rows. The filter wraps the store-derived decision —
+				 * including the effective-agent short-circuit — so hosts can
+				 * tighten as well as widen access.
+				 *
+				 * @param bool                                       $allowed      Default store-derived decision.
+				 * @param AgentsAPI\AI\WP_Agent_Execution_Principal  $principal    Execution principal.
+				 * @param string                                     $agent_id     Agent identifier.
+				 * @param string                                     $minimum_role Minimum access role.
+				 * @param array<string,mixed>                        $context      Host-owned authorization context.
+				 */
+				$allowed = (bool) apply_filters( 'wp_agent_can_access_agent', $allowed, $principal, $agent_id, $minimum_role, $context );
+			}
+
+			return $allowed;
+		}
+
+		/**
+		 * Resolve the default (store-derived) access decision before host filtering.
+		 *
+		 * Includes the effective-agent short-circuit so the host filter can
+		 * tighten as well as widen the decision.
+		 *
+		 * @param AgentsAPI\AI\WP_Agent_Execution_Principal $principal    Execution principal.
+		 * @param string                                     $agent_id     Agent identifier.
+		 * @param string                                     $minimum_role Minimum access role.
+		 * @param array<string,mixed>                        $context      Host-owned authorization context.
+		 */
+		private function resolve_default_access_decision( AgentsAPI\AI\WP_Agent_Execution_Principal $principal, string $agent_id, string $minimum_role, array $context ): bool {
 			if ( $principal->effective_agent_id === $agent_id ) {
 				return true;
 			}
