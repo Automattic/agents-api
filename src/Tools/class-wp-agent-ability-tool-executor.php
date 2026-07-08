@@ -102,6 +102,10 @@ class WP_Agent_Ability_Tool_Executor implements WP_Agent_Tool_Executor {
 	 * and any token/client restrictions; this method depends only on the ceiling
 	 * being present on the principal, not on how it was derived.
 	 *
+	 * When a denial is decided, the `agents_api_tool_capability_denied` action
+	 * fires with a redaction-safe payload before the denial error is returned.
+	 * The hook is a pure notification and does not alter control flow.
+	 *
 	 * @param string       $tool_name           Model-facing tool name.
 	 * @param string       $ability_name        Resolved ability name.
 	 * @param string       $required_capability Required WordPress capability.
@@ -133,6 +137,43 @@ class WP_Agent_Ability_Tool_Executor implements WP_Agent_Tool_Executor {
 			return null;
 		}
 
+		$redacted_parameters = WP_Agent_Ability_Dispatcher::redacted_parameters( $ability_name, $parameters );
+
+		/**
+		 * Fires when an ability-backed tool call is denied on capability grounds.
+		 *
+		 * Hosts subscribe to log, telemeter, or alert on ceiling-denied tool calls.
+		 * The substrate emits this notification only; it owns no storage, logger,
+		 * or telemetry backend. The hook is a pure observer: it fires after the
+		 * denial is decided and before the denial error is returned, and it must
+		 * not alter control flow or the returned tool result.
+		 *
+		 * The payload is JSON-friendly and redaction-safe. It reuses the safe
+		 * principal metadata from WP_Agent_Execution_Principal::to_safe_metadata()
+		 * (which omits token ids, owner keys, request metadata, audience claims,
+		 * capability details, and binding claims) and the already-redacted ability
+		 * parameters from WP_Agent_Ability_Dispatcher::redacted_parameters(). It
+		 * never carries raw parameters, secrets, or unredacted principal fields.
+		 *
+		 * @param array<string, mixed> $denial Redaction-safe denial event (see keys below).
+		 * @param array<mixed>         $context Host runtime context for this invocation.
+		 */
+		do_action(
+			'agents_api_tool_capability_denied',
+			array(
+				'schema_version'      => 1,
+				'operation'           => 'tool_execution',
+				'tool_name'           => $tool_name,
+				'ability_name'        => $ability_name,
+				'required_capability' => $required_capability,
+				'reason'              => $reason,
+				'principal'           => $safe_metadata,
+				'parameters'          => $redacted_parameters,
+				'parameters_redacted' => true,
+			),
+			$context
+		);
+
 		return WP_Agent_Tool_Result::error(
 			$tool_name,
 			sprintf( 'Tool "%1$s" requires the "%2$s" capability, which is not permitted for this execution.', $tool_name, $required_capability ),
@@ -140,7 +181,7 @@ class WP_Agent_Ability_Tool_Executor implements WP_Agent_Tool_Executor {
 				'error_type'          => 'capability_denied',
 				'required_capability' => $required_capability,
 				'ability_name'        => $ability_name,
-				'parameters'          => WP_Agent_Ability_Dispatcher::redacted_parameters( $ability_name, $parameters ),
+				'parameters'          => $redacted_parameters,
 				'parameters_redacted' => true,
 				'denial'              => array(
 					'allowed'   => false,
