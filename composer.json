@@ -85,6 +85,7 @@
       "php tests/default-agents-chat-handler-smoke.php",
       "php tests/ability-tool-executor-smoke.php",
       "php tests/ability-tool-ceiling-smoke.php",
+      "php tests/ability-tool-capability-denied-event-smoke.php",
       "php tests/tool-mediation-runner-smoke.php",
       "php tests/conversation-loop-tool-execution-smoke.php",
       "php tests/tool-call-gate-smoke.php",

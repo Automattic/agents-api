@@ -579,6 +579,32 @@ Canonical action-policy values are `direct`, `preview`, and `forbidden`. Resolut
 
 On WordPress < 7.1 the underlying filters are never applied, so registered handlers stay idle.
 
+## Capability-denied audit event
+
+When an ability-backed tool declares a `required_capability` and the execution principal's capability ceiling does not permit it, `WP_Agent_Ability_Tool_Executor` denies the call before the ability runs. The `agents_api_tool_capability_denied` action fires at the moment of denial so hosts can log, telemeter, or alert on ceiling-denied tool calls. The substrate emits the event only; it owns no storage, logger, or telemetry backend.
+
+```php
+add_action( 'agents_api_tool_capability_denied', function ( array $denial, array $context ): void {
+	// Persist to a private audit log, push to telemetry, or trigger an alert.
+}, 10, 2 );
+```
+
+The `$denial` payload is JSON-friendly and redaction-safe:
+
+| Key | Value |
+| --- | --- |
+| `schema_version` | Event schema version (`1`). |
+| `operation` | Always `tool_execution`. |
+| `tool_name` | Model-facing tool name. |
+| `ability_name` | Resolved ability name. |
+| `required_capability` | Required WordPress capability. |
+| `reason` | `capability_not_permitted` when a principal was present but the ceiling/user denied the capability, or `principal_unavailable` when no principal was threaded (fail closed). |
+| `principal` | Safe principal metadata from `WP_Agent_Execution_Principal::to_safe_metadata()`, or `null` when no principal was threaded. Omits token ids, owner keys, request metadata, audience claims, capability details, and binding claims. |
+| `parameters` | Redacted ability parameters from `WP_Agent_Ability_Dispatcher::redacted_parameters()`. |
+| `parameters_redacted` | Always `true`. |
+
+The hook is a pure notification: it fires after the denial is decided and before the denial error is returned, and it does not alter control flow or the returned tool result. It never carries raw parameters, secrets, or unredacted principal fields. Hosts that need richer audit trails should persist the full `to_array()` principal shape in private storage they control.
+
 ## Compaction and conservation
 
 Conversation compaction is opt-in. Agents can declare `supports_conversation_compaction` and a `conversation_compaction_policy`; callers provide the summarizer. `WP_Agent_Conversation_Compaction::compact()` returns transformed messages, compaction metadata, and lifecycle events. If summarization fails, the original transcript is preserved and a failure event is emitted.
