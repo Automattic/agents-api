@@ -422,10 +422,10 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * branches keep running in their own worker PIDs and the caller polls the
 	 * recorder.
 	 *
-	 * A no-op (returns 0) on a runtime without loopback/admin-ajax, where the run
-	 * falls back to AS's own WP-Cron runner or the caller's budget — acceptable
-	 * degradation, never fabricated behavior. When request_multiple is unavailable it
-	 * degrades to serial non-blocking POSTs (AS's own dispatch shape).
+		 * A no-op (returns 0) on a runtime without loopback/admin-ajax, where the run
+		 * falls back to AS's own WP-Cron runner or the caller's budget — acceptable
+		 * degradation, never fabricated behavior. When request_multiple is unavailable it
+		 * degrades to serial non-blocking POSTs (AS's own dispatch shape).
 	 *
 	 * @since 0.5.0
 	 *
@@ -523,10 +523,10 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 					}
 				}
 
-				// Even if every response object was an early-close exception, the workers
-				// may still have accepted and begun the queue run (we do not await the
-				// branch). Report at least the attempts so callers see the dispatch fired.
-				return $fired > 0 ? $fired : $workers;
+				// Count only loopbacks the runtime accepted. Connection-refused/transport
+				// failures mean no queue runner was reached, so callers must see 0 and fall
+				// back to another claim path instead of receiving fabricated success.
+				return $fired;
 			}
 		}
 

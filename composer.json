@@ -123,6 +123,7 @@
       "php tests/workflow-scoped-drain-smoke.php",
       "php tests/workflow-async-branch-payload-smoke.php",
       "php tests/workflow-async-loopback-target-smoke.php",
+      "php tests/workflow-async-runner-dispatch-result-smoke.php",
       "php tests/workflow-reconcile-race-smoke.php",
       "php tests/workflow-lifecycle-smoke.php",
       "php tests/agents-workflow-ability-smoke.php",
