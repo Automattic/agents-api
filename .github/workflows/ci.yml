@@ -41,3 +41,42 @@ jobs:
 
       - name: Run ${{ matrix.label }}
         run: composer ${{ matrix.command }}
+
+  workflow-contracts:
+    name: Workflow contracts
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Checkout Docs Agent producer
+        uses: actions/checkout@v6.0.3
+        with:
+          repository: Automattic/docs-agent
+          ref: 5344a4bfbda4a0553cc92636258e46a715b1c72d
+          path: .docs-agent-producer
+
+      - name: Checkout WP Codebox producer schema
+        uses: actions/checkout@v6.0.3
+        with:
+          repository: Automattic/wp-codebox
+          ref: 54c2f9a7bc3cd1fe20055d496c83efcfb99afb41
+          path: .wp-codebox-producer
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          coverage: none
+
+      - name: Validate native Docs Agent producer contract
+        env:
+          DOCS_AGENT_DIR: ${{ github.workspace }}/.docs-agent-producer
+          WP_CODEBOX_DIR: ${{ github.workspace }}/.wp-codebox-producer
+        run: php tests/docs-agent-native-workflow-contract.php
+
+      - name: Lint GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          # With no paths, actionlint discovers and reads every workflow file.
+          args: -no-color
