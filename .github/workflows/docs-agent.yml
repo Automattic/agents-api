@@ -4,66 +4,37 @@ on:
   workflow_dispatch:
     inputs:
       prompt:
-        description: Optional additional instruction for Docs Agent.
+        description: Optional instruction appended to the technical documentation maintenance task.
         required: false
-        default: Generate or update Agents API documentation from repository source. Open a documentation pull request only when changes are needed.
-      audience:
-        description: Documentation lane to maintain.
-        type: choice
-        required: true
-        options:
-          - technical
-          - user
-        default: technical
-      run_kind:
-        description: Docs Agent run kind.
-        type: choice
-        required: true
-        options:
-          - maintenance
-          - bootstrap
-        default: maintenance
-      openai_model:
-        description: OpenAI model to use for Docs Agent.
-        required: true
-        default: gpt-5.5
-      docs_agent_ref:
-        description: Automattic/docs-agent ref to use for the Docs Agent recipe.
-        required: true
-        default: main
-      base_ref:
-        description: Base branch or ref for documentation pull requests.
-        required: true
-        default: main
-      docs_branch:
-        description: Stable branch reused for the Docs Agent pull request.
-        required: true
-        default: docs-agent/docs-upkeep
-      writable_paths:
-        description: Comma-separated paths Docs Agent may edit.
-        required: true
-        default: README.md,docs/**
+        default: Generate or update Agents API developer documentation from repository source. Open a documentation pull request only when changes are needed.
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
 
+concurrency:
+  group: docs-agent-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   docs-agent:
-    name: Maintain Documentation
+    name: Maintain Technical Documentation
     uses: Automattic/docs-agent/.github/workflows/maintain-docs.yml@main
     with:
-      audience: ${{ inputs.audience }}
-      run_kind: ${{ inputs.run_kind }}
-      base_ref: ${{ inputs.base_ref }}
-      docs_branch: ${{ inputs.docs_branch }}
-      writable_paths: ${{ inputs.writable_paths }}
-      model: ${{ inputs.openai_model }}
-      docs_agent_ref: ${{ inputs.docs_agent_ref }}
+      audience: technical
+      run_kind: maintenance
+      base_ref: main
+      docs_branch: docs-agent/agents-api-docs-upkeep
+      writable_paths: README.md,docs/**
       verification_commands: |
         [
+          "composer test",
           "php tests/no-product-imports-smoke.php"
+        ]
+      drift_checks: |
+        [
+          "git diff --check"
         ]
       prompt: |
         ${{ inputs.prompt }}
@@ -71,5 +42,7 @@ jobs:
         Target repository: Automattic/agents-api
         Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-        Preserve the Agents API product-neutral boundary. Use Agents API as the product name in production and package documentation. Keep generated documentation focused on the public API substrate, repository source, developer contracts, setup, tests, and contributor workflows for the selected audience.
-    secrets: inherit
+        Maintain source-grounded developer documentation for the public, product-neutral Agents API substrate. Cover developer contracts, setup, tests, and contributor workflows using repository source as evidence.
+    secrets:
+      ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+      EXTERNAL_PACKAGE_SOURCE_POLICY: ${{ secrets.EXTERNAL_PACKAGE_SOURCE_POLICY }}
