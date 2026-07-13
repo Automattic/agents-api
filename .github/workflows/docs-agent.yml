@@ -20,7 +20,7 @@ concurrency:
 jobs:
   docs-agent:
     name: Maintain Technical Documentation
-    uses: Automattic/docs-agent/.github/workflows/maintain-docs.yml@main
+    uses: Automattic/docs-agent/.github/workflows/maintain-docs.yml@5344a4bfbda4a0553cc92636258e46a715b1c72d
     with:
       audience: technical
       run_kind: maintenance
@@ -44,5 +44,5 @@ jobs:
 
         Maintain source-grounded developer documentation for the public, product-neutral Agents API substrate. Cover developer contracts, setup, tests, and contributor workflows using repository source as evidence.
     secrets:
-      ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       EXTERNAL_PACKAGE_SOURCE_POLICY: ${{ secrets.EXTERNAL_PACKAGE_SOURCE_POLICY }}
