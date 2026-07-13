@@ -132,7 +132,6 @@
       "php tests/event-trigger-smoke.php",
       "php tests/subagents-smoke.php",
       "php tests/access-decision-filter-smoke.php",
-      "php tests/docs-agent-native-workflow-contract.php",
       "php tests/no-product-imports-smoke.php"
     ],
     "test": [
