@@ -214,6 +214,42 @@ Important options:
 
 When mediated tool execution consults `completion_policy`, complete decisions stop the loop and record `completion_policy_stop` in `events[]`. Incomplete decisions with an empty message preserve the existing continue behavior. Incomplete decisions with a non-empty message append a normalized `user` text continuation message, record a `completion_policy_continue` lifecycle event in `events[]`, and emit the same event through `on_event`; the event metadata includes `tool_name`, `turn`, `message`, and caller-owned policy `context`. Agents API does not persist these diagnostics beyond the returned transcript/result surfaces.
 
+### Trusted chat runtime tool overlays
+
+The native `agents/chat` handler accepts runtime-local overlays only at
+`client_context.runtime_tool_declarations`. This is a string-keyed map that a
+trusted host constructs after authenticating its runtime; public transports must
+not forward this field from untrusted request data. No ambient context field,
+name match, or `runtime_tools` alias is used for execution binding.
+
+Each map key and declaration `name` must be the same canonical id already listed
+in the imported agent's `enabled_tools` allowlist. The declaration is normalized
+by `WP_Agent_Tool_Declaration::normalizeForConversationRequest()`. It can replace
+the model-facing schema and runtime metadata for that allowlisted tool, including
+`runtime.executor_target`; it cannot add a tool or replace the ability binding.
+An overlay target must be registered through `agents_api_tool_executors` for the
+turn. Duplicate canonical ids, provider-safe alias collisions, malformed entries,
+and unregistered targets reject the chat request with
+`agents_chat_invalid_runtime_tool_declaration`.
+
+```php
+array(
+	'client_context' => array(
+		'runtime_tool_declarations' => array(
+			'example/write_file' => array(
+				'name'        => 'example/write_file',
+				'source'      => 'example',
+				'description' => 'Write a file in the isolated runtime.',
+				'parameters'  => array( 'type' => 'object', 'properties' => array( 'path' => array( 'type' => 'string' ) ) ),
+				'executor'    => 'host',
+				'scope'       => 'run',
+				'runtime'     => array( 'executor_target' => 'example/isolated-runtime' ),
+			),
+		),
+	),
+)
+```
+
 ### Minimal caller-managed loop
 
 ```php

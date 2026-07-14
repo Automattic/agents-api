@@ -442,7 +442,7 @@ function agents_chat_input_schema(): array {
 					),
 					'runtime_tool_declarations' => array(
 						'type'                 => 'object',
-						'description'          => 'Alias for explicit runtime-local tool declarations supplied by a trusted caller for this turn.',
+						'description'          => 'Trusted-host-only map keyed by canonical enabled tool id. Each value is a WP_Agent_Tool_Declaration overlay for that existing tool; it may provide schema and runtime.executor_target metadata but cannot add tools.',
 						'additionalProperties' => array( 'type' => 'object' ),
 					),
 					'tool_declarations'         => array(

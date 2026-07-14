@@ -41,6 +41,7 @@ use AgentsAPI\AI\WP_Agent_Conversation_Loop;
 use AgentsAPI\AI\WP_Agent_Message;
 use AgentsAPI\AI\Tools\WP_Agent_Ability_Tool_Executor;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration;
+use AgentsAPI\AI\Tools\WP_Agent_Tool_Executor_Registry;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Sessions;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store;
 use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
@@ -126,7 +127,19 @@ class WP_Agent_Default_Chat_Handler {
 		}
 
 		$system_prompt     = self::resolve_system_prompt( $config );
-		$tool_declarations = self::resolve_tool_declarations( $config );
+		$tool_declarations = self::resolve_tool_declarations( $config, $input );
+		if ( is_wp_error( $tool_declarations ) ) {
+			return $tool_declarations;
+		}
+		$tool_declarations = ( new \WP_Agent_Tool_Policy() )->resolve(
+			$tool_declarations,
+			array(
+				'agent_config' => $config,
+				'allow_only'   => is_array( $input['allow_only'] ?? null ) ? $input['allow_only'] : array(),
+				'tool_policy'  => is_array( $input['tool_policy'] ?? null ) ? $input['tool_policy'] : array(),
+				'principal'    => $input['principal'] ?? null,
+			)
+		);
 		$max_turns         = self::resolve_max_turns( $input, $config );
 		$tool_call_rules   = self::resolve_tool_call_rules( $config );
 
@@ -268,14 +281,24 @@ class WP_Agent_Default_Chat_Handler {
 	 * model-facing name is the ability name; {@see WP_Agent_Ability_Tool_Executor}
 	 * dispatches it back through the Abilities API.
 	 *
+	 * Runtime overlays are accepted only from
+	 * `client_context.runtime_tool_declarations`. Hosts construct that keyed map
+	 * after authenticating their runtime; transport metadata and similarly named
+	 * context fields are never inspected. Each entry must name an existing
+	 * canonical enabled tool. It may replace its model schema and runtime metadata
+	 * (including `runtime.executor_target`), but never its ability allowlist entry.
+	 *
 	 * @param array<string,mixed> $config Agent default config.
-	 * @return array<string,array<string,mixed>> Declarations keyed by tool name.
+	 * @param array<string,mixed> $input  Canonical chat input.
+	 * @return array<string,array<mixed>>|\WP_Error Declarations, or an invalid overlay error.
 	 */
-	private static function resolve_tool_declarations( array $config ): array {
-		$names = array();
-		foreach ( array( 'enabled_tools', 'tools', 'abilities', 'tool_names' ) as $key ) {
-			if ( is_array( $config[ $key ] ?? null ) ) {
-				$names = array_merge( $names, $config[ $key ] );
+	private static function resolve_tool_declarations( array $config, array $input = array() ) {
+		$names = is_array( $config['enabled_tools'] ?? null ) ? $config['enabled_tools'] : array();
+		if ( empty( $names ) ) {
+			foreach ( array( 'tools', 'abilities', 'tool_names' ) as $key ) {
+				if ( is_array( $config[ $key ] ?? null ) ) {
+					$names = array_merge( $names, $config[ $key ] );
+				}
 			}
 		}
 
@@ -313,7 +336,70 @@ class WP_Agent_Default_Chat_Handler {
 			);
 		}
 
+		$client_context = is_array( $input['client_context'] ?? null ) ? $input['client_context'] : array();
+		$overlays       = $client_context['runtime_tool_declarations'] ?? array();
+		if ( array() === $overlays ) {
+			return $declarations;
+		}
+		if ( ! is_array( $overlays ) ) {
+			return self::runtime_tool_declaration_error( 'runtime_tool_declarations' );
+		}
+
+		$executor_registry = WP_Agent_Tool_Executor_Registry::fromFilters(
+			array( 'agent_slug' => $input['agent'] ?? '', 'session_id' => $input['session_id'] ?? '' )
+		);
+		$seen_names        = array();
+		$seen_aliases      = array();
+		foreach ( $overlays as $map_name => $overlay ) {
+			if ( ! is_string( $map_name ) || ! is_array( $overlay ) ) {
+				return self::runtime_tool_declaration_error( 'declaration' );
+			}
+
+			try {
+				$normalized = WP_Agent_Tool_Declaration::normalizeForConversationRequest( $overlay );
+			} catch ( \InvalidArgumentException $error ) {
+				return self::runtime_tool_declaration_error( $error->getMessage() );
+			}
+
+			$name = $normalized['name'] ?? '';
+			if ( ! is_string( $name ) || $map_name !== $name || ! isset( $declarations[ $name ] ) || isset( $seen_names[ $name ] ) ) {
+				return self::runtime_tool_declaration_error( 'name' );
+			}
+			$seen_names[ $name ] = true;
+
+			$alias = $normalized['provider_safe_name'] ?? WP_Agent_Tool_Declaration::providerSafeName( $name );
+			if ( ! is_string( $alias ) || isset( $seen_aliases[ $alias ] ) ) {
+				return self::runtime_tool_declaration_error( 'provider_safe_name' );
+			}
+			$seen_aliases[ $alias ] = true;
+
+			$target_id      = WP_Agent_Tool_Executor_Registry::targetIdFromDeclaration( $normalized );
+			$runtime        = is_array( $normalized['runtime'] ?? null ) ? $normalized['runtime'] : array();
+			$declares_target = array_key_exists( WP_Agent_Tool_Executor_Registry::RUNTIME_EXECUTOR_TARGET, $runtime );
+			if ( $declares_target && ( '' === $target_id || null === $executor_registry->executorForTarget( $target_id ) ) ) {
+				return self::runtime_tool_declaration_error( 'executor_target' );
+			}
+
+			// The imported agent's allowlist and ability binding remain host-owned.
+			$declarations[ $name ] = array_merge( $declarations[ $name ], $normalized );
+			$declarations[ $name ]['ability'] = $name;
+		}
+
 		return $declarations;
+	}
+
+	/**
+	 * Build the public error returned for a rejected trusted-runtime overlay.
+	 *
+	 * @param string $reason Machine-readable validation reason.
+	 * @return \WP_Error
+	 */
+	private static function runtime_tool_declaration_error( string $reason ): \WP_Error {
+		return new \WP_Error(
+			'agents_chat_invalid_runtime_tool_declaration',
+			'Runtime tool declarations must be a canonical, allowlisted map in client_context.runtime_tool_declarations.',
+			array( 'status' => 400, 'reason' => $reason )
+		);
 	}
 
 	/**
