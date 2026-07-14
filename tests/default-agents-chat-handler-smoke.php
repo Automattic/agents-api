@@ -438,6 +438,13 @@ namespace {
 	agents_api_smoke_assert_equals( true, in_array( 'user', $canonical_roles, true ), 'canonical messages include the user turn', $failures, $passes );
 	agents_api_smoke_assert_equals( true, in_array( 'assistant', $canonical_roles, true ), 'canonical messages include the assistant reply', $failures, $passes );
 	agents_api_smoke_assert_equals( true, ! in_array( 'tool', $canonical_roles, true ), 'canonical messages omit raw tool envelopes', $failures, $passes );
+	$tool_observability = $output['metadata']['agents_api']['tool_observability'] ?? array();
+	agents_api_smoke_assert_equals( 1, $tool_observability['version'] ?? null, 'canonical metadata projects tool observability v1', $failures, $passes );
+	agents_api_smoke_assert_equals( 'call-1', $tool_observability['calls'][0]['tool_call_id'] ?? '', 'canonical metadata preserves the provider tool call id', $failures, $passes );
+	agents_api_smoke_assert_equals( 'succeeded', $tool_observability['calls'][0]['status'] ?? '', 'canonical metadata projects the terminal tool status', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'query' ), $tool_observability['calls'][0]['arguments']['keys'] ?? array(), 'canonical metadata exposes argument keys without values', $failures, $passes );
+	$tool_observability_json = json_encode( $tool_observability );
+	agents_api_smoke_assert_equals( false, is_string( $tool_observability_json ) && str_contains( $tool_observability_json, 'risotto' ), 'canonical tool observability omits argument values', $failures, $passes );
 
 	echo "\n[1b] Runtime-bundle agents declare their toolset as `enabled_tools` and the loop wires it:\n";
 	// Native runtime agent bundles place their toolset under

@@ -246,6 +246,7 @@ agents_api_smoke_assert_equals( 'Duplicate tool call rejected.', $reject_result[
 agents_api_smoke_assert_equals( 'duplicate_tool_call', $reject_result['tool_audit_events'][0]['error_type'] ?? '', 'reject decision records audit error type', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'tool_call', 'tool_result' ), array_column( $reject_result['tool_events'], 'type' ), 'reject decision records canonical tool events', $failures, $passes );
 agents_api_smoke_assert_equals( 'error', $reject_result['tool_events'][1]['status'] ?? '', 'reject decision records error tool event status', $failures, $passes );
+agents_api_smoke_assert_equals( 'rejected', $reject_result['tool_observability']['calls'][0]['status'] ?? '', 'tool observability distinguishes mediator rejection from execution failure', $failures, $passes );
 
 $executor->executed = array();
 $replace_result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
@@ -350,6 +351,8 @@ $multi_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 2, count( $executor->executed ), 'tool executor was called twice across turns', $failures, $passes );
 agents_api_smoke_assert_equals( 3, $turn_count, 'loop ran three turns (two with tools, one without)', $failures, $passes );
 agents_api_smoke_assert_equals( 2, count( $multi_result['tool_execution_results'] ), 'result contains two tool execution results', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'tool-call-1-1', 'tool-call-2-1' ), array_column( $multi_result['tool_observability']['calls'] ?? array(), 'tool_call_id' ), 'tool observability preserves generated fallback ids across turns', $failures, $passes );
+agents_api_smoke_assert_equals( array( 1, 2 ), array_column( $multi_result['tool_observability']['calls'] ?? array(), 'sequence' ), 'tool observability assigns global call sequence across turns', $failures, $passes );
 
 echo "\n[4] Tool validation errors are returned as error results without crashing:\n";
 $executor->executed = array();
@@ -644,6 +647,7 @@ agents_api_smoke_assert_equals( false, $pending_result['completed'] ?? true, 'pe
 agents_api_smoke_assert_equals( 'client/summarize', $pending_result['runtime_tool_pending']['tool_name'] ?? '', 'pending request carries tool name', $failures, $passes );
 agents_api_smoke_assert_equals( 'client-call-1', $pending_result['runtime_tool_pending']['tool_call_id'] ?? '', 'pending request carries tool call id', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'tool_call', AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING ), array_column( $pending_result['tool_events'], 'type' ), 'pending request is recorded in canonical tool events', $failures, $passes );
+agents_api_smoke_assert_equals( 'pending', $pending_result['tool_observability']['calls'][0]['status'] ?? '', 'tool observability records pending runtime calls', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STATUS_PENDING_RUNTIME_TOOL, $pending_result['run_outcome']['status'] ?? '', 'pending runtime tool run outcome is pending', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING, $pending_result['run_outcome']['stop_reason'] ?? '', 'pending runtime tool run outcome stop reason is pending', $failures, $passes );
 

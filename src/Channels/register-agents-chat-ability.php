@@ -565,7 +565,53 @@ function agents_chat_output_schema(): array {
 			),
 			'metadata'   => array(
 				'type'        => 'object',
-				'description' => 'Runtime-specific metadata (token usage, model, latency, tool calls). Opaque to the dispatcher.',
+				'description' => 'Runtime metadata. The default handler exposes `agents_api.tool_observability`, a content-redacted v1 tool lifecycle contract.',
+				'properties'  => array(
+					'agents_api' => array(
+						'type'       => 'object',
+						'properties' => array(
+							'tool_observability' => array(
+								'type'        => 'object',
+								'description' => 'Additive content-redacted tool observability. Calls are globally ordered and expose no argument values, result content, hashes, raw errors, paths, or arbitrary runtime metadata.',
+								'required'    => array( 'version', 'calls' ),
+								'properties'  => array(
+									'version' => array( 'type' => 'integer', 'enum' => array( 1 ) ),
+									'calls'   => array(
+										'type'  => 'array',
+										'items' => array(
+											'type'       => 'object',
+											'required'   => array( 'sequence', 'turn', 'tool_call_id', 'tool_name', 'status', 'arguments' ),
+											'properties' => array(
+												'sequence'     => array( 'type' => 'integer' ),
+												'turn'         => array( 'type' => 'integer' ),
+												'tool_call_id' => array( 'type' => 'string' ),
+												'tool_name'    => array( 'type' => 'string' ),
+												'status'       => array( 'type' => 'string', 'enum' => array( 'pending', 'succeeded', 'failed', 'rejected' ) ),
+												'arguments'    => array(
+													'type'       => 'object',
+													'required'   => array( 'keys', 'count', 'redacted' ),
+													'properties' => array(
+														'keys'     => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+														'count'    => array( 'type' => 'integer' ),
+														'redacted' => array( 'type' => 'boolean', 'enum' => array( true ) ),
+													),
+												),
+												'result'       => array(
+													'type'        => 'object',
+													'description' => 'Optional result shape only: type plus count for containers or byte size for strings.',
+												),
+												'error'        => array(
+													'type'        => 'object',
+													'description' => 'Agents API-owned normalized code and fixed safe message; never the executor or provider error.',
+												),
+											),
+										),
+									),
+								),
+							),
+						),
+					),
+				),
 			),
 		),
 	);

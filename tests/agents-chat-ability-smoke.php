@@ -186,6 +186,8 @@ smoke_assert( true, isset( $in['properties']['principal']['properties']['auth_so
 
 $out_schema = agents_chat_output_schema();
 smoke_assert( array( 'session_id', 'reply' ), $out_schema['required'] ?? array(), 'output_schema_required_fields', $failures, $passes );
+smoke_assert( array( 1 ), $out_schema['properties']['metadata']['properties']['agents_api']['properties']['tool_observability']['properties']['version']['enum'] ?? array(), 'output_schema_documents_tool_observability_v1', $failures, $passes );
+smoke_assert( array( 'pending', 'succeeded', 'failed', 'rejected' ), $out_schema['properties']['metadata']['properties']['agents_api']['properties']['tool_observability']['properties']['calls']['items']['properties']['status']['enum'] ?? array(), 'output_schema_documents_tool_statuses', $failures, $passes );
 
 // 9. Runtime principal input is normalized before dispatch and has a scoped permission filter.
 smoke_reset_chat_filters();
