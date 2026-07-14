@@ -435,33 +435,31 @@ function agents_chat_input_schema(): array {
 						'type'        => 'boolean',
 						'description' => 'Whether this turn is an explicit agent-to-agent delegation call.',
 					),
-					'runtime_tools'             => array(
-						'type'                 => 'object',
-						'description'          => 'Explicit runtime-local tool declarations supplied by a trusted caller for this turn.',
-						'additionalProperties' => array( 'type' => 'object' ),
-					),
-					'runtime_tool_declarations' => array(
-						'type'                 => 'object',
-						'description'          => 'Trusted-host-only map keyed by canonical enabled tool id. Each value is a WP_Agent_Tool_Declaration overlay for that existing tool; it may provide schema and runtime.executor_target metadata but cannot add tools.',
-						'additionalProperties' => array( 'type' => 'object' ),
-					),
-					'tool_declarations'         => array(
-						'type'                 => 'object',
-						'description'          => 'Transport-level tool declarations supplied by a trusted caller for this turn.',
-						'additionalProperties' => array( 'type' => 'object' ),
-					),
-					'runtime_tool_callback'     => array(
-						'type'        => 'string',
-						'description' => 'Runtime-local callback identifier for executing runtime tool calls in trusted in-process callers.',
-					),
-					'runtime_tool_timeout'      => array(
-						'type'        => 'integer',
-						'description' => 'Runtime-local tool timeout in seconds.',
-					),
 				),
 			),
 		),
 	);
+}
+
+/**
+ * Remove transport-controlled runtime declaration fields from client context.
+ *
+ * Runtime declaration overlays are server-only and arrive through
+ * `agents_api_runtime_tool_declarations`, never a public request envelope.
+ *
+ * @param array<string,mixed> $client_context Client context from a transport.
+ * @return array<string,mixed> Client context without runtime declaration fields.
+ */
+function agents_chat_strip_runtime_tool_declaration_fields( array $client_context ): array {
+	unset(
+		$client_context['runtime_tools'],
+		$client_context['runtime_tool_declarations'],
+		$client_context['tool_declarations'],
+		$client_context['runtime_tool_callback'],
+		$client_context['runtime_tool_timeout']
+	);
+
+	return $client_context;
 }
 
 /**

@@ -105,6 +105,10 @@ class WP_Agent_Tool_Execution_Core {
 	public function executePreparedTool( array $tool_call, array $tool_definition, WP_Agent_Tool_Executor $executor, array $context = array() ): array {
 		$tool_call = WP_Agent_Tool_Call::normalize( $tool_call );
 		$executor  = $this->resolveExecutorForTool( $tool_definition, $executor, $context );
+		if ( null === $executor ) {
+			$tool_name = is_string( $tool_call['tool_name'] ?? null ) ? $tool_call['tool_name'] : '';
+			return WP_Agent_Tool_Result::error( $tool_name, 'Tool execution target is unavailable.', array( 'error_type' => 'executor_target_unavailable' ) );
+		}
 		try {
 			$result = $executor->executeWP_Agent_Tool_Call( $tool_call, $tool_definition, $context );
 		} catch ( \Throwable $throwable ) {
@@ -177,19 +181,22 @@ class WP_Agent_Tool_Execution_Core {
 	 * @param array<mixed>           $tool_definition  Tool declaration selected for the call.
 	 * @param WP_Agent_Tool_Executor $default_executor Caller-provided default executor.
 	 * @param array<mixed>           $context          Host runtime context for this invocation.
-	 * @return WP_Agent_Tool_Executor Executor to dispatch the tool call to.
+	 * @return WP_Agent_Tool_Executor|null Executor to dispatch the tool call, or null when a declared target is unavailable.
 	 */
-	private function resolveExecutorForTool( array $tool_definition, WP_Agent_Tool_Executor $default_executor, array $context ): WP_Agent_Tool_Executor {
+	private function resolveExecutorForTool( array $tool_definition, WP_Agent_Tool_Executor $default_executor, array $context ): ?WP_Agent_Tool_Executor {
 		// Skip registry resolution entirely when the tool names no target, so the
 		// common ability-backed path never builds or consults a registry.
 		if ( '' === WP_Agent_Tool_Executor_Registry::targetIdFromDeclaration( $tool_definition ) ) {
 			return $default_executor;
 		}
 
-		if ( null === $this->executor_registry ) {
+		$frozen_registry = $context['tool_executor_registry'] ?? null;
+		if ( $frozen_registry instanceof WP_Agent_Tool_Executor_Registry ) {
+			$this->executor_registry = $frozen_registry;
+		} elseif ( null === $this->executor_registry ) {
 			$this->executor_registry = WP_Agent_Tool_Executor_Registry::fromFilters( $context );
 		}
 
-		return $this->executor_registry->resolveForTool( $tool_definition, $default_executor );
+		return $this->executor_registry->executorForTarget( WP_Agent_Tool_Executor_Registry::targetIdFromDeclaration( $tool_definition ) );
 	}
 }

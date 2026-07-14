@@ -473,117 +473,68 @@ namespace {
 	agents_api_smoke_assert_equals( 'risotto', $GLOBALS['__chat_handler_ability_calls'][0]['query'] ?? '', 'the enabled_tools-declared tool received the model-supplied parameters', $failures, $passes );
 	agents_api_smoke_assert_equals( 2, (int) ( $bundle_output['metadata']['agents_api']['turn_count'] ?? 0 ), 'enabled_tools agent ran the full tool-mediated loop, not a single tool-less turn', $failures, $passes );
 
-	echo "\n[1c] A trusted runtime overlay can bind an enabled tool to a registered executor:\n";
+	echo "\n[1c] Server-only runtime overlays freeze a registered execution target:\n";
 	$overlay_executor = new Agents_Chat_Runtime_Overlay_Executor();
-	add_filter(
-		'agents_api_tool_executors',
-		static function ( array $executors ) use ( $overlay_executor ): array {
+	$server_overlays  = array();
+	$runtime_contexts = array();
+	$executor_registry_contexts = array();
+	add_filter( 'agents_api_runtime_tool_declarations', static function ( array $declarations, $agent, array $context ) use ( &$server_overlays, &$runtime_contexts ): array {
+		unset( $declarations );
+		$runtime_contexts[] = array( 'agent' => $agent, 'context' => $context );
+		return in_array( $context['agent_slug'] ?? '', array( 'bundle-brain', 'mandatory-brain' ), true ) ? $server_overlays : array();
+	}, 10, 3 );
+	add_filter( 'agents_api_tool_executors', static function ( array $executors, array $context ) use ( $overlay_executor, &$executor_registry_contexts ): array {
+		$executor_registry_contexts[] = $context;
+		if ( 'runtime-run' === ( $context['run_id'] ?? '' ) && '' !== ( $context['session_id'] ?? '' ) ) {
 			$executors['test/runtime-overlay'] = $overlay_executor;
-			return $executors;
 		}
-	);
+		return $executors;
+	}, 10, 2 );
+	$server_overlays = array( 'kitchen/lookup' => array(
+		'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Runtime kitchen lookup.',
+		'parameters' => array( 'type' => 'object', 'required' => array( 'query' ), 'properties' => array( 'query' => array( 'type' => 'string' ) ) ),
+		'executor' => 'host', 'scope' => 'run', 'runtime' => array( 'executor_target' => 'test/runtime-overlay' ),
+	) );
 	$GLOBALS['__chat_handler_ability_calls'] = array();
 	$reset_provider();
-	$overlay_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
-		array(
-			'agent'   => 'bundle-brain',
-			'message' => 'Use the runtime tool.',
-			'client_context' => array(
-				'api_token' => 'never-forward-this',
-				'runtime_tool_declarations' => array(
-					'kitchen/lookup' => array(
-						'name'        => 'kitchen/lookup',
-						'source'      => 'kitchen',
-						'description' => 'Runtime kitchen lookup.',
-						'parameters'  => array(
-							'type'       => 'object',
-							'required'   => array( 'query' ),
-							'properties' => array(
-								'query'  => array( 'type' => 'string' ),
-								'token'  => array( 'type' => 'string' ),
-							),
-						),
-						'parameter_bindings' => array( 'token' => 'client_context.api_token' ),
-						'executor'    => 'host',
-						'scope'       => 'run',
-						'runtime'     => array( 'executor_target' => 'test/runtime-overlay' ),
-					),
-				),
-			),
-		)
-	);
-	agents_api_smoke_assert_equals( false, $overlay_output instanceof WP_Error, 'trusted enabled-tool overlay runs successfully', $failures, $passes );
-	agents_api_smoke_assert_equals( 1, count( $overlay_executor->calls ), 'registered runtime executor receives the overlay call', $failures, $passes );
+	$overlay_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute( array(
+		'agent' => 'bundle-brain', 'message' => 'Use the runtime tool.', 'run_id' => 'runtime-run',
+		'client_context' => array( 'runtime_tool_declarations' => array( 'kitchen/lookup' => array( 'runtime' => array( 'executor_target' => 'test/attacker' ) ) ) ),
+	) );
+	agents_api_smoke_assert_equals( false, $overlay_output instanceof WP_Error, 'server overlay runs successfully', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, count( $overlay_executor->calls ), 'frozen registered runtime executor receives the overlay call', $failures, $passes );
 	agents_api_smoke_assert_equals( 0, count( $GLOBALS['__chat_handler_ability_calls'] ), 'overlay target replaces the default ability executor', $failures, $passes );
 	agents_api_smoke_assert_equals( 'risotto', $overlay_executor->calls[0]['parameters']['query'] ?? '', 'overlay executor receives model parameters', $failures, $passes );
-	agents_api_smoke_assert_equals( false, array_key_exists( 'token', $overlay_executor->calls[0]['parameters'] ?? array() ), 'client context is not ambiently exposed to parameter bindings', $failures, $passes );
 	agents_api_smoke_assert_equals( 'string', $overlay_executor->calls[0]['definition']['parameters']['properties']['query']['type'] ?? '', 'overlay executor receives the normalized overlay schema', $failures, $passes );
+	agents_api_smoke_assert_equals( 'runtime-run', $runtime_contexts[0]['context']['run_id'] ?? '', 'server filter receives final run context', $failures, $passes );
+	agents_api_smoke_assert_equals( true, '' !== ( $runtime_contexts[0]['context']['session_id'] ?? '' ), 'server filter receives generated session context', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, count( $executor_registry_contexts ), 'execution uses the registry frozen for the final run context', $failures, $passes );
 
-	$extra_overlay = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
-		array(
-			'agent' => 'bundle-brain', 'message' => 'reject extra',
-			'client_context' => array( 'runtime_tool_declarations' => array(
-				'kitchen/extra' => array( 'name' => 'kitchen/extra', 'source' => 'kitchen', 'description' => 'Extra.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run' ),
-			) ),
-		)
-	);
-	agents_api_smoke_assert_equals( 'agents_chat_invalid_runtime_tool_declaration', $extra_overlay instanceof WP_Error ? $extra_overlay->get_error_code() : '', 'overlay cannot add an undeclared tool', $failures, $passes );
+	foreach ( array(
+		'extra' => array( 'kitchen/extra' => array( 'name' => 'kitchen/extra', 'source' => 'kitchen', 'description' => 'Extra.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run' ) ),
+		'duplicate' => array( 'kitchen/lookup' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'First.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run' ), 'kitchen/lookup-copy' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Second.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run' ) ),
+		'malformed' => array( 'kitchen/lookup' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Malformed.', 'parameters' => 'not-a-schema', 'executor' => 'host', 'scope' => 'run' ) ),
+		'alias' => array( 'kitchen_lookup' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Alias.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run' ) ),
+		'target' => array( 'kitchen/lookup' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Missing target.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run', 'runtime' => array( 'executor_target' => 'test/not-registered' ) ) ),
+	) as $case => $overlays ) {
+		$server_overlays = $overlays;
+		$rejected = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute( array( 'agent' => 'bundle-brain', 'message' => 'reject ' . $case, 'run_id' => 'runtime-run' ) );
+		agents_api_smoke_assert_equals( 'agents_chat_invalid_runtime_tool_declaration', $rejected instanceof WP_Error ? $rejected->get_error_code() : '', $case . ' server overlay is rejected', $failures, $passes );
+	}
 
-	$malformed_overlay = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
-		array(
-			'agent' => 'bundle-brain', 'message' => 'reject malformed',
-			'client_context' => array( 'runtime_tool_declarations' => array(
-				'kitchen/lookup' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Malformed.', 'parameters' => 'not-a-schema', 'executor' => 'host', 'scope' => 'run' ),
-			) ),
-		)
-	);
-	agents_api_smoke_assert_equals( 'agents_chat_invalid_runtime_tool_declaration', $malformed_overlay instanceof WP_Error ? $malformed_overlay->get_error_code() : '', 'malformed overlay is rejected', $failures, $passes );
-
-	$alias_overlay = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
-		array(
-			'agent' => 'bundle-brain', 'message' => 'reject alias',
-			'client_context' => array( 'runtime_tool_declarations' => array(
-				'kitchen_lookup' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Alias.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run' ),
-			) ),
-		)
-	);
-	agents_api_smoke_assert_equals( 'agents_chat_invalid_runtime_tool_declaration', $alias_overlay instanceof WP_Error ? $alias_overlay->get_error_code() : '', 'canonical-id aliases are rejected', $failures, $passes );
-
-	$unregistered_target = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
-		array(
-			'agent' => 'bundle-brain', 'message' => 'reject target',
-			'client_context' => array( 'runtime_tool_declarations' => array(
-				'kitchen/lookup' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Missing target.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run', 'runtime' => array( 'executor_target' => 'test/not-registered' ) ),
-			) ),
-		)
-	);
-	agents_api_smoke_assert_equals( 'agents_chat_invalid_runtime_tool_declaration', $unregistered_target instanceof WP_Error ? $unregistered_target->get_error_code() : '', 'unregistered overlay executor target is rejected', $failures, $passes );
-
+	$server_overlays = array( 'kitchen/lookup' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Overlay.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run', 'runtime' => array( 'executor_target' => 'test/runtime-overlay' ) ) );
 	$overlay_executor->calls = array();
 	$reset_provider();
-	$policy_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
-		array(
-			'agent' => 'bundle-brain', 'message' => 'policy narrows tools', 'allow_only' => array( 'other/tool' ),
-			'client_context' => array( 'runtime_tool_declarations' => array(
-				'kitchen/lookup' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Overlay.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run', 'runtime' => array( 'executor_target' => 'test/runtime-overlay' ) ),
-			) ),
-		)
-	);
+	$policy_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute( array( 'agent' => 'bundle-brain', 'message' => 'policy narrows tools', 'run_id' => 'runtime-run', 'allow_only' => array( 'other/tool' ) ) );
 	agents_api_smoke_assert_equals( false, $policy_output instanceof WP_Error, 'allow_only can narrow an overlay turn', $failures, $passes );
 	agents_api_smoke_assert_equals( 0, count( $overlay_executor->calls ), 'allow_only is enforced before runtime overlay execution', $failures, $passes );
 
+	$registry->register( 'mandatory-brain', array( 'label' => 'Mandatory', 'default_config' => array( 'provider' => 'fake-provider', 'model' => 'fake-model', 'enabled_tools' => array( 'kitchen/lookup' ), 'tool_policy' => array( 'mandatory_tools' => array( 'kitchen/lookup' ) ) ) ) );
 	$overlay_executor->calls = array();
 	$reset_provider();
-	$tool_policy_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
-		array(
-			'agent' => 'bundle-brain', 'message' => 'policy narrows tools', 'tool_policy' => array( 'mode' => 'allow', 'tools' => array( 'other/tool' ) ),
-			'client_context' => array( 'runtime_tool_declarations' => array(
-				'kitchen/lookup' => array( 'name' => 'kitchen/lookup', 'source' => 'kitchen', 'description' => 'Overlay.', 'parameters' => array(), 'executor' => 'host', 'scope' => 'run', 'runtime' => array( 'executor_target' => 'test/runtime-overlay' ) ),
-			) ),
-		)
-	);
-	agents_api_smoke_assert_equals( false, $tool_policy_output instanceof WP_Error, 'tool policy can narrow an overlay turn', $failures, $passes );
-	agents_api_smoke_assert_equals( 0, count( $overlay_executor->calls ), 'tool policy is enforced before runtime overlay execution', $failures, $passes );
+	$mandatory_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute( array( 'agent' => 'mandatory-brain', 'message' => 'mandatory tool', 'run_id' => 'runtime-run', 'allow_only' => array( 'other/tool' ) ) );
+	agents_api_smoke_assert_equals( false, $mandatory_output instanceof WP_Error, 'mandatory tool overlay runs successfully', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, count( $overlay_executor->calls ), 'mandatory tool bypasses allow_only after overlay', $failures, $passes );
 
 	echo "\n[2] Provider/model fall back to the request when the agent config omits them:\n";
 	$registry->register(

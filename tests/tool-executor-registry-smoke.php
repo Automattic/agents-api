@@ -3,8 +3,8 @@
  * Pure-PHP smoke test for per-target tool-executor dispatch.
  *
  * Proves that a tool declaration naming a registered executor target dispatches
- * to that executor, while any tool without a registered target falls back to the
- * caller-provided default executor exactly as before (backward compatibility).
+	 * to that executor, while tools without a target use the caller-provided default
+	 * executor. Explicit but unregistered targets fail closed.
  *
  * Run with: php tests/tool-executor-registry-smoke.php
  *
@@ -144,7 +144,7 @@ agents_api_smoke_assert_equals( 1, count( $default_executor->calls ), 'default e
 agents_api_smoke_assert_equals( 'host/search', $default_executor->calls[0]['tool_name'] ?? '', 'default executor received the untargeted tool', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $target_executor->calls ), 'target executor was not invoked for the untargeted tool', $failures, $passes );
 
-echo "\n[3] Unregistered target id falls back to the default executor:\n";
+echo "\n[3] Unregistered target id fails closed:\n";
 $unmatched_tools = array(
 	'sandbox/orphan' => array(
 		'name'        => 'sandbox/orphan',
@@ -169,9 +169,9 @@ $orphan_result = $core->executeTool(
 	array( 'tool_call_id' => 'call-orphan-1' )
 );
 
-agents_api_smoke_assert_equals( true, $orphan_result['success'] ?? false, 'unregistered-target tool execution succeeds', $failures, $passes );
-agents_api_smoke_assert_equals( 'default', $orphan_result['result']['handled_by'] ?? '', 'unregistered target falls back to default executor', $failures, $passes );
-agents_api_smoke_assert_equals( 2, count( $default_executor->calls ), 'default executor handled the orphan-target tool', $failures, $passes );
+agents_api_smoke_assert_equals( false, $orphan_result['success'] ?? true, 'unregistered-target tool execution fails closed', $failures, $passes );
+agents_api_smoke_assert_equals( 'executor_target_unavailable', $orphan_result['metadata']['error_type'] ?? '', 'unregistered target returns a stable error type', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $default_executor->calls ), 'default executor did not handle the orphan-target tool', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $target_executor->calls ), 'target executor untouched by the orphan-target tool', $failures, $passes );
 
 echo "\n[4] Registry helpers resolve targets generically:\n";
