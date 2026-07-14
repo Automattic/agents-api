@@ -121,6 +121,7 @@ function agents_frontend_chat_rest_input( \WP_REST_Request $request ) {
 
 	$client_context = $request->get_param( 'client_context' );
 	$client_context = is_array( $client_context ) ? \AgentsAPI\AI\agents_api_string_keyed_array( $client_context ) : array();
+	$client_context = agents_chat_strip_runtime_tool_declaration_fields( $client_context );
 	$session_id     = $request->get_param( 'session_id' );
 	$client_name    = \AgentsAPI\AI\agents_api_scalar_to_string( $client_context['client_name'] ?? null );
 	$client_context = array_merge(
@@ -158,6 +159,9 @@ function agents_frontend_chat_rest_input( \WP_REST_Request $request ) {
 		return $cache[ $request ];
 	}
 	$input = \AgentsAPI\AI\agents_api_string_keyed_array( $filtered_input );
+	if ( is_array( $input['client_context'] ?? null ) ) {
+		$input['client_context'] = agents_chat_strip_runtime_tool_declaration_fields( \AgentsAPI\AI\agents_api_string_keyed_array( $input['client_context'] ) );
+	}
 
 	if ( '' === \AgentsAPI\AI\agents_api_scalar_to_string( $input['agent'] ?? null ) || '' === trim( \AgentsAPI\AI\agents_api_scalar_to_string( $input['message'] ?? null ) ) ) {
 		$cache[ $request ] = new \WP_Error(
@@ -182,6 +186,7 @@ function agents_frontend_chat_rest_input( \WP_REST_Request $request ) {
 function agents_frontend_chat_rest_scope( \WP_REST_Request $request ): array {
 	$client_context            = $request->get_param( 'client_context' );
 	$client_context            = is_array( $client_context ) ? \AgentsAPI\AI\agents_api_string_keyed_array( $client_context ) : array();
+	$client_context            = agents_chat_strip_runtime_tool_declaration_fields( $client_context );
 	$scope                     = \AgentsAPI\AI\Auth\agents_access_request_scope(
 		array(
 			'workspace_id' => $request->get_param( 'workspace_id' ),

@@ -165,7 +165,7 @@ $params = array(
 			array( 'type' => 'text', 'text' => 'Hello ' ),
 			array( 'type' => 'text', 'text' => 'world' ),
 			array( 'type' => 'text', 'text' => 'SECRET', 'contentType' => 'context' ),
-			array( 'type' => 'data', 'data' => array( 'clientContext' => array( 'traceId' => 'trace-1' ) ) ),
+			array( 'type' => 'data', 'data' => array( 'clientContext' => array( 'traceId' => 'trace-1', 'runtime_tool_declarations' => array( 'support/action' => array( 'runtime' => array( 'executor_target' => 'attacker' ) ) ) ) ) ),
 			array( 'type' => 'file', 'file' => array( 'name' => 'a.png', 'mimeType' => 'image/png' ) ),
 		),
 	),
@@ -179,7 +179,8 @@ agents_api_smoke_assert_equals( 'Hello world', $input['message'] ?? null, 'input
 agents_api_smoke_assert_equals( 'sess-9', $input['session_id'] ?? null, 'input carries sessionId', $failures, $passes );
 agents_api_smoke_assert_equals( 'rpc-1', $input['run_id'] ?? null, 'input maps JSON-RPC id to run_id', $failures, $passes );
 agents_api_smoke_assert_equals( 'jsonrpc', $input['client_context']['source'] ?? null, 'input marks jsonrpc source', $failures, $passes );
-agents_api_smoke_assert_equals( 'trace-1', $input['client_context']['traceId'] ?? null, 'input preserves camelCase clientContext', $failures, $passes );
+	agents_api_smoke_assert_equals( 'trace-1', $input['client_context']['traceId'] ?? null, 'input preserves camelCase clientContext', $failures, $passes );
+	agents_api_smoke_assert_equals( false, isset( $input['client_context']['runtime_tool_declarations'] ), 'input strips request-supplied runtime tool declarations', $failures, $passes );
 agents_api_smoke_assert_equals( true, $input['token_streaming'] ?? null, 'input maps top-level tokenStreaming to token_streaming', $failures, $passes );
 $input_schema = agents_chat_input_schema();
 $source_enum  = $input_schema['properties']['client_context']['properties']['source']['enum'] ?? array();

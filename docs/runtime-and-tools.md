@@ -214,6 +214,65 @@ Important options:
 
 When mediated tool execution consults `completion_policy`, complete decisions stop the loop and record `completion_policy_stop` in `events[]`. Incomplete decisions with an empty message preserve the existing continue behavior. Incomplete decisions with a non-empty message append a normalized `user` text continuation message, record a `completion_policy_continue` lifecycle event in `events[]`, and emit the same event through `on_event`; the event metadata includes `tool_name`, `turn`, `message`, and caller-owned policy `context`. Agents API does not persist these diagnostics beyond the returned transcript/result surfaces.
 
+### Trusted chat runtime tool overlays
+
+The native `agents/chat` handler accepts runtime-local overlays only through the
+server-side `agents_api_runtime_tool_declarations` filter. Public REST,
+JSON-RPC, and chat request `client_context` fields cannot declare or select
+runtime tools; those transport fields are stripped before dispatch.
+
+Each map key and declaration `name` must be the same canonical id already listed
+in the imported agent's `enabled_tools` allowlist. The declaration is normalized
+by `WP_Agent_Tool_Declaration::normalizeForConversationRequest()`. It can replace
+only the model-facing `description`, `parameters`, and runtime execution metadata
+for that allowlisted tool, including `runtime.executor_target`. It cannot change
+the imported declaration's ability binding, capability, mandatory flag, modes,
+categories, visibility, parameter bindings, defaults, or policy behavior.
+
+The filter runs after agent selection and final session/run context resolution.
+Its exact signature is:
+
+```php
+apply_filters(
+	'agents_api_runtime_tool_declarations',
+	array $declarations,
+	?WP_Agent $agent,
+	array $runtime_context // agent, agent_slug, session_id, run_id
+): array
+```
+
+An explicit `runtime.executor_target` must be registered through
+`agents_api_tool_executors` in that exact `$runtime_context`. The selected
+registry is frozen for execution; an unavailable target fails closed and never
+falls back to the default ability executor. Duplicate canonical ids, aliases,
+malformed entries, undeclared tools, and unregistered targets reject the chat request with
+`agents_chat_invalid_runtime_tool_declaration`.
+
+```php
+add_filter(
+	'agents_api_runtime_tool_declarations',
+	static function ( array $declarations, ?WP_Agent $agent, array $runtime_context ): array {
+		if ( ! $agent instanceof WP_Agent || 'example-agent' !== $runtime_context['agent_slug'] ) {
+			return $declarations;
+		}
+
+		$declarations['example/write_file'] = array(
+			'name'        => 'example/write_file',
+			'source'      => 'example',
+			'description' => 'Write a file in the isolated runtime.',
+			'parameters'  => array( 'type' => 'object', 'properties' => array( 'path' => array( 'type' => 'string' ) ) ),
+			'executor'    => 'host',
+			'scope'       => 'run',
+			'runtime'     => array( 'executor_target' => 'example/isolated-runtime' ),
+		);
+
+		return $declarations;
+	},
+	10,
+	3
+);
+```
+
 ### Minimal caller-managed loop
 
 ```php

@@ -216,6 +216,7 @@ $request = agents_api_smoke_rest_request(
 		'attachments'    => array( array( 'type' => 'image' ) ),
 		'client_context' => array(
 			'client_name'  => 'block-chat',
+			'runtime_tool_declarations' => array( 'support/action' => array( 'runtime' => array( 'executor_target' => 'attacker' ) ) ),
 			'host_context' => array(
 				'opaque_id' => 'selected-material-123',
 				'hints'     => array( 'current-item' ),
@@ -242,7 +243,8 @@ agents_api_smoke_assert_equals( 'Hi there', $captured['message'] ?? null, 'dispa
 agents_api_smoke_assert_equals( 'rest', $captured['client_context']['source'] ?? null, 'dispatch marks REST source', $failures, $passes );
 agents_api_smoke_assert_equals( 'block-chat', $captured['client_context']['client_name'] ?? null, 'dispatch preserves client name', $failures, $passes );
 agents_api_smoke_assert_equals( 'selected-material-123', $captured['client_context']['host_context']['opaque_id'] ?? null, 'dispatch preserves caller-owned context metadata', $failures, $passes );
-agents_api_smoke_assert_equals( array( 'current-item' ), $captured['client_context']['host_context']['hints'] ?? null, 'dispatch preserves nested caller-owned context metadata', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'current-item' ), $captured['client_context']['host_context']['hints'] ?? null, 'dispatch preserves nested caller-owned context metadata', $failures, $passes );
+	agents_api_smoke_assert_equals( false, isset( $captured['client_context']['runtime_tool_declarations'] ), 'dispatch strips request-supplied runtime tool declarations', $failures, $passes );
 $rest_access_scope = AgentsAPI\AI\Channels\agents_frontend_chat_rest_scope( $request );
 agents_api_smoke_assert_equals( 'selected-material-123', $rest_access_scope['client_context']['host_context']['opaque_id'] ?? null, 'access scope receives caller-owned context metadata', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'current-item' ), $rest_access_scope['request_metadata']['client_context']['host_context']['hints'] ?? null, 'access metadata receives nested caller-owned context metadata', $failures, $passes );

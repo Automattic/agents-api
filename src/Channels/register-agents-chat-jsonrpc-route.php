@@ -319,7 +319,7 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	$session_id = \AgentsAPI\AI\agents_api_scalar_to_string( $params['sessionId'] ?? null );
 	$run_id     = \AgentsAPI\AI\agents_api_scalar_to_string( $params['id'] ?? null );
 
-	$client_context = agents_chat_jsonrpc_client_context( $message );
+	$client_context = agents_chat_strip_runtime_tool_declaration_fields( agents_chat_jsonrpc_client_context( $message ) );
 	$client_context = array_merge(
 		$client_context,
 		array(
@@ -354,7 +354,16 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	/** @var mixed $filtered Hosts may return invalid values from this filter. */
 	$filtered = apply_filters( 'agents_chat_jsonrpc_input', $input, $params, $agent );
 
-	return is_array( $filtered ) ? \AgentsAPI\AI\agents_api_string_keyed_array( $filtered ) : $input;
+	if ( ! is_array( $filtered ) ) {
+		return $input;
+	}
+
+	$input = \AgentsAPI\AI\agents_api_string_keyed_array( $filtered );
+	if ( is_array( $input['client_context'] ?? null ) ) {
+		$input['client_context'] = agents_chat_strip_runtime_tool_declaration_fields( \AgentsAPI\AI\agents_api_string_keyed_array( $input['client_context'] ) );
+	}
+
+	return $input;
 }
 
 /**
