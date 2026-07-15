@@ -53,14 +53,14 @@ jobs:
         uses: actions/checkout@v6.0.3
         with:
           repository: Automattic/docs-agent
-          ref: 5344a4bfbda4a0553cc92636258e46a715b1c72d
+          ref: 662ebbfcfe929673fd8b260c685fbc9dc5807842
           path: .docs-agent-producer
 
       - name: Checkout WP Codebox producer schema
         uses: actions/checkout@v6.0.3
         with:
           repository: Automattic/wp-codebox
-          ref: 54c2f9a7bc3cd1fe20055d496c83efcfb99afb41
+          ref: v0.12.20
           path: .wp-codebox-producer
 
       - name: Set up PHP
