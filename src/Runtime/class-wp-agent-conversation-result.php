@@ -30,6 +30,7 @@ class WP_Agent_Conversation_Result {
 	public const OUTCOME_STOP_NATURAL                = WP_Agent_Run_Outcome::STOP_NATURAL;
 	public const OUTCOME_STOP_MAX_TURNS              = WP_Agent_Run_Outcome::STOP_MAX_TURNS;
 	public const OUTCOME_STOP_PROVIDER_ERROR         = WP_Agent_Run_Outcome::STOP_PROVIDER_ERROR;
+	public const TOOL_OBSERVABILITY_VERSION          = 1;
 
 	/**
 	 * Validate and normalize a loop result.
@@ -252,9 +253,139 @@ class WP_Agent_Conversation_Result {
 			throw self::invalid( 'runtime_tool_pending', 'must be an array when present' );
 		}
 
+		$result['tool_observability'] = self::tool_observability( $result['tool_events'], $result['tool_execution_results'] );
 		$result['run_outcome'] = WP_Agent_Run_Outcome::normalize( $result['run_outcome'] ?? null, $result );
 
 		return $result;
+	}
+
+	/**
+	 * Project internal tool lifecycle data to a compact content-redacted contract.
+	 *
+	 * @param array<mixed> $events  Ordered tool lifecycle events.
+	 * @param array<mixed> $results Tool execution results.
+	 * @return array{version:int,calls:array<int,array<string,mixed>>}
+	 */
+	private static function tool_observability( array $events, array $results ): array {
+		$calls       = array();
+		$pending     = array();
+		$result_uses = array();
+
+		foreach ( $events as $event ) {
+			if ( ! is_array( $event ) ) {
+				continue;
+			}
+
+			$type         = $event['type'] ?? '';
+			$tool_call_id = $event['tool_call_id'] ?? '';
+			if ( ! is_string( $type ) || ! is_string( $tool_call_id ) || '' === $tool_call_id ) {
+				continue;
+			}
+
+			if ( 'tool_call' === $type ) {
+				$metadata   = is_array( $event['metadata'] ?? null ) ? $event['metadata'] : array();
+				$parameters = is_array( $metadata['parameters'] ?? null ) ? $metadata['parameters'] : array();
+				$keys       = array_map( 'strval', array_keys( $parameters ) );
+				$calls[]    = array(
+					'sequence'     => count( $calls ) + 1,
+					'turn'         => is_int( $event['turn_count'] ?? null ) ? $event['turn_count'] : 0,
+					'tool_call_id' => $tool_call_id,
+					'tool_name'    => is_string( $event['tool_name'] ?? null ) ? $event['tool_name'] : '',
+					'status'       => 'pending',
+					'arguments'    => array(
+						'keys'     => $keys,
+						'count'    => count( $keys ),
+						'redacted' => true,
+					),
+				);
+				$pending[ $tool_call_id ][] = count( $calls ) - 1;
+				continue;
+			}
+
+			if ( ! in_array( $type, array( 'tool_result', 'pending' ), true ) || empty( $pending[ $tool_call_id ] ) ) {
+				continue;
+			}
+
+			if ( 'pending' === $type ) {
+				continue;
+			}
+			$call_index = (int) array_shift( $pending[ $tool_call_id ] );
+
+			$metadata = is_array( $event['metadata'] ?? null ) ? $event['metadata'] : array();
+			$rejected = true === ( $metadata['rejected'] ?? false );
+			$succeeded = true === ( $metadata['success'] ?? false );
+			$calls[ $call_index ]['status'] = $rejected ? 'rejected' : ( $succeeded ? 'succeeded' : 'failed' );
+
+			$result = self::matching_tool_result( $results, $tool_call_id, $result_uses );
+			if ( is_array( $result ) ) {
+				$execution_result = is_array( $result['result'] ?? null ) ? $result['result'] : array();
+				$canonical_name   = $execution_result['tool_name'] ?? null;
+				if ( is_string( $canonical_name ) && '' !== $canonical_name ) {
+					$calls[ $call_index ]['tool_name'] = $canonical_name;
+				}
+
+				if ( $succeeded && array_key_exists( 'result', $execution_result ) ) {
+					$calls[ $call_index ]['result'] = self::result_shape( $execution_result['result'] );
+				}
+			}
+
+			if ( ! $succeeded ) {
+				$calls[ $call_index ]['error'] = $rejected
+					? array( 'code' => 'agents_api_tool_call_rejected', 'message' => 'Tool call was rejected.' )
+					: array( 'code' => 'agents_api_tool_execution_failed', 'message' => 'Tool execution failed.' );
+			}
+		}
+
+		return array(
+			'version' => self::TOOL_OBSERVABILITY_VERSION,
+			'calls'   => $calls,
+		);
+	}
+
+	/**
+	 * Find the next execution result for a tool-call id.
+	 *
+	 * @param array<mixed>       $results Tool results.
+	 * @param string             $tool_call_id Tool call id.
+	 * @param array<string, int> $uses Per-id result offsets.
+	 * @return array<mixed>|null
+	 */
+	private static function matching_tool_result( array $results, string $tool_call_id, array &$uses ): ?array {
+		$offset = $uses[ $tool_call_id ] ?? 0;
+		$match  = 0;
+		foreach ( $results as $result ) {
+			if ( ! is_array( $result ) || $tool_call_id !== ( $result['tool_call_id'] ?? null ) ) {
+				continue;
+			}
+			if ( $match === $offset ) {
+				$uses[ $tool_call_id ] = $offset + 1;
+				return $result;
+			}
+			++$match;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Describe a result without exposing its content.
+	 *
+	 * @param mixed $value Result value.
+	 * @return array<string,int|string>
+	 */
+	private static function result_shape( $value ): array {
+		if ( is_array( $value ) ) {
+			return array(
+				'type'  => array_is_list( $value ) ? 'array' : 'object',
+				'count' => count( $value ),
+			);
+		}
+
+		if ( is_string( $value ) ) {
+			return array( 'type' => 'string', 'size' => strlen( $value ) );
+		}
+
+		return array( 'type' => strtolower( gettype( $value ) ) );
 	}
 
 	/**

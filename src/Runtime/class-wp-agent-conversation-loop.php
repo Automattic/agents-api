@@ -880,8 +880,9 @@ class WP_Agent_Conversation_Loop {
 				$tool_call_id,
 				$turn,
 				array(
-					'status'  => ! empty( $exec_result['success'] ) ? 'success' : 'error',
-					'success' => (bool) ( $exec_result['success'] ?? false ),
+					'status'   => ! empty( $exec_result['success'] ) ? 'success' : 'error',
+					'success'  => (bool) ( $exec_result['success'] ?? false ),
+					'rejected' => 'reject' === $mediator_decision['action'],
 				)
 			);
 

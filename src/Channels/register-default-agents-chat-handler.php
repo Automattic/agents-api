@@ -566,10 +566,11 @@ class WP_Agent_Default_Chat_Handler {
 	private static function to_canonical_output( string $session_id, array $result ): array {
 		$metadata = array_filter(
 			array(
-				'status'      => is_string( $result['status'] ?? null ) ? $result['status'] : null,
-				'turn_count'  => isset( $result['turn_count'] ) ? self::int_value( $result['turn_count'] ) : null,
-				'usage'       => is_array( $result['usage'] ?? null ) ? $result['usage'] : null,
-				'run_outcome' => is_array( $result['run_outcome'] ?? null ) ? $result['run_outcome'] : null,
+				'status'             => is_string( $result['status'] ?? null ) ? $result['status'] : null,
+				'turn_count'         => isset( $result['turn_count'] ) ? self::int_value( $result['turn_count'] ) : null,
+				'usage'              => is_array( $result['usage'] ?? null ) ? $result['usage'] : null,
+				'run_outcome'        => is_array( $result['run_outcome'] ?? null ) ? $result['run_outcome'] : null,
+				'tool_observability' => is_array( $result['tool_observability'] ?? null ) ? $result['tool_observability'] : null,
 			),
 			static fn( $value ): bool => null !== $value
 		);
