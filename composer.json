@@ -11,6 +11,9 @@
   "require": {
     "php": ">=8.1"
   },
+  "replace": {
+    "automattic/agents-api": "self.version"
+  },
   "autoload": {
     "files": [
       "agents-api.php"
@@ -22,6 +25,8 @@
   "scripts": {
     "phpstan": "phpstan analyse --no-progress --memory-limit=2G",
     "smoke": [
+      "php tests/composer-autoload-smoke.php",
+      "php tests/bootstrap-version-skew-smoke.php",
       "php tests/bootstrap-smoke.php",
       "php tests/message-envelope-smoke.php",
       "php tests/message-coalesce-smoke.php",

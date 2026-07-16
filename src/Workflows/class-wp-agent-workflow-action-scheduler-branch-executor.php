@@ -389,8 +389,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 *
 	 * It replicates ActionScheduler_AsyncRequest_QueueRunner's own dispatch: a POST
 	 * to `admin-ajax.php?action=as_async_request_queue_runner` with the matching
-	 * nonce. On MySQL each warm worker's `stake_claim` uses FOR UPDATE SKIP LOCKED,
-	 * so concurrent workers claim DIFFERENT pending branch actions.
+	 * nonce. Stores that support concurrent writes can claim pending branch actions
+	 * from separate workers. SQLite serializes writes behind its single writer lock,
+	 * so it cannot provide parallel branch execution.
 	 *
 	 * Public so a caller awaiting a suspended run in the foreground can re-nudge the
 	 * pool during its poll (the loopback worker self-chain can lapse behind AS's
