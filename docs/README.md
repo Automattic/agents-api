@@ -22,16 +22,13 @@ Developer-facing documentation for Agents API, a WordPress-shaped substrate for 
 - [Auth, Consent, Context, and Memory](auth-consent-context-memory.md) - bearer-token auth, access grants, execution principals, consent decisions, memory/context registries, and guideline boundaries.
 - [Channels, Workflows, and Operations](channels-workflows-operations.md) - direct channels, canonical chat payloads, bridge queues, workflows, routines, transcripts, approvals, and scheduling.
 
-### Maintenance And Contributor Workflows
-
-- [Docs Agent Workflow](docs-agent-workflow.md) - repository-native technical documentation maintenance workflow, reusable-workflow pin, write boundary, publication branch, verification, and review contract.
-
 ### Focused Design Notes
 
 - [External Clients, Channels, And Bridges](external-clients.md) - external conversation surfaces and bridge/channel integration shapes.
 - [Bridge Authorization And Onboarding](bridge-authorization.md) - connector identity, bridge authorization dimensions, and onboarding boundary.
 - [Remote Bridge Protocol](remote-bridge-protocol.md) - queue-first remote bridge flow, storage, pending items, and acknowledgement semantics.
 - [Default Stores Companion Proposal](default-stores-companion.md) - companion package boundary for guideline-backed memory, markdown memory, and transcript stores.
+- [Docs Agent Workflow](docs-agent-workflow.md) - canonical documentation maintenance workflow, current Docs Agent and WP Codebox producer pins, secret forwarding, reviewer-safe result projection, and verification contract.
 
 ## Documentation Structure
 
@@ -45,14 +42,14 @@ docs/
 +-- runtime-and-tools.md              # Runtime loop and tool mediation contracts
 +-- auth-consent-context-memory.md    # Auth, consent, context, and memory contracts
 +-- channels-workflows-operations.md  # Channels, workflows, routines, transcripts, approvals
-+-- docs-agent-workflow.md            # Repository-native Docs Agent maintenance workflow
 +-- external-clients.md               # Existing external client architecture note
 +-- bridge-authorization.md           # Existing bridge authorization note
 +-- remote-bridge-protocol.md         # Existing remote bridge protocol note
 +-- default-stores-companion.md       # Existing default stores companion proposal
++-- docs-agent-workflow.md            # Documentation maintenance workflow contract
 ```
 
-Agents API has one docs audience: developers integrating with or extending the substrate. Keep new documentation in this topic-oriented `docs/` tree. Maintainers running automated documentation upkeep should follow the [Docs Agent Workflow](docs-agent-workflow.md).
+Agents API has one docs audience: developers integrating with or extending the substrate. Keep new documentation in this topic-oriented `docs/` tree.
 
 ## Source And Test Evidence
 

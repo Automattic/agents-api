@@ -1,83 +1,75 @@
 # Docs Agent Workflow
 
-This guide documents the repository-native Docs Agent workflow in `.github/workflows/docs-agent.yml`. It is intended for maintainers who run or review automated documentation upkeep for Agents API.
+Agents API publishes its canonical documentation updates through the repository-local Docs Agent consumer workflow in `.github/workflows/docs-agent.yml`. This page documents the consumer contract and the pinned native producer chain that `tests/docs-agent-native-workflow-contract.php` verifies.
 
-## Purpose
+## Consumer Workflow Contract
 
-The workflow keeps developer-facing documentation aligned with the public, product-neutral Agents API substrate. Its default prompt tells the agent to "Generate or update Agents API developer documentation from repository source" and to open a documentation pull request only when changes are needed. The maintained scope is developer documentation for contracts, setup, tests, and contributor workflows, grounded in repository source rather than product-specific imports or downstream application behavior.
+The consumer workflow is named **Docs Agent** and dispatches the reusable Docs Agent workflow from Automattic/docs-agent at the exact pinned revision:
 
-## Manual trigger
-
-`docs-agent.yml` is manual-only: it is registered under `workflow_dispatch` and does not run on push or pull request events. Maintainers can optionally pass a `prompt` input when dispatching the workflow. That input is appended to the built-in maintenance task; when it is omitted, the default instruction asks for source-grounded Agents API developer documentation and pull-request publication only when changes are needed.
-
-The workflow also sets a repository-scoped concurrency group, `docs-agent-${{ github.repository }}`, with `cancel-in-progress: false`. This prevents overlapping Docs Agent maintenance runs from racing each other while allowing an already-running documentation pass to finish.
-
-## Reusable workflow pin
-
-The job delegates execution to the reusable Docs Agent producer workflow:
-
-```yaml
-uses: Automattic/docs-agent/.github/workflows/maintain-docs.yml@662ebbfcfe929673fd8b260c685fbc9dc5807842
+```text
+Automattic/docs-agent/.github/workflows/maintain-docs.yml@4c1043510ae71be4750cfde69777efc95ae0001e
 ```
 
-That full commit SHA is the immutable producer pin for this repository. The CI workflow checks out the same `Automattic/docs-agent` revision and runs `php tests/docs-agent-native-workflow-contract.php` to validate that the consumer workflow still points at the expected producer chain. The contract test names the expected Docs Agent revision as `662ebbfcfe929673fd8b260c685fbc9dc5807842` and verifies that the pinned producer preserves the technical maintenance lane, package digest, WP Codebox handoff, writable-path forwarding, verification forwarding, drift-check forwarding, publication behavior, and credential chain.
-
-## Maintenance lane and target branch
-
-The workflow passes these lane settings to the reusable workflow:
+The workflow contract is intentionally narrow:
 
 - `audience: technical`
 - `run_kind: maintenance`
 - `base_ref: main`
 - `docs_branch: docs-agent/agents-api-docs-upkeep`
+- `writable_paths: README.md,docs/**`
+- `verification_commands`: `composer test`, then `php tests/no-product-imports-smoke.php`
+- `drift_checks`: `git diff --check`
 
-Together, these settings mean a run performs technical documentation maintenance against `main` and publishes documentation changes from the stable branch `docs-agent/agents-api-docs-upkeep`. The same branch name is asserted by `tests/docs-agent-native-workflow-contract.php`, so changing it requires updating the source workflow and the contract test together.
+The workflow prompt tells the technical lane to maintain source-grounded developer documentation for the public, product-neutral Agents API substrate. Documentation updates are expected to stay inside `README.md` and `docs/**`.
 
-## Writable documentation boundary
+## Producer Chain
 
-The reusable workflow receives a narrow writable boundary:
+`tests/docs-agent-native-workflow-contract.php` validates the consumer against the native producer chain instead of only checking copied strings in this repository. Run it with:
 
-```yaml
-writable_paths: README.md,docs/**
+```sh
+DOCS_AGENT_DIR=/path/to/docs-agent WP_CODEBOX_DIR=/path/to/wp-codebox php tests/docs-agent-native-workflow-contract.php
 ```
 
-The boundary is intentionally limited to the repository documentation surfaces used by Agents API: the top-level `README.md` and the topic-oriented `docs/` tree. The contract test verifies this exact value. Source files, tests, workflow files, and release metadata are evidence for documentation updates, but they are outside the Docs Agent write boundary for this workflow.
+The required producer checkouts are:
 
-## Verification and drift checks
+- Docs Agent revision `4c1043510ae71be4750cfde69777efc95ae0001e`.
+- WP Codebox ref `v0.12.21`, revision `b5b1fc7eef4367d5e403de3e373df91d3722965b`.
 
-The workflow forwards two verification commands:
+At that Docs Agent revision, the `technical:maintenance` lane maps to the native package:
 
-```json
-[
-  "composer test",
-  "php tests/no-product-imports-smoke.php"
-]
+```text
+bundles/technical-docs-agent/native/technical-docs-maintenance-agent.agent.json
 ```
 
-`composer test` expands to the smoke-test suite declared in `composer.json`, covering the public substrate contracts across registry, packages, runtime, tools, auth, consent, context, memory, channels, workflows, routines, approvals, transcripts, remote bridge behavior, and product-boundary checks. The explicit `php tests/no-product-imports-smoke.php` command re-runs the product-neutral boundary check that prevents repository code from depending on product-specific imports.
+with agent slug `technical-docs-maintenance-agent`, package digest `sha256-bytes-v1:6057aad4eb7c5f0320ccfbce9da93a5fa1d3fc521478b5571ed81c28129325aa`, and `success_requires_pr=false`.
 
-The workflow also forwards one drift check:
+Docs Agent then calls WP Codebox's reusable workflow:
 
-```json
-[
-  "git diff --check"
-]
+```text
+Automattic/wp-codebox/.github/workflows/run-agent-task.yml@v0.12.21
 ```
 
-That check catches whitespace errors in the documentation diff before publication. `tests/docs-agent-native-workflow-contract.php` asserts that the verification command list includes the test chain and that the drift check includes `git diff --check`.
+The contract test verifies that this WP Codebox producer exposes the `wp-codebox/reusable-workflow-interface/v1` schema and preserves the release, external-package, runtime-source, target repository, writable path, verification, drift-check, publication, access-repository, and allowed-repository chain. In that producer path, WP Codebox v0.12.21 is the component that runs the agent task and returns the reviewer-safe result projection used by the reusable workflow publication path.
 
-## Permissions and secrets
+## Secrets And Publication Credentials
 
-The workflow grants `contents: write`, `pull-requests: write`, and `issues: write`. Those permissions support built-in-token documentation publication by the reusable workflow. The consumer workflow forwards `[REDACTED:configured-secret-name]` and `EXTERNAL_PACKAGE_SOURCE_POLICY`; it does not require or forward an `ACCESS_TOKEN`. The contract test checks both the expected permissions and the absence of an `ACCESS_TOKEN` secret in the consumer workflow.
+The consumer workflow forwards exactly these repository secrets to Docs Agent:
 
-## Contributor workflow
+- `[REDACTED:configured-secret-name]`
+- `EXTERNAL_PACKAGE_SOURCE_POLICY`
 
-When you need a documentation maintenance pass:
+`ACCESS_TOKEN` is **not** configured by the Agents API consumer workflow and must not be added there. The native contract test asserts that the consumer does not reference `secrets.ACCESS_TOKEN` or define an `ACCESS_TOKEN:` secret mapping.
 
-1. Open the **Docs Agent** workflow in GitHub Actions and choose **Run workflow**.
-2. Leave the optional prompt empty for the standard maintenance task, or add a focused instruction such as a changed API, module, or workflow that needs source-grounded coverage.
-3. Review the resulting pull request from `docs-agent/agents-api-docs-upkeep` when the run finds changes. If the run reports no changes, no pull request is expected.
-4. Check that any generated documentation stays inside `README.md` or `docs/**`, links into the existing docs index, and cites repository-native source behavior rather than downstream product assumptions.
-5. Expect the workflow verification commands and `git diff --check` drift check to pass before merging.
+The producer chain still uses a publication token: at the pinned Docs Agent revision, Docs Agent forwards `ACCESS_TOKEN: ${{ github.token }}` to WP Codebox along with `[REDACTED:configured-secret-name]` and `EXTERNAL_PACKAGE_SOURCE_POLICY`. The consumer supports that built-in-token publication path by granting workflow permissions for `contents: write`, `pull-requests: write`, and `issues: write`.
 
-For local validation of the workflow contract itself, CI runs `php tests/docs-agent-native-workflow-contract.php` with `DOCS_AGENT_DIR` and `WP_CODEBOX_DIR` pointing at the pinned producer checkouts. Run that test locally only when you have those producer repositories checked out at the revisions named in the test file.
+## Verification
+
+For normal documentation maintenance runs, the configured consumer verification is the same command chain in `.github/workflows/docs-agent.yml`:
+
+```sh
+composer test
+php tests/no-product-imports-smoke.php
+git diff --check
+```
+
+The native producer-chain contract is separate because it needs local checkouts of Automattic/docs-agent and Automattic/wp-codebox at the pinned revisions. Use `tests/docs-agent-native-workflow-contract.php` when changing the Docs Agent pin, WP Codebox pin, reusable workflow inputs, secret forwarding, writable paths, or publication branch.
