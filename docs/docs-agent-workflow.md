@@ -55,12 +55,12 @@ The contract test verifies that this WP Codebox producer exposes the `wp-codebox
 
 The consumer workflow forwards exactly these repository secrets to Docs Agent:
 
-- `[REDACTED:configured-secret-name]`
+- `OPENAI_API_KEY`
 - `EXTERNAL_PACKAGE_SOURCE_POLICY`
 
 `ACCESS_TOKEN` is **not** configured by the Agents API consumer workflow and must not be added there. The native contract test asserts that the consumer does not reference `secrets.ACCESS_TOKEN` or define an `ACCESS_TOKEN:` secret mapping.
 
-The producer chain still uses a publication token: at the pinned Docs Agent revision, Docs Agent forwards `ACCESS_TOKEN: ${{ github.token }}` to WP Codebox along with `[REDACTED:configured-secret-name]` and `EXTERNAL_PACKAGE_SOURCE_POLICY`. The consumer supports that built-in-token publication path by granting workflow permissions for `contents: write`, `pull-requests: write`, and `issues: write`.
+The producer chain still uses a publication token: at the pinned Docs Agent revision, Docs Agent forwards `ACCESS_TOKEN: ${{ github.token }}` to WP Codebox along with `OPENAI_API_KEY` and `EXTERNAL_PACKAGE_SOURCE_POLICY`. The consumer supports that built-in-token publication path by granting workflow permissions for `contents: write`, `pull-requests: write`, and `issues: write`.
 
 ## Verification
 
