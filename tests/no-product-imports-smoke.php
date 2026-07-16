@@ -42,12 +42,6 @@ $forbidden_namespaces = array(
 );
 
 $forbidden_product_vocabulary = array(
-	'Data Machine',
-	'DataMachine',
-	'data machine',
-	'datamachine',
-	'data-machine',
-	'data_machine',
 	'Homeboy',
 	'homeboy',
 	'Acme Runner',
