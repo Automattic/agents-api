@@ -220,6 +220,28 @@ $invalid_principal_result = agents_chat_dispatch( array( 'agent' => 'runtime-loc
 smoke_assert( true, $invalid_principal_result instanceof WP_Error, 'invalid_principal_returns_wp_error', $failures, $passes );
 smoke_assert( 'agents_chat_invalid_principal', $invalid_principal_result->get_error_code(), 'invalid_principal_error_code', $failures, $passes );
 
+// 10. Per-agent handler routing: scoped handlers coexist and pass through.
+// Clear earlier handlers (including the unscoped runtime handler above and the
+// default fallback runtime) so only the scoped handlers below are registered.
+smoke_reset_chat_filters();
+register_chat_handler(
+	static fn( array $i ) => array( 'session_id' => 'sa', 'reply' => 'from-alpha', 'completed' => true ),
+	10,
+	'alpha'
+);
+register_chat_handler(
+	static fn( array $i ) => array( 'session_id' => 'sb', 'reply' => 'from-beta', 'completed' => true ),
+	10,
+	'beta'
+);
+AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::register();
+$alpha = agents_chat_dispatch( array( 'agent' => 'alpha', 'message' => 'hi' ) );
+$beta  = agents_chat_dispatch( array( 'agent' => 'beta', 'message' => 'hi' ) );
+$gamma = agents_chat_dispatch( array( 'agent' => 'gamma', 'message' => 'hi' ) );
+smoke_assert( 'from-alpha', $alpha['reply'] ?? null, 'scoped_handler_claims_its_agent', $failures, $passes );
+smoke_assert( 'from-beta', $beta['reply'] ?? null, 'second_scoped_handler_coexists', $failures, $passes );
+smoke_assert( 'agents_chat_registry_unavailable', $gamma instanceof WP_Error ? $gamma->get_error_code() : '', 'unmatched_agent_reaches_native_fallback', $failures, $passes );
+
 // ─── Done ───────────────────────────────────────────────────────────
 
 if ( $failures ) {

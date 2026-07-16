@@ -623,19 +623,29 @@ function agents_chat_output_schema(): array {
  * Equivalent to `add_filter( 'wp_agent_chat_handler', ... )` but reads more
  * intentionally at the call site.
  *
+ * Pass an `$agent_slug` to scope the handler to a single agent: it then claims
+ * only turns whose `agent` matches and passes every other agent through to later
+ * handlers, so multiple consumer plugins can register runtimes on the same site
+ * without colliding. Without it (the default), the handler claims any turn not
+ * already handled — the original behavior, fine for a single-consumer site.
+ *
  * @since 0.103.0
  *
- * @param callable $handler  Receives the canonical input array, returns the
- *                           canonical output array or WP_Error.
- * @param int      $priority Filter priority. Default 10.
+ * @param callable    $handler    Receives the canonical input array, returns the
+ *                                canonical output array or WP_Error.
+ * @param int         $priority   Filter priority. Default 10.
+ * @param string|null $agent_slug Optional agent slug to scope this handler to. When
+ *                                set, non-matching agents are passed through.
  */
-function register_chat_handler( callable $handler, int $priority = 10 ): void {
+function register_chat_handler( callable $handler, int $priority = 10, ?string $agent_slug = null ): void {
 	add_filter(
 		'wp_agent_chat_handler',
-		static function ( $existing, array $input ) use ( $handler ) {
-			unset( $input );
+		static function ( $existing, array $input ) use ( $handler, $agent_slug ) {
 			if ( null !== $existing ) {
-				return $existing;
+				return $existing; // An earlier handler already claimed this turn.
+			}
+			if ( null !== $agent_slug && ( $input['agent'] ?? null ) !== $agent_slug ) {
+				return $existing; // Scoped handler: not our agent, pass through.
 			}
 			return $handler;
 		},
