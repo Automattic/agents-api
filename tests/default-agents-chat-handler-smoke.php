@@ -3,7 +3,7 @@
  * Pure-PHP smoke test for the default agents/chat runtime handler.
  *
  * Proves that Agents API runs a real agent loop turn natively behind the
- * canonical `agents/chat` ability — no Data Machine, no external runtime — and
+ * canonical `agents/chat` ability — no product-specific or external runtime — and
  * that dispatch is provider-agnostic (driven only by the requested provider +
  * model through the wp-ai-client builder, here stubbed with a deterministic
  * fake provider that emits a tool call then a final assistant message).
