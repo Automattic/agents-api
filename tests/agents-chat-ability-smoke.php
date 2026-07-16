@@ -234,12 +234,13 @@ register_chat_handler(
 	10,
 	'beta'
 );
+AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::register();
 $alpha = agents_chat_dispatch( array( 'agent' => 'alpha', 'message' => 'hi' ) );
 $beta  = agents_chat_dispatch( array( 'agent' => 'beta', 'message' => 'hi' ) );
 $gamma = agents_chat_dispatch( array( 'agent' => 'gamma', 'message' => 'hi' ) );
 smoke_assert( 'from-alpha', $alpha['reply'] ?? null, 'scoped_handler_claims_its_agent', $failures, $passes );
 smoke_assert( 'from-beta', $beta['reply'] ?? null, 'second_scoped_handler_coexists', $failures, $passes );
-smoke_assert( true, $gamma instanceof WP_Error, 'unmatched_agent_passes_through_to_no_handler', $failures, $passes );
+smoke_assert( 'agents_chat_registry_unavailable', $gamma instanceof WP_Error ? $gamma->get_error_code() : '', 'unmatched_agent_reaches_native_fallback', $failures, $passes );
 
 // ─── Done ───────────────────────────────────────────────────────────
 
