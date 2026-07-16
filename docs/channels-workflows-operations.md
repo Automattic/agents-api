@@ -264,6 +264,8 @@ Default step handlers:
 
 The default `parallel` handler uses `wp_agent_workflow_step_executor` as its concurrency seam. When an executor is available, it dispatches branches out of band and returns a `_suspend` directive so the run can resume after reconciliation. Agents API ships an Action Scheduler branch executor that is selected when `as_enqueue_async_action()` exists; it enqueues one async action per branch, raises branch-specific Action Scheduler concurrency while branches are in flight, and triggers loopback runners for faster drain. Without Action Scheduler or a caller-supplied executor, `parallel` falls back to synchronous in-process branch execution.
 
+The Action Scheduler executor requires a store that supports concurrent writes for parallel branch execution. MySQL and MariaDB can provide that concurrency. SQLite uses a single database-wide writer lock, so Action Scheduler claims and branch execution serialize even when multiple workers are requested. SQLite remains correct for async branch completion, but it provides no parallel speedup. Consumers that require parallel execution should use MySQL or MariaDB; Agents API does not detect or warn about the active database engine at runtime.
+
 Consumers extend the runner through the constructor or the `wp_agent_workflow_step_handlers` filter. Product-specific steps such as `branch` or nested `workflow` belong in consumers.
 
 Recorder behavior is conservative: `start()` runs before input validation, per-step `update()` calls follow state changes, and recorder-start failure returns a failed run result without executing steps.

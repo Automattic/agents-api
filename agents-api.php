@@ -25,9 +25,67 @@ if ( defined( '__PHPSTAN_RUNNING__' ) ) {
 	return;
 }
 
-defined( 'ABSPATH' ) || exit;
+// Composer evaluates this file through its `files` autoloader. Loading a
+// project's autoloader before WordPress is bootstrapped must remain harmless.
+if ( ! defined( 'ABSPATH' ) ) {
+	return;
+}
 
 if ( defined( 'AGENTS_API_LOADED' ) ) {
+	// A newer bundled or Composer copy can add symbols after an older copy has
+	// registered the runtime. Load each class or interface only when its symbol is
+	// absent, without repeating registration side effects.
+	$agents_api_load_symbol_file = static function ( string $file ): void {
+		$namespace = '';
+		$tokens    = token_get_all( (string) file_get_contents( $file ) );
+		$count     = count( $tokens );
+
+		for ( $index = 0; $index < $count; ++$index ) {
+			$token = $tokens[ $index ];
+			if ( ! is_array( $token ) ) {
+				continue;
+			}
+
+			if ( T_NAMESPACE === $token[0] ) {
+				$namespace = '';
+				for ( ++$index; $index < $count; ++$index ) {
+					$namespace_token = $tokens[ $index ];
+					if ( ';' === $namespace_token || '{' === $namespace_token ) {
+						break;
+					}
+					if ( is_array( $namespace_token ) ) {
+						$namespace .= $namespace_token[1];
+					}
+				}
+				continue;
+			}
+
+			if ( ! in_array( $token[0], array( T_CLASS, T_INTERFACE, T_TRAIT ), true ) ) {
+				continue;
+			}
+
+			for ( ++$index; $index < $count; ++$index ) {
+				$symbol_token = $tokens[ $index ];
+				if ( is_array( $symbol_token ) && T_STRING === $symbol_token[0] ) {
+					$namespace = trim( $namespace );
+					$symbol    = '' === $namespace ? $symbol_token[1] : $namespace . '\\' . $symbol_token[1];
+					if ( ! class_exists( $symbol, false ) && ! interface_exists( $symbol, false ) && ! trait_exists( $symbol, false ) ) {
+						require_once $file;
+					}
+					return;
+				}
+			}
+		}
+	};
+
+	$agents_api_symbol_files = array_merge(
+		glob( __DIR__ . '/src/*/{class,interface}-*.php', GLOB_BRACE ) ?: array(),
+		array( __DIR__ . '/src/Channels/register-default-agents-chat-handler.php' )
+	);
+	foreach ( $agents_api_symbol_files as $agents_api_symbol_file ) {
+		$agents_api_load_symbol_file( $agents_api_symbol_file );
+	}
+
 	return;
 }
 

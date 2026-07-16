@@ -168,9 +168,10 @@ add_filter( 'action_scheduler_timeout_period', $agents_workflow_branch_reaper_wi
 //        branch and leaves the rest for its peers.
 //
 //    Together (concurrent_batches=N + batch_size=1) they turn N running workers into N
-//    DISTINCT branches instead of one worker draining a batch of them serially. On
-//    MySQL each worker's stake_claim uses FOR UPDATE SKIP LOCKED, so the concurrent
-//    claims pick distinct branches.
+//    DISTINCT branches instead of one worker draining a batch of them serially on
+//    stores that support concurrent writes. SQLite has one database-wide writer,
+//    so it serializes Action Scheduler claims and cannot execute these branches in
+//    parallel.
 //
 //    IN FLIGHT = PENDING + IN-PROGRESS, NOT PENDING ALONE. The gate keys off
 //    {@see WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count()}
