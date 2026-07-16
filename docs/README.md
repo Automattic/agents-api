@@ -28,6 +28,7 @@ Developer-facing documentation for Agents API, a WordPress-shaped substrate for 
 - [Bridge Authorization And Onboarding](bridge-authorization.md) - connector identity, bridge authorization dimensions, and onboarding boundary.
 - [Remote Bridge Protocol](remote-bridge-protocol.md) - queue-first remote bridge flow, storage, pending items, and acknowledgement semantics.
 - [Default Stores Companion Proposal](default-stores-companion.md) - companion package boundary for guideline-backed memory, markdown memory, and transcript stores.
+- [Docs Agent Workflow](docs-agent-workflow.md) - canonical documentation maintenance workflow, current Docs Agent and WP Codebox producer pins, secret forwarding, reviewer-safe result projection, and verification contract.
 
 ## Documentation Structure
 
@@ -45,6 +46,7 @@ docs/
 +-- bridge-authorization.md           # Existing bridge authorization note
 +-- remote-bridge-protocol.md         # Existing remote bridge protocol note
 +-- default-stores-companion.md       # Existing default stores companion proposal
++-- docs-agent-workflow.md            # Documentation maintenance workflow contract
 ```
 
 Agents API has one docs audience: developers integrating with or extending the substrate. Keep new documentation in this topic-oriented `docs/` tree.
