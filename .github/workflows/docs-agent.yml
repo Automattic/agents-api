@@ -20,7 +20,7 @@ concurrency:
 jobs:
   docs-agent:
     name: Maintain Technical Documentation
-    uses: Automattic/docs-agent/.github/workflows/maintain-docs.yml@4c1043510ae71be4750cfde69777efc95ae0001e
+    uses: Automattic/docs-agent/.github/workflows/maintain-docs.yml@37d2c49251bc402852d301d9d5b42a105413f13e
     with:
       audience: technical
       run_kind: maintenance
