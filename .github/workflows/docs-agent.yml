@@ -29,6 +29,7 @@ jobs:
       writable_paths: README.md,docs/**
       verification_commands: |
         [
+          "composer install --no-interaction --prefer-dist --no-progress",
           "composer test",
           "php tests/no-product-imports-smoke.php"
         ]

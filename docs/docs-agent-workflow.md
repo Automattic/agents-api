@@ -17,7 +17,7 @@ The workflow contract is intentionally narrow:
 - `base_ref: main`
 - `docs_branch: docs-agent/agents-api-docs-upkeep`
 - `writable_paths: README.md,docs/**`
-- `verification_commands`: `composer test`, then `php tests/no-product-imports-smoke.php`
+- `verification_commands`: `composer install --no-interaction --prefer-dist --no-progress`, `composer test`, then `php tests/no-product-imports-smoke.php`
 - `drift_checks`: `git diff --check`
 
 The workflow prompt tells the technical lane to maintain source-grounded developer documentation for the public, product-neutral Agents API substrate. Documentation updates are expected to stay inside `README.md` and `docs/**`.
@@ -67,6 +67,7 @@ The producer chain still uses a publication token: at the pinned Docs Agent revi
 For normal documentation maintenance runs, the configured consumer verification is the same command chain in `.github/workflows/docs-agent.yml`:
 
 ```sh
+composer install --no-interaction --prefer-dist --no-progress
 composer test
 php tests/no-product-imports-smoke.php
 git diff --check

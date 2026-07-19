@@ -109,7 +109,7 @@ agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*run_kind:\s*main
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*base_ref:\s*main\s*$~m', 'Consumer target base must be main.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*docs_branch:\s*docs-agent/agents-api-docs-upkeep\s*$~m', 'Consumer publication branch must be stable and exact.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*writable_paths:\s*README\.md,docs/\*\*\s*$~m', 'Consumer writable paths must be README.md,docs/**.', $failures );
-agents_api_docs_agent_contract_match( $consumer_workflow, '~"composer test"\s*,\s*"php tests/no-product-imports-smoke\.php"~s', 'Consumer verification commands must include the test chain.', $failures );
+agents_api_docs_agent_contract_match( $consumer_workflow, '~"composer install --no-interaction --prefer-dist --no-progress"\s*,\s*"composer test"\s*,\s*"php tests/no-product-imports-smoke\.php"~s', 'Consumer verification commands must hydrate dependencies before the test chain.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~"git diff --check"~', 'Consumer drift check must run git diff --check.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*OPENAI_API_KEY:\s*\$\{\{ secrets\.OPENAI_API_KEY \}\}\s*$~m', 'Consumer must forward OPENAI_API_KEY.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*EXTERNAL_PACKAGE_SOURCE_POLICY:\s*\$\{\{ secrets\.EXTERNAL_PACKAGE_SOURCE_POLICY \}\}\s*$~m', 'Consumer must forward EXTERNAL_PACKAGE_SOURCE_POLICY.', $failures );
