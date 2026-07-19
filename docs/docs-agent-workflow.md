@@ -7,7 +7,7 @@ Agents API publishes its canonical documentation updates through the repository-
 The consumer workflow is named **Docs Agent** and dispatches the reusable Docs Agent workflow from Automattic/docs-agent at the exact pinned revision:
 
 ```text
-Automattic/docs-agent/.github/workflows/maintain-docs.yml@4c1043510ae71be4750cfde69777efc95ae0001e
+Automattic/docs-agent/.github/workflows/maintain-docs.yml@06a7e92e0f4d265d09bbdb6dae1ec78fd8e7c825
 ```
 
 The workflow contract is intentionally narrow:
@@ -32,8 +32,8 @@ DOCS_AGENT_DIR=/path/to/docs-agent WP_CODEBOX_DIR=/path/to/wp-codebox php tests/
 
 The required producer checkouts are:
 
-- Docs Agent revision `4c1043510ae71be4750cfde69777efc95ae0001e`.
-- WP Codebox ref `v0.12.21`, revision `b5b1fc7eef4367d5e403de3e373df91d3722965b`.
+- Docs Agent revision `06a7e92e0f4d265d09bbdb6dae1ec78fd8e7c825`.
+- WP Codebox ref `v0.12.29`, revision `bc982947ec33c78160125026e16d357b7ece3ea1`.
 
 At that Docs Agent revision, the `technical:maintenance` lane maps to the native package:
 
@@ -41,15 +41,15 @@ At that Docs Agent revision, the `technical:maintenance` lane maps to the native
 bundles/technical-docs-agent/native/technical-docs-maintenance-agent.agent.json
 ```
 
-with agent slug `technical-docs-maintenance-agent`, package digest `sha256-bytes-v1:6057aad4eb7c5f0320ccfbce9da93a5fa1d3fc521478b5571ed81c28129325aa`, and `success_requires_pr=false`.
+with agent slug `technical-docs-maintenance-agent`, package-source revision `85443eb91c12b2759d8e207f1ae4421407b4cc5e`, package digest `sha256-bytes-v1:78fef9f8d787866c7b48b8f044769d38c0528778c8e2a82af816f9f8ea65014f`, and `lane_requires_pr=false`.
 
 Docs Agent then calls WP Codebox's reusable workflow:
 
 ```text
-Automattic/wp-codebox/.github/workflows/run-agent-task.yml@v0.12.21
+Automattic/wp-codebox/.github/workflows/run-agent-task.yml@v0.12.29
 ```
 
-The contract test verifies that this WP Codebox producer exposes the `wp-codebox/reusable-workflow-interface/v1` schema and preserves the release, external-package, runtime-source, target repository, writable path, verification, drift-check, publication, access-repository, and allowed-repository chain. In that producer path, WP Codebox v0.12.21 is the component that runs the agent task and returns the reviewer-safe result projection used by the reusable workflow publication path.
+The contract test verifies that this WP Codebox producer exposes the `wp-codebox/reusable-workflow-interface/v1` schema and preserves the release, external-package, runtime-source, target repository, writable path, verification, drift-check, publication, access-repository, and allowed-repository chain. In that producer path, WP Codebox v0.12.29 runs the agent task and returns the reviewer-safe result projection used by the reusable workflow publication path. Successful publication verification returns `{ valid: true }` without a failure-only `error`; repository mismatches retain their exact diagnostic.
 
 ## Secrets And Publication Credentials
 
