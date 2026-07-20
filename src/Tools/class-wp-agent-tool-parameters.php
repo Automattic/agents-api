@@ -32,11 +32,11 @@ class WP_Agent_Tool_Parameters {
 	/**
 	 * Merge declared client-context bindings with runtime tool parameters.
 	 *
-	 * Caller-supplied parameters always win. Values from `$context` are only
-	 * pulled in for parameter slots that the tool declaration explicitly opts
-	 * into via `client_context_bindings`. This keeps sensitive parameters
-	 * auditable: a context key can never silently satisfy a required tool
-	 * argument the tool author didn't expect to come from context.
+	 * Caller-supplied parameters win unless a binding declares
+	 * `authoritative => true`. Values from `$context` are only pulled in for
+	 * parameter slots that the tool declaration explicitly opts into. This keeps
+	 * sensitive parameters auditable: a context key can never silently satisfy a
+	 * required tool argument the tool author didn't expect to come from context.
 	 *
 	 * Two declaration shapes are accepted:
 	 *
@@ -45,8 +45,10 @@ class WP_Agent_Tool_Parameters {
 	 *   - Flat list:   `[ 'sender_id', 'connector_id' ]`  — same-name
 	 *     binding, equivalent to `[ 'sender_id' => 'sender_id', ... ]`.
 	 *
-	 * Empty / null context values are ignored so they don't silently
-	 * satisfy a required-parameter check.
+	 * Empty / null ordinary context values are ignored so they don't silently
+	 * satisfy a required-parameter check. Authoritative bindings preserve any
+	 * explicitly present value, including null, and reject caller substitutes
+	 * when their context path is absent.
 	 *
 	 * @param array<mixed> $tool_parameters Runtime tool-call parameters.
 	 * @param array<mixed> $context         Host runtime context for this invocation.
@@ -60,7 +62,12 @@ class WP_Agent_Tool_Parameters {
 			$parameters[ $parameter_name ] = $value;
 		}
 
-		foreach ( self::parameterBindings( $tool_definition ) as $parameter_name => $binding ) {
+		$bindings = self::parameterBindings( $tool_definition );
+		foreach ( $bindings as $parameter_name => $binding ) {
+			if ( ! empty( $binding['authoritative'] ) ) {
+				continue;
+			}
+
 			$resolved = self::resolveBindingValue( $binding, $context );
 			if ( ! $resolved['found'] ) {
 				if ( array_key_exists( 'default', $binding ) ) {
@@ -79,6 +86,21 @@ class WP_Agent_Tool_Parameters {
 			$parameters[ $key ] = $value;
 		}
 
+		foreach ( $bindings as $parameter_name => $binding ) {
+			if ( empty( $binding['authoritative'] ) ) {
+				continue;
+			}
+
+			$resolved = self::resolveBindingValue( $binding, $context );
+			if ( $resolved['found'] ) {
+				$parameters[ $parameter_name ] = $resolved['value'];
+			} elseif ( array_key_exists( 'default', $binding ) ) {
+				$parameters[ $parameter_name ] = $binding['default'];
+			} else {
+				unset( $parameters[ $parameter_name ] );
+			}
+		}
+
 		return $parameters;
 	}
 
@@ -86,7 +108,7 @@ class WP_Agent_Tool_Parameters {
 	 * Normalize explicit parameter bindings, including legacy client-context bindings.
 	 *
 	 * @param array<mixed> $tool_definition Normalized tool declaration.
-	 * @return array<string, array{source: string, path: string, sensitive?: bool, default?: mixed}>
+	 * @return array<string, array{source: string, path: string, sensitive?: bool, default?: mixed, authoritative?: bool}>
 	 */
 	public static function normalizeParameterBindings( array $tool_definition ): array {
 		$normalized = array();
@@ -171,7 +193,7 @@ class WP_Agent_Tool_Parameters {
 	 * Normalize parameter bindings from a declaration that has already been validated.
 	 *
 	 * @param array<mixed> $tool_definition Normalized tool declaration.
-	 * @return array<string, array{source: string, path: string, sensitive?: bool, default?: mixed}>
+	 * @return array<string, array{source: string, path: string, sensitive?: bool, default?: mixed, authoritative?: bool}>
 	 */
 	private static function parameterBindings( array $tool_definition ): array {
 		try {
@@ -201,7 +223,7 @@ class WP_Agent_Tool_Parameters {
 	 * Normalize one parameter binding declaration.
 	 *
 	 * @param mixed $binding Raw binding declaration.
-	 * @return array{source: string, path: string, sensitive?: bool, default?: mixed}
+	 * @return array{source: string, path: string, sensitive?: bool, default?: mixed, authoritative?: bool}
 	 */
 	private static function normalizeParameterBinding( $binding ): array {
 		if ( is_string( $binding ) ) {
@@ -209,6 +231,11 @@ class WP_Agent_Tool_Parameters {
 		}
 
 		if ( ! is_array( $binding ) ) {
+			throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_bindings' );
+		}
+
+		$unknown_fields = array_diff( array_keys( $binding ), array( 'source', 'path', 'sensitive', 'default', 'authoritative' ) );
+		if ( ! empty( $unknown_fields ) ) {
 			throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_bindings' );
 		}
 
@@ -239,7 +266,63 @@ class WP_Agent_Tool_Parameters {
 			$normalized['default'] = $binding['default'];
 		}
 
+		if ( array_key_exists( 'authoritative', $binding ) ) {
+			if ( ! is_bool( $binding['authoritative'] ) ) {
+				throw new \InvalidArgumentException( 'invalid_parameter_bindings: parameter_bindings' );
+			}
+			if ( $binding['authoritative'] ) {
+				$normalized['authoritative'] = true;
+			}
+		}
+
 		return $normalized;
+	}
+
+	/**
+	 * Return the parameter schema that may be exposed to a model.
+	 *
+	 * Authoritative parameters are host-controlled execution inputs, so they are
+	 * removed from both the model-visible properties and required list.
+	 *
+	 * @param array<mixed> $tool_definition Normalized tool declaration.
+	 * @return array<mixed> Model-visible parameter schema.
+	 */
+	public static function modelParameterSchema( array $tool_definition ): array {
+		$schema = isset( $tool_definition['parameters'] ) && is_array( $tool_definition['parameters'] )
+			? $tool_definition['parameters']
+			: array();
+
+		$authoritative = array();
+		foreach ( self::parameterBindings( $tool_definition ) as $parameter_name => $binding ) {
+			if ( ! empty( $binding['authoritative'] ) ) {
+				$authoritative[ $parameter_name ] = true;
+			}
+		}
+
+		if ( empty( $authoritative ) ) {
+			return $schema;
+		}
+
+		if ( isset( $schema['properties'] ) && is_array( $schema['properties'] ) ) {
+			foreach ( $authoritative as $parameter_name => $_ ) {
+				unset( $schema['properties'][ $parameter_name ] );
+			}
+		} else {
+			foreach ( $authoritative as $parameter_name => $_ ) {
+				unset( $schema[ $parameter_name ] );
+			}
+		}
+
+		if ( isset( $schema['required'] ) && is_array( $schema['required'] ) ) {
+			$schema['required'] = array_values(
+				array_filter(
+					$schema['required'],
+					static fn( $parameter_name ): bool => ! is_string( $parameter_name ) || ! isset( $authoritative[ $parameter_name ] )
+				)
+			);
+		}
+
+		return $schema;
 	}
 
 	/**
