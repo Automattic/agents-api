@@ -7,7 +7,7 @@ Agents API publishes its canonical documentation updates through the repository-
 The consumer workflow is named **Docs Agent** and dispatches the reusable Docs Agent workflow from Automattic/docs-agent at the exact pinned revision:
 
 ```text
-Automattic/docs-agent/.github/workflows/maintain-docs.yml@305928a4ab2bddea759cf3d88077215ed687f75f
+Automattic/docs-agent/.github/workflows/maintain-docs.yml@f887e392ad93db11efb997ed3669171e67018403
 ```
 
 The workflow contract is intentionally narrow:
@@ -33,7 +33,7 @@ DOCS_AGENT_DIR=/path/to/docs-agent WP_CODEBOX_DIR=/path/to/wp-codebox php tests/
 
 The required producer checkouts are:
 
-- Docs Agent revision `305928a4ab2bddea759cf3d88077215ed687f75f`.
+- Docs Agent revision `f887e392ad93db11efb997ed3669171e67018403`.
 - WP Codebox reusable-workflow and helper revision `a6fe2d208e990a8d04104aa74aacbb8d1539fbc1`; packaged runtime release `v0.12.29` resolves to `bc982947ec33c78160125026e16d357b7ece3ea1`.
 
 At that Docs Agent revision, the `technical:maintenance` lane maps to the native package:
