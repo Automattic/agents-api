@@ -324,6 +324,9 @@ class WP_Agent_Default_Chat_Handler {
 			}
 
 			$ability     = function_exists( 'wp_get_ability' ) ? wp_get_ability( $name ) : null;
+			if ( ! $ability instanceof \WP_Ability && ! array_key_exists( $name, $overlays ) ) {
+				continue;
+			}
 			$description = '';
 			$parameters  = array();
 			if ( $ability instanceof \WP_Ability ) {

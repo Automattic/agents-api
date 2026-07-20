@@ -460,7 +460,7 @@ namespace {
 				'provider'      => 'fake-provider',
 				'model'         => 'fake-model',
 				'system_prompt' => 'You are the bundle brain.',
-				'enabled_tools' => array( 'kitchen/lookup' ),
+				'enabled_tools' => array( 'kitchen/lookup', 'missing/lookup' ),
 			),
 		)
 	);
@@ -479,6 +479,8 @@ namespace {
 	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__chat_handler_ability_calls'] ), 'enabled_tools wired the toolset so the loop mediated the tool call', $failures, $passes );
 	agents_api_smoke_assert_equals( 'risotto', $GLOBALS['__chat_handler_ability_calls'][0]['query'] ?? '', 'the enabled_tools-declared tool received the model-supplied parameters', $failures, $passes );
 	agents_api_smoke_assert_equals( 2, (int) ( $bundle_output['metadata']['agents_api']['turn_count'] ?? 0 ), 'enabled_tools agent ran the full tool-mediated loop, not a single tool-less turn', $failures, $passes );
+	$bundle_declaration_names = array_map( static fn( $declaration ): string => (string) ( $declaration->name ?? '' ), $GLOBALS['__adapter_smoke']['declarations'] ?? array() );
+	agents_api_smoke_assert_equals( array( 'kitchen/lookup' ), $bundle_declaration_names, 'enabled_tools omits names without an installed ability or trusted runtime overlay', $failures, $passes );
 
 	echo "\n[1c] Server-only runtime overlays freeze a registered execution target:\n";
 	$overlay_executor = new Agents_Chat_Runtime_Overlay_Executor();
