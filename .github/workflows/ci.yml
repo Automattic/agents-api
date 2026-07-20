@@ -53,7 +53,7 @@ jobs:
         uses: actions/checkout@v6.0.3
         with:
           repository: Automattic/docs-agent
-          ref: f887e392ad93db11efb997ed3669171e67018403
+          ref: 7b67d341eea16b75b8e055507d36a8d8e69a1fe3
           path: .docs-agent-producer
 
       - name: Checkout WP Codebox producer schema
