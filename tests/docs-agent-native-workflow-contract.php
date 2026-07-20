@@ -2,8 +2,8 @@
 /**
  * Validate the Docs Agent consumer against its pinned native producer chain.
  *
- * Run with DOCS_AGENT_DIR at Docs Agent #165's merge commit and WP_CODEBOX_DIR
- * at WP Codebox v0.12.29. This test intentionally fails without
+ * Run with DOCS_AGENT_DIR at Docs Agent #167's merge commit and WP_CODEBOX_DIR
+ * at the accepted WP Codebox reusable-workflow producer. This test intentionally fails without
  * both checkouts because it verifies the producer interfaces, not just copies
  * of their expected values in this repository.
  *
@@ -12,9 +12,9 @@
 
 declare( strict_types=1 );
 
-const AGENTS_API_DOCS_AGENT_REVISION = '06a7e92e0f4d265d09bbdb6dae1ec78fd8e7c825';
-const AGENTS_API_WP_CODEBOX_REF      = 'v0.12.29';
-const AGENTS_API_WP_CODEBOX_REVISION = 'bc982947ec33c78160125026e16d357b7ece3ea1';
+const AGENTS_API_DOCS_AGENT_REVISION          = 'a39d9db230eb9e0b72ed84465f4d61bd8dda1bab';
+const AGENTS_API_WP_CODEBOX_RELEASE_REF       = 'v0.12.29';
+const AGENTS_API_WP_CODEBOX_PRODUCER_REVISION = '12a5bb19a97b89d0a78b502fc71adede5b122359';
 
 $root     = dirname( __DIR__ );
 $failures = array();
@@ -66,7 +66,7 @@ if ( $failures ) {
 }
 
 agents_api_docs_agent_contract_revision( $docs_agent_dir, AGENTS_API_DOCS_AGENT_REVISION, 'Docs Agent', $failures );
-agents_api_docs_agent_contract_revision( $wp_codebox_dir, AGENTS_API_WP_CODEBOX_REVISION, 'WP Codebox', $failures );
+agents_api_docs_agent_contract_revision( $wp_codebox_dir, AGENTS_API_WP_CODEBOX_PRODUCER_REVISION, 'WP Codebox', $failures );
 
 $consumer_workflow = (string) file_get_contents( $root . '/.github/workflows/docs-agent.yml' );
 $docs_workflow     = agents_api_docs_agent_contract_read( $docs_agent_dir, '.github/workflows/maintain-docs.yml', $failures );
@@ -103,12 +103,13 @@ if ( is_array( $schema ) ) {
 	}
 }
 
-agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*uses:\s*Automattic/docs-agent/\.github/workflows/maintain-docs\.yml@' . AGENTS_API_DOCS_AGENT_REVISION . '\s*$~m', 'Consumer must pin Docs Agent #165.', $failures );
+agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*uses:\s*Automattic/docs-agent/\.github/workflows/maintain-docs\.yml@' . AGENTS_API_DOCS_AGENT_REVISION . '\s*$~m', 'Consumer must pin Docs Agent #167.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*audience:\s*technical\s*$~m', 'Consumer audience must be technical.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*run_kind:\s*maintenance\s*$~m', 'Consumer run kind must be maintenance.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*base_ref:\s*main\s*$~m', 'Consumer target base must be main.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*docs_branch:\s*docs-agent/agents-api-docs-upkeep\s*$~m', 'Consumer publication branch must be stable and exact.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*writable_paths:\s*README\.md,docs/\*\*\s*$~m', 'Consumer writable paths must be README.md,docs/**.', $failures );
+agents_api_docs_agent_contract_match( $consumer_workflow, '~"id":\s*"workflow-run-awaiter".*?"https://github\.com/Automattic/agents-api/pull/422".*?"src/Workflows/class-wp-agent-workflow-run-awaiter\.php".*?"tests/workflow-run-awaiter-smoke\.php".*?"requires_documentation_change":\s*true~s', 'Consumer must declare the bounded workflow awaiter documentation drift.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~"composer install --no-interaction --prefer-dist --no-progress"\s*,\s*"composer test"\s*,\s*"php tests/no-product-imports-smoke\.php"~s', 'Consumer verification commands must hydrate dependencies before the test chain.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~"git diff --check"~', 'Consumer drift check must run git diff --check.', $failures );
 agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*OPENAI_API_KEY:\s*\$\{\{ secrets\.OPENAI_API_KEY \}\}\s*$~m', 'Consumer must forward OPENAI_API_KEY.', $failures );
@@ -119,9 +120,9 @@ foreach ( array( 'contents: write', 'pull-requests: write', 'issues: write' ) as
 	agents_api_docs_agent_contract_match( $consumer_workflow, '~^\s*' . preg_quote( $permission, '~' ) . '\s*$~m', "Consumer must grant {$permission} for built-in-token publication.", $failures );
 }
 
-agents_api_docs_agent_contract_match( $docs_workflow, '~technical:maintenance\)\s+package_path="bundles/technical-docs-agent/native/technical-docs-maintenance-agent\.agent\.json"\s+agent_slug="technical-docs-maintenance-agent"\s+package_digest="sha256-bytes-v1:78fef9f8d787866c7b48b8f044769d38c0528778c8e2a82af816f9f8ea65014f"\s+lane_requires_pr=false~s', 'Docs Agent #165 technical maintenance lane must map to its exact native package.', $failures );
-agents_api_docs_agent_contract_match( $docs_workflow, '~uses:\s*Automattic/wp-codebox/\.github/workflows/run-agent-task\.yml@' . preg_quote( AGENTS_API_WP_CODEBOX_REF, '~' ) . '~', 'Docs Agent must pin WP Codebox v0.12.29.', $failures );
-agents_api_docs_agent_contract_match( $docs_workflow, '~wp_codebox_release_ref:\s*' . preg_quote( AGENTS_API_WP_CODEBOX_REF, '~' ) . '.*?external_package_source:\s*\$\{\{ needs\.prepare\.outputs\.external_package_source \}\}.*?runtime_sources:\s*\$\{\{ needs\.prepare\.outputs\.runtime_sources \}\}.*?target_repo:\s*\$\{\{ github\.repository \}\}.*?writable_paths:\s*\$\{\{ inputs\.writable_paths \}\}.*?verification_commands:\s*\$\{\{ needs\.prepare\.outputs\.verification_commands \}\}.*?drift_checks:\s*\$\{\{ needs\.prepare\.outputs\.drift_checks \}\}.*?success_requires_pr:\s*\$\{\{ needs\.prepare\.outputs\.success_requires_pr == \'true\' \}\}.*?access_token_repos:\s*\$\{\{ github\.repository \}\}.*?allowed_repos:\s*\'\["\$\{\{ github\.repository \}\}"\]\'~s', 'Docs Agent must preserve the WP Codebox release, external-package, runtime-source, target, writable, verification, publication, and access chain.', $failures );
+agents_api_docs_agent_contract_match( $docs_workflow, '~technical:maintenance\)\s+package_path="bundles/technical-docs-agent/native/technical-docs-maintenance-agent\.agent\.json"\s+agent_slug="technical-docs-maintenance-agent"\s+package_digest="sha256-bytes-v1:975c7b0a0a7aff52897c52be5ac903a7fb110ea3c33e16227f8694c74c932519"\s+lane_requires_pr=false~s', 'Docs Agent #167 technical maintenance lane must map to its exact native package.', $failures );
+agents_api_docs_agent_contract_match( $docs_workflow, '~uses:\s*Automattic/wp-codebox/\.github/workflows/run-agent-task\.yml@' . AGENTS_API_WP_CODEBOX_PRODUCER_REVISION . '~', 'Docs Agent must pin the accepted WP Codebox producer.', $failures );
+agents_api_docs_agent_contract_match( $docs_workflow, '~wp_codebox_release_ref:\s*' . preg_quote( AGENTS_API_WP_CODEBOX_RELEASE_REF, '~' ) . '.*?external_package_source:\s*\$\{\{ needs\.prepare\.outputs\.external_package_source \}\}.*?runtime_sources:\s*\$\{\{ needs\.prepare\.outputs\.runtime_sources \}\}.*?target_repo:\s*\$\{\{ github\.repository \}\}.*?writable_paths:\s*\$\{\{ inputs\.writable_paths \}\}.*?verification_commands:\s*\$\{\{ needs\.prepare\.outputs\.verification_commands \}\}.*?drift_checks:\s*\$\{\{ needs\.prepare\.outputs\.drift_checks \}\}.*?success_requires_pr:\s*\$\{\{ needs\.prepare\.outputs\.success_requires_pr == \'true\' \}\}.*?access_token_repos:\s*\$\{\{ needs\.prepare\.outputs\.access_token_repos \}\}.*?allowed_repos:\s*\$\{\{ needs\.prepare\.outputs\.allowed_repos \}\}~s', 'Docs Agent must preserve the WP Codebox release, external-package, runtime-source, target, writable, verification, publication, and access chain.', $failures );
 agents_api_docs_agent_contract_match( $docs_workflow, '~OPENAI_API_KEY:\s*\$\{\{ secrets\.OPENAI_API_KEY \}\}\s+ACCESS_TOKEN:\s*\$\{\{ github\.token \}\}\s+EXTERNAL_PACKAGE_SOURCE_POLICY:\s*\$\{\{ secrets\.EXTERNAL_PACKAGE_SOURCE_POLICY \}\}~s', 'Docs Agent must forward caller credentials and its built-in publication token.', $failures );
 
 if ( $failures ) {
