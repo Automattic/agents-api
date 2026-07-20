@@ -12,9 +12,9 @@
 
 declare( strict_types=1 );
 
-const AGENTS_API_DOCS_AGENT_REVISION          = 'a39d9db230eb9e0b72ed84465f4d61bd8dda1bab';
+const AGENTS_API_DOCS_AGENT_REVISION          = 'd1bf324154b4604099ae3209f64519386caf1f48';
 const AGENTS_API_WP_CODEBOX_RELEASE_REF       = 'v0.12.29';
-const AGENTS_API_WP_CODEBOX_PRODUCER_REVISION = '12a5bb19a97b89d0a78b502fc71adede5b122359';
+const AGENTS_API_WP_CODEBOX_PRODUCER_REVISION = '0227ca7551d8cd98f14242b31e142b50f78dff13';
 
 $root     = dirname( __DIR__ );
 $failures = array();

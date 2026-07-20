@@ -7,7 +7,7 @@ Agents API publishes its canonical documentation updates through the repository-
 The consumer workflow is named **Docs Agent** and dispatches the reusable Docs Agent workflow from Automattic/docs-agent at the exact pinned revision:
 
 ```text
-Automattic/docs-agent/.github/workflows/maintain-docs.yml@a39d9db230eb9e0b72ed84465f4d61bd8dda1bab
+Automattic/docs-agent/.github/workflows/maintain-docs.yml@d1bf324154b4604099ae3209f64519386caf1f48
 ```
 
 The workflow contract is intentionally narrow:
@@ -33,8 +33,8 @@ DOCS_AGENT_DIR=/path/to/docs-agent WP_CODEBOX_DIR=/path/to/wp-codebox php tests/
 
 The required producer checkouts are:
 
-- Docs Agent revision `a39d9db230eb9e0b72ed84465f4d61bd8dda1bab`.
-- WP Codebox reusable-workflow producer revision `12a5bb19a97b89d0a78b502fc71adede5b122359`; packaged runtime release `v0.12.29` resolves to `bc982947ec33c78160125026e16d357b7ece3ea1`.
+- Docs Agent revision `d1bf324154b4604099ae3209f64519386caf1f48`.
+- WP Codebox reusable-workflow producer revision `0227ca7551d8cd98f14242b31e142b50f78dff13`; packaged runtime release `v0.12.29` resolves to `bc982947ec33c78160125026e16d357b7ece3ea1`.
 
 At that Docs Agent revision, the `technical:maintenance` lane maps to the native package:
 
@@ -42,12 +42,12 @@ At that Docs Agent revision, the `technical:maintenance` lane maps to the native
 bundles/technical-docs-agent/native/technical-docs-maintenance-agent.agent.json
 ```
 
-with agent slug `technical-docs-maintenance-agent`, package-source revision `85f0d162a7d499fdc1286891371342727d084c88`, package digest `sha256-bytes-v1:975c7b0a0a7aff52897c52be5ac903a7fb110ea3c33e16227f8694c74c932519`, and `lane_requires_pr=false`.
+with agent slug `technical-docs-maintenance-agent`, package-source revision `a39d9db230eb9e0b72ed84465f4d61bd8dda1bab`, package digest `sha256-bytes-v1:975c7b0a0a7aff52897c52be5ac903a7fb110ea3c33e16227f8694c74c932519`, and `lane_requires_pr=false`.
 
 Docs Agent then calls WP Codebox's reusable workflow:
 
 ```text
-Automattic/wp-codebox/.github/workflows/run-agent-task.yml@12a5bb19a97b89d0a78b502fc71adede5b122359
+Automattic/wp-codebox/.github/workflows/run-agent-task.yml@0227ca7551d8cd98f14242b31e142b50f78dff13
 ```
 
 The contract test verifies that this WP Codebox producer exposes the `wp-codebox/reusable-workflow-interface/v1` schema and preserves the release, external-package, runtime-source, target repository, writable path, verification, drift-check, publication, access-repository, and allowed-repository chain. The completion contract requires one evidence-backed report item for the `workflow-run-awaiter` source delta and rejects a no-change disposition until that known drift is documented. WP Codebox returns the reviewer-safe result projection and stages the validated completion report as a declared command artifact.
