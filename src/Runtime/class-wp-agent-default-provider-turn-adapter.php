@@ -1157,7 +1157,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			}
 
 			$description = is_string( $tool['description'] ?? null ) ? $tool['description'] : '';
-			$parameters  = Tools\WP_Agent_Tool_Parameters::modelParameterSchema( $tool );
+			$parameters  = is_array( $tool['parameters'] ?? null ) ? $tool['parameters'] : array();
 
 			$declarations[] = new \WordPress\AiClient\Tools\DTO\FunctionDeclaration(
 				$tool_name,

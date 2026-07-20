@@ -8,6 +8,7 @@
 namespace AgentsAPI\AI;
 
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration;
+use AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -159,6 +160,8 @@ class WP_Agent_Provider_Turn_Request {
 			if ( '' === $name ) {
 				throw self::invalid( 'tool_declarations.' . (string) $key . '.name', 'must be a non-empty string' );
 			}
+
+			$tool['parameters'] = WP_Agent_Tool_Parameters::modelParameterSchema( $tool );
 
 			$normalized[ $name ] = $tool;
 		}

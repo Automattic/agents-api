@@ -48,7 +48,9 @@ class WP_Agent_Tool_Parameters {
 	 * Empty / null ordinary context values are ignored so they don't silently
 	 * satisfy a required-parameter check. Authoritative bindings preserve any
 	 * explicitly present value, including null, and reject caller substitutes
-	 * when their context path is absent.
+	 * when their context path is absent. Their precedence is resolved context,
+	 * then binding-local default, then top-level parameter default; caller input
+	 * never participates in that chain.
 	 *
 	 * @param array<mixed> $tool_parameters Runtime tool-call parameters.
 	 * @param array<mixed> $context         Host runtime context for this invocation.
@@ -56,9 +58,10 @@ class WP_Agent_Tool_Parameters {
 	 * @return array<mixed> Complete parameters for execution.
 	 */
 	public static function buildParameters( array $tool_parameters, array $context = array(), array $tool_definition = array() ): array {
+		$defaults   = self::parameterDefaults( $tool_definition );
 		$parameters = array();
 
-		foreach ( self::parameterDefaults( $tool_definition ) as $parameter_name => $value ) {
+		foreach ( $defaults as $parameter_name => $value ) {
 			$parameters[ $parameter_name ] = $value;
 		}
 
@@ -96,6 +99,8 @@ class WP_Agent_Tool_Parameters {
 				$parameters[ $parameter_name ] = $resolved['value'];
 			} elseif ( array_key_exists( 'default', $binding ) ) {
 				$parameters[ $parameter_name ] = $binding['default'];
+			} elseif ( array_key_exists( $parameter_name, $defaults ) ) {
+				$parameters[ $parameter_name ] = $defaults[ $parameter_name ];
 			} else {
 				unset( $parameters[ $parameter_name ] );
 			}
@@ -282,7 +287,8 @@ class WP_Agent_Tool_Parameters {
 	 * Return the parameter schema that may be exposed to a model.
 	 *
 	 * Authoritative parameters are host-controlled execution inputs, so they are
-	 * removed from both the model-visible properties and required list.
+	 * removed from model-visible properties and required lists, including schema
+	 * branches composed through `allOf`, `anyOf`, or `oneOf`.
 	 *
 	 * @param array<mixed> $tool_definition Normalized tool declaration.
 	 * @return array<mixed> Model-visible parameter schema.
@@ -303,13 +309,26 @@ class WP_Agent_Tool_Parameters {
 			return $schema;
 		}
 
+		return self::removeAuthoritativeParametersFromSchema( $schema, $authoritative );
+	}
+
+	/**
+	 * Remove authoritative inputs from one schema node and its composition branches.
+	 *
+	 * @param array<mixed>       $schema        Parameter schema node.
+	 * @param array<string,bool> $authoritative Authoritative parameter names.
+	 * @return array<mixed> Sanitized schema node.
+	 */
+	private static function removeAuthoritativeParametersFromSchema( array $schema, array $authoritative ): array {
 		if ( isset( $schema['properties'] ) && is_array( $schema['properties'] ) ) {
 			foreach ( $authoritative as $parameter_name => $_ ) {
 				unset( $schema['properties'][ $parameter_name ] );
 			}
 		} else {
 			foreach ( $authoritative as $parameter_name => $_ ) {
-				unset( $schema[ $parameter_name ] );
+				if ( isset( $schema[ $parameter_name ] ) && is_array( $schema[ $parameter_name ] ) ) {
+					unset( $schema[ $parameter_name ] );
+				}
 			}
 		}
 
@@ -320,6 +339,18 @@ class WP_Agent_Tool_Parameters {
 					static fn( $parameter_name ): bool => ! is_string( $parameter_name ) || ! isset( $authoritative[ $parameter_name ] )
 				)
 			);
+		}
+
+		foreach ( array( 'allOf', 'anyOf', 'oneOf' ) as $composition ) {
+			if ( ! isset( $schema[ $composition ] ) || ! is_array( $schema[ $composition ] ) ) {
+				continue;
+			}
+
+			foreach ( $schema[ $composition ] as $index => $branch ) {
+				if ( is_array( $branch ) ) {
+					$schema[ $composition ][ $index ] = self::removeAuthoritativeParametersFromSchema( $branch, $authoritative );
+				}
+			}
 		}
 
 		return $schema;
