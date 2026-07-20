@@ -12,9 +12,9 @@
 
 declare( strict_types=1 );
 
-const AGENTS_API_DOCS_AGENT_REVISION          = 'd1bf324154b4604099ae3209f64519386caf1f48';
+const AGENTS_API_DOCS_AGENT_REVISION          = '305928a4ab2bddea759cf3d88077215ed687f75f';
 const AGENTS_API_WP_CODEBOX_RELEASE_REF       = 'v0.12.29';
-const AGENTS_API_WP_CODEBOX_PRODUCER_REVISION = '0227ca7551d8cd98f14242b31e142b50f78dff13';
+const AGENTS_API_WP_CODEBOX_PRODUCER_REVISION = 'a6fe2d208e990a8d04104aa74aacbb8d1539fbc1';
 
 $root     = dirname( __DIR__ );
 $failures = array();
@@ -122,6 +122,7 @@ foreach ( array( 'contents: write', 'pull-requests: write', 'issues: write' ) as
 
 agents_api_docs_agent_contract_match( $docs_workflow, '~technical:maintenance\)\s+package_path="bundles/technical-docs-agent/native/technical-docs-maintenance-agent\.agent\.json"\s+agent_slug="technical-docs-maintenance-agent"\s+package_digest="sha256-bytes-v1:975c7b0a0a7aff52897c52be5ac903a7fb110ea3c33e16227f8694c74c932519"\s+lane_requires_pr=false~s', 'Docs Agent #167 technical maintenance lane must map to its exact native package.', $failures );
 agents_api_docs_agent_contract_match( $docs_workflow, '~uses:\s*Automattic/wp-codebox/\.github/workflows/run-agent-task\.yml@' . AGENTS_API_WP_CODEBOX_PRODUCER_REVISION . '~', 'Docs Agent must pin the accepted WP Codebox producer.', $failures );
+agents_api_docs_agent_contract_match( $docs_workflow, '~wp_codebox_workflow_ref:\s*' . AGENTS_API_WP_CODEBOX_PRODUCER_REVISION . '~', 'Docs Agent must execute helpers from the accepted WP Codebox producer.', $failures );
 agents_api_docs_agent_contract_match( $docs_workflow, '~wp_codebox_release_ref:\s*' . preg_quote( AGENTS_API_WP_CODEBOX_RELEASE_REF, '~' ) . '.*?external_package_source:\s*\$\{\{ needs\.prepare\.outputs\.external_package_source \}\}.*?runtime_sources:\s*\$\{\{ needs\.prepare\.outputs\.runtime_sources \}\}.*?target_repo:\s*\$\{\{ github\.repository \}\}.*?writable_paths:\s*\$\{\{ inputs\.writable_paths \}\}.*?verification_commands:\s*\$\{\{ needs\.prepare\.outputs\.verification_commands \}\}.*?drift_checks:\s*\$\{\{ needs\.prepare\.outputs\.drift_checks \}\}.*?success_requires_pr:\s*\$\{\{ needs\.prepare\.outputs\.success_requires_pr == \'true\' \}\}.*?access_token_repos:\s*\$\{\{ needs\.prepare\.outputs\.access_token_repos \}\}.*?allowed_repos:\s*\$\{\{ needs\.prepare\.outputs\.allowed_repos \}\}~s', 'Docs Agent must preserve the WP Codebox release, external-package, runtime-source, target, writable, verification, publication, and access chain.', $failures );
 agents_api_docs_agent_contract_match( $docs_workflow, '~OPENAI_API_KEY:\s*\$\{\{ secrets\.OPENAI_API_KEY \}\}\s+ACCESS_TOKEN:\s*\$\{\{ github\.token \}\}\s+EXTERNAL_PACKAGE_SOURCE_POLICY:\s*\$\{\{ secrets\.EXTERNAL_PACKAGE_SOURCE_POLICY \}\}~s', 'Docs Agent must forward caller credentials and its built-in publication token.', $failures );
 

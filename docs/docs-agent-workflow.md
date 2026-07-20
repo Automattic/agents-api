@@ -7,7 +7,7 @@ Agents API publishes its canonical documentation updates through the repository-
 The consumer workflow is named **Docs Agent** and dispatches the reusable Docs Agent workflow from Automattic/docs-agent at the exact pinned revision:
 
 ```text
-Automattic/docs-agent/.github/workflows/maintain-docs.yml@d1bf324154b4604099ae3209f64519386caf1f48
+Automattic/docs-agent/.github/workflows/maintain-docs.yml@305928a4ab2bddea759cf3d88077215ed687f75f
 ```
 
 The workflow contract is intentionally narrow:
@@ -33,8 +33,8 @@ DOCS_AGENT_DIR=/path/to/docs-agent WP_CODEBOX_DIR=/path/to/wp-codebox php tests/
 
 The required producer checkouts are:
 
-- Docs Agent revision `d1bf324154b4604099ae3209f64519386caf1f48`.
-- WP Codebox reusable-workflow producer revision `0227ca7551d8cd98f14242b31e142b50f78dff13`; packaged runtime release `v0.12.29` resolves to `bc982947ec33c78160125026e16d357b7ece3ea1`.
+- Docs Agent revision `305928a4ab2bddea759cf3d88077215ed687f75f`.
+- WP Codebox reusable-workflow and helper revision `a6fe2d208e990a8d04104aa74aacbb8d1539fbc1`; packaged runtime release `v0.12.29` resolves to `bc982947ec33c78160125026e16d357b7ece3ea1`.
 
 At that Docs Agent revision, the `technical:maintenance` lane maps to the native package:
 
@@ -47,7 +47,7 @@ with agent slug `technical-docs-maintenance-agent`, package-source revision `a39
 Docs Agent then calls WP Codebox's reusable workflow:
 
 ```text
-Automattic/wp-codebox/.github/workflows/run-agent-task.yml@0227ca7551d8cd98f14242b31e142b50f78dff13
+Automattic/wp-codebox/.github/workflows/run-agent-task.yml@a6fe2d208e990a8d04104aa74aacbb8d1539fbc1
 ```
 
 The contract test verifies that this WP Codebox producer exposes the `wp-codebox/reusable-workflow-interface/v1` schema and preserves the release, external-package, runtime-source, target repository, writable path, verification, drift-check, publication, access-repository, and allowed-repository chain. The completion contract requires one evidence-backed report item for the `workflow-run-awaiter` source delta and rejects a no-change disposition until that known drift is documented. WP Codebox returns the reviewer-safe result projection and stages the validated completion report as a declared command artifact.
