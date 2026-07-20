@@ -28,7 +28,21 @@ $tools = array(
 			'type'       => 'object',
 			'required'   => array( 'query' ),
 			'properties' => array(
-				'query' => array( 'type' => 'string' ),
+				'query'    => array( 'type' => 'string' ),
+				'scope_id' => array( 'type' => 'integer' ),
+			),
+			'allOf'      => array(
+				array(
+					'properties' => array( 'scope_id' => array( 'type' => 'integer' ) ),
+					'required'   => array( 'scope_id' ),
+				),
+			),
+		),
+		'parameter_bindings' => array(
+			'scope_id' => array(
+				'source'        => 'caller_context',
+				'path'          => 'scope.id',
+				'authoritative' => true,
 			),
 		),
 		'executor'    => 'client',
@@ -67,6 +81,10 @@ $request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
 
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Message::SCHEMA, $request->messages()[0]['schema'], 'provider request messages normalize to canonical envelopes', $failures, $passes );
 agents_api_smoke_assert_equals( 'client/lookup', array_key_first( $request->toolDeclarations() ), 'provider request carries keyed tool declarations', $failures, $passes );
+$provider_tool_schema = $request->toolDeclarations()['client/lookup']['parameters'] ?? array();
+agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $provider_tool_schema['properties'] ?? array() ), 'provider request boundary removes authoritative model properties', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $provider_tool_schema['allOf'][0]['properties'] ?? array() ), 'provider request boundary sanitizes composed model schemas', $failures, $passes );
+agents_api_smoke_assert_equals( array(), $provider_tool_schema['allOf'][0]['required'] ?? null, 'provider request boundary removes composed authoritative requirements', $failures, $passes );
 agents_api_smoke_assert_equals( 'fake-provider', $request->model()['provider_id'], 'provider request carries provider metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'fake-runtime', $request->runtime()['runtime_id'], 'provider request carries runtime metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'run-123', $request->runId(), 'provider request carries run id', $failures, $passes );
@@ -247,6 +265,9 @@ agents_api_smoke_assert_equals( 'fake-provider', $adapter->requests[0]['model'][
 agents_api_smoke_assert_equals( 'smoke', $adapter->requests[0]['runtime']['request_kind'], 'provider adapter receives runtime metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'run-loop-1', $adapter->requests[0]['run_id'], 'provider adapter receives run id', $failures, $passes );
 agents_api_smoke_assert_equals( 'session-loop-1', $adapter->requests[0]['session_id'], 'provider adapter receives session id', $failures, $passes );
+$custom_adapter_schema = $adapter->requests[0]['tool_declarations']['client/lookup']['parameters'] ?? array();
+agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $custom_adapter_schema['properties'] ?? array() ), 'custom provider adapters receive sanitized model properties', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $custom_adapter_schema['allOf'][0]['properties'] ?? array() ), 'custom provider adapters receive sanitized composed schemas', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'loop mediated adapter tool call through executor', $failures, $passes );
 agents_api_smoke_assert_equals( 'call-provider-1', $executor->executed[0]['id'] ?? '', 'loop preserved provider tool call id', $failures, $passes );
 agents_api_smoke_assert_equals( 'Final answer from fake adapter.', $result['final_content'], 'loop surfaces adapter final assistant content', $failures, $passes );

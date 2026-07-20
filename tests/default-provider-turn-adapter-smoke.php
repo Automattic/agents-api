@@ -363,8 +363,18 @@ namespace {
 				'description' => 'Look up one value.',
 				'parameters'  => array(
 					'type'       => 'object',
-					'required'   => array( 'query' ),
-					'properties' => array( 'query' => array( 'type' => 'string' ) ),
+					'required'   => array( 'query', 'scope_id' ),
+					'properties' => array(
+						'query'    => array( 'type' => 'string' ),
+						'scope_id' => array( 'type' => 'integer' ),
+					),
+				),
+				'parameter_bindings' => array(
+					'scope_id' => array(
+						'source'        => 'caller_context',
+						'path'          => 'scope.id',
+						'authoritative' => true,
+					),
 				),
 				'executor'    => 'client',
 				'scope'       => 'run',
@@ -390,6 +400,9 @@ namespace {
 	agents_api_smoke_assert_equals( 2, count( $GLOBALS['__adapter_smoke']['history'] ?? array() ), 'run_turn sends earlier turns as history', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__adapter_smoke']['declarations'] ?? array() ), 'run_turn maps tool declarations to function declarations', $failures, $passes );
 	agents_api_smoke_assert_equals( 'client/lookup', $GLOBALS['__adapter_smoke']['declarations'][0]->name ?? '', 'function declaration carries the logical tool name', $failures, $passes );
+	$model_parameters = $GLOBALS['__adapter_smoke']['declarations'][0]->parameters ?? array();
+	agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $model_parameters['properties'] ?? array() ), 'function declaration excludes authoritative parameters from model input', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'query' ), $model_parameters['required'] ?? array(), 'function declaration excludes authoritative parameters from model requirements', $failures, $passes );
 	agents_api_smoke_assert_equals( 600.0, $GLOBALS['__adapter_smoke']['request_timeout'] ?? null, 'run_turn applies the raised 600s agentic per-request timeout to the builder by default', $failures, $passes );
 
 	echo "\n[1b] request timeout is configurable and honors a caller-supplied override + filter:\n";

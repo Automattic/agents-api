@@ -283,6 +283,173 @@ $default_explicit = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters
 );
 agents_api_smoke_assert_equals( 'explicit', $default_explicit['query'] ?? null, 'explicit runtime parameters override bindings and defaults', $failures, $passes );
 
+$authoritative_definition = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForServer(
+	array(
+		'name'               => 'ability/inspect_scope',
+		'source'             => 'abilities',
+		'description'        => 'Inspect a host-controlled scope.',
+		'parameters'         => array(
+			'type'       => 'object',
+			'required'   => array( 'scope_id', 'query' ),
+			'properties' => array(
+				'scope_id' => array( 'type' => 'integer' ),
+				'query'    => array( 'type' => 'string' ),
+			),
+		),
+		'parameter_bindings' => array(
+			'scope_id' => array(
+				'source'        => 'caller_context',
+				'path'          => 'scope.id',
+				'authoritative' => true,
+			),
+			'query'    => array(
+				'source' => 'client_context',
+				'path'   => 'query',
+			),
+		),
+	)
+);
+$authoritative_parameters = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array( 'scope_id' => 999, 'query' => 'caller query' ),
+	array(
+		'caller_context' => array( 'scope' => array( 'id' => 7 ) ),
+		'client_context' => array( 'query' => 'context query' ),
+	),
+	$authoritative_definition
+);
+agents_api_smoke_assert_equals( 7, $authoritative_parameters['scope_id'] ?? null, 'authoritative bindings override runtime parameters', $failures, $passes );
+agents_api_smoke_assert_equals( 'caller query', $authoritative_parameters['query'] ?? null, 'ordinary bindings remain runtime-overridable alongside authoritative bindings', $failures, $passes );
+
+$authoritative_zero = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array( 'scope_id' => 999 ),
+	array( 'caller_context' => array( 'scope' => array( 'id' => 0 ) ) ),
+	$authoritative_definition
+);
+agents_api_smoke_assert_equals( 0, $authoritative_zero['scope_id'] ?? null, 'authoritative bindings preserve explicit integer zero', $failures, $passes );
+
+$authoritative_false_definition                       = $authoritative_definition;
+$authoritative_false_definition['parameter_bindings'] = array(
+	'enabled' => array(
+		'source'        => 'runtime_context',
+		'path'          => 'enabled',
+		'authoritative' => true,
+	),
+);
+$authoritative_false = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array( 'enabled' => true ),
+	array( 'runtime_context' => array( 'enabled' => false ) ),
+	$authoritative_false_definition
+);
+agents_api_smoke_assert_equals( false, $authoritative_false['enabled'] ?? null, 'authoritative bindings preserve explicit false', $failures, $passes );
+
+$authoritative_null = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array( 'enabled' => true ),
+	array( 'runtime_context' => array( 'enabled' => null ) ),
+	$authoritative_false_definition
+);
+agents_api_smoke_assert_equals( true, array_key_exists( 'enabled', $authoritative_null ), 'authoritative bindings distinguish explicit null from an absent path', $failures, $passes );
+agents_api_smoke_assert_equals( null, $authoritative_null['enabled'], 'authoritative bindings preserve explicit null', $failures, $passes );
+
+$authoritative_absent = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array( 'scope_id' => 999 ),
+	array(),
+	$authoritative_definition
+);
+agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $authoritative_absent ), 'absent authoritative context rejects a runtime-supplied substitute', $failures, $passes );
+
+$authoritative_default_definition = array(
+	'parameter_defaults' => array( 'scope_id' => 2 ),
+	'parameter_bindings' => array(
+		'scope_id' => array(
+			'source'        => 'caller_context',
+			'path'          => 'scope.id',
+			'default'       => 3,
+			'authoritative' => true,
+		),
+	),
+);
+$authoritative_default = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array( 'scope_id' => 999 ),
+	array(),
+	$authoritative_default_definition
+);
+agents_api_smoke_assert_equals( 3, $authoritative_default['scope_id'] ?? null, 'authoritative binding defaults override runtime parameters when context is absent', $failures, $passes );
+$authoritative_default_context = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array( 'scope_id' => 999 ),
+	array( 'caller_context' => array( 'scope' => array( 'id' => 4 ) ) ),
+	$authoritative_default_definition
+);
+agents_api_smoke_assert_equals( 4, $authoritative_default_context['scope_id'] ?? null, 'authoritative context overrides binding-local and top-level defaults', $failures, $passes );
+
+$authoritative_top_default_definition = array(
+	'parameter_defaults' => array(
+		'scope_id' => 0,
+		'enabled'  => false,
+		'marker'   => null,
+	),
+	'parameter_bindings' => array(
+		'scope_id' => array( 'source' => 'runtime_context', 'path' => 'scope_id', 'authoritative' => true ),
+		'enabled'  => array( 'source' => 'runtime_context', 'path' => 'enabled', 'authoritative' => true ),
+		'marker'   => array( 'source' => 'runtime_context', 'path' => 'marker', 'authoritative' => true ),
+	),
+);
+$authoritative_top_defaults = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::buildParameters(
+	array( 'scope_id' => 999, 'enabled' => true, 'marker' => 'caller' ),
+	array(),
+	$authoritative_top_default_definition
+);
+agents_api_smoke_assert_equals( 0, $authoritative_top_defaults['scope_id'] ?? null, 'authoritative bindings preserve an explicit zero top-level default', $failures, $passes );
+agents_api_smoke_assert_equals( false, $authoritative_top_defaults['enabled'] ?? null, 'authoritative bindings preserve an explicit false top-level default', $failures, $passes );
+agents_api_smoke_assert_equals( true, array_key_exists( 'marker', $authoritative_top_defaults ), 'authoritative bindings preserve an explicit null top-level default', $failures, $passes );
+agents_api_smoke_assert_equals( null, $authoritative_top_defaults['marker'], 'authoritative null top-level defaults override runtime parameters', $failures, $passes );
+
+$model_schema = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::modelParameterSchema( $authoritative_definition );
+agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $model_schema['properties'] ?? array() ), 'authoritative parameters are omitted from the model input schema', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'query' ), $model_schema['required'] ?? array(), 'authoritative parameters are omitted from the model required list', $failures, $passes );
+
+$composed_schema_definition                       = $authoritative_definition;
+$composed_schema_definition['parameters']         = array(
+	'type'  => 'object',
+	'allOf' => array(
+		array(
+			'properties' => array(
+				'scope_id' => array( 'type' => 'integer' ),
+				'query'    => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'scope_id', 'query' ),
+		),
+		array(
+			'anyOf' => array(
+				array(
+					'properties' => array(
+						'scope_id' => array( 'type' => 'integer' ),
+						'mode'     => array( 'type' => 'string' ),
+					),
+					'required'   => array( 'scope_id', 'mode' ),
+				),
+				array(
+					'oneOf' => array(
+						array(
+							'properties' => array(
+								'scope_id' => array( 'type' => 'integer' ),
+								'limit'    => array( 'type' => 'integer' ),
+							),
+							'required'   => array( 'scope_id', 'limit' ),
+						),
+					),
+				),
+			),
+		),
+	),
+);
+$composed_model_schema = AgentsAPI\AI\Tools\WP_Agent_Tool_Parameters::modelParameterSchema( $composed_schema_definition );
+agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $composed_model_schema['allOf'][0]['properties'] ?? array() ), 'allOf branches omit authoritative parameters', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'query' ), $composed_model_schema['allOf'][0]['required'] ?? array(), 'allOf branches omit authoritative requirements', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $composed_model_schema['allOf'][1]['anyOf'][0]['properties'] ?? array() ), 'nested anyOf branches omit authoritative parameters', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'mode' ), $composed_model_schema['allOf'][1]['anyOf'][0]['required'] ?? array(), 'nested anyOf branches omit authoritative requirements', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $composed_model_schema['allOf'][1]['anyOf'][1]['oneOf'][0]['properties'] ?? array() ), 'nested oneOf branches omit authoritative parameters', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'limit' ), $composed_model_schema['allOf'][1]['anyOf'][1]['oneOf'][0]['required'] ?? array(), 'nested oneOf branches omit authoritative requirements', $failures, $passes );
+
 $malformed_rejected = false;
 try {
 	AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForServer(
@@ -299,6 +466,40 @@ try {
 	$malformed_rejected = false !== strpos( $error->getMessage(), 'parameter_bindings' );
 }
 agents_api_smoke_assert_equals( true, $malformed_rejected, 'malformed parameter bindings are rejected with field-scoped errors', $failures, $passes );
+
+$unknown_binding_metadata_rejected = false;
+try {
+	AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForServer(
+		array(
+			'name'               => 'ability/unknown_binding_metadata',
+			'source'             => 'abilities',
+			'description'        => 'Reject unknown binding metadata.',
+			'parameter_bindings' => array(
+				'scope_id' => array( 'source' => 'context', 'path' => 'scope_id', 'priority' => 'host' ),
+			),
+		)
+	);
+} catch ( InvalidArgumentException $error ) {
+	$unknown_binding_metadata_rejected = false !== strpos( $error->getMessage(), 'parameter_bindings' );
+}
+agents_api_smoke_assert_equals( true, $unknown_binding_metadata_rejected, 'unknown parameter binding metadata is rejected', $failures, $passes );
+
+$malformed_authoritative_rejected = false;
+try {
+	AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForServer(
+		array(
+			'name'               => 'ability/malformed_authoritative_binding',
+			'source'             => 'abilities',
+			'description'        => 'Reject malformed authoritative metadata.',
+			'parameter_bindings' => array(
+				'scope_id' => array( 'source' => 'context', 'path' => 'scope_id', 'authoritative' => 'yes' ),
+			),
+		)
+	);
+} catch ( InvalidArgumentException $error ) {
+	$malformed_authoritative_rejected = false !== strpos( $error->getMessage(), 'parameter_bindings' );
+}
+agents_api_smoke_assert_equals( true, $malformed_authoritative_rejected, 'non-boolean authoritative metadata is rejected', $failures, $passes );
 
 $sensitive_definition = array(
 	'parameter_bindings' => array(
@@ -352,6 +553,24 @@ $adapter = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
 };
 
 $executor = new AgentsAPI\AI\Tools\WP_Agent_Tool_Execution_Core();
+$authoritative_prepared = $executor->prepareWP_Agent_Tool_Call(
+	'ability/inspect_scope',
+	array( 'scope_id' => 999, 'query' => 'inspect' ),
+	array( 'ability/inspect_scope' => $authoritative_definition ),
+	array( 'caller_context' => array( 'scope' => array( 'id' => 7 ) ) )
+);
+agents_api_smoke_assert_equals( true, $authoritative_prepared['ready'] ?? false, 'execution preparation accepts an authoritative context-bound parameter', $failures, $passes );
+agents_api_smoke_assert_equals( 7, $authoritative_prepared['tool_call']['parameters']['scope_id'] ?? null, 'execution preparation keeps the authoritative value over model input', $failures, $passes );
+
+$authoritative_missing = $executor->prepareWP_Agent_Tool_Call(
+	'ability/inspect_scope',
+	array( 'scope_id' => 999, 'query' => 'inspect' ),
+	array( 'ability/inspect_scope' => $authoritative_definition ),
+	array()
+);
+agents_api_smoke_assert_equals( false, $authoritative_missing['ready'] ?? true, 'execution preparation fails required validation when authoritative context is absent', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'scope_id' ), $authoritative_missing['metadata']['missing_parameters'] ?? array(), 'missing authoritative context reports the bound parameter without accepting model input', $failures, $passes );
+
 $missing  = $executor->executeTool( 'local/summarize', array(), $tools, $adapter, array( 'request_id' => 'req-123' ) );
 agents_api_smoke_assert_equals( false, $missing['success'], 'execution returns normalized error for missing parameters', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'text' ), $missing['metadata']['missing_parameters'], 'execution error includes missing parameter metadata', $failures, $passes );
