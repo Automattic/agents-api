@@ -7,7 +7,7 @@ Agents API publishes its canonical documentation updates through the repository-
 The consumer workflow is named **Docs Agent** and dispatches the reusable Docs Agent workflow from Automattic/docs-agent at the exact pinned revision:
 
 ```text
-Automattic/docs-agent/.github/workflows/maintain-docs.yml@06a7e92e0f4d265d09bbdb6dae1ec78fd8e7c825
+Automattic/docs-agent/.github/workflows/maintain-docs.yml@a39d9db230eb9e0b72ed84465f4d61bd8dda1bab
 ```
 
 The workflow contract is intentionally narrow:
@@ -17,6 +17,7 @@ The workflow contract is intentionally narrow:
 - `base_ref: main`
 - `docs_branch: docs-agent/agents-api-docs-upkeep`
 - `writable_paths: README.md,docs/**`
+- `source_delta`: the known documentation drift introduced by Agents API PR #422, bounded to the workflow run awaiter implementation and smoke test
 - `verification_commands`: `composer install --no-interaction --prefer-dist --no-progress`, `composer test`, then `php tests/no-product-imports-smoke.php`
 - `drift_checks`: `git diff --check`
 
@@ -32,8 +33,8 @@ DOCS_AGENT_DIR=/path/to/docs-agent WP_CODEBOX_DIR=/path/to/wp-codebox php tests/
 
 The required producer checkouts are:
 
-- Docs Agent revision `06a7e92e0f4d265d09bbdb6dae1ec78fd8e7c825`.
-- WP Codebox ref `v0.12.29`, revision `bc982947ec33c78160125026e16d357b7ece3ea1`.
+- Docs Agent revision `a39d9db230eb9e0b72ed84465f4d61bd8dda1bab`.
+- WP Codebox reusable-workflow producer revision `12a5bb19a97b89d0a78b502fc71adede5b122359`; packaged runtime release `v0.12.29` resolves to `bc982947ec33c78160125026e16d357b7ece3ea1`.
 
 At that Docs Agent revision, the `technical:maintenance` lane maps to the native package:
 
@@ -41,15 +42,15 @@ At that Docs Agent revision, the `technical:maintenance` lane maps to the native
 bundles/technical-docs-agent/native/technical-docs-maintenance-agent.agent.json
 ```
 
-with agent slug `technical-docs-maintenance-agent`, package-source revision `85443eb91c12b2759d8e207f1ae4421407b4cc5e`, package digest `sha256-bytes-v1:78fef9f8d787866c7b48b8f044769d38c0528778c8e2a82af816f9f8ea65014f`, and `lane_requires_pr=false`.
+with agent slug `technical-docs-maintenance-agent`, package-source revision `85f0d162a7d499fdc1286891371342727d084c88`, package digest `sha256-bytes-v1:975c7b0a0a7aff52897c52be5ac903a7fb110ea3c33e16227f8694c74c932519`, and `lane_requires_pr=false`.
 
 Docs Agent then calls WP Codebox's reusable workflow:
 
 ```text
-Automattic/wp-codebox/.github/workflows/run-agent-task.yml@v0.12.29
+Automattic/wp-codebox/.github/workflows/run-agent-task.yml@12a5bb19a97b89d0a78b502fc71adede5b122359
 ```
 
-The contract test verifies that this WP Codebox producer exposes the `wp-codebox/reusable-workflow-interface/v1` schema and preserves the release, external-package, runtime-source, target repository, writable path, verification, drift-check, publication, access-repository, and allowed-repository chain. In that producer path, WP Codebox v0.12.29 runs the agent task and returns the reviewer-safe result projection used by the reusable workflow publication path. Successful publication verification returns `{ valid: true }` without a failure-only `error`; repository mismatches retain their exact diagnostic.
+The contract test verifies that this WP Codebox producer exposes the `wp-codebox/reusable-workflow-interface/v1` schema and preserves the release, external-package, runtime-source, target repository, writable path, verification, drift-check, publication, access-repository, and allowed-repository chain. The completion contract requires one evidence-backed report item for the `workflow-run-awaiter` source delta and rejects a no-change disposition until that known drift is documented. WP Codebox returns the reviewer-safe result projection and stages the validated completion report as a declared command artifact.
 
 ## Secrets And Publication Credentials
 

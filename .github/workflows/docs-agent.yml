@@ -20,13 +20,25 @@ concurrency:
 jobs:
   docs-agent:
     name: Maintain Technical Documentation
-    uses: Automattic/docs-agent/.github/workflows/maintain-docs.yml@06a7e92e0f4d265d09bbdb6dae1ec78fd8e7c825
+    uses: Automattic/docs-agent/.github/workflows/maintain-docs.yml@a39d9db230eb9e0b72ed84465f4d61bd8dda1bab
     with:
       audience: technical
       run_kind: maintenance
       base_ref: main
       docs_branch: docs-agent/agents-api-docs-upkeep
       writable_paths: README.md,docs/**
+      source_delta: |
+        [
+          {
+            "id": "workflow-run-awaiter",
+            "source_refs": [
+              "https://github.com/Automattic/agents-api/pull/422",
+              "src/Workflows/class-wp-agent-workflow-run-awaiter.php",
+              "tests/workflow-run-awaiter-smoke.php"
+            ],
+            "requires_documentation_change": true
+          }
+        ]
       verification_commands: |
         [
           "composer install --no-interaction --prefer-dist --no-progress",
