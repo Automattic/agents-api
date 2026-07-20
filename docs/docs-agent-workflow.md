@@ -15,9 +15,9 @@ The workflow contract is intentionally narrow:
 - `audience: technical`
 - `run_kind: maintenance`
 - `base_ref: main`
-- `docs_branch: docs-agent/agents-api-docs-upkeep`
+- `docs_branch: docs-agent/agents-api-docs-upkeep-v2`
 - `writable_paths: README.md,docs/**`
-- `source_delta`: the known documentation drift introduced by Agents API PR #422, bounded to the workflow run awaiter implementation and smoke test
+- `source_delta`: the satisfied documentation record for Agents API PR #422, bounded to the workflow run awaiter implementation and smoke test
 - `verification_commands`: `composer install --no-interaction --prefer-dist --no-progress`, `composer test`, then `php tests/no-product-imports-smoke.php`
 - `drift_checks`: `git diff --check`
 
@@ -50,7 +50,7 @@ Docs Agent then calls WP Codebox's reusable workflow:
 Automattic/wp-codebox/.github/workflows/run-agent-task.yml@a6fe2d208e990a8d04104aa74aacbb8d1539fbc1
 ```
 
-The contract test verifies that this WP Codebox producer exposes the `wp-codebox/reusable-workflow-interface/v1` schema and preserves the release, external-package, runtime-source, target repository, writable path, verification, drift-check, publication, access-repository, and allowed-repository chain. The completion contract requires one evidence-backed report item for the `workflow-run-awaiter` source delta and rejects a no-change disposition until that known drift is documented. WP Codebox returns the reviewer-safe result projection and stages the validated completion report as a declared command artifact.
+The contract test verifies that this WP Codebox producer exposes the `wp-codebox/reusable-workflow-interface/v1` schema and preserves the release, external-package, runtime-source, target repository, writable path, verification, drift-check, publication, access-repository, and allowed-repository chain. The host generates the completion report from the bounded `workflow-run-awaiter` source record, Git diff, and writable scope; because that source is now documented, a clean workspace is a valid no-change outcome. WP Codebox returns the reviewer-safe result projection and stages the generated completion report as a declared command artifact.
 
 ## Secrets And Publication Credentials
 

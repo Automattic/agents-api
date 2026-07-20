@@ -25,7 +25,7 @@ jobs:
       audience: technical
       run_kind: maintenance
       base_ref: main
-      docs_branch: docs-agent/agents-api-docs-upkeep
+      docs_branch: docs-agent/agents-api-docs-upkeep-v2
       writable_paths: README.md,docs/**
       source_delta: |
         [
@@ -36,7 +36,7 @@ jobs:
               "src/Workflows/class-wp-agent-workflow-run-awaiter.php",
               "tests/workflow-run-awaiter-smoke.php"
             ],
-            "requires_documentation_change": true
+            "requires_documentation_change": false
           }
         ]
       verification_commands: |
