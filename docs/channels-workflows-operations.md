@@ -270,6 +270,33 @@ Consumers extend the runner through the constructor or the `wp_agent_workflow_st
 
 Recorder behavior is conservative: `start()` runs before input validation, per-step `update()` calls follow state changes, and recorder-start failure returns a failed run result without executing steps.
 
+### Awaiting suspended workflow runs
+
+`WP_Agent_Workflow_Run_Awaiter` is the storage-neutral foreground await service for persisted workflow runs. Call `await( string $run_id, WP_Agent_Workflow_Run_Recorder $recorder, array $options = array() )` from a foreground/orchestrator context such as a CLI command, `wp-cron.php` request, or explicit status poll. The recorder is always caller-owned: Agents API does not resolve an ambient workflow recorder and the awaiter does not implement storage. Pass the same recorder implementation that owns the run so the awaiter and drained branch actions can re-read live state.
+
+The await contract is:
+
+- If `find( $run_id )` returns `null` before or after a drain, the call returns `WP_Error` with code `agents_workflow_run_not_found` and does not fabricate a response.
+- If the current run is not `suspended`, no Action Scheduler work is claimed. The response still includes a zero-work `drain` shape with `stop_reason: terminal_status`, the current status in `terminal_state`, normalized hooks/group, and the scoped-drain availability flag.
+- If the run is `suspended`, the awaiter delegates to `WP_Agent_Workflow_Scoped_Drain::drain_suspended_run()`. That helper drains only the configured hook + group scope until the run leaves `suspended`, the scope empties, a safety budget stops the loop, Action Scheduler is unavailable, or a re-entrant/claimed-action guard refuses the drain.
+- After draining, the awaiter reloads the run from the caller recorder and returns the latest persisted status.
+
+The await response uses schema `agents-api/workflow-run-await/v1` and includes:
+
+| Field | Contract |
+| --- | --- |
+| `schema` | Versioned await response schema. |
+| `run_id` | The persisted run id from the reloaded result. |
+| `status` | Latest workflow-run status. |
+| `terminal` | `true` only for `succeeded`, `failed`, `skipped`, or `cancelled`. |
+| `reconnectable` | `false` for terminal runs; `true` for any nonterminal response, including a budget-exhausted or drain-refused suspended run. |
+| `result` | Canonical `agents-api/run-result/v1` run-result envelope when `terminal` is true; `null` while nonterminal. Failed terminal results preserve the canonical error payload. |
+| `drain` | Scoped-drain stats: `batches`, `actions_processed`, `completions`, `failures`, `remaining_pending`, `total_pending`, `warnings`, `stop_reason`, `terminal_state`, comma-separated `hooks`, `group`, and `available`. |
+
+Supported await/drain options are forwarded to the scoped drain after validation: `hooks` (string list), `group`, `batch_size`, `limit`, `time_limit_ms`, `time_limit`, `stop_before_timeout_ms`, `stop_before_timeout`, and `execution_context`. Omitted or empty hooks fall back to the Action Scheduler branch executor's branch and resume hooks; an omitted group falls back to the workflow Action Scheduler group. Budget stop reasons such as `limit`, `time_limit`, `timeout_margin`, `memory_limit`, `no_progress`, `as_unavailable`, `refused_reentrant`, and `refused_in_claimed_action` are reported in `drain.stop_reason` rather than converted into errors, so callers can return a reconnectable polling response.
+
+Do not call the drain from inside one of the scoped branch or resume actions. `WP_Agent_Workflow_Scoped_Drain` checks the live action stack and a process-level guard and refuses those contexts to avoid self-deadlocking a worker that is holding an Action Scheduler claim while trying to claim sibling actions.
+
 ## Workflow abilities and permissions
 
 `src/Workflows/register-agents-workflow-abilities.php` registers three abilities:
