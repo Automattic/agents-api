@@ -138,6 +138,12 @@ if ( ! function_exists( 'update_option' ) ) {
 		return true;
 	}
 }
+if ( ! function_exists( 'delete_option' ) ) {
+	function delete_option( string $option ): bool {
+		unset( $GLOBALS['__options'][ $option ] );
+		return true;
+	}
+}
 
 // ── The Action Scheduler function-shim ───────────────────────────────────────
 // Records every async enqueue as a queued action with a unique, claimable id.
@@ -151,14 +157,19 @@ final class AS_Shim {
 	/** @var array<int,bool> id => claimed */
 	public static array $claimed = array();
 	private static int $seq = 0;
+	public static string $reject_hook = '';
 
 	public static function reset(): void {
 		self::$queue   = array();
 		self::$claimed = array();
 		self::$seq     = 0;
+		self::$reject_hook = '';
 	}
 
 	public static function enqueue( string $hook, array $args, string $group ): int {
+		if ( '' !== self::$reject_hook && self::$reject_hook === $hook ) {
+			return 0;
+		}
 		$id                = ++self::$seq;
 		self::$queue[]     = array(
 			'id'    => $id,
@@ -405,6 +416,9 @@ $tables_before = $recorder->tables();
 $run = ( new WP_Agent_Workflow_Runner( $recorder ) )->run( as_smoke_roles_spec(), array(), array( 'run_id' => 'as-A' ) );
 
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $run->get_status(), 'AS path: run SUSPENDED after dispatch', $failures, $passes );
+AS_Shim::$reject_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK;
+smoke_assert( false, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::maybe_defer_resume( false, 'as-A', WP_Agent_Workflow_Action_Scheduler_Branch_Executor::ID, $run ), 'resume enqueue failure falls back to inline reconcile instead of stranding the run', $failures, $passes );
+AS_Shim::$reject_hook = '';
 
 // DISPATCH WIRING: one BRANCH_HOOK action per sibling branch (2; aggregator is
 // deferred), each carrying its full descriptor in the payload, under the
@@ -413,8 +427,18 @@ $branch_actions = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branc
 smoke_assert( 2, count( $branch_actions ), 'dispatch: one AS action enqueued per branch (2 siblings)', $failures, $passes );
 
 $first_payload = $branch_actions[0]['args'][0] ?? array();
-smoke_assert( 'agents-api', $branch_actions[0]['group'] ?? '', 'dispatch: branch action uses the agents-api group', $failures, $passes );
+$run_group     = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-A' );
+smoke_assert_true( 'agents-api' !== $run_group, 'dispatch: a new run receives an isolated Action Scheduler group', $failures, $passes );
+smoke_assert( $run_group, $branch_actions[0]['group'] ?? '', 'dispatch: branch action uses its run-specific group', $failures, $passes );
+smoke_assert( $run_group, $branch_actions[1]['group'] ?? '', 'dispatch: sibling branches share the same run-specific group', $failures, $passes );
 smoke_assert( 'as-A', $first_payload['run_id'] ?? '', 'dispatch: payload carries run_id', $failures, $passes );
+
+$run_b = ( new WP_Agent_Workflow_Runner( $recorder ) )->run( as_smoke_roles_spec(), array(), array( 'run_id' => 'as-B' ) );
+$run_b_group = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-B' );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $run_b->get_status(), 'isolation: a second run suspends independently', $failures, $passes );
+smoke_assert_true( $run_group !== $run_b_group, 'isolation: concurrent runs receive different claim groups', $failures, $passes );
+$all_branch_actions = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+smoke_assert( $run_b_group, $all_branch_actions[2]['group'] ?? '', 'isolation: run B branches cannot be claimed through run A group', $failures, $passes );
 
 // PAYLOAD OFFLOAD (Bug 1): the AS args are now a SMALL reference — no inline
 // branch descriptor, no inline shared context. The heavy descriptor lives in the
@@ -460,6 +484,7 @@ $after_all = $recorder->find( 'as-A' );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $after_all->get_status(), 'AS path: resume DEFERRED (still suspended until RESUME action fires)', $failures, $passes );
 $resume_actions = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
 smoke_assert( 1, count( $resume_actions ), 'AS path: exactly one RESUME action enqueued when all branches terminal', $failures, $passes );
+smoke_assert( $run_group, $resume_actions[0]['group'] ?? '', 'AS path: resume preserves the run-specific group across processes', $failures, $passes );
 
 // Fire the RESUME action → aggregate already spliced by reconcile, resume() runs
 // the sequential `after` step.
@@ -470,6 +495,7 @@ $out_steps = $final->get_output()['steps'] ?? array();
 smoke_assert( 'FUSED[HEAD|BODY]', $out_steps['scatter']['final']['final_bundle'] ?? '', 'AS path: aggregate fused REAL branch outputs (run_branch_steps ran demo/role-worker)', $failures, $passes );
 smoke_assert( 'GOT:FUSED[HEAD|BODY]', $out_steps['after']['consumed'] ?? '', 'AS path: sequential step consumed the aggregate on resume', $failures, $passes );
 smoke_assert( array(), $final->get_suspension(), 'table-free: frame DELETED on resume', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::GROUP, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-A' ), 'terminal resume deletes the run-group mapping', $failures, $passes );
 smoke_assert( $tables_before, $recorder->tables(), 'table-free: NO new table after full run', $failures, $passes );
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -630,6 +656,59 @@ foreach ( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Execut
 $final4 = $recorder4->find( 'as-fail' );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $final4->get_status(), 'branch-action state machine: required branch failing in a REAL run_branch_steps → run FAILED on resume', $failures, $passes );
 smoke_assert( 'workflow_parallel_required_branch_failed', $final4->get_error()['code'] ?? '', 'branch-action state machine: real reconcile surfaces the required-branch failure code', $failures, $passes );
+
+// A resume can advance into another parallel step and suspend again. The run's
+// isolated group and branch-store rows must survive that intermediate resume.
+function as_smoke_two_fanout_spec(): WP_Agent_Workflow_Spec {
+	$fanout = static function ( string $id, string $label ): array {
+		return array(
+			'id'    => $id,
+			'type'  => 'parallel',
+			'as'    => 'item',
+			'items' => array( array( 'label' => $label ) ),
+			'steps' => array(
+				array( 'id' => $id . '-worker', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => $label ) ),
+			),
+		);
+	};
+
+	return WP_Agent_Workflow_Spec::from_array(
+		array(
+			'id'    => 'demo/as-two-fanouts',
+			'steps' => array( $fanout( 'first', 'one' ), $fanout( 'second', 'two' ) ),
+		)
+	);
+}
+
+AS_Shim::reset();
+$recorder5 = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder5 ) { return $recorder5; } );
+
+$run5       = ( new WP_Agent_Workflow_Runner( $recorder5 ) )->run( as_smoke_two_fanout_spec(), array(), array( 'run_id' => 'as-two' ) );
+$group5     = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' );
+$branches5  = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+AS_Shim::fire( $branches5[0]['id'] );
+$resumes5 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
+as_enqueue_async_action( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK, $resumes5[0]['args'], $resumes5[0]['group'] );
+AS_Shim::fire( $resumes5[0]['id'] );
+
+$stale_resumes5 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
+AS_Shim::fire( $stale_resumes5[1]['id'] );
+
+$mid5      = $recorder5->find( 'as-two' );
+$branches5 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $mid5->get_status(), 'multi-fanout: intermediate resume suspends on the second fan-out', $failures, $passes );
+smoke_assert( 1, (int) ( $mid5->get_suspension()['step_index'] ?? 0 ), 'multi-fanout: delayed duplicate resume cannot skip the newer suspension generation', $failures, $passes );
+smoke_assert( $group5, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' ), 'multi-fanout: intermediate resume preserves the run-group mapping', $failures, $passes );
+smoke_assert( $group5, $branches5[1]['group'] ?? '', 'multi-fanout: second fan-out stays in the original isolated group', $failures, $passes );
+
+AS_Shim::fire( $branches5[1]['id'] );
+$resumes5 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
+AS_Shim::fire( $resumes5[2]['id'] );
+$final5 = $recorder5->find( 'as-two' );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $final5->get_status(), 'multi-fanout: second resume reaches terminal success', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::GROUP, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' ), 'multi-fanout: terminal resume finally removes the group mapping', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );

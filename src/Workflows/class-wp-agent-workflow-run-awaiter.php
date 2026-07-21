@@ -39,6 +39,13 @@ class WP_Agent_Workflow_Run_Awaiter {
 	 * @return array{schema:string,run_id:string,status:string,terminal:bool,reconnectable:bool,result:?array<string,mixed>,drain:array<string,int|string|bool>}|\WP_Error
 	 */
 	public function await( string $run_id, WP_Agent_Workflow_Run_Recorder $recorder, array $options = array() ) {
+		if ( ! isset( $options['group'] ) || ! is_scalar( $options['group'] ) || '' === (string) $options['group'] ) {
+			$options['group'] = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( $run_id );
+		}
+		// A run await must never fall back to hook-only claims: that could execute a
+		// different run whose branch/resume hooks share this executor.
+		$options['allow_group_fallback'] = false;
+
 		$current = $recorder->find( $run_id );
 		if ( null === $current ) {
 			return new \WP_Error( 'agents_workflow_run_not_found', 'No workflow run was found for the requested run_id.' );

@@ -61,11 +61,13 @@ final class Await_Smoke_Awaiter extends WP_Agent_Workflow_Run_Awaiter {
 	public int $drains = 0;
 	public string $next_status = WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED;
 	public string $stop_reason = 'terminal_status';
+	public array $last_options = array();
 
 	public function __construct() {}
 
 	protected function drain_suspended_run( string $run_id, WP_Agent_Workflow_Run_Recorder $recorder, array $options ): array {
 		++$this->drains;
+		$this->last_options = $options;
 		$current = $recorder->find( $run_id );
 		if ( null !== $current && WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED !== $this->next_status ) {
 			$recorder->update( $current->with( array( 'status' => $this->next_status ) ) );
@@ -133,6 +135,11 @@ await_assert( false, $limited['terminal'], 'limit-exhausted suspended run is non
 await_assert( true, $limited['reconnectable'], 'limit-exhausted suspended run is reconnectable' );
 await_assert( 'limit', $limited['drain']['stop_reason'], 'limit stop is preserved' );
 await_assert( null, $limited['result'], 'nonterminal state has no terminal result' );
+await_assert( 'agents-api', $awaiter->last_options['group'] ?? '', 'legacy run without a persisted mapping drains through the backward-compatible shared group' );
+await_assert( false, $awaiter->last_options['allow_group_fallback'] ?? null, 'run await never widens a failed group claim to other runs sharing the hooks' );
+
+$awaiter->await( 'limited', $recorder, array( 'limit' => 1, 'group' => 'caller-supplied' ) );
+await_assert( 'caller-supplied', $awaiter->last_options['group'] ?? '', 'an explicit caller group remains authoritative' );
 
 $awaiter->stop_reason = 'time_limit';
 $budgeted = $awaiter->await( 'limited', $recorder, array( 'time_limit_ms' => 1 ) );

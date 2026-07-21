@@ -116,10 +116,12 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 final class Scoped_Drain_AS {
 	/** @var array<int,array{id:int,hook:string,group:string,status:string}> */
 	public static array $actions = array();
+	public static bool $throw_group_claim = false;
 	private static int $seq      = 0;
 
 	public static function reset(): void {
 		self::$actions = array();
+		self::$throw_group_claim = false;
 		self::$seq     = 0;
 	}
 
@@ -204,6 +206,9 @@ if ( ! class_exists( '\ActionScheduler_Store' ) ) {
 		 */
 		public function stake_claim( int $max = 10, $before = null, array $hooks = array(), string $group = '' ): ActionScheduler_ActionClaim {
 			unset( $before );
+			if ( '' !== $group && Scoped_Drain_AS::$throw_group_claim ) {
+				throw new InvalidArgumentException( 'group does not exist' );
+			}
 			$claimed = array();
 			foreach ( Scoped_Drain_AS::$actions as $id => $action ) {
 				if ( count( $claimed ) >= $max ) {
@@ -461,6 +466,21 @@ Scoped_Drain_AS::seed( $branch_hook, $group, 2 );
 smoke_assert( 3, Scoped_Drain_AS::count_status( ActionScheduler_Store::STATUS_PENDING ), 'scoping: 3 unrelated actions left PENDING (not drained)', $failures, $passes );
 smoke_assert( 0, $GLOBALS['__other_runs'], 'scoping: unrelated hook callback never ran', $failures, $passes );
 smoke_assert( 2, Scoped_Drain_AS::count_status( ActionScheduler_Store::STATUS_COMPLETE ), 'scoping: only the 2 in-scope branch actions completed', $failures, $passes );
+
+// A run awaiter disables HybridStore's hook-only fallback. If the requested
+// group cannot be claimed, refusing work is safer than claiming another run.
+Scoped_Drain_AS::reset();
+Scoped_Drain_AS::seed( $branch_hook, 'run-a', 1 );
+Scoped_Drain_AS::seed( $branch_hook, 'run-b', 1 );
+Scoped_Drain_AS::$throw_group_claim = true;
+$strict = ( new WP_Agent_Workflow_Scoped_Drain() )->drain(
+	array(
+		'group'                => 'run-a',
+		'allow_group_fallback' => false,
+	)
+);
+smoke_assert( 'warning', $strict['stop_reason'], 'strict run scope reports an unavailable group claim without widening scope', $failures, $passes );
+smoke_assert( 2, Scoped_Drain_AS::count_status( ActionScheduler_Store::STATUS_PENDING ), 'strict run scope leaves both runs pending instead of cross-claiming by hook', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );

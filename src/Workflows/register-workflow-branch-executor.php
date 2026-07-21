@@ -82,7 +82,7 @@ add_action(
 add_action(
 	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK,
 	/**
-	 * @param array<string,mixed> $payload Action payload: { run_id }.
+	 * @param array<string,mixed> $payload Action payload: { run_id, suspension_id }.
 	 */
 	static function ( $payload = array() ): void {
 		WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_resume_action( is_array( $payload ) ? $payload : array() );
@@ -99,17 +99,19 @@ add_filter(
 	 * @param bool   $deferred    Whether resume is already deferred.
 	 * @param string $run_id      The suspended run id.
 	 * @param string $executor_id The frame's owning executor id.
+	 * @param mixed  $result      Current suspended run result.
 	 * @return bool
 	 */
-	static function ( $deferred, $run_id, $executor_id ) {
+	static function ( $deferred, $run_id, $executor_id, $result ) {
 		return WP_Agent_Workflow_Action_Scheduler_Branch_Executor::maybe_defer_resume(
 			(bool) $deferred,
 			is_string( $run_id ) ? $run_id : '',
-			is_string( $executor_id ) ? $executor_id : ''
+			is_string( $executor_id ) ? $executor_id : '',
+			$result
 		);
 	},
 	10,
-	3
+	4
 );
 
 // 4. Long-branch reaping window. Action Scheduler's QueueCleaner marks any action

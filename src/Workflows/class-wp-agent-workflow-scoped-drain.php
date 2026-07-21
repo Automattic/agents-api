@@ -144,6 +144,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 *     time_limit?:int,
 	 *     stop_before_timeout_ms?:int,
 	 *     stop_before_timeout?:int,
+	 *     allow_group_fallback?:bool,
 	 *     execution_context?:string,
 	 *     terminal_status_callback?:callable
 	 * } $options Drain options.
@@ -160,6 +161,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 		$stop_before_ms    = isset( $options['stop_before_timeout_ms'] )
 			? max( 0, (int) $options['stop_before_timeout_ms'] )
 			: max( 0, (int) ( $options['stop_before_timeout'] ?? 0 ) ) * 1000;
+		$allow_group_fallback = ! isset( $options['allow_group_fallback'] ) || (bool) $options['allow_group_fallback'];
 		$execution_context = (string) ( $options['execution_context'] ?? 'agents-api scoped drain' );
 		$terminal_callback = is_callable( $options['terminal_status_callback'] ?? null ) ? $options['terminal_status_callback'] : null;
 
@@ -236,7 +238,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 				}
 
 				$due_before = $this->due_pending_count( $hooks, $group );
-				$batch      = $this->run_batch( $current_batch, $hooks, $group, $deadline_at, $execution_context );
+				$batch      = $this->run_batch( $current_batch, $hooks, $group, $deadline_at, $execution_context, $allow_group_fallback );
 				++$batches;
 				$processed += (int) $batch['processed'];
 				$warnings  += (int) $batch['warnings'];
@@ -318,6 +320,9 @@ final class WP_Agent_Workflow_Scoped_Drain {
 				$drain_options[ $int_key ] = (int) $options[ $int_key ];
 			}
 		}
+		if ( isset( $options['allow_group_fallback'] ) ) {
+			$drain_options['allow_group_fallback'] = (bool) $options['allow_group_fallback'];
+		}
 		if ( isset( $options['execution_context'] ) && is_scalar( $options['execution_context'] ) ) {
 			$drain_options['execution_context'] = (string) $options['execution_context'];
 		}
@@ -342,9 +347,10 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 * @param string            $group             AS group.
 	 * @param float             $deadline_at       Unix timestamp (with microseconds); 0 = no deadline.
 	 * @param string            $execution_context AS execution context label.
+	 * @param bool              $allow_group_fallback Whether HybridStore may retry without the group.
 	 * @return array{processed:int,warnings:int,stop_reason:string} Batch result.
 	 */
-	private function run_batch( int $batch_size, array $hooks, string $group, float $deadline_at, string $execution_context ): array {
+	private function run_batch( int $batch_size, array $hooks, string $group, float $deadline_at, string $execution_context, bool $allow_group_fallback ): array {
 		/** @var \ActionScheduler_Store $store */
 		$store       = \ActionScheduler_Store::instance();
 		$runner      = \ActionScheduler::runner();
@@ -358,9 +364,10 @@ final class WP_Agent_Workflow_Scoped_Drain {
 			// stake_claim( $max, $before_date, $hooks, $group ). Claiming over the
 			// scoped hooks + group means we only ever run THIS caller's scope — never
 			// an unrelated AS workload sharing the queue. HybridStore can transiently
-			// throw "group does not exist" while actions for that group are readable;
-			// in that case retry hook-scoped only rather than failing the foreground pump.
-			$claim = $this->stake_claim( $store, $batch_size, $hooks, $group );
+			// throw "group does not exist" while actions for that group are readable.
+			// Generic callers may retry hook-scoped; run awaiters disable that fallback
+			// because hook-only claims would cross run boundaries.
+			$claim = $this->stake_claim( $store, $batch_size, $hooks, $group, $allow_group_fallback );
 		} catch ( \Throwable $throwable ) {
 			unset( $throwable );
 			return array(
@@ -421,13 +428,14 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 * @param int               $batch_size Maximum actions to claim.
 	 * @param array<int,string> $hooks      Hook scope.
 	 * @param string            $group      Group scope.
+	 * @param bool              $allow_group_fallback Whether to retry hook-only.
 	 * @return \ActionScheduler_ActionClaim Action Scheduler claim.
 	 */
-	private function stake_claim( \ActionScheduler_Store $store, int $batch_size, array $hooks, string $group ): \ActionScheduler_ActionClaim {
+	private function stake_claim( \ActionScheduler_Store $store, int $batch_size, array $hooks, string $group, bool $allow_group_fallback ): \ActionScheduler_ActionClaim {
 		try {
 			return $store->stake_claim( $batch_size, null, $hooks, $group );
 		} catch ( \InvalidArgumentException $error ) {
-			if ( '' === $group || false === stripos( $error->getMessage(), 'group' ) ) {
+			if ( ! $allow_group_fallback || '' === $group || false === stripos( $error->getMessage(), 'group' ) ) {
 				throw $error;
 			}
 			return $store->stake_claim( $batch_size, null, $hooks, '' );
