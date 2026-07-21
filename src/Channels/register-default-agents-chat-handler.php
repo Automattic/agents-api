@@ -183,6 +183,7 @@ class WP_Agent_Default_Chat_Handler {
 				'session_id'             => $session_id,
 				'agent_slug'             => $agent_slug,
 				'run_id'                 => $runtime_context['run_id'],
+				'_agents_run_claim_token' => $input['_agents_run_claim_token'] ?? '',
 				'principal'              => $input['principal'] ?? null,
 				'conversation_store'     => $store,
 				'tool_executor_registry' => $executor_registry,

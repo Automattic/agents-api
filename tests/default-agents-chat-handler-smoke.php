@@ -360,6 +360,8 @@ namespace {
 	};
 
 	require_once __DIR__ . '/../agents-api.php';
+	require_once __DIR__ . '/class-agents-api-memory-atomic-run-control-store.php';
+	\AgentsAPI\AI\WP_Agent_Run_Control::set_store( new \Agents_API_Memory_Atomic_Run_Control_Store() );
 
 	class Agents_Chat_Runtime_Overlay_Executor implements \AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
 		/** @var array<int,array<string,mixed>> */

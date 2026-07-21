@@ -420,6 +420,27 @@ class WP_Agent_Run_Control {
 		$store->save_workspace_state( $store_key, $workspace, $state );
 	}
 
+	/**
+	 * Serialize a read-modify-write mutation through the registered store.
+	 *
+	 * @param callable(array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}):array{state:array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>},result:mixed} $mutation State mutation.
+	 * @return mixed Mutation result.
+	 */
+	public static function mutate_state( string $store_key, callable $mutation, ?WP_Agent_Workspace_Scope $workspace = null ): mixed {
+		$store = self::store();
+		if ( null === $workspace ) {
+			if ( ! $store instanceof WP_Agent_Atomic_Run_Control_Store ) {
+				throw new \RuntimeException( 'The registered run-control store does not support atomic state mutation.' );
+			}
+			return $store->mutate_state( $store_key, $mutation );
+		}
+		if ( ! $store instanceof WP_Agent_Atomic_Workspace_Run_Control_Store ) {
+			throw new \RuntimeException( 'The registered run-control store does not support atomic workspace state mutation.' );
+		}
+
+		return $store->mutate_workspace_state( $store_key, $workspace, $mutation );
+	}
+
 	public static function now(): string {
 		return gmdate( 'c' );
 	}

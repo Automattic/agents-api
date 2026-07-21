@@ -80,3 +80,45 @@ jobs:
         with:
           # With no paths, actionlint discovers and reads every workflow file.
           args: -no-color
+
+  option-store-concurrency:
+    name: Option-store concurrency
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_DATABASE: agents_api_test
+          MARIADB_USER: agents_api
+          MARIADB_PASSWORD: agents_api
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: mysqli, pcntl
+          coverage: none
+
+      - name: Download WordPress database layer
+        run: |
+          curl --fail --silent --show-error https://wordpress.org/latest.tar.gz | tar -xz -C /tmp
+
+      - name: Run option-store concurrency tests
+        env:
+          AGENTS_API_WP_ROOT: /tmp/wordpress
+          AGENTS_API_DB_HOST: 127.0.0.1:3306
+          AGENTS_API_DB_NAME: agents_api_test
+          AGENTS_API_DB_USER: agents_api
+          AGENTS_API_DB_PASSWORD: agents_api
+        run: php tests/run-control-option-store-integration.php

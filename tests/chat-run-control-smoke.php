@@ -88,6 +88,8 @@ if ( ! function_exists( 'update_option' ) ) {
 }
 
 agents_api_smoke_require_module();
+require_once __DIR__ . '/class-agents-api-memory-atomic-run-control-store.php';
+AgentsAPI\AI\WP_Agent_Run_Control::set_store( new Agents_API_Memory_Atomic_Run_Control_Store() );
 
 $conversation_store = new class() implements AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store {
 	public function create_session( AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace, int $user_id, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ): string {

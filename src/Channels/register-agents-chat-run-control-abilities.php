@@ -197,6 +197,9 @@ function agents_cancel_chat_run( array $input ) {
 		}
 
 		$result = WP_Agent_Chat_Run_Control::request_cancel( agents_chat_run_control_string( $input['run_id'] ?? '' ), $context['workspace'], $context['owner'] );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
 		if ( null === $result ) {
 			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
 		}
