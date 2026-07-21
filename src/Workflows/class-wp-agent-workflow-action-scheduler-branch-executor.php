@@ -22,9 +22,8 @@
  * ({@see WP_Agent_Workflow_Action_Scheduler_Bridge}), which schedules ONE
  * recurring action per workflow trigger under `wp_agent_workflow_run_scheduled`.
 	 * This executor enqueues ONE async action PER BRANCH under a distinct hook,
-	 * plus one RESUME action per suspended run. New runs use one durable group per
-	 * run so foreground awaiters cannot claim another run's work; legacy in-flight
-	 * runs without a mapping retain GROUP `agents-api` across upgrades.
+	 * plus one RESUME action per suspended run. Every run uses one deterministic
+	 * group so foreground awaiters cannot claim another run's work.
  *
  * The runner owns the suspend/resume state machine and the reconcile entry
  * point ({@see agents_reconcile_workflow_branch()}); this executor owns only the
@@ -39,9 +38,6 @@ namespace AgentsAPI\AI\Workflows;
 defined( 'ABSPATH' ) || exit;
 
 final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Agent_Workflow_Branch_Executor {
-
-	/** Option prefix mapping newly dispatched runs to their isolated AS group. */
-	private const RUN_GROUP_PREFIX = 'agents_wf_as_group_';
 
 	/**
 	 * Stable executor id stamped on every frame + handle so reconcile and the
@@ -107,20 +103,12 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	}
 
 	/**
-	 * Resolve the durable queue group for a run.
-	 *
-	 * Runs dispatched before run-group isolation have no mapping and deliberately
-	 * retain the legacy shared group so an upgrade cannot strand in-flight actions.
+	 * Resolve the deterministic queue group for a run.
 	 *
 	 * @since 0.5.2
 	 */
 	public static function group_for_run( string $run_id ): string {
-		if ( '' === $run_id || ! function_exists( 'get_option' ) ) {
-			return self::GROUP;
-		}
-
-		$group = get_option( self::RUN_GROUP_PREFIX . md5( $run_id ), '' );
-		return is_string( $group ) && '' !== $group ? $group : self::GROUP;
+		return '' !== $run_id ? 'agents-api-run-' . md5( $run_id ) : '';
 	}
 
 	/**
@@ -219,7 +207,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 				'context_ref' => $context_ref,
 			);
 
-			$group     = self::ensure_run_group( $run_id );
+			$group     = self::group_for_run( $run_id );
 			$action_id = self::enqueue_async_action( self::BRANCH_HOOK, array( $payload ), $group );
 
 			// FAIL LOUD: a non-positive action id means the enqueue did not durably
@@ -231,7 +219,6 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			if ( $action_id <= 0 ) {
 				if ( '' !== $run_id ) {
 					WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
-					self::forget_run_group( $run_id );
 				}
 				return new \WP_Error(
 					'workflow_branch_dispatch_enqueue_failed',
@@ -765,18 +752,14 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		// Rehydrate the full self-contained descriptor from the branch store using
 		// the lightweight ref the AS args carried. The store re-seats the run-scoped
 		// shared context into branch_vars.context, so the branch runs against the
-		// same descriptor shape the runner built at dispatch. A backward-compatible
-		// inline descriptor (a payload enqueued before the offload) is still honored.
+		// same descriptor shape the runner built at dispatch.
 		$descriptor = '' !== $store_ref
 			? WP_Agent_Workflow_Branch_Store::get_branch( $store_ref, $context_ref )
 			: null;
-		if ( null === $descriptor && is_array( $payload['branch'] ?? null ) ) {
-			$descriptor = self::string_keyed_array( $payload['branch'] );
-		}
 
 		if ( ! is_array( $descriptor ) ) {
-			// The stored descriptor is gone (expired / evicted) and no inline
-			// fallback exists. Reconcile a clean failure so the run does not hang
+			// The stored descriptor is gone (expired / evicted). Reconcile a clean
+			// failure so the run does not hang
 			// SUSPENDED against a branch that can no longer run.
 			$branch_result = array(
 				'key'    => '',
@@ -977,19 +960,15 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			// claim + this SUSPENDED re-check.
 			if ( null !== $result ) {
 				WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
-				self::forget_run_group( $run_id );
 			}
 			return;
 		}
 
 		$expected_suspension = self::string_value( $payload['suspension_id'] ?? '' );
-		if ( '' === $expected_suspension && self::GROUP !== self::group_for_run( $run_id ) ) {
-			// Tokenless actions predate suspension generations. They remain valid only
-			// for genuinely legacy runs that also lack a run-group mapping; once such a
-			// run advances into a new fan-out, its new mapping blocks delayed old actions.
+		if ( '' === $expected_suspension ) {
 			return;
 		}
-		if ( '' !== $expected_suspension && ! hash_equals( $expected_suspension, self::suspension_id( $result->get_suspension() ) ) ) {
+		if ( ! hash_equals( $expected_suspension, self::suspension_id( $result->get_suspension() ) ) ) {
 			// A delayed duplicate from an earlier fan-out must not resume through the
 			// current, newer suspension generation.
 			return;
@@ -998,13 +977,11 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$runner = agents_workflow_resolve_runner( $recorder );
 		$runner->resume( $run_id );
 
-		// resume() can reach another parallel step and suspend again. Keep the shared
-		// group mapping and branch-store index until the run is truly terminal so the
-		// next foreground await claims the new fan-out in the same isolated scope.
+		// resume() can reach another parallel step and suspend again. Keep the branch
+		// store index until the run is truly terminal.
 		$current = $recorder->find( $run_id );
 		if ( null !== $current && ! $current->is_suspended() ) {
 			WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
-			self::forget_run_group( $run_id );
 		}
 	}
 
@@ -1045,26 +1022,6 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			// letting the throw be swallowed by AS's queue runner into a hang.
 			unset( $error );
 			return 0;
-		}
-	}
-
-	/** Persist and return the isolated group for a newly dispatched run. */
-	private static function ensure_run_group( string $run_id ): string {
-		$existing = self::group_for_run( $run_id );
-		if ( self::GROUP !== $existing || '' === $run_id || ! function_exists( 'update_option' ) || ! function_exists( 'get_option' ) ) {
-			return $existing;
-		}
-
-		$group = 'agents-api-run-' . md5( $run_id );
-		update_option( self::RUN_GROUP_PREFIX . md5( $run_id ), $group, false );
-
-		return self::group_for_run( $run_id );
-	}
-
-	/** Remove a terminal run's queue-group mapping. */
-	private static function forget_run_group( string $run_id ): void {
-		if ( '' !== $run_id && function_exists( 'delete_option' ) ) {
-			delete_option( self::RUN_GROUP_PREFIX . md5( $run_id ) );
 		}
 	}
 
