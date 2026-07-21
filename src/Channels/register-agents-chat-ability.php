@@ -178,9 +178,13 @@ function agents_chat_dispatch( array $input ) {
 	$agent      = agents_chat_optional_string( $input['agent'] ?? null ) ?? '';
 	if ( null !== $session_id ) {
 		try {
-			WP_Agent_Chat_Run_Control::start_run( $run_id, $session_id, array( 'agent' => $agent ), $run_context['workspace'], $run_context['owner'] );
+			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $session_id, array( 'agent' => $agent ), $run_context['workspace'], $run_context['owner'] );
 		} catch ( \RuntimeException $error ) {
 			return new \WP_Error( 'agents_chat_run_workspace_unsupported', $error->getMessage() );
+		}
+		if ( is_wp_error( $started ) ) {
+			do_action( 'agents_chat_dispatch_failed', $started->get_error_code(), $input );
+			return $started;
 		}
 	}
 
@@ -220,7 +224,11 @@ function agents_chat_dispatch( array $input ) {
 	$resolved_session_id = agents_chat_optional_string( $result['session_id'] ?? null ) ?? $session_id;
 	if ( null !== $resolved_session_id ) {
 		if ( null === $session_id ) {
-			WP_Agent_Chat_Run_Control::start_run( $result_run_id, $resolved_session_id, array( 'agent' => $agent ), $run_context['workspace'], $run_context['owner'] );
+			$started = WP_Agent_Chat_Run_Control::start_run( $result_run_id, $resolved_session_id, array( 'agent' => $agent ), $run_context['workspace'], $run_context['owner'] );
+			if ( is_wp_error( $started ) ) {
+				do_action( 'agents_chat_dispatch_failed', $started->get_error_code(), $input );
+				return $started;
+			}
 		}
 
 		$status = WP_Agent_Run_Outcome::run_control_status( $result );

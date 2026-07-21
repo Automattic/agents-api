@@ -151,6 +151,25 @@ $created = agents_chat_dispatch(
 );
 $run_id = is_array( $created ) ? (string) ( $created['run_id'] ?? '' ) : '';
 agents_api_smoke_assert_equals( false, $created instanceof WP_Error, 'run is created on the first subsite under an explicit workspace', $failures, $passes );
+$workspace_scope = WP_Agent_Workspace_Scope::from_array( $workspace );
+
+$foreign_run_id = 'run_foreign_owner';
+$GLOBALS['__agents_api_multisite_user'] = 456;
+$foreign_run = agents_chat_dispatch(
+	array(
+		'agent'         => 'demo-agent',
+		'message'       => 'claim victim session',
+		'session_id'    => 'network-session',
+		'run_id'        => $foreign_run_id,
+		'workspace'     => $workspace,
+		'principal'     => $other_principal,
+		'session_owner' => $other_owner,
+	)
+);
+agents_api_smoke_assert_equals( 'agents_chat_run_owner_forbidden', $foreign_run instanceof WP_Error ? $foreign_run->get_error_code() : '', 'foreign principal cannot create a separately owned run for the victim session', $failures, $passes );
+$foreign_run_state = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope );
+agents_api_smoke_assert_equals( false, isset( $foreign_run_state['runs'][ $foreign_run_id ] ), 'denied foreign run is not persisted', $failures, $passes );
+$GLOBALS['__agents_api_multisite_user'] = 123;
 
 $queued = agents_queue_chat_message(
 	array(
@@ -183,6 +202,29 @@ agents_api_smoke_assert_equals( false, $foreign_allowed, 'foreign principal cann
 agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $foreign_queued instanceof WP_Error ? $foreign_queued->get_error_code() : '', 'foreign principal cannot enqueue with its own owner claim', $failures, $passes );
 $GLOBALS['__agents_api_multisite_user'] = 123;
 
+// Simulate pre-fix corrupt state with the foreign run stored first. The
+// canonical session binding must remain authoritative regardless of run order.
+$reversed_state = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope );
+$reversed_state['runs'] = array_merge(
+	array(
+		$foreign_run_id => array(
+			'run_id'     => $foreign_run_id,
+			'session_id' => 'network-session',
+			'status'     => 'running',
+			'_owner'     => hash( 'sha256', 'user:456' ),
+		),
+	),
+	$reversed_state['runs']
+);
+WP_Agent_Run_Control::save_state( 'agents_api_chat_run_control', $reversed_state, $workspace_scope );
+agents_api_smoke_assert_equals( $foreign_run_id, array_key_first( WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope )['runs'] ), 'corrupt foreign run is first in storage order for regression coverage', $failures, $passes );
+
+$foreign_owned_run_input = array_replace( $foreign_input, array( 'run_id' => $foreign_run_id ) );
+$GLOBALS['__agents_api_multisite_user'] = 456;
+$foreign_owned_run_queue = agents_queue_chat_message( $foreign_owned_run_input );
+agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $foreign_owned_run_queue instanceof WP_Error ? $foreign_owned_run_queue->get_error_code() : '', 'foreign principal cannot enqueue through a separately owned run for the victim session', $failures, $passes );
+$GLOBALS['__agents_api_multisite_user'] = 123;
+
 switch_to_blog( 2 );
 $control_input = array(
 	'session_id'    => 'network-session',
@@ -201,6 +243,8 @@ $foreign_cross_site = agents_queue_chat_message( $foreign_input );
 agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $foreign_cross_site instanceof WP_Error ? $foreign_cross_site->get_error_code() : '', 'foreign enqueue remains denied from another subsite', $failures, $passes );
 $foreign_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', WP_Agent_Workspace_Scope::from_array( $workspace ), $other_owner );
 agents_api_smoke_assert_equals( array(), $foreign_claim, 'foreign claim cannot consume the owner queue', $failures, $passes );
+$preserved_queue = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope )['queues']['network-session'] ?? array();
+agents_api_smoke_assert_equals( 'queued continuation', $preserved_queue[0]['message'] ?? null, 'foreign claim preserves the legitimate queue when foreign run is first', $failures, $passes );
 $GLOBALS['__agents_api_multisite_user'] = 123;
 
 $claimed = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', WP_Agent_Workspace_Scope::from_array( $workspace ), $owner );
@@ -249,7 +293,6 @@ $mixed_second = agents_queue_chat_message( array_replace( $control_input, array(
 agents_api_smoke_assert_equals( 'queued', $mixed_first['status'] ?? null, 'owner can enqueue before mixed-state recovery', $failures, $passes );
 agents_api_smoke_assert_equals( 'queued', $mixed_second['status'] ?? null, 'owner can append before mixed-state recovery', $failures, $passes );
 
-$workspace_scope = WP_Agent_Workspace_Scope::from_array( $workspace );
 $mixed_state     = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope );
 $mixed_state['queues']['network-session'][] = array(
 	'queued_message_id' => 'queued_foreign',
@@ -268,6 +311,8 @@ WP_Agent_Run_Control::save_state( 'agents_api_chat_run_control', $mixed_state, $
 
 $mixed_foreign_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', $workspace_scope, $other_owner );
 agents_api_smoke_assert_equals( array(), $mixed_foreign_claim, 'wrong owner cannot use mixed entries to consume the queue', $failures, $passes );
+$mixed_preserved = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope )['queues']['network-session'] ?? array();
+agents_api_smoke_assert_equals( array( 'owner first', 'owner second' ), array_slice( array_column( $mixed_preserved, 'message' ), 0, 2 ), 'wrong-owner claim leaves legitimate entries intact beside corrupt rows', $failures, $passes );
 $mixed_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', $workspace_scope, $owner );
 agents_api_smoke_assert_equals( array( 'owner first', 'owner second' ), array_column( $mixed_claim, 'message' ), 'owner claim progresses while discarding foreign and invalid entries', $failures, $passes );
 $recovered_state = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope );

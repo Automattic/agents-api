@@ -203,11 +203,11 @@ $approval_stored = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id
 agents_api_smoke_assert_equals( 'approval_required', $approval_stored['status'] ?? null, 'chat dispatch keeps approval-required run addressable', $failures, $passes );
 agents_api_smoke_assert_equals( false, 'completed' === ( $approval_stored['status'] ?? null ), 'approval-required run is not marked completed', $failures, $passes );
 
-AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-default-cancel', 'session-1' );
+AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-default-cancel', 'session-1', array(), null, array( 'type' => 'user', 'key' => '123' ) );
 $default_cancelled = AgentsAPI\AI\Channels\agents_cancel_chat_run( array( 'session_id' => 'session-1', 'run_id' => 'run-default-cancel' ) );
 agents_api_smoke_assert_equals( 'cancelling', $default_cancelled['status'] ?? null, 'default cancel marks running runs as cancelling', $failures, $passes );
 
-AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-default-queue', 'session-default' );
+AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-default-queue', 'session-default', array(), null, array( 'type' => 'user', 'key' => '123' ) );
 $default_queued = AgentsAPI\AI\Channels\agents_queue_chat_message(
 	array(
 		'agent'      => 'demo-agent',
