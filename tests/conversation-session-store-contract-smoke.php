@@ -32,8 +32,10 @@ require_once __DIR__ . '/../src/Runtime/class-wp-agent-execution-principal.php';
 require_once __DIR__ . '/../src/Transcripts/class-wp-agent-conversation-store.php';
 require_once __DIR__ . '/../src/Transcripts/class-wp-agent-principal-conversation-store.php';
 require_once __DIR__ . '/../src/Transcripts/class-wp-agent-principal-conversation-session-reader.php';
+require_once __DIR__ . '/../src/Transcripts/class-wp-agent-conversation-sessions.php';
 
 use AgentsAPI\AI\WP_Agent_Execution_Principal;
+use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Sessions;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Principal_Conversation_Session_Reader;
 use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 
@@ -230,6 +232,8 @@ $browser_id    = $store->create_session_for_owner( $workspace, $browser_owner, '
 
 smoke_assert( 'browser:opaque', $store->get_session_for_owner( $workspace, $browser_owner, $browser_id )['owner_key'] ?? null, 'principal reader loads matching opaque owner', $failures, $passes );
 smoke_assert( null, $store->get_session_for_owner( $workspace, array( 'type' => 'browser', 'key' => 'browser:other' ), $browser_id ), 'principal reader blocks other opaque owners', $failures, $passes );
+smoke_assert( $browser_id, WP_Agent_Conversation_Sessions::get_owned_session( $store, $browser_id, $workspace, $browser_owner )['session_id'] ?? null, 'canonical resolver delegates opaque ownership to the principal reader', $failures, $passes );
+smoke_assert( null, WP_Agent_Conversation_Sessions::get_owned_session( $store, $browser_id, $workspace, array( 'type' => 'browser', 'key' => 'browser:other' ) ), 'canonical resolver rejects a foreign opaque principal', $failures, $passes );
 smoke_assert( 'fake-2', $store->get_recent_pending_session( $workspace, 8, 600, 'chat' )['session_id'] ?? null, 'pending lookup scopes user sessions', $failures, $passes );
 smoke_assert( 'fake-4', $store->get_recent_pending_session_for_owner( $workspace, $browser_owner, 600, 'chat' )['session_id'] ?? null, 'pending lookup scopes principal sessions', $failures, $passes );
 

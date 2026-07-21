@@ -129,15 +129,20 @@ class WP_Agent_Conversation_Loop {
 		$budget_resolution     = self::resolve_budgets( $options, $max_turns );
 		$budgets               = $budget_resolution['budgets'];
 		$has_explicit_turns    = $budget_resolution['has_explicit_turns'];
-		$turn_runner           = self::resolve_turn_runner( $turn_runner, $options, $tool_declarations, $run_id, $lock_session_id, $request, $budgets );
 		$wall_clock_started_at = microtime( true );
 		$wall_clock_initial    = isset( $budgets['wall_clock_seconds'] ) ? $budgets['wall_clock_seconds']->current() : 0;
 		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
 		self::emit_tool_declaration_diagnostics( $on_event, $rejected_declarations, $tool_declarations, $tool_executor );
 		$messages = self::normalize_messages( $messages );
 		if ( '' !== $run_id && '' !== $lock_session_id ) {
-			WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, array( 'source' => 'conversation_loop' ), $run_workspace, $run_owner );
+			$conversation_store = ( $context['conversation_store'] ?? null ) instanceof \AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store ? $context['conversation_store'] : null;
+			$started            = WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, array( 'source' => 'conversation_loop' ), $run_workspace, $run_owner, $conversation_store );
+			if ( is_wp_error( $started ) ) {
+				self::emit_event( $on_event, 'failed', array( 'error' => $started->get_error_message() ) );
+				return self::run_control_failure_result( $messages, $started );
+			}
 		}
+		$turn_runner           = self::resolve_turn_runner( $turn_runner, $options, $tool_declarations, $run_id, $lock_session_id, $request, $budgets );
 		$events                = array();
 		$tool_results          = array();
 		$tool_events           = self::normalize_array_list( array() );
@@ -1113,6 +1118,32 @@ class WP_Agent_Conversation_Loop {
 				'message'    => $error->getMessage(),
 				'code'       => (string) $error->getCode(),
 				'turn_count' => $turn,
+			),
+		) );
+	}
+
+	/**
+	 * Build a failure result when canonical session ownership rejects turn zero.
+	 *
+	 * @param array<int,array<string,mixed>> $messages Normalized input messages.
+	 * @return array<string,mixed>
+	 */
+	private static function run_control_failure_result( array $messages, \WP_Error $error ): array {
+		return self::normalize_conversation_result( array(
+			'messages'               => $messages,
+			'tool_execution_results' => array(),
+			'tool_events'            => array(),
+			'tool_audit_events'      => array(),
+			'events'                 => array(),
+			'status'                 => 'failed',
+			'completed'              => false,
+			'turn_count'             => 0,
+			'final_content'          => self::extract_final_content( $messages ),
+			'failure'                => array(
+				'type'       => 'run_control',
+				'message'    => $error->get_error_message(),
+				'code'       => $error->get_error_code(),
+				'turn_count' => 0,
 			),
 		) );
 	}

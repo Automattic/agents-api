@@ -232,13 +232,23 @@ function agents_queue_chat_message( array $input ) {
 	if ( $context['workspace'] instanceof WP_Agent_Workspace_Scope ) {
 		$input['workspace'] = $context['workspace']->to_array();
 	}
+	try {
+		if ( ! WP_Agent_Chat_Run_Control::can_queue_message( $input, $context['workspace'], $context['owner'], $context['conversation_store'] ) ) {
+			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested session owner.' );
+		}
+	} catch ( \RuntimeException $error ) {
+		return new \WP_Error( 'agents_chat_run_workspace_unsupported', $error->getMessage() );
+	}
+	if ( is_array( $context['owner'] ) ) {
+		$input['session_owner'] = $context['owner'];
+	}
 
 	$handler = apply_filters( 'wp_agent_chat_message_queue_handler', null, $input );
 	if ( is_callable( $handler ) ) {
 		$result = agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_message_queue_invalid_result' );
 	} else {
 		try {
-			$result = WP_Agent_Chat_Run_Control::queue_message( $input, $context['workspace'], $context['owner'] );
+			$result = WP_Agent_Chat_Run_Control::queue_message( $input, $context['workspace'], $context['owner'], $context['conversation_store'] );
 		} catch ( \InvalidArgumentException|\RuntimeException $error ) {
 			return new \WP_Error( 'agents_chat_message_queue_invalid_result', $error->getMessage() );
 		}
@@ -280,6 +290,17 @@ function agents_chat_run_read_permission( array $input ): bool {
 /** @param array<string, mixed> $input Ability input. */
 function agents_chat_run_enqueue_permission( array $input ): bool {
 	$allowed = agents_chat_run_write_permission( $input );
+	$context = WP_Agent_Chat_Run_Control::context_from_input( $input );
+	if ( $allowed && ! is_wp_error( $context ) ) {
+		try {
+			$allowed = WP_Agent_Chat_Run_Control::can_queue_message( $input, $context['workspace'], $context['owner'], $context['conversation_store'] );
+		} catch ( \RuntimeException $error ) {
+			unset( $error );
+			$allowed = false;
+		}
+	} else {
+		$allowed = false;
+	}
 	$allowed = (bool) apply_filters( 'agents_chat_run_enqueue_permission', $allowed, $input );
 	return (bool) apply_filters( 'agents_chat_run_control_permission', $allowed, $input );
 }

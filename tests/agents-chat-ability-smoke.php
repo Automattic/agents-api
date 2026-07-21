@@ -72,6 +72,46 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 
 agents_api_smoke_require_module();
 
+$conversation_store = new class() implements AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store {
+	public function create_session( AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace, int $user_id, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ): string {
+		unset( $workspace, $user_id, $agent_slug, $metadata, $context );
+		return '';
+	}
+	public function list_sessions( AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace, int $user_id, array $args = array() ): array {
+		unset( $workspace, $user_id, $args );
+		return array();
+	}
+	public function get_session( string $session_id ): ?array {
+		if ( 'runtime-s-1' !== $session_id ) {
+			return null;
+		}
+		return array(
+			'session_id'     => $session_id,
+			'workspace_type' => 'site',
+			'workspace_id'   => 'default',
+			'owner_type'     => 'runtime',
+			'owner_key'      => 'runtime-session-1',
+		);
+	}
+	public function update_session( string $session_id, array $messages, array $metadata = array(), string $provider = '', string $model = '', ?string $provider_response_id = null ): bool {
+		unset( $session_id, $messages, $metadata, $provider, $model, $provider_response_id );
+		return true;
+	}
+	public function delete_session( string $session_id ): bool {
+		unset( $session_id );
+		return true;
+	}
+	public function get_recent_pending_session( AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace, int $user_id, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array {
+		unset( $workspace, $user_id, $seconds, $context, $token_id );
+		return null;
+	}
+	public function update_title( string $session_id, string $title ): bool {
+		unset( $session_id, $title );
+		return true;
+	}
+};
+add_filter( 'wp_agent_conversation_store', static fn() => $conversation_store );
+
 use function AgentsAPI\AI\Channels\agents_chat_dispatch;
 use function AgentsAPI\AI\Channels\agents_chat_permission;
 use function AgentsAPI\AI\Channels\agents_chat_input_schema;

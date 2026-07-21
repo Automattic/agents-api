@@ -184,6 +184,7 @@ class WP_Agent_Default_Chat_Handler {
 				'agent_slug'             => $agent_slug,
 				'run_id'                 => $runtime_context['run_id'],
 				'principal'              => $input['principal'] ?? null,
+				'conversation_store'     => $store,
 				'tool_executor_registry' => $executor_registry,
 			),
 		);
