@@ -113,6 +113,8 @@ class WP_Agent_Conversation_Loop {
 		$interrupt_source      = self::resolve_interrupt_source( $options );
 		$request               = self::resolve_request( $messages, $options );
 		$principal             = $request->principal();
+		$run_workspace         = $request->workspace();
+		$run_owner             = $principal instanceof WP_Agent_Execution_Principal ? $principal->conversation_owner() : null;
 		if ( $principal instanceof WP_Agent_Execution_Principal && ! isset( $context['principal'] ) ) {
 			// Thread the resolved execution principal into the run context so it
 			// reaches tool execution (turn context -> tool context -> executor).
@@ -134,7 +136,7 @@ class WP_Agent_Conversation_Loop {
 		self::emit_tool_declaration_diagnostics( $on_event, $rejected_declarations, $tool_declarations, $tool_executor );
 		$messages = self::normalize_messages( $messages );
 		if ( '' !== $run_id && '' !== $lock_session_id ) {
-			WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, array( 'source' => 'conversation_loop' ) );
+			WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, array( 'source' => 'conversation_loop' ), $run_workspace, $run_owner );
 		}
 		$events                = array();
 		$tool_results          = array();
@@ -190,7 +192,7 @@ class WP_Agent_Conversation_Loop {
 				$force_continue       = false;
 				$turn_context         = $context;
 				$turn_context['turn'] = $turn;
-				$interrupt            = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
+				$interrupt            = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event, $run_workspace, $run_owner );
 				if ( null !== $interrupt ) {
 					$messages[]  = $interrupt['message'];
 					$events[]    = self::interrupt_event( $interrupt );
@@ -229,7 +231,7 @@ class WP_Agent_Conversation_Loop {
 					);
 
 					if ( '' !== $run_id && '' !== $lock_session_id ) {
-						WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED );
+						WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_workspace );
 					}
 
 					self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
@@ -255,7 +257,7 @@ class WP_Agent_Conversation_Loop {
 					throw $error;
 				}
 
-				$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
+				$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event, $run_workspace, $run_owner );
 				if ( null !== $interrupt ) {
 					$messages[]  = $interrupt['message'];
 					$events[]    = self::interrupt_event( $interrupt );
@@ -291,7 +293,7 @@ class WP_Agent_Conversation_Loop {
 					) );
 
 					if ( '' !== $run_id && '' !== $lock_session_id ) {
-						WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED );
+						WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_workspace );
 					}
 
 					self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
@@ -316,7 +318,7 @@ class WP_Agent_Conversation_Loop {
 				// When mediation is enabled, the turn runner returns tool_calls
 				// and the loop handles execution. Otherwise, the caller-managed path applies.
 				if ( null !== $tool_executor && $mediation_enabled && isset( $result['tool_calls'] ) && is_array( $result['tool_calls'] ) ) {
-					$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
+					$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event, $run_workspace, $run_owner );
 					if ( null !== $interrupt ) {
 						$messages[]  = $interrupt['message'];
 						$events[]    = self::interrupt_event( $interrupt );
@@ -354,7 +356,7 @@ class WP_Agent_Conversation_Loop {
 					$approval_required     = $mediation_result['approval_required'] ?? null;
 					$runtime_tool_pending  = $mediation_result['runtime_tool_pending'] ?? null;
 					$stalled               = self::check_spin_detector( $spin_detector, $mediation_result['spin_signatures'], $turn_context, $on_event );
-					$interrupt             = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
+					$interrupt             = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event, $run_workspace, $run_owner );
 					if ( null !== $interrupt ) {
 						$messages[]  = $interrupt['message'];
 						$events[]    = self::interrupt_event( $interrupt );
@@ -454,7 +456,7 @@ class WP_Agent_Conversation_Loop {
 
 				$interrupt = self::check_interrupt_source( $interrupt_source, $messages, $options, $turn_context, $on_event );
 				if ( null === $interrupt ) {
-					$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event );
+					$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event, $run_workspace, $run_owner );
 				}
 				if ( null !== $interrupt ) {
 					$messages[] = $interrupt['message'];
@@ -534,7 +536,7 @@ class WP_Agent_Conversation_Loop {
 			$final_result = self::normalize_conversation_result( $final_result_data );
 
 			if ( '' !== $run_id && '' !== $lock_session_id ) {
-				WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Run_Outcome::run_control_status( $final_result ) );
+				WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Run_Outcome::run_control_status( $final_result ), $run_workspace );
 			}
 
 			self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
@@ -1472,14 +1474,15 @@ class WP_Agent_Conversation_Loop {
 	 * Check canonical chat run-control cancellation state.
 	 *
 	 * @param array<string,mixed> $context Current turn context.
+	 * @param array<string,mixed>|null $owner Canonical conversation owner.
 	 * @return array{message: array<string, mixed>, metadata: array<string, mixed>, action: string}|null
 	 */
-	private static function check_runtime_cancellation( string $run_id, string $lock_session_id, array $context, ?callable $on_event ): ?array {
+	private static function check_runtime_cancellation( string $run_id, string $lock_session_id, array $context, ?callable $on_event, ?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ): ?array {
 		if ( '' === $run_id ) {
 			return null;
 		}
 
-		$interrupt_message = WP_Agent_Chat_Run_Control::cancellation_interrupt_for_run( $run_id, $lock_session_id );
+		$interrupt_message = WP_Agent_Chat_Run_Control::cancellation_interrupt_for_run( $run_id, $lock_session_id, $workspace, $owner );
 		if ( null === $interrupt_message ) {
 			return null;
 		}
@@ -1706,16 +1709,29 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		$runtime_overrides = self::resolve_runtime_overrides( $options );
+		$principal         = $options['principal'] ?? ( is_array( $options['context'] ?? null ) ? ( $options['context']['principal'] ?? null ) : null );
+		if ( is_array( $principal ) ) {
+			try {
+				$principal = WP_Agent_Execution_Principal::from_array( self::normalize_assoc_array( $principal ) );
+			} catch ( \Throwable $error ) {
+				unset( $error );
+				$principal = null;
+			}
+		}
+		$workspace = $options['workspace'] ?? null;
+		if ( ! $workspace instanceof \AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope ) {
+			$workspace = null;
+		}
 
 		return new WP_Agent_Conversation_Request(
 			$messages,
 			array(),
-			null,
+			$principal instanceof WP_Agent_Execution_Principal ? $principal : null,
 			self::normalize_assoc_array( $options['context'] ?? array() ),
 			array(),
 			self::max_turns( $options['max_turns'] ?? 1 ),
 			false,
-			null,
+			$workspace,
 			$runtime_overrides
 		);
 	}

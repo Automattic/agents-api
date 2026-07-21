@@ -230,6 +230,7 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-continua
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-lifecycle.php';
 require_once AGENTS_API_PATH . 'src/Runtime/register-runtime-tool-lifecycle-abilities.php';
 require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-run-control-store.php';
+require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-workspace-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-option-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-control.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-result-envelope.php';

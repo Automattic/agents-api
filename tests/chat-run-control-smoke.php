@@ -286,7 +286,7 @@ agents_api_smoke_assert_equals( 'run-1', $interrupt['metadata']['run_id'] ?? nul
 
 $no_events_handler = AgentsAPI\AI\Channels\agents_list_chat_run_events( array( 'session_id' => 'session-events-1', 'run_id' => 'run-events-1' ) );
 agents_api_smoke_assert_equals( true, $no_events_handler instanceof WP_Error, 'run events require host handler', $failures, $passes );
-agents_api_smoke_assert_equals( 'agents_chat_run_events_no_handler', $no_events_handler->get_error_code(), 'run events no-handler error is explicit', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $no_events_handler->get_error_code(), 'run events report missing stored runs explicitly', $failures, $passes );
 
 add_filter(
 	'wp_agent_chat_run_events_handler',
