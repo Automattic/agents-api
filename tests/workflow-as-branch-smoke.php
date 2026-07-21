@@ -416,6 +416,8 @@ $tables_before = $recorder->tables();
 $run = ( new WP_Agent_Workflow_Runner( $recorder ) )->run( as_smoke_roles_spec(), array(), array( 'run_id' => 'as-A' ) );
 
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $run->get_status(), 'AS path: run SUSPENDED after dispatch', $failures, $passes );
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_resume_action( array( 'run_id' => 'as-A' ) );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $recorder->find( 'as-A' )->get_status(), 'resume: tokenless action cannot advance a suspended run', $failures, $passes );
 AS_Shim::$reject_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK;
 smoke_assert( false, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::maybe_defer_resume( false, 'as-A', WP_Agent_Workflow_Action_Scheduler_Branch_Executor::ID, $run ), 'resume enqueue failure falls back to inline reconcile instead of stranding the run', $failures, $passes );
 AS_Shim::$reject_hook = '';
@@ -495,7 +497,7 @@ $out_steps = $final->get_output()['steps'] ?? array();
 smoke_assert( 'FUSED[HEAD|BODY]', $out_steps['scatter']['final']['final_bundle'] ?? '', 'AS path: aggregate fused REAL branch outputs (run_branch_steps ran demo/role-worker)', $failures, $passes );
 smoke_assert( 'GOT:FUSED[HEAD|BODY]', $out_steps['after']['consumed'] ?? '', 'AS path: sequential step consumed the aggregate on resume', $failures, $passes );
 smoke_assert( array(), $final->get_suspension(), 'table-free: frame DELETED on resume', $failures, $passes );
-smoke_assert( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::GROUP, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-A' ), 'terminal resume deletes the run-group mapping', $failures, $passes );
+smoke_assert( $run_group, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-A' ), 'terminal run keeps its deterministic group identity without persisted compatibility state', $failures, $passes );
 smoke_assert( $tables_before, $recorder->tables(), 'table-free: NO new table after full run', $failures, $passes );
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -700,7 +702,7 @@ $mid5      = $recorder5->find( 'as-two' );
 $branches5 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $mid5->get_status(), 'multi-fanout: intermediate resume suspends on the second fan-out', $failures, $passes );
 smoke_assert( 1, (int) ( $mid5->get_suspension()['step_index'] ?? 0 ), 'multi-fanout: delayed duplicate resume cannot skip the newer suspension generation', $failures, $passes );
-smoke_assert( $group5, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' ), 'multi-fanout: intermediate resume preserves the run-group mapping', $failures, $passes );
+smoke_assert( $group5, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' ), 'multi-fanout: intermediate resume preserves deterministic group identity', $failures, $passes );
 smoke_assert( $group5, $branches5[1]['group'] ?? '', 'multi-fanout: second fan-out stays in the original isolated group', $failures, $passes );
 
 AS_Shim::fire( $branches5[1]['id'] );
@@ -708,7 +710,7 @@ $resumes5 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Exec
 AS_Shim::fire( $resumes5[2]['id'] );
 $final5 = $recorder5->find( 'as-two' );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $final5->get_status(), 'multi-fanout: second resume reaches terminal success', $failures, $passes );
-smoke_assert( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::GROUP, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' ), 'multi-fanout: terminal resume finally removes the group mapping', $failures, $passes );
+smoke_assert( $group5, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' ), 'multi-fanout: terminal run retains the same deterministic group identity', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );

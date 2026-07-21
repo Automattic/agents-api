@@ -135,7 +135,7 @@ await_assert( false, $limited['terminal'], 'limit-exhausted suspended run is non
 await_assert( true, $limited['reconnectable'], 'limit-exhausted suspended run is reconnectable' );
 await_assert( 'limit', $limited['drain']['stop_reason'], 'limit stop is preserved' );
 await_assert( null, $limited['result'], 'nonterminal state has no terminal result' );
-await_assert( 'agents-api', $awaiter->last_options['group'] ?? '', 'legacy run without a persisted mapping drains through the backward-compatible shared group' );
+await_assert( 'agents-api-run-' . md5( 'limited' ), $awaiter->last_options['group'] ?? '', 'run await derives its isolated group directly from run identity' );
 await_assert( false, $awaiter->last_options['allow_group_fallback'] ?? null, 'run await never widens a failed group claim to other runs sharing the hooks' );
 
 $awaiter->await( 'limited', $recorder, array( 'limit' => 1, 'group' => 'caller-supplied' ) );
