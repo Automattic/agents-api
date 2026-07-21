@@ -101,6 +101,7 @@ function wp_register_ability( string $ability, array $args ): void {
 }
 
 agents_api_smoke_require_module();
+require_once __DIR__ . '/class-agents-api-memory-atomic-run-control-store.php';
 
 use AgentsAPI\AI\WP_Agent_Chat_Run_Control;
 use AgentsAPI\AI\WP_Agent_Conversation_Loop;
@@ -115,6 +116,8 @@ use function AgentsAPI\AI\Channels\agents_chat_dispatch;
 use function AgentsAPI\AI\Channels\agents_get_chat_run;
 use function AgentsAPI\AI\Channels\agents_list_chat_run_events;
 use function AgentsAPI\AI\Channels\agents_queue_chat_message;
+
+WP_Agent_Run_Control::set_store( new Agents_API_Memory_Atomic_Run_Control_Store() );
 
 $workspace = array(
 	'workspace_type' => 'network',
@@ -323,7 +326,7 @@ $GLOBALS['__agents_api_multisite_user'] = 456;
 $foreign_cross_site = agents_queue_chat_message( $foreign_input );
 agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $foreign_cross_site instanceof WP_Error ? $foreign_cross_site->get_error_code() : '', 'foreign enqueue remains denied from another subsite', $failures, $passes );
 $foreign_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', WP_Agent_Workspace_Scope::from_array( $workspace ), $other_owner );
-agents_api_smoke_assert_equals( array(), $foreign_claim, 'foreign claim cannot consume the owner queue', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_chat_run_owner_forbidden', $foreign_claim instanceof WP_Error ? $foreign_claim->get_error_code() : '', 'foreign claim cannot consume the owner queue', $failures, $passes );
 $preserved_queue = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope )['queues']['network-session'] ?? array();
 agents_api_smoke_assert_equals( 'queued continuation', $preserved_queue[0]['message'] ?? null, 'foreign claim preserves the legitimate queue when foreign run is first', $failures, $passes );
 $GLOBALS['__agents_api_multisite_user'] = 123;
@@ -391,7 +394,7 @@ $mixed_state['queues']['network-session'][] = array(
 WP_Agent_Run_Control::save_state( 'agents_api_chat_run_control', $mixed_state, $workspace_scope );
 
 $mixed_foreign_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', $workspace_scope, $other_owner );
-agents_api_smoke_assert_equals( array(), $mixed_foreign_claim, 'wrong owner cannot use mixed entries to consume the queue', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_chat_run_owner_forbidden', $mixed_foreign_claim instanceof WP_Error ? $mixed_foreign_claim->get_error_code() : '', 'wrong owner cannot use mixed entries to consume the queue', $failures, $passes );
 $mixed_preserved = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope )['queues']['network-session'] ?? array();
 agents_api_smoke_assert_equals( array( 'owner first', 'owner second' ), array_slice( array_column( $mixed_preserved, 'message' ), 0, 2 ), 'wrong-owner claim leaves legitimate entries intact beside corrupt rows', $failures, $passes );
 $mixed_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', $workspace_scope, $owner );

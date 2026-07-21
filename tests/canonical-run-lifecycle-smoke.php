@@ -36,7 +36,7 @@ if ( ! function_exists( 'current_user_can' ) ) {
 
 agents_api_smoke_require_module();
 
-final class Agents_API_Smoke_Run_Control_Store implements AgentsAPI\AI\WP_Agent_Run_Control_Store {
+final class Agents_API_Smoke_Run_Control_Store implements AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store {
 	/** @var array<string,array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}> */
 	private array $states = array();
 
@@ -54,6 +54,12 @@ final class Agents_API_Smoke_Run_Control_Store implements AgentsAPI\AI\WP_Agent_
 			'queues' => is_array( $state['queues'] ?? null ) ? $state['queues'] : array(),
 			'events' => is_array( $state['events'] ?? null ) ? $state['events'] : array(),
 		);
+	}
+
+	public function mutate_state( string $store_key, callable $mutation ): mixed {
+		$mutated = $mutation( $this->get_state( $store_key ) );
+		$this->save_state( $store_key, $mutated['state'] );
+		return $mutated['result'];
 	}
 }
 

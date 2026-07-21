@@ -30,6 +30,8 @@ class WP_Agent_Chat_Run_Control {
 	public const STATUS_STALLED              = 'stalled';
 	public const STATUS_INTERRUPTED          = 'interrupted';
 	private const OPTION_KEY                 = 'agents_api_chat_run_control';
+	/** @var array<string,string> */
+	private static array $active_claim_tokens = array();
 
 	/** @return string[] */
 	public static function statuses(): array {
@@ -123,8 +125,18 @@ class WP_Agent_Chat_Run_Control {
 	/**
 	 * Generate an opaque client-addressable run ID.
 	 */
-	public static function generate_run_id(): string {
-		return WP_Agent_Run_Control::generate_run_id();
+	public static function generate_run_id( string $prefix = 'run_' ): string {
+		return WP_Agent_Run_Control::generate_run_id( $prefix );
+	}
+
+	public static function activate_run_claim( string $run_id, string $claim_token ): void {
+		self::$active_claim_tokens[ $run_id ] = $claim_token;
+	}
+
+	public static function deactivate_run_claim( string $run_id, string $claim_token ): void {
+		if ( isset( self::$active_claim_tokens[ $run_id ] ) && hash_equals( self::$active_claim_tokens[ $run_id ], $claim_token ) ) {
+			unset( self::$active_claim_tokens[ $run_id ] );
+		}
 	}
 
 	/**
@@ -192,23 +204,129 @@ class WP_Agent_Chat_Run_Control {
 		if ( $canonical_owner instanceof \WP_Error ) {
 			return $canonical_owner;
 		}
-
-		$state    = self::state( $workspace );
-		$existing = $state['runs'][ $run_id ] ?? null;
-		if ( is_array( $existing ) && ( $session_id !== self::string_value( $existing['session_id'] ?? '' ) || ! self::fingerprint_matches( $existing['_owner'] ?? null, $canonical_owner ) ) ) {
-			return new \WP_Error( 'agents_chat_run_owner_forbidden', 'The run_id is already bound to another session or owner.' );
+		$claim_token = trim( self::string_value( $metadata['_claim_token'] ?? '' ) );
+		if ( '' === $claim_token && 'conversation_loop' === self::string_value( $metadata['source'] ?? '' ) ) {
+			$claim_token = self::$active_claim_tokens[ $run_id ] ?? '';
 		}
+		unset( $metadata['_claim_token'] );
 
-		return self::normalize_run( WP_Agent_Run_Control::start_run(
-			self::OPTION_KEY,
-			$run_id,
-			array(
-				'session_id' => $session_id,
-				'metadata'   => $metadata,
-				'_owner'     => $canonical_owner,
-			),
-			$workspace
-		) );
+		try {
+			$result = self::mutate_state(
+				static function ( array $state ) use ( $run_id, $session_id, $metadata, $canonical_owner, $claim_token ): array {
+					$existing = $state['runs'][ $run_id ] ?? null;
+					if ( is_array( $existing ) && ! self::fingerprint_matches( $existing['_owner'] ?? null, $canonical_owner ) ) {
+						return array(
+							'state'  => $state,
+							'result' => new \WP_Error( 'agents_chat_run_owner_forbidden', 'The run_id is already bound to another session or owner.' ),
+						);
+					}
+					if ( is_array( $existing ) ) {
+						$stored_claim = self::string_value( $existing['_claim_token'] ?? '' );
+						if ( '' !== $claim_token && '' !== $stored_claim && hash_equals( $stored_claim, $claim_token ) ) {
+							if ( ! empty( $existing['_session_pending'] ) ) {
+								$existing['session_id'] = $session_id;
+								$existing['metadata']   = $metadata;
+								$existing['updated_at'] = self::now();
+								unset( $existing['_session_pending'] );
+								$state['runs'][ $run_id ] = $existing;
+								return array( 'state' => $state, 'result' => self::normalize_run( $existing ) );
+							}
+							if ( $session_id !== self::string_value( $existing['session_id'] ?? '' ) ) {
+								return array(
+									'state'  => $state,
+									'result' => new \WP_Error( 'agents_chat_run_owner_forbidden', 'The run_id is already bound to another session or owner.' ),
+								);
+							}
+							return array( 'state' => $state, 'result' => self::normalize_run( $existing ) );
+						}
+						if ( $session_id !== self::string_value( $existing['session_id'] ?? '' ) ) {
+							return array(
+								'state'  => $state,
+								'result' => new \WP_Error( 'agents_chat_run_owner_forbidden', 'The run_id is already bound to another session or owner.' ),
+							);
+						}
+						return array(
+							'state'  => $state,
+							'result' => new \WP_Error( 'agents_chat_run_already_started', 'The run_id has already been claimed for execution.' ),
+						);
+					}
+
+					$now = self::now();
+					$run = array(
+						'run_id'       => $run_id,
+						'session_id'   => $session_id,
+						'status'       => self::STATUS_RUNNING,
+						'started_at'   => $now,
+						'updated_at'   => $now,
+						'metadata'     => $metadata,
+						'_owner'       => $canonical_owner,
+						'_claim_token' => $claim_token,
+					);
+					$state['runs'][ $run_id ] = $run;
+					$state = self::record_event( $state, $run_id, 'run_started', array( 'status' => self::STATUS_RUNNING ) );
+					return array(
+						'state'  => $state,
+						'result' => self::normalize_run( $run ),
+					);
+				},
+				$workspace,
+				'' === $canonical_owner
+			);
+		} catch ( \RuntimeException $error ) {
+			return self::atomic_unavailable( $error );
+		}
+		if ( $result instanceof \WP_Error ) {
+			return $result;
+		}
+		if ( ! is_array( $result ) ) {
+			throw new \RuntimeException( 'Atomic chat run creation returned an invalid result.' );
+		}
+		return self::normalize_run( WP_Agent_Run_Control::string_keyed_array( $result ) );
+	}
+
+	/**
+	 * Reserve a run before a handler creates and returns its canonical session.
+	 *
+	 * @param array<string,mixed>|null $owner Canonical conversation owner.
+	 * @return array<string,mixed>|\WP_Error
+	 */
+	public static function claim_pending_run( string $run_id, string $claim_token, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ) {
+		$fingerprint = self::owner_fingerprint( $owner );
+		if ( $workspace instanceof WP_Agent_Workspace_Scope && '' === $fingerprint ) {
+			return new \WP_Error( 'agents_chat_run_owner_required', 'Explicit workspace run control requires an authenticated conversation owner.' );
+		}
+		try {
+			$result = self::mutate_state(
+				static function ( array $state ) use ( $run_id, $claim_token, $fingerprint ): array {
+					if ( isset( $state['runs'][ $run_id ] ) ) {
+						return array( 'state' => $state, 'result' => new \WP_Error( 'agents_chat_run_already_started', 'The run_id has already been claimed for execution.' ) );
+					}
+					$now = self::now();
+					$run = array(
+						'run_id'           => $run_id,
+						'session_id'       => 'pending:' . $run_id,
+						'status'           => self::STATUS_RUNNING,
+						'started_at'       => $now,
+						'updated_at'       => $now,
+						'metadata'         => array(),
+						'_owner'           => $fingerprint,
+						'_claim_token'     => $claim_token,
+						'_session_pending' => true,
+					);
+					$state['runs'][ $run_id ] = $run;
+					$state = self::record_event( $state, $run_id, 'run_started', array( 'status' => self::STATUS_RUNNING ) );
+					return array( 'state' => $state, 'result' => self::normalize_run( $run ) );
+				},
+				$workspace,
+				'' === $fingerprint
+			);
+		} catch ( \RuntimeException $error ) {
+			return self::atomic_unavailable( $error );
+		}
+		if ( $result instanceof \WP_Error ) {
+			return $result;
+		}
+		return is_array( $result ) ? self::normalize_run( WP_Agent_Run_Control::string_keyed_array( $result ) ) : new \WP_Error( 'agents_chat_run_atomic_unavailable', 'Atomic pending run claim returned an invalid result.' );
 	}
 
 	/**
@@ -216,11 +334,33 @@ class WP_Agent_Chat_Run_Control {
 	 *
 	 * @param string $run_id Run ID.
 	 * @param string $status Terminal status.
-	 * @return array<string,mixed>|null Normalized run, or null when absent.
+	 * @return array<string,mixed>|null|\WP_Error Normalized run, null when absent, or a storage error.
 	 */
-	public static function finish_run( string $run_id, string $status = self::STATUS_COMPLETED, ?WP_Agent_Workspace_Scope $workspace = null ): ?array {
-		$run = WP_Agent_Run_Control::finish_run( self::OPTION_KEY, $run_id, $status, $workspace );
-		return null === $run ? null : self::normalize_run( $run );
+	public static function finish_run( string $run_id, string $status = self::STATUS_COMPLETED, ?WP_Agent_Workspace_Scope $workspace = null ) {
+		$allow_legacy = null === $workspace && ( ! class_exists( '\wpdb' ) || self::run_is_unowned( $run_id, $workspace ) );
+		try {
+			$result = self::mutate_state(
+			static function ( array $state ) use ( $run_id, $status ): array {
+				$run = $state['runs'][ $run_id ] ?? null;
+				if ( ! is_array( $run ) ) {
+					return array( 'state' => $state, 'result' => null );
+				}
+				$run['status']     = self::normalize_status( $status );
+				$run['updated_at'] = self::now();
+				if ( self::STATUS_CANCELLED === $run['status'] ) {
+					$run['cancelled'] = true;
+				}
+				$state['runs'][ $run_id ] = $run;
+				$state = self::record_event( $state, $run_id, 'run_finished', array( 'status' => $run['status'] ) );
+				return array( 'state' => $state, 'result' => self::normalize_run( $run ) );
+			},
+				$workspace,
+				$allow_legacy
+			);
+		} catch ( \RuntimeException $error ) {
+			return self::atomic_unavailable( $error );
+		}
+		return is_array( $result ) ? self::normalize_run( WP_Agent_Run_Control::string_keyed_array( $result ) ) : null;
 	}
 
 	/**
@@ -244,15 +384,35 @@ class WP_Agent_Chat_Run_Control {
 	 *
 	 * @param string $run_id Run ID.
 	 * @param array<string,mixed>|null $owner Canonical conversation owner.
-	 * @return array<string,mixed>|null Normalized run, or null when absent.
+	 * @return array<string,mixed>|null|\WP_Error Normalized run, null when absent, or a storage error.
 	 */
-	public static function request_cancel( string $run_id, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ): ?array {
+	public static function request_cancel( string $run_id, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ) {
 		if ( ! self::can_access_run( $run_id, $workspace, $owner ) ) {
 			return null;
 		}
 
-		$run = WP_Agent_Run_Control::request_cancel( self::OPTION_KEY, $run_id, $workspace );
-		return null === $run ? null : self::normalize_run( $run );
+		try {
+			$result = self::mutate_state(
+			static function ( array $state ) use ( $run_id, $owner ): array {
+				$run = $state['runs'][ $run_id ] ?? null;
+				if ( ! is_array( $run ) || ! self::owner_matches( $run['_owner'] ?? '', $owner ) ) {
+					return array( 'state' => $state, 'result' => null );
+				}
+				$terminal          = in_array( self::normalize_status( $run['status'] ?? '' ), array( self::STATUS_COMPLETED, self::STATUS_FAILED, self::STATUS_CANCELLED, self::STATUS_BUDGET_EXCEEDED, self::STATUS_STALLED, self::STATUS_INTERRUPTED ), true );
+				$run['status']     = $terminal ? self::normalize_status( $run['status'] ?? '' ) : self::STATUS_CANCELLING;
+				$run['cancelled']  = ! $terminal;
+				$run['updated_at'] = self::now();
+				$state['runs'][ $run_id ] = $run;
+				$state = self::record_event( $state, $run_id, 'cancel_requested', array( 'status' => $run['status'] ) );
+				return array( 'state' => $state, 'result' => self::normalize_run( $run ) );
+			},
+				$workspace,
+				null === $workspace && '' === self::owner_fingerprint( $owner )
+			);
+		} catch ( \RuntimeException $error ) {
+			return self::atomic_unavailable( $error );
+		}
+		return is_array( $result ) ? self::normalize_run( WP_Agent_Run_Control::string_keyed_array( $result ) ) : null;
 	}
 
 	/**
@@ -287,39 +447,58 @@ class WP_Agent_Chat_Run_Control {
 			throw new \InvalidArgumentException( 'session_id must be a non-empty string' );
 		}
 
-		$target = self::queue_target( $input, $workspace, $owner, $conversation_store );
-		if ( $target instanceof \WP_Error ) {
-			return $target;
+		$canonical_owner = self::session_owner_fingerprint( $session_id, $workspace, $owner, $conversation_store );
+		if ( $canonical_owner instanceof \WP_Error ) {
+			return $canonical_owner;
 		}
-		$run_id = $target['run_id'];
 
-		$queued_id = 'queued_' . str_replace( 'run_', '', self::generate_run_id() );
-		$item      = array(
-			'queued_message_id' => $queued_id,
-			'session_id'        => $session_id,
-			'run_id'            => $run_id,
-			'agent'             => sanitize_title( self::string_value( $input['agent'] ?? null ) ),
-			'message'           => self::string_value( $input['message'] ?? null ),
-			'attachments'       => is_array( $input['attachments'] ?? null ) ? $input['attachments'] : array(),
-			'client_context'    => is_array( $input['client_context'] ?? null ) ? $input['client_context'] : array(),
-			'created_at'        => self::now(),
-			'_owner'            => $target['owner_fingerprint'],
-		);
-
-		$state                            = self::state( $workspace );
-		$state['queues'][ $session_id ]   = array_values( $state['queues'][ $session_id ] ?? array() );
-		$state['queues'][ $session_id ][] = $item;
-		$position                         = count( $state['queues'][ $session_id ] );
-		self::save_state( $state, $workspace );
-
-		return self::normalize_run( array(
-			'run_id'            => $run_id,
-			'session_id'        => $session_id,
-			'status'            => self::STATUS_QUEUED,
-			'updated_at'        => self::now(),
-			'queued_message_id' => $queued_id,
-			'position'          => $position,
-		) );
+		try {
+			$result = self::mutate_state(
+			static function ( array $state ) use ( $input, $session_id, $canonical_owner ): array {
+				$target = self::queue_target_from_state( $input, $state, $canonical_owner );
+				if ( $target instanceof \WP_Error ) {
+					return array( 'state' => $state, 'result' => $target );
+				}
+				$queued_id = 'queued_' . str_replace( 'run_', '', self::generate_run_id() );
+				$item = array(
+					'queued_message_id' => $queued_id,
+					'session_id'        => $session_id,
+					'run_id'            => $target['run_id'],
+					'agent'             => sanitize_title( self::string_value( $input['agent'] ?? null ) ),
+					'message'           => self::string_value( $input['message'] ?? null ),
+					'attachments'       => is_array( $input['attachments'] ?? null ) ? $input['attachments'] : array(),
+					'client_context'    => is_array( $input['client_context'] ?? null ) ? $input['client_context'] : array(),
+					'created_at'        => self::now(),
+					'_owner'            => $canonical_owner,
+				);
+				$state['queues'][ $session_id ]   = array_values( $state['queues'][ $session_id ] ?? array() );
+				$state['queues'][ $session_id ][] = $item;
+				$position = count( $state['queues'][ $session_id ] );
+				return array(
+					'state'  => $state,
+					'result' => self::normalize_run( array(
+						'run_id'            => $target['run_id'],
+						'session_id'        => $session_id,
+						'status'            => self::STATUS_QUEUED,
+						'updated_at'        => self::now(),
+						'queued_message_id' => $queued_id,
+						'position'          => $position,
+					) ),
+				);
+			},
+				$workspace,
+				'' === $canonical_owner
+			);
+		} catch ( \RuntimeException $error ) {
+			return self::atomic_unavailable( $error );
+		}
+		if ( $result instanceof \WP_Error ) {
+			return $result;
+		}
+		if ( ! is_array( $result ) ) {
+			throw new \RuntimeException( 'Atomic chat queue mutation returned an invalid result.' );
+		}
+		return self::normalize_run( WP_Agent_Run_Control::string_keyed_array( $result ) );
 	}
 
 	/**
@@ -327,22 +506,43 @@ class WP_Agent_Chat_Run_Control {
 	 *
 	 * @param string $session_id Session ID.
 	 * @param array<string,mixed>|null $owner Canonical conversation owner.
-	 * @return array<int,array<string,mixed>> Queued items.
+	 * @return array<int,array<string,mixed>>|\WP_Error Queued items or a storage error.
 	 */
-	public static function claim_queued_messages( string $session_id, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null, ?WP_Agent_Conversation_Store $conversation_store = null ): array {
+	public static function claim_queued_messages( string $session_id, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null, ?WP_Agent_Conversation_Store $conversation_store = null ): array|\WP_Error {
 		$canonical_owner = self::session_owner_fingerprint( $session_id, $workspace, $owner, $conversation_store );
 		if ( $canonical_owner instanceof \WP_Error ) {
-			return array();
+			return $canonical_owner;
 		}
 
-		$state = self::state( $workspace );
-		$items = array_values( array_filter(
-			$state['queues'][ $session_id ] ?? array(),
-			static fn( array $item ): bool => self::fingerprint_matches( $item['_owner'] ?? null, $canonical_owner )
-		) );
-		unset( $state['queues'][ $session_id ] );
-		self::save_state( $state, $workspace );
-		return array_map( array( self::class, 'public_queue_item' ), $items );
+		try {
+			$result = self::mutate_state(
+			static function ( array $state ) use ( $session_id, $canonical_owner ): array {
+				$items = array_values( array_filter(
+					$state['queues'][ $session_id ] ?? array(),
+					static fn( array $item ): bool => self::fingerprint_matches( $item['_owner'] ?? null, $canonical_owner )
+				) );
+				unset( $state['queues'][ $session_id ] );
+				return array(
+					'state'  => $state,
+					'result' => array_map( array( self::class, 'public_queue_item' ), $items ),
+				);
+			},
+				$workspace,
+				'' === $canonical_owner
+			);
+		} catch ( \RuntimeException $error ) {
+			return self::atomic_unavailable( $error );
+		}
+		if ( ! is_array( $result ) ) {
+			return array();
+		}
+		$items = array();
+		foreach ( $result as $item ) {
+			if ( is_array( $item ) ) {
+				$items[] = WP_Agent_Run_Control::string_keyed_array( $item );
+			}
+		}
+		return $items;
 	}
 
 	/**
@@ -413,11 +613,6 @@ class WP_Agent_Chat_Run_Control {
 		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (int) $value : 0;
 	}
 
-	/** @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state State to persist. */
-	private static function save_state( array $state, ?WP_Agent_Workspace_Scope $workspace = null ): void {
-		WP_Agent_Run_Control::save_state( self::OPTION_KEY, $state, $workspace );
-	}
-
 	/** @param array<string,mixed>|null $owner */
 	private static function owner_fingerprint( ?array $owner ): string {
 		if ( ! is_string( $owner['type'] ?? null ) || ! is_string( $owner['key'] ?? null ) ) {
@@ -448,12 +643,21 @@ class WP_Agent_Chat_Run_Control {
 	 */
 	private static function queue_target( array $input, ?WP_Agent_Workspace_Scope $workspace, ?array $owner, ?WP_Agent_Conversation_Store $conversation_store ) {
 		$session_id      = trim( self::string_value( $input['session_id'] ?? null ) );
-		$run_id          = trim( self::string_value( $input['run_id'] ?? null ) );
-		$state           = self::state( $workspace );
 		$canonical_owner = self::session_owner_fingerprint( $session_id, $workspace, $owner, $conversation_store );
 		if ( $canonical_owner instanceof \WP_Error ) {
 			return $canonical_owner;
 		}
+		return self::queue_target_from_state( $input, self::state( $workspace ), $canonical_owner );
+	}
+
+	/**
+	 * @param array<string,mixed> $input Queue input.
+	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state Stored state.
+	 * @return array{run_id:string,owner_fingerprint:string}|\WP_Error
+	 */
+	private static function queue_target_from_state( array $input, array $state, string $canonical_owner ) {
+		$session_id = trim( self::string_value( $input['session_id'] ?? null ) );
+		$run_id     = trim( self::string_value( $input['run_id'] ?? null ) );
 
 		if ( '' !== $run_id ) {
 			$candidate = $state['runs'][ $run_id ] ?? null;
@@ -482,6 +686,57 @@ class WP_Agent_Chat_Run_Control {
 			'run_id'            => $run_id,
 			'owner_fingerprint' => $canonical_owner,
 		);
+	}
+
+	/**
+	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state
+	 * @param array<string,mixed> $metadata
+	 * @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}
+	 */
+	private static function record_event( array $state, string $run_id, string $type, array $metadata ): array {
+		$events = array_values( $state['events'][ $run_id ] ?? array() );
+		$events[] = array(
+			'id'         => (string) count( $events ),
+			'type'       => $type,
+			'created_at' => self::now(),
+			'metadata'   => $metadata,
+		);
+		$state['events'][ $run_id ] = $events;
+		return $state;
+	}
+
+	private static function atomic_unavailable( \RuntimeException $error ): \WP_Error {
+		return new \WP_Error( 'agents_chat_run_atomic_unavailable', $error->getMessage() );
+	}
+
+	/**
+	 * @param callable(array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}):array{state:array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>},result:mixed} $mutation
+	 */
+	private static function mutate_state( callable $mutation, ?WP_Agent_Workspace_Scope $workspace, bool $allow_unowned_site_legacy ): mixed {
+		$store = WP_Agent_Run_Control::store();
+		if ( null === $workspace && method_exists( $store, 'mutate_state' ) ) {
+			try {
+				return $store->mutate_state( self::OPTION_KEY, $mutation );
+			} catch ( \RuntimeException $error ) {
+				if ( ! $allow_unowned_site_legacy || class_exists( '\wpdb' ) ) {
+					throw $error;
+				}
+			}
+		}
+		if ( $workspace instanceof WP_Agent_Workspace_Scope && method_exists( $store, 'mutate_workspace_state' ) ) {
+			return $store->mutate_workspace_state( self::OPTION_KEY, $workspace, $mutation );
+		}
+		if ( null === $workspace && $allow_unowned_site_legacy ) {
+			$mutated = $mutation( self::state() );
+			WP_Agent_Run_Control::save_state( self::OPTION_KEY, $mutated['state'] );
+			return $mutated['result'];
+		}
+		throw new \RuntimeException( 'The registered run-control store does not support atomic chat state mutation.' );
+	}
+
+	private static function run_is_unowned( string $run_id, ?WP_Agent_Workspace_Scope $workspace ): bool {
+		$run = self::state( $workspace )['runs'][ $run_id ] ?? null;
+		return is_array( $run ) && '' === self::string_value( $run['_owner'] ?? '' );
 	}
 
 	/**
