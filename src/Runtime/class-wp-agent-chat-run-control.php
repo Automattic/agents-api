@@ -500,9 +500,9 @@ class WP_Agent_Chat_Run_Control {
 			return new \WP_Error( 'agents_chat_run_owner_required', 'Explicit workspace run control requires an authenticated conversation owner.' );
 		}
 
-		$binding_key   = hash( 'sha256', $session_id );
-		$binding_state = WP_Agent_Run_Control::state( self::SESSION_OWNER_OPTION_KEY, $workspace );
-		$binding       = $binding_state['runs'][ $binding_key ] ?? null;
+		$binding_store_key = self::SESSION_OWNER_OPTION_KEY . '_' . hash( 'sha256', $session_id );
+		$binding_state     = WP_Agent_Run_Control::state( $binding_store_key, $workspace );
+		$binding           = $binding_state['runs']['binding'] ?? null;
 		if ( is_array( $binding ) ) {
 			$stored = is_string( $binding['_owner'] ?? null ) ? $binding['_owner'] : '';
 			if ( $session_id !== self::string_value( $binding['session_id'] ?? '' ) || ! self::fingerprint_matches( $stored, $fingerprint ) ) {
@@ -533,13 +533,27 @@ class WP_Agent_Chat_Run_Control {
 			return new \WP_Error( 'agents_chat_run_not_found', 'No chat run was found for the requested session.' );
 		}
 
-		$binding_state['runs'][ $binding_key ] = array(
-			'session_id' => $session_id,
-			'_owner'     => $fingerprint,
+		$initial_state = array(
+			'runs'   => array(
+				'binding' => array(
+					'session_id' => $session_id,
+					'_owner'     => $fingerprint,
+				),
+			),
+			'queues' => array(),
+			'events' => array(),
 		);
-		WP_Agent_Run_Control::save_state( self::SESSION_OWNER_OPTION_KEY, $binding_state, $workspace );
+		if ( WP_Agent_Run_Control::create_state_if_absent( $binding_store_key, $initial_state, $workspace ) ) {
+			return $fingerprint;
+		}
 
-		return $fingerprint;
+		$binding = WP_Agent_Run_Control::state( $binding_store_key, $workspace )['runs']['binding'] ?? null;
+		$stored  = is_array( $binding ) && is_string( $binding['_owner'] ?? null ) ? $binding['_owner'] : '';
+		if ( ! is_array( $binding ) || $session_id !== self::string_value( $binding['session_id'] ?? '' ) || ! self::fingerprint_matches( $stored, $fingerprint ) ) {
+			return new \WP_Error( 'agents_chat_run_owner_forbidden', 'The session is owned by another conversation principal.' );
+		}
+
+		return $stored;
 	}
 
 	/** @param array<string,mixed>|null $owner */

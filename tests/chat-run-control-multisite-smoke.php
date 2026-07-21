@@ -25,6 +25,8 @@ $GLOBALS['__agents_api_multisite_stack']    = array();
 $GLOBALS['__agents_api_multisite_options']  = array();
 $GLOBALS['__agents_api_multisite_network']  = array();
 $GLOBALS['__agents_api_multisite_user']     = 123;
+$GLOBALS['__agents_api_site_add_before']    = null;
+$GLOBALS['__agents_api_network_add_before'] = null;
 
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {
@@ -63,11 +65,39 @@ function update_option( string $option, $value, $autoload = null ): bool {
 	return true;
 }
 
+function add_option( string $option, $value = '', $deprecated = '', $autoload = null ): bool {
+	unset( $deprecated, $autoload );
+	$before = $GLOBALS['__agents_api_site_add_before'];
+	$GLOBALS['__agents_api_site_add_before'] = null;
+	if ( is_callable( $before ) ) {
+		$before();
+	}
+	$blog_id = get_current_blog_id();
+	if ( array_key_exists( $option, $GLOBALS['__agents_api_multisite_options'][ $blog_id ] ?? array() ) ) {
+		return false;
+	}
+	$GLOBALS['__agents_api_multisite_options'][ $blog_id ][ $option ] = $value;
+	return true;
+}
+
 function get_site_option( string $option, $default = false ) {
 	return $GLOBALS['__agents_api_multisite_network'][ $option ] ?? $default;
 }
 
 function update_site_option( string $option, $value ): bool {
+	$GLOBALS['__agents_api_multisite_network'][ $option ] = $value;
+	return true;
+}
+
+function add_site_option( string $option, $value ): bool {
+	$before = $GLOBALS['__agents_api_network_add_before'];
+	$GLOBALS['__agents_api_network_add_before'] = null;
+	if ( is_callable( $before ) ) {
+		$before();
+	}
+	if ( array_key_exists( $option, $GLOBALS['__agents_api_multisite_network'] ) ) {
+		return false;
+	}
 	$GLOBALS['__agents_api_multisite_network'][ $option ] = $value;
 	return true;
 }
@@ -103,6 +133,8 @@ function wp_register_ability( string $ability, array $args ): void {
 agents_api_smoke_require_module();
 
 use AgentsAPI\AI\WP_Agent_Chat_Run_Control;
+use AgentsAPI\AI\WP_Agent_Conversation_Loop;
+use AgentsAPI\AI\WP_Agent_Message;
 use AgentsAPI\AI\WP_Agent_Execution_Principal;
 use AgentsAPI\AI\WP_Agent_Run_Control;
 use AgentsAPI\AI\WP_Agent_Run_Control_Store;
@@ -169,6 +201,24 @@ $foreign_run = agents_chat_dispatch(
 agents_api_smoke_assert_equals( 'agents_chat_run_owner_forbidden', $foreign_run instanceof WP_Error ? $foreign_run->get_error_code() : '', 'foreign principal cannot create a separately owned run for the victim session', $failures, $passes );
 $foreign_run_state = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope );
 agents_api_smoke_assert_equals( false, isset( $foreign_run_state['runs'][ $foreign_run_id ] ), 'denied foreign run is not persisted', $failures, $passes );
+
+$foreign_turns = 0;
+$foreign_loop  = WP_Agent_Conversation_Loop::run(
+	array( WP_Agent_Message::text( 'user', 'foreign turn' ) ),
+	static function () use ( &$foreign_turns ): array {
+		++$foreign_turns;
+		return array( 'messages' => array() );
+	},
+	array(
+		'run_id'                => 'run_foreign_loop',
+		'transcript_session_id' => 'network-session',
+		'workspace'             => $workspace_scope,
+		'principal'             => $other_principal,
+	)
+);
+agents_api_smoke_assert_equals( 'failed', $foreign_loop['status'] ?? null, 'conversation loop surfaces session owner conflicts as failures', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_chat_run_owner_forbidden', $foreign_loop['failure']['code'] ?? null, 'conversation loop preserves the owner-conflict error code', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $foreign_turns, 'conversation loop stops before foreign model or tool execution', $failures, $passes );
 $GLOBALS['__agents_api_multisite_user'] = 123;
 
 $queued = agents_queue_chat_message(
@@ -340,6 +390,27 @@ $legacy_origin = WP_Agent_Chat_Run_Control::get_run( 'legacy-run', null, $owner 
 agents_api_smoke_assert_equals( 'legacy-run', $legacy_origin['run_id'] ?? null, 'omitted workspace compatibility remains readable on its origin site', $failures, $passes );
 $legacy_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'legacy-session', null, $owner );
 agents_api_smoke_assert_equals( 'legacy continuation', $legacy_claim[0]['message'] ?? null, 'omitted-workspace owner queue still progresses on its origin site', $failures, $passes );
+
+$site_race_nested = null;
+$GLOBALS['__agents_api_site_add_before'] = static function () use ( &$site_race_nested, $other_owner ): void {
+	$site_race_nested = WP_Agent_Chat_Run_Control::start_run( 'site-race-foreign', 'site-race-session', array(), null, $other_owner );
+};
+$site_race_outer = WP_Agent_Chat_Run_Control::start_run( 'site-race-owner', 'site-race-session', array(), null, $owner );
+agents_api_smoke_assert_equals( false, $site_race_nested instanceof WP_Error, 'site-local atomic create admits one interleaved first owner', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_chat_run_owner_forbidden', $site_race_outer instanceof WP_Error ? $site_race_outer->get_error_code() : '', 'site-local atomic create rejects the losing concurrent owner', $failures, $passes );
+agents_api_smoke_assert_equals( null, WP_Agent_Chat_Run_Control::get_run( 'site-race-owner', null, $owner ), 'site-local losing run is never persisted', $failures, $passes );
+agents_api_smoke_assert_equals( 'site-race-foreign', WP_Agent_Chat_Run_Control::get_run( 'site-race-foreign', null, $other_owner )['run_id'] ?? null, 'site-local winning owner remains canonical', $failures, $passes );
+
+$workspace_race_nested = null;
+$GLOBALS['__agents_api_network_add_before'] = static function () use ( &$workspace_race_nested, $other_owner, $workspace_scope ): void {
+	$workspace_race_nested = WP_Agent_Chat_Run_Control::start_run( 'workspace-race-foreign', 'workspace-race-session', array(), $workspace_scope, $other_owner );
+};
+$workspace_race_outer = WP_Agent_Chat_Run_Control::start_run( 'workspace-race-owner', 'workspace-race-session', array(), $workspace_scope, $owner );
+agents_api_smoke_assert_equals( false, $workspace_race_nested instanceof WP_Error, 'workspace atomic create admits one interleaved first owner', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_chat_run_owner_forbidden', $workspace_race_outer instanceof WP_Error ? $workspace_race_outer->get_error_code() : '', 'workspace atomic create rejects the losing concurrent owner', $failures, $passes );
+agents_api_smoke_assert_equals( null, WP_Agent_Chat_Run_Control::get_run( 'workspace-race-owner', $workspace_scope, $owner ), 'workspace losing run is never persisted', $failures, $passes );
+agents_api_smoke_assert_equals( 'workspace-race-foreign', WP_Agent_Chat_Run_Control::get_run( 'workspace-race-foreign', $workspace_scope, $other_owner )['run_id'] ?? null, 'workspace winning owner remains canonical', $failures, $passes );
+agents_api_smoke_assert_equals( 1, get_current_blog_id(), 'atomic site and workspace interleavings preserve blog context', $failures, $passes );
 
 $unsupported_store = new class() implements WP_Agent_Run_Control_Store {
 	public function get_state( string $store_key ): array {

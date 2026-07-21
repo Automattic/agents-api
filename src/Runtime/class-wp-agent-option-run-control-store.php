@@ -11,14 +11,14 @@ use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 
 defined( 'ABSPATH' ) || exit;
 
-if ( ! interface_exists( WP_Agent_Workspace_Run_Control_Store::class ) ) {
-	require_once __DIR__ . '/interface-wp-agent-workspace-run-control-store.php';
+if ( ! interface_exists( WP_Agent_Atomic_Workspace_Run_Control_Store::class ) ) {
+	require_once __DIR__ . '/interface-wp-agent-atomic-workspace-run-control-store.php';
 }
 
 /**
  * Persists run-control state in WordPress options.
  */
-class WP_Agent_Option_Run_Control_Store implements WP_Agent_Workspace_Run_Control_Store {
+class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run_Control_Store {
 
 	/**
 	 * @param string $store_key Store key.
@@ -45,6 +45,23 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Workspace_Run_Contro
 		if ( function_exists( 'update_option' ) ) {
 			update_option( $store_key, $state, false );
 		}
+	}
+
+	/**
+	 * Atomically create site-local state using the option-name unique key.
+	 *
+	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state Initial state envelope.
+	 */
+	public function create_state_if_absent( string $store_key, array $state ): bool {
+		if ( ! function_exists( 'add_option' ) ) {
+			if ( ! function_exists( 'get_option' ) && ! function_exists( 'update_option' ) ) {
+				// Pure-PHP harnesses have no shared store or concurrent writer.
+				return true;
+			}
+			throw new \RuntimeException( 'The run-control store cannot atomically create site state.' );
+		}
+
+		return add_option( $store_key, $state, '', false );
 	}
 
 	/**
@@ -82,6 +99,19 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Workspace_Run_Contro
 		}
 
 		update_site_option( $this->workspace_option_key( $store_key, $workspace ), $state );
+	}
+
+	/**
+	 * Atomically create workspace state using the network option-name unique key.
+	 *
+	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state Initial state envelope.
+	 */
+	public function create_workspace_state_if_absent( string $store_key, WP_Agent_Workspace_Scope $workspace, array $state ): bool {
+		if ( ! function_exists( 'add_site_option' ) ) {
+			throw new \RuntimeException( 'The run-control store cannot atomically create workspace state.' );
+		}
+
+		return add_site_option( $this->workspace_option_key( $store_key, $workspace ), $state );
 	}
 
 	private function workspace_option_key( string $store_key, WP_Agent_Workspace_Scope $workspace ): string {

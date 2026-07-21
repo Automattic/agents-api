@@ -420,6 +420,26 @@ class WP_Agent_Run_Control {
 		$store->save_workspace_state( $store_key, $workspace, $state );
 	}
 
+	/**
+	 * Atomically create state when no state exists for the selected scope.
+	 *
+	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state Initial state envelope.
+	 */
+	public static function create_state_if_absent( string $store_key, array $state, ?WP_Agent_Workspace_Scope $workspace = null ): bool {
+		$store = self::store();
+		if ( null === $workspace ) {
+			if ( ! $store instanceof WP_Agent_Atomic_Run_Control_Store ) {
+				throw new \RuntimeException( 'The registered run-control store does not support atomic state creation.' );
+			}
+			return $store->create_state_if_absent( $store_key, $state );
+		}
+		if ( ! $store instanceof WP_Agent_Atomic_Workspace_Run_Control_Store ) {
+			throw new \RuntimeException( 'The registered run-control store does not support atomic workspace state creation.' );
+		}
+
+		return $store->create_workspace_state_if_absent( $store_key, $workspace, $state );
+	}
+
 	public static function now(): string {
 		return gmdate( 'c' );
 	}
