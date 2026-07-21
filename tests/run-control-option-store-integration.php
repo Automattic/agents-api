@@ -56,6 +56,10 @@ function is_multisite(): bool {
 	return (bool) ( $GLOBALS['__agents_api_integration_multisite'] ?? true );
 }
 
+function absint( mixed $value ): int {
+	return abs( (int) $value );
+}
+
 function sanitize_title( string $value ): string {
 	return strtolower( (string) preg_replace( '/[^a-z0-9_-]+/i', '-', $value ) );
 }
