@@ -231,8 +231,6 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-tool-lifecycl
 require_once AGENTS_API_PATH . 'src/Runtime/register-runtime-tool-lifecycle-abilities.php';
 require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-workspace-run-control-store.php';
-require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-atomic-run-control-store.php';
-require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-atomic-workspace-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-option-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-control.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-result-envelope.php';

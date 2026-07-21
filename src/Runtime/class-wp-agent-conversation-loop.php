@@ -135,7 +135,8 @@ class WP_Agent_Conversation_Loop {
 		self::emit_tool_declaration_diagnostics( $on_event, $rejected_declarations, $tool_declarations, $tool_executor );
 		$messages = self::normalize_messages( $messages );
 		if ( '' !== $run_id && '' !== $lock_session_id ) {
-			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, array( 'source' => 'conversation_loop' ), $run_workspace, $run_owner );
+			$conversation_store = ( $context['conversation_store'] ?? null ) instanceof \AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store ? $context['conversation_store'] : null;
+			$started            = WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, array( 'source' => 'conversation_loop' ), $run_workspace, $run_owner, $conversation_store );
 			if ( is_wp_error( $started ) ) {
 				self::emit_event( $on_event, 'failed', array( 'error' => $started->get_error_message() ) );
 				return self::run_control_failure_result( $messages, $started );
@@ -1122,10 +1123,10 @@ class WP_Agent_Conversation_Loop {
 	}
 
 	/**
-	 * Build a failure result when run ownership rejects execution before turn zero.
+	 * Build a failure result when canonical session ownership rejects turn zero.
 	 *
 	 * @param array<int,array<string,mixed>> $messages Normalized input messages.
-	 * @return array<string,mixed> Normalized conversation failure result.
+	 * @return array<string,mixed>
 	 */
 	private static function run_control_failure_result( array $messages, \WP_Error $error ): array {
 		return self::normalize_conversation_result( array(

@@ -7,6 +7,8 @@
 
 namespace AgentsAPI\AI;
 
+use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Sessions;
+use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store;
 use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 
 defined( 'ABSPATH' ) || exit;
@@ -28,7 +30,6 @@ class WP_Agent_Chat_Run_Control {
 	public const STATUS_STALLED              = 'stalled';
 	public const STATUS_INTERRUPTED          = 'interrupted';
 	private const OPTION_KEY                 = 'agents_api_chat_run_control';
-	private const SESSION_OWNER_OPTION_KEY   = 'agents_api_chat_session_owners';
 
 	/** @return string[] */
 	public static function statuses(): array {
@@ -48,10 +49,10 @@ class WP_Agent_Chat_Run_Control {
 	}
 
 	/**
-	 * Resolve and bind canonical workspace and principal ownership.
+	 * Resolve canonical workspace, principal, and conversation store context.
 	 *
 	 * @param array<mixed> $input Ability input.
-	 * @return array{workspace:?WP_Agent_Workspace_Scope,owner:?array{type:string,key:string}}|\WP_Error
+	 * @return array{workspace:?WP_Agent_Workspace_Scope,owner:?array{type:string,key:string},conversation_store:?WP_Agent_Conversation_Store}|\WP_Error
 	 */
 	public static function context_from_input( array $input ) {
 		$workspace = null;
@@ -113,8 +114,9 @@ class WP_Agent_Chat_Run_Control {
 		}
 
 		return array(
-			'workspace' => $workspace,
-			'owner'     => $owner,
+			'workspace'          => $workspace,
+			'owner'              => $owner,
+			'conversation_store' => WP_Agent_Conversation_Sessions::get_store( WP_Agent_Run_Control::string_keyed_array( $input ) ),
 		);
 	}
 
@@ -185,8 +187,8 @@ class WP_Agent_Chat_Run_Control {
 	 * @param array<string,mixed>|null $owner Canonical conversation owner.
 	 * @return array<string,mixed>|\WP_Error Normalized run.
 	 */
-	public static function start_run( string $run_id, string $session_id, array $metadata = array(), ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ) {
-		$canonical_owner = self::session_owner_fingerprint( $session_id, $workspace, $owner, true );
+	public static function start_run( string $run_id, string $session_id, array $metadata = array(), ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null, ?WP_Agent_Conversation_Store $conversation_store = null ) {
+		$canonical_owner = self::session_owner_fingerprint( $session_id, $workspace, $owner, $conversation_store );
 		if ( $canonical_owner instanceof \WP_Error ) {
 			return $canonical_owner;
 		}
@@ -279,13 +281,13 @@ class WP_Agent_Chat_Run_Control {
 	 * @param array<string,mixed>|null $owner Canonical conversation owner.
 	 * @return array<string,mixed>|\WP_Error Queue result.
 	 */
-	public static function queue_message( array $input, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ) {
+	public static function queue_message( array $input, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null, ?WP_Agent_Conversation_Store $conversation_store = null ) {
 		$session_id = trim( self::string_value( $input['session_id'] ?? null ) );
 		if ( '' === $session_id ) {
 			throw new \InvalidArgumentException( 'session_id must be a non-empty string' );
 		}
 
-		$target = self::queue_target( $input, $workspace, $owner );
+		$target = self::queue_target( $input, $workspace, $owner, $conversation_store );
 		if ( $target instanceof \WP_Error ) {
 			return $target;
 		}
@@ -327,8 +329,8 @@ class WP_Agent_Chat_Run_Control {
 	 * @param array<string,mixed>|null $owner Canonical conversation owner.
 	 * @return array<int,array<string,mixed>> Queued items.
 	 */
-	public static function claim_queued_messages( string $session_id, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ): array {
-		$canonical_owner = self::session_owner_fingerprint( $session_id, $workspace, $owner, false );
+	public static function claim_queued_messages( string $session_id, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null, ?WP_Agent_Conversation_Store $conversation_store = null ): array {
+		$canonical_owner = self::session_owner_fingerprint( $session_id, $workspace, $owner, $conversation_store );
 		if ( $canonical_owner instanceof \WP_Error ) {
 			return array();
 		}
@@ -349,8 +351,8 @@ class WP_Agent_Chat_Run_Control {
 	 * @param array<string,mixed>      $input Canonical queue input.
 	 * @param array<string,mixed>|null $owner Canonical conversation owner.
 	 */
-	public static function can_queue_message( array $input, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ): bool {
-		return ! ( self::queue_target( $input, $workspace, $owner ) instanceof \WP_Error );
+	public static function can_queue_message( array $input, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null, ?WP_Agent_Conversation_Store $conversation_store = null ): bool {
+		return ! ( self::queue_target( $input, $workspace, $owner, $conversation_store ) instanceof \WP_Error );
 	}
 
 	/**
@@ -428,7 +430,8 @@ class WP_Agent_Chat_Run_Control {
 	/** @param array<string,mixed>|null $owner */
 	private static function owner_matches( mixed $stored, ?array $owner ): bool {
 		$stored = is_string( $stored ) ? $stored : '';
-		return '' === $stored || ( '' !== self::owner_fingerprint( $owner ) && hash_equals( $stored, self::owner_fingerprint( $owner ) ) );
+		$fingerprint = self::owner_fingerprint( $owner );
+		return '' === $stored ? '' === $fingerprint : '' !== $fingerprint && hash_equals( $stored, $fingerprint );
 	}
 
 	private static function fingerprint_matches( mixed $stored, string $expected ): bool {
@@ -443,11 +446,11 @@ class WP_Agent_Chat_Run_Control {
 	 * @param array<string,mixed>|null $owner Resolved principal owner.
 	 * @return array{run_id:string,owner_fingerprint:string}|\WP_Error
 	 */
-	private static function queue_target( array $input, ?WP_Agent_Workspace_Scope $workspace, ?array $owner ) {
+	private static function queue_target( array $input, ?WP_Agent_Workspace_Scope $workspace, ?array $owner, ?WP_Agent_Conversation_Store $conversation_store ) {
 		$session_id      = trim( self::string_value( $input['session_id'] ?? null ) );
 		$run_id          = trim( self::string_value( $input['run_id'] ?? null ) );
 		$state           = self::state( $workspace );
-		$canonical_owner = self::session_owner_fingerprint( $session_id, $workspace, $owner, false );
+		$canonical_owner = self::session_owner_fingerprint( $session_id, $workspace, $owner, $conversation_store );
 		if ( $canonical_owner instanceof \WP_Error ) {
 			return $canonical_owner;
 		}
@@ -482,17 +485,15 @@ class WP_Agent_Chat_Run_Control {
 	}
 
 	/**
-	 * Resolve or create the immutable owner binding for a session.
-	 *
-	 * Existing runs are consulted only to migrate pre-binding state. Conflicting
-	 * historical owners fail closed without changing the binding or queue.
+	 * Resolve ownership from the canonical conversation store.
 	 *
 	 * @param array<string,mixed>|null $owner Resolved principal owner.
 	 * @return string|\WP_Error Canonical owner fingerprint.
 	 */
-	private static function session_owner_fingerprint( string $session_id, ?WP_Agent_Workspace_Scope $workspace, ?array $owner, bool $create ) {
+	private static function session_owner_fingerprint( string $session_id, ?WP_Agent_Workspace_Scope $workspace, ?array $owner, ?WP_Agent_Conversation_Store $conversation_store ) {
 		$session_id  = trim( $session_id );
 		$fingerprint = self::owner_fingerprint( $owner );
+		$conversation_store ??= WP_Agent_Conversation_Sessions::get_store();
 		if ( '' === $session_id ) {
 			return new \WP_Error( 'agents_chat_run_not_found', 'No chat session was requested.' );
 		}
@@ -500,17 +501,33 @@ class WP_Agent_Chat_Run_Control {
 			return new \WP_Error( 'agents_chat_run_owner_required', 'Explicit workspace run control requires an authenticated conversation owner.' );
 		}
 
-		$binding_store_key = self::SESSION_OWNER_OPTION_KEY . '_' . hash( 'sha256', $session_id );
-		$binding_state     = WP_Agent_Run_Control::state( $binding_store_key, $workspace );
-		$binding           = $binding_state['runs']['binding'] ?? null;
-		if ( is_array( $binding ) ) {
-			$stored = is_string( $binding['_owner'] ?? null ) ? $binding['_owner'] : '';
-			if ( $session_id !== self::string_value( $binding['session_id'] ?? '' ) || ! self::fingerprint_matches( $stored, $fingerprint ) ) {
-				return new \WP_Error( 'agents_chat_run_owner_forbidden', 'The session is owned by another conversation principal.' );
-			}
-			return $stored;
+		$canonical_workspace = $workspace;
+		if ( null === $canonical_workspace && $conversation_store instanceof WP_Agent_Conversation_Store && is_array( $owner ) ) {
+			$canonical_workspace = WP_Agent_Workspace_Scope::from_parts( 'site', function_exists( 'get_current_blog_id' ) ? (string) get_current_blog_id() : 'default' );
 		}
 
+		if ( $canonical_workspace instanceof WP_Agent_Workspace_Scope && $conversation_store instanceof WP_Agent_Conversation_Store ) {
+			if ( ! is_array( $owner ) ) {
+				return new \WP_Error( 'agents_chat_run_owner_forbidden', 'The canonical conversation session is not owned by this workspace principal.' );
+			}
+			$canonical_owner = array(
+				'type' => self::string_value( $owner['type'] ?? '' ),
+				'key'  => self::string_value( $owner['key'] ?? '' ),
+			);
+			if ( ! is_array( WP_Agent_Conversation_Sessions::get_owned_session( $conversation_store, $session_id, $canonical_workspace, $canonical_owner ) ) ) {
+				return new \WP_Error( 'agents_chat_run_owner_forbidden', 'The canonical conversation session is not owned by this workspace principal.' );
+			}
+			return $fingerprint;
+		}
+
+		if ( $workspace instanceof WP_Agent_Workspace_Scope ) {
+			if ( ! $conversation_store instanceof WP_Agent_Conversation_Store ) {
+				return new \WP_Error( 'agents_chat_run_session_store_required', 'Explicit workspace run control requires an authoritative conversation session store.' );
+			}
+		}
+
+		// Omitted-workspace compatibility is limited to ownership already proven
+		// by a site-local run. New principal-owned sessions need a canonical store.
 		$historical_owners = array();
 		foreach ( self::state( $workspace )['runs'] as $run ) {
 			if ( $session_id !== self::string_value( $run['session_id'] ?? '' ) ) {
@@ -529,31 +546,11 @@ class WP_Agent_Chat_Run_Control {
 				return new \WP_Error( 'agents_chat_run_owner_forbidden', 'The session is owned by another conversation principal.' );
 			}
 			$fingerprint = $stored;
-		} elseif ( ! $create ) {
-			return new \WP_Error( 'agents_chat_run_not_found', 'No chat run was found for the requested session.' );
+		} elseif ( '' !== $fingerprint ) {
+			return new \WP_Error( 'agents_chat_run_session_store_required', 'Principal-owned run control requires an authoritative conversation session store.' );
 		}
 
-		$initial_state = array(
-			'runs'   => array(
-				'binding' => array(
-					'session_id' => $session_id,
-					'_owner'     => $fingerprint,
-				),
-			),
-			'queues' => array(),
-			'events' => array(),
-		);
-		if ( WP_Agent_Run_Control::create_state_if_absent( $binding_store_key, $initial_state, $workspace ) ) {
-			return $fingerprint;
-		}
-
-		$binding = WP_Agent_Run_Control::state( $binding_store_key, $workspace )['runs']['binding'] ?? null;
-		$stored  = is_array( $binding ) && is_string( $binding['_owner'] ?? null ) ? $binding['_owner'] : '';
-		if ( ! is_array( $binding ) || $session_id !== self::string_value( $binding['session_id'] ?? '' ) || ! self::fingerprint_matches( $stored, $fingerprint ) ) {
-			return new \WP_Error( 'agents_chat_run_owner_forbidden', 'The session is owned by another conversation principal.' );
-		}
-
-		return $stored;
+		return $fingerprint;
 	}
 
 	/** @param array<string,mixed>|null $owner */

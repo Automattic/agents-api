@@ -34,17 +34,6 @@ if ( ! function_exists( 'update_option' ) ) {
 	}
 }
 
-if ( ! function_exists( 'add_option' ) ) {
-	function add_option( string $option, $value = '', $deprecated = '', $autoload = null ): bool {
-		unset( $deprecated, $autoload );
-		if ( array_key_exists( $option, $GLOBALS['__agents_api_smoke_options'] ) ) {
-			return false;
-		}
-		$GLOBALS['__agents_api_smoke_options'][ $option ] = $value;
-		return true;
-	}
-}
-
 agents_api_smoke_require_module();
 
 $executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {

@@ -233,7 +233,7 @@ function agents_queue_chat_message( array $input ) {
 		$input['workspace'] = $context['workspace']->to_array();
 	}
 	try {
-		if ( ! WP_Agent_Chat_Run_Control::can_queue_message( $input, $context['workspace'], $context['owner'] ) ) {
+		if ( ! WP_Agent_Chat_Run_Control::can_queue_message( $input, $context['workspace'], $context['owner'], $context['conversation_store'] ) ) {
 			return agents_chat_run_control_no_handler( 'agents_chat_run_not_found', 'No chat run was found for the requested session owner.' );
 		}
 	} catch ( \RuntimeException $error ) {
@@ -248,7 +248,7 @@ function agents_queue_chat_message( array $input ) {
 		$result = agents_chat_run_control_normalize_result( call_user_func( $handler, $input ), 'agents_chat_message_queue_invalid_result' );
 	} else {
 		try {
-			$result = WP_Agent_Chat_Run_Control::queue_message( $input, $context['workspace'], $context['owner'] );
+			$result = WP_Agent_Chat_Run_Control::queue_message( $input, $context['workspace'], $context['owner'], $context['conversation_store'] );
 		} catch ( \InvalidArgumentException|\RuntimeException $error ) {
 			return new \WP_Error( 'agents_chat_message_queue_invalid_result', $error->getMessage() );
 		}
@@ -293,7 +293,7 @@ function agents_chat_run_enqueue_permission( array $input ): bool {
 	$context = WP_Agent_Chat_Run_Control::context_from_input( $input );
 	if ( $allowed && ! is_wp_error( $context ) ) {
 		try {
-			$allowed = WP_Agent_Chat_Run_Control::can_queue_message( $input, $context['workspace'], $context['owner'] );
+			$allowed = WP_Agent_Chat_Run_Control::can_queue_message( $input, $context['workspace'], $context['owner'], $context['conversation_store'] );
 		} catch ( \RuntimeException $error ) {
 			unset( $error );
 			$allowed = false;
