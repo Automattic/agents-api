@@ -517,9 +517,14 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			if ( is_array( $results ) ) {
 				$fired = 0;
 				foreach ( $results as $result ) {
-					// A successful loopback returns a Requests Response; a torn-down one
-					// returns an exception. Count the ones the runtime accepted.
-					if ( $result instanceof \WpOrg\Requests\Response ) {
+					// A transport response alone does not prove the queue runner accepted
+					// the request: protected origins can return 403/5xx without executing
+					// Action Scheduler. Count only successful HTTP responses.
+					if (
+						$result instanceof \WpOrg\Requests\Response
+						&& $result->status_code >= 200
+						&& $result->status_code < 300
+					) {
 						++$fired;
 					}
 				}

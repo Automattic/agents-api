@@ -8,7 +8,9 @@
  */
 
 namespace WpOrg\Requests {
-	class Response {}
+	class Response {
+		public function __construct( public int $status_code ) {}
+	}
 
 	class Requests {
 		/** @var array<int,mixed> */
@@ -122,13 +124,25 @@ namespace {
 
 	Requests::$results = array(
 		new \RuntimeException( 'cURL error 7: Failed to connect to 127.0.0.1 port 443' ),
-		new Response(),
-		new Response(),
+		new Response( 200 ),
+		new Response( 204 ),
 	);
 	smoke_assert(
 		2,
 		WP_Agent_Workflow_Action_Scheduler_Branch_Executor::trigger_async_runner( 3 ),
 		'mixed parallel loopbacks report only accepted dispatches',
+		$failures,
+		$passes
+	);
+
+	Requests::$results = array(
+		new Response( 403 ),
+		new Response( 503 ),
+	);
+	smoke_assert(
+		0,
+		WP_Agent_Workflow_Action_Scheduler_Branch_Executor::trigger_async_runner( 2 ),
+		'rejected HTTP responses report 0 accepted dispatches',
 		$failures,
 		$passes
 	);
