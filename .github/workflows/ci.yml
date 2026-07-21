@@ -25,7 +25,7 @@ jobs:
             label: PHP smoke tests
 
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -47,17 +47,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - name: Checkout Docs Agent producer
-        uses: actions/checkout@v6.0.3
+        uses: actions/checkout@v7.0.0
         with:
           repository: Automattic/docs-agent
           ref: 7b67d341eea16b75b8e055507d36a8d8e69a1fe3
           path: .docs-agent-producer
 
       - name: Checkout WP Codebox producer schema
-        uses: actions/checkout@v6.0.3
+        uses: actions/checkout@v7.0.0
         with:
           repository: Automattic/wp-codebox
           ref: a6fe2d208e990a8d04104aa74aacbb8d1539fbc1
@@ -101,7 +101,7 @@ jobs:
           --health-retries=10
 
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
