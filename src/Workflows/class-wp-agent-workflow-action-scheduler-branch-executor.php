@@ -21,9 +21,10 @@
  * This is a DIFFERENT Action Scheduler use-case from the cron bridge
  * ({@see WP_Agent_Workflow_Action_Scheduler_Bridge}), which schedules ONE
  * recurring action per workflow trigger under `wp_agent_workflow_run_scheduled`.
- * This executor enqueues ONE async action PER BRANCH under a distinct hook,
- * plus one RESUME action per suspended run. Both reuse GROUP `agents-api` so an
- * operator has a single group to reason about; the hooks keep them separate.
+	 * This executor enqueues ONE async action PER BRANCH under a distinct hook,
+	 * plus one RESUME action per suspended run. New runs use one durable group per
+	 * run so foreground awaiters cannot claim another run's work; legacy in-flight
+	 * runs without a mapping retain GROUP `agents-api` across upgrades.
  *
  * The runner owns the suspend/resume state machine and the reconcile entry
  * point ({@see agents_reconcile_workflow_branch()}); this executor owns only the
@@ -38,6 +39,9 @@ namespace AgentsAPI\AI\Workflows;
 defined( 'ABSPATH' ) || exit;
 
 final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Agent_Workflow_Branch_Executor {
+
+	/** Option prefix mapping newly dispatched runs to their isolated AS group. */
+	private const RUN_GROUP_PREFIX = 'agents_wf_as_group_';
 
 	/**
 	 * Stable executor id stamped on every frame + handle so reconcile and the
@@ -100,6 +104,23 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 */
 	public static function is_available(): bool {
 		return function_exists( 'as_enqueue_async_action' );
+	}
+
+	/**
+	 * Resolve the durable queue group for a run.
+	 *
+	 * Runs dispatched before run-group isolation have no mapping and deliberately
+	 * retain the legacy shared group so an upgrade cannot strand in-flight actions.
+	 *
+	 * @since 0.5.2
+	 */
+	public static function group_for_run( string $run_id ): string {
+		if ( '' === $run_id || ! function_exists( 'get_option' ) ) {
+			return self::GROUP;
+		}
+
+		$group = get_option( self::RUN_GROUP_PREFIX . md5( $run_id ), '' );
+		return is_string( $group ) && '' !== $group ? $group : self::GROUP;
 	}
 
 	/**
@@ -198,7 +219,8 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 				'context_ref' => $context_ref,
 			);
 
-			$action_id = self::enqueue_async_action( self::BRANCH_HOOK, array( $payload ), self::GROUP );
+			$group     = self::ensure_run_group( $run_id );
+			$action_id = self::enqueue_async_action( self::BRANCH_HOOK, array( $payload ), $group );
 
 			// FAIL LOUD: a non-positive action id means the enqueue did not durably
 			// persist the branch (AS's args-size guard threw, AS is down, etc.).
@@ -209,6 +231,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			if ( $action_id <= 0 ) {
 				if ( '' !== $run_id ) {
 					WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
+					self::forget_run_group( $run_id );
 				}
 				return new \WP_Error(
 					'workflow_branch_dispatch_enqueue_failed',
@@ -889,9 +912,10 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * @param bool   $deferred    Whether resume is already deferred.
 	 * @param string $run_id      The suspended run id.
 	 * @param string $executor_id The frame's owning executor id.
+	 * @param mixed  $result      Current suspended run result.
 	 * @return bool True when this executor claimed the resume.
 	 */
-	public static function maybe_defer_resume( bool $deferred, string $run_id, string $executor_id ): bool {
+	public static function maybe_defer_resume( bool $deferred, string $run_id, string $executor_id, $result = null ): bool {
 		if ( $deferred ) {
 			return true;
 		}
@@ -904,13 +928,23 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			return false;
 		}
 
-		self::enqueue_async_action(
+		$suspension = is_object( $result ) && method_exists( $result, 'get_suspension' )
+			? self::string_keyed_array( (array) $result->get_suspension() )
+			: array();
+		$action_id = self::enqueue_async_action(
 			self::RESUME_HOOK,
-			array( array( 'run_id' => $run_id ) ),
-			self::GROUP
+			array(
+				array(
+					'run_id'        => $run_id,
+					'suspension_id' => self::suspension_id( $suspension ),
+				),
+			),
+			self::group_for_run( $run_id )
 		);
 
-		return true;
+		// If durable enqueue fails, return false so reconcile resumes inline rather
+		// than stranding a suspended run with no resume action.
+		return $action_id > 0;
 	}
 
 	/**
@@ -922,7 +956,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 *
 	 * @since 0.5.0
 	 *
-	 * @param array<mixed> $payload Action payload: { run_id }.
+	 * @param array<mixed> $payload Action payload: { run_id, suspension_id }.
 	 * @return void
 	 */
 	public static function run_resume_action( array $payload ): void {
@@ -941,16 +975,37 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			// Already resumed (or gone). The claimed action is a no-op. This is
 			// the second-of-two simultaneous finishers being deduped by AS's
 			// claim + this SUSPENDED re-check.
+			if ( null !== $result ) {
+				WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
+				self::forget_run_group( $run_id );
+			}
+			return;
+		}
+
+		$expected_suspension = self::string_value( $payload['suspension_id'] ?? '' );
+		if ( '' === $expected_suspension && self::GROUP !== self::group_for_run( $run_id ) ) {
+			// Tokenless actions predate suspension generations. They remain valid only
+			// for genuinely legacy runs that also lack a run-group mapping; once such a
+			// run advances into a new fan-out, its new mapping blocks delayed old actions.
+			return;
+		}
+		if ( '' !== $expected_suspension && ! hash_equals( $expected_suspension, self::suspension_id( $result->get_suspension() ) ) ) {
+			// A delayed duplicate from an earlier fan-out must not resume through the
+			// current, newer suspension generation.
 			return;
 		}
 
 		$runner = agents_workflow_resolve_runner( $recorder );
 		$runner->resume( $run_id );
 
-		// The run has resolved (the suspension frame was cleared by resume). Release
-		// this run's stored branch payloads so no orphan option rows linger — same
-		// cleanup discipline the suspension frame follows.
-		WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
+		// resume() can reach another parallel step and suspend again. Keep the shared
+		// group mapping and branch-store index until the run is truly terminal so the
+		// next foreground await claims the new fan-out in the same isolated scope.
+		$current = $recorder->find( $run_id );
+		if ( null !== $current && ! $current->is_suspended() ) {
+			WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
+			self::forget_run_group( $run_id );
+		}
 	}
 
 	// ── Internals ────────────────────────────────────────────────────────────
@@ -991,6 +1046,53 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			unset( $error );
 			return 0;
 		}
+	}
+
+	/** Persist and return the isolated group for a newly dispatched run. */
+	private static function ensure_run_group( string $run_id ): string {
+		$existing = self::group_for_run( $run_id );
+		if ( self::GROUP !== $existing || '' === $run_id || ! function_exists( 'update_option' ) || ! function_exists( 'get_option' ) ) {
+			return $existing;
+		}
+
+		$group = 'agents-api-run-' . md5( $run_id );
+		update_option( self::RUN_GROUP_PREFIX . md5( $run_id ), $group, false );
+
+		return self::group_for_run( $run_id );
+	}
+
+	/** Remove a terminal run's queue-group mapping. */
+	private static function forget_run_group( string $run_id ): void {
+		if ( '' !== $run_id && function_exists( 'delete_option' ) ) {
+			delete_option( self::RUN_GROUP_PREFIX . md5( $run_id ) );
+		}
+	}
+
+	/**
+	 * Derive a stable identity for one exact suspension generation.
+	 *
+	 * @param array<string,mixed> $suspension Suspension frame.
+	 */
+	private static function suspension_id( array $suspension ): string {
+		$handles = is_array( $suspension['handles'] ?? null ) ? $suspension['handles'] : array();
+		$ids     = array();
+		$step_index = is_numeric( $suspension['step_index'] ?? null ) ? (int) $suspension['step_index'] : 0;
+		foreach ( $handles as $handle ) {
+			if ( is_array( $handle ) ) {
+				$ids[] = self::string_value( $handle['id'] ?? '' );
+			}
+		}
+
+		return hash(
+			'sha256',
+			serialize(
+				array(
+					'step_index' => $step_index,
+					'step_id'    => self::string_value( $suspension['step_id'] ?? '' ),
+					'handles'    => $ids,
+				)
+			)
+		);
 	}
 
 	/**
