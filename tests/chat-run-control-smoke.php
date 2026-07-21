@@ -43,6 +43,12 @@ if ( ! function_exists( 'get_current_user_id' ) ) {
 	}
 }
 
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( string $value ): string {
+		return (string) preg_replace( '/[^a-z0-9_-]/', '', strtolower( $value ) );
+	}
+}
+
 if ( ! function_exists( 'wp_has_ability_category' ) ) {
 	function wp_has_ability_category( string $category ): bool {
 		return isset( $GLOBALS['__agents_api_smoke_categories'][ $category ] );
@@ -92,14 +98,16 @@ $chat_read_permission                  = 'AgentsAPI\AI\Channels\agents_chat_run_
 $chat_cancel_permission                = 'AgentsAPI\AI\Channels\agents_chat_run_cancel_permission';
 $chat_queue_permission                 = 'AgentsAPI\AI\Channels\agents_chat_run_enqueue_permission';
 
+AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-1', 'session-1', array(), null, array( 'type' => 'user', 'key' => '123' ) );
+
 agents_api_smoke_assert_equals( true, call_user_func( $chat_read_permission, array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) ), 'read-only user can read chat run status', $failures, $passes );
 agents_api_smoke_assert_equals( false, call_user_func( $chat_cancel_permission, array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) ), 'read-only user cannot cancel chat run by id alone', $failures, $passes );
 agents_api_smoke_assert_equals( false, call_user_func( $chat_queue_permission, array( 'agent' => 'demo-agent', 'session_id' => 'session-1', 'message' => 'Next' ) ), 'read-only user cannot queue chat message by session id alone', $failures, $passes );
 agents_api_smoke_assert_equals( true, call_user_func( $chat_cancel_permission, array( 'session_id' => 'session-1', 'run_id' => 'run-1', 'session_owner' => array( 'type' => 'user', 'key' => '123' ) ) ), 'session owner can cancel chat run', $failures, $passes );
-agents_api_smoke_assert_equals( true, call_user_func( $chat_queue_permission, array( 'agent' => 'demo-agent', 'session_id' => 'session-1', 'message' => 'Next', 'session_owner' => array( 'type' => 'user', 'key' => '123' ) ) ), 'session owner can queue chat message', $failures, $passes );
+agents_api_smoke_assert_equals( true, call_user_func( $chat_queue_permission, array( 'agent' => 'demo-agent', 'session_id' => 'session-1', 'run_id' => 'run-1', 'message' => 'Next', 'session_owner' => array( 'type' => 'user', 'key' => '123' ) ) ), 'session owner can queue chat message', $failures, $passes );
 $GLOBALS['__agents_api_smoke_caps']['manage_options'] = true;
 agents_api_smoke_assert_equals( true, call_user_func( $chat_cancel_permission, array( 'session_id' => 'session-1', 'run_id' => 'run-1' ) ), 'manager can cancel chat run without owner claim', $failures, $passes );
-agents_api_smoke_assert_equals( true, call_user_func( $chat_queue_permission, array( 'agent' => 'demo-agent', 'session_id' => 'session-1', 'message' => 'Next' ) ), 'manager can queue chat message without owner claim', $failures, $passes );
+agents_api_smoke_assert_equals( true, call_user_func( $chat_queue_permission, array( 'agent' => 'demo-agent', 'session_id' => 'session-1', 'run_id' => 'run-1', 'message' => 'Next' ) ), 'manager can queue chat message without owner claim', $failures, $passes );
 
 agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Channels\AGENTS_GET_CHAT_RUN_ABILITY ), 'get-run ability registers', $failures, $passes );
 agents_api_smoke_assert_equals( true, wp_has_ability( AgentsAPI\AI\Channels\AGENTS_CANCEL_CHAT_RUN_ABILITY ), 'cancel-run ability registers', $failures, $passes );
@@ -199,10 +207,12 @@ AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-default-cancel', 'sessio
 $default_cancelled = AgentsAPI\AI\Channels\agents_cancel_chat_run( array( 'session_id' => 'session-1', 'run_id' => 'run-default-cancel' ) );
 agents_api_smoke_assert_equals( 'cancelling', $default_cancelled['status'] ?? null, 'default cancel marks running runs as cancelling', $failures, $passes );
 
+AgentsAPI\AI\WP_Agent_Chat_Run_Control::start_run( 'run-default-queue', 'session-default' );
 $default_queued = AgentsAPI\AI\Channels\agents_queue_chat_message(
 	array(
 		'agent'      => 'demo-agent',
 		'session_id' => 'session-default',
+		'run_id'     => 'run-default-queue',
 		'message'    => 'Default queue',
 	)
 );

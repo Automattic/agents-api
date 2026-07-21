@@ -124,6 +124,7 @@ $other_workspace = array(
 $principal = WP_Agent_Execution_Principal::user_session( 123, 'demo-agent' )->to_array();
 $other_principal = WP_Agent_Execution_Principal::user_session( 456, 'demo-agent' )->to_array();
 $owner = array( 'type' => 'user', 'key' => '123' );
+$other_owner = array( 'type' => 'user', 'key' => '456' );
 
 add_filter(
 	'wp_agent_chat_handler',
@@ -164,6 +165,24 @@ $queued = agents_queue_chat_message(
 );
 agents_api_smoke_assert_equals( 'queued', $queued['status'] ?? null, 'queue state is created on the first subsite', $failures, $passes );
 
+// Exact #451 exploit: a foreign principal knows both IDs and supplies its own
+// otherwise-valid owner claim. Permission and execution must both deny it.
+$foreign_input = array(
+	'agent'         => 'demo-agent',
+	'message'       => 'foreign poison',
+	'session_id'    => 'network-session',
+	'run_id'        => $run_id,
+	'workspace'     => $workspace,
+	'principal'     => $other_principal,
+	'session_owner' => $other_owner,
+);
+$GLOBALS['__agents_api_multisite_user'] = 456;
+$foreign_allowed = AgentsAPI\AI\Channels\agents_chat_run_enqueue_permission( $foreign_input );
+$foreign_queued  = agents_queue_chat_message( $foreign_input );
+agents_api_smoke_assert_equals( false, $foreign_allowed, 'foreign principal cannot pass enqueue permission with a known session id', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $foreign_queued instanceof WP_Error ? $foreign_queued->get_error_code() : '', 'foreign principal cannot enqueue with its own owner claim', $failures, $passes );
+$GLOBALS['__agents_api_multisite_user'] = 123;
+
 switch_to_blog( 2 );
 $control_input = array(
 	'session_id'    => 'network-session',
@@ -177,8 +196,16 @@ $events = agents_list_chat_run_events( $control_input );
 agents_api_smoke_assert_equals( 'runtime_tool_pending', $status['status'] ?? null, 'second subsite reads workspace run status', $failures, $passes );
 agents_api_smoke_assert_equals( true, count( $events['events'] ?? array() ) >= 2, 'second subsite reads workspace run events', $failures, $passes );
 
+$GLOBALS['__agents_api_multisite_user'] = 456;
+$foreign_cross_site = agents_queue_chat_message( $foreign_input );
+agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $foreign_cross_site instanceof WP_Error ? $foreign_cross_site->get_error_code() : '', 'foreign enqueue remains denied from another subsite', $failures, $passes );
+$foreign_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', WP_Agent_Workspace_Scope::from_array( $workspace ), $other_owner );
+agents_api_smoke_assert_equals( array(), $foreign_claim, 'foreign claim cannot consume the owner queue', $failures, $passes );
+$GLOBALS['__agents_api_multisite_user'] = 123;
+
 $claimed = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', WP_Agent_Workspace_Scope::from_array( $workspace ), $owner );
 agents_api_smoke_assert_equals( 'queued continuation', $claimed[0]['message'] ?? null, 'second subsite claims the workspace queue', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $claimed ), 'rejected exploit does not poison or block owner queue progress', $failures, $passes );
 
 $continued = agents_chat_dispatch(
 	array(
@@ -198,12 +225,16 @@ agents_api_smoke_assert_equals( 2, get_current_blog_id(), 'workspace operations 
 
 $wrong_workspace = agents_get_chat_run( array_replace( $control_input, array( 'workspace' => $other_workspace ) ) );
 agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $wrong_workspace instanceof WP_Error ? $wrong_workspace->get_error_code() : '', 'same run id is inaccessible in another workspace', $failures, $passes );
+$wrong_workspace_queue = agents_queue_chat_message( array_replace( $control_input, array( 'agent' => 'demo-agent', 'message' => 'wrong workspace', 'workspace' => $other_workspace ) ) );
+agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $wrong_workspace_queue instanceof WP_Error ? $wrong_workspace_queue->get_error_code() : '', 'enqueue cannot cross workspace boundaries', $failures, $passes );
 
 $wrong_principal_input              = $control_input;
 $wrong_principal_input['principal'] = $other_principal;
 $wrong_principal_input['session_owner'] = array( 'type' => 'user', 'key' => '456' );
 $wrong_principal = agents_get_chat_run( $wrong_principal_input );
 agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $wrong_principal instanceof WP_Error ? $wrong_principal->get_error_code() : '', 'wrong principal cannot inspect a workspace run', $failures, $passes );
+$wrong_principal_queue = agents_queue_chat_message( array_replace( $wrong_principal_input, array( 'agent' => 'demo-agent', 'message' => 'wrong principal' ) ) );
+agents_api_smoke_assert_equals( 'agents_chat_run_not_found', $wrong_principal_queue instanceof WP_Error ? $wrong_principal_queue->get_error_code() : '', 'wrong principal cannot enqueue to a workspace run', $failures, $passes );
 
 $forged_owner_input                  = $control_input;
 $forged_owner_input['session_owner'] = array( 'type' => 'user', 'key' => '456' );
@@ -213,14 +244,57 @@ agents_api_smoke_assert_equals( 'agents_chat_run_owner_forbidden', $forged_owner
 $invalid_workspace = agents_get_chat_run( array_replace( $control_input, array( 'workspace' => array( 'workspace_type' => 'network' ) ) ) );
 agents_api_smoke_assert_equals( 'agents_chat_run_invalid_workspace', $invalid_workspace instanceof WP_Error ? $invalid_workspace->get_error_code() : '', 'malformed canonical workspaces are rejected', $failures, $passes );
 
+$mixed_first = agents_queue_chat_message( array_replace( $control_input, array( 'agent' => 'demo-agent', 'message' => 'owner first' ) ) );
+$mixed_second = agents_queue_chat_message( array_replace( $control_input, array( 'agent' => 'demo-agent', 'message' => 'owner second' ) ) );
+agents_api_smoke_assert_equals( 'queued', $mixed_first['status'] ?? null, 'owner can enqueue before mixed-state recovery', $failures, $passes );
+agents_api_smoke_assert_equals( 'queued', $mixed_second['status'] ?? null, 'owner can append before mixed-state recovery', $failures, $passes );
+
+$workspace_scope = WP_Agent_Workspace_Scope::from_array( $workspace );
+$mixed_state     = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope );
+$mixed_state['queues']['network-session'][] = array(
+	'queued_message_id' => 'queued_foreign',
+	'session_id'        => 'network-session',
+	'run_id'            => $run_id,
+	'message'           => 'foreign stored poison',
+	'_owner'            => hash( 'sha256', 'user:456' ),
+);
+$mixed_state['queues']['network-session'][] = array(
+	'queued_message_id' => 'queued_invalid',
+	'session_id'        => 'network-session',
+	'run_id'            => $run_id,
+	'message'           => 'invalid stored poison',
+);
+WP_Agent_Run_Control::save_state( 'agents_api_chat_run_control', $mixed_state, $workspace_scope );
+
+$mixed_foreign_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', $workspace_scope, $other_owner );
+agents_api_smoke_assert_equals( array(), $mixed_foreign_claim, 'wrong owner cannot use mixed entries to consume the queue', $failures, $passes );
+$mixed_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'network-session', $workspace_scope, $owner );
+agents_api_smoke_assert_equals( array( 'owner first', 'owner second' ), array_column( $mixed_claim, 'message' ), 'owner claim progresses while discarding foreign and invalid entries', $failures, $passes );
+$recovered_state = WP_Agent_Run_Control::state( 'agents_api_chat_run_control', $workspace_scope );
+agents_api_smoke_assert_equals( false, isset( $recovered_state['queues']['network-session'] ), 'mixed-entry recovery cleans poison entries from storage', $failures, $passes );
+agents_api_smoke_assert_equals( 2, get_current_blog_id(), 'queue authorization and recovery preserve caller blog context', $failures, $passes );
+
 restore_current_blog();
 $legacy = WP_Agent_Chat_Run_Control::start_run( 'legacy-run', 'legacy-session', array(), null, $owner );
+$legacy_queued = agents_queue_chat_message(
+	array(
+		'agent'         => 'demo-agent',
+		'message'       => 'legacy continuation',
+		'session_id'    => 'legacy-session',
+		'run_id'        => 'legacy-run',
+		'principal'     => $principal,
+		'session_owner' => $owner,
+	)
+);
+agents_api_smoke_assert_equals( 'queued', $legacy_queued['status'] ?? null, 'omitted-workspace enqueue remains compatible', $failures, $passes );
 switch_to_blog( 2 );
 $legacy_other_site = WP_Agent_Chat_Run_Control::get_run( 'legacy-run', null, $owner );
 agents_api_smoke_assert_equals( null, $legacy_other_site, 'omitted workspace state remains site-local', $failures, $passes );
 restore_current_blog();
 $legacy_origin = WP_Agent_Chat_Run_Control::get_run( 'legacy-run', null, $owner );
 agents_api_smoke_assert_equals( 'legacy-run', $legacy_origin['run_id'] ?? null, 'omitted workspace compatibility remains readable on its origin site', $failures, $passes );
+$legacy_claim = WP_Agent_Chat_Run_Control::claim_queued_messages( 'legacy-session', null, $owner );
+agents_api_smoke_assert_equals( 'legacy continuation', $legacy_claim[0]['message'] ?? null, 'omitted-workspace owner queue still progresses on its origin site', $failures, $passes );
 
 $unsupported_store = new class() implements WP_Agent_Run_Control_Store {
 	public function get_state( string $store_key ): array {

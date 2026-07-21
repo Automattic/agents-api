@@ -265,14 +265,19 @@ class WP_Agent_Chat_Run_Control {
 	 *
 	 * @param array<string,mixed> $input Canonical queue input.
 	 * @param array<string,mixed>|null $owner Canonical conversation owner.
-	 * @return array<string,mixed> Queue result.
+	 * @return array<string,mixed>|\WP_Error Queue result.
 	 */
-	public static function queue_message( array $input, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ): array {
+	public static function queue_message( array $input, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ) {
 		$session_id = trim( self::string_value( $input['session_id'] ?? null ) );
-		$run_id     = trim( self::string_value( $input['run_id'] ?? null ) );
 		if ( '' === $session_id ) {
 			throw new \InvalidArgumentException( 'session_id must be a non-empty string' );
 		}
+
+		$target = self::queue_target( $input, $workspace, $owner );
+		if ( $target instanceof \WP_Error ) {
+			return $target;
+		}
+		$run_id = $target['run_id'];
 
 		$queued_id = 'queued_' . str_replace( 'run_', '', self::generate_run_id() );
 		$item      = array(
@@ -284,7 +289,7 @@ class WP_Agent_Chat_Run_Control {
 			'attachments'       => is_array( $input['attachments'] ?? null ) ? $input['attachments'] : array(),
 			'client_context'    => is_array( $input['client_context'] ?? null ) ? $input['client_context'] : array(),
 			'created_at'        => self::now(),
-			'_owner'            => self::owner_fingerprint( $owner ),
+			'_owner'            => $target['owner_fingerprint'],
 		);
 
 		$state                            = self::state( $workspace );
@@ -294,7 +299,7 @@ class WP_Agent_Chat_Run_Control {
 		self::save_state( $state, $workspace );
 
 		return self::normalize_run( array(
-			'run_id'            => '' !== $run_id ? $run_id : self::generate_run_id(),
+			'run_id'            => $run_id,
 			'session_id'        => $session_id,
 			'status'            => self::STATUS_QUEUED,
 			'updated_at'        => self::now(),
@@ -311,17 +316,29 @@ class WP_Agent_Chat_Run_Control {
 	 * @return array<int,array<string,mixed>> Queued items.
 	 */
 	public static function claim_queued_messages( string $session_id, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ): array {
+		$target = self::queue_target( array( 'session_id' => $session_id ), $workspace, $owner );
+		if ( $target instanceof \WP_Error ) {
+			return array();
+		}
+
 		$state = self::state( $workspace );
 		$items = array_values( array_filter(
 			$state['queues'][ $session_id ] ?? array(),
-			static fn( array $item ): bool => self::owner_matches( $item['_owner'] ?? '', $owner )
+			static fn( array $item ): bool => self::fingerprint_matches( $item['_owner'] ?? null, $target['owner_fingerprint'] )
 		) );
-		if ( count( $items ) !== count( $state['queues'][ $session_id ] ?? array() ) ) {
-			return array();
-		}
 		unset( $state['queues'][ $session_id ] );
 		self::save_state( $state, $workspace );
 		return array_map( array( self::class, 'public_queue_item' ), $items );
+	}
+
+	/**
+	 * Check whether queue input resolves to a session owned by the principal.
+	 *
+	 * @param array<string,mixed>      $input Canonical queue input.
+	 * @param array<string,mixed>|null $owner Canonical conversation owner.
+	 */
+	public static function can_queue_message( array $input, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ): bool {
+		return ! ( self::queue_target( $input, $workspace, $owner ) instanceof \WP_Error );
 	}
 
 	/**
@@ -400,6 +417,54 @@ class WP_Agent_Chat_Run_Control {
 	private static function owner_matches( mixed $stored, ?array $owner ): bool {
 		$stored = is_string( $stored ) ? $stored : '';
 		return '' === $stored || ( '' !== self::owner_fingerprint( $owner ) && hash_equals( $stored, self::owner_fingerprint( $owner ) ) );
+	}
+
+	private static function fingerprint_matches( mixed $stored, string $expected ): bool {
+		return is_string( $stored ) && hash_equals( $expected, $stored );
+	}
+
+	/**
+	 * Resolve a queue target from stored run state, which is authoritative for
+	 * both the session identity and its canonical owner.
+	 *
+	 * @param array<string,mixed>      $input Queue input.
+	 * @param array<string,mixed>|null $owner Resolved principal owner.
+	 * @return array{run_id:string,owner_fingerprint:string}|\WP_Error
+	 */
+	private static function queue_target( array $input, ?WP_Agent_Workspace_Scope $workspace, ?array $owner ) {
+		$session_id = trim( self::string_value( $input['session_id'] ?? null ) );
+		$run_id     = trim( self::string_value( $input['run_id'] ?? null ) );
+		$state      = self::state( $workspace );
+		$target     = null;
+
+		if ( '' !== $run_id ) {
+			$candidate = $state['runs'][ $run_id ] ?? null;
+			if ( is_array( $candidate ) && $session_id === trim( self::string_value( $candidate['session_id'] ?? null ) ) ) {
+				$target = $candidate;
+			}
+		} else {
+			foreach ( $state['runs'] as $candidate_run_id => $candidate ) {
+				if ( $session_id === trim( self::string_value( $candidate['session_id'] ?? null ) ) ) {
+					$target = $candidate;
+					$run_id = $candidate_run_id;
+					break;
+				}
+			}
+		}
+
+		if ( ! is_array( $target ) ) {
+			return new \WP_Error( 'agents_chat_run_not_found', 'No chat run was found for the requested session.' );
+		}
+
+		$stored_owner = is_string( $target['_owner'] ?? null ) ? $target['_owner'] : '';
+		if ( ( $workspace instanceof WP_Agent_Workspace_Scope && '' === $stored_owner ) || ! self::owner_matches( $stored_owner, $owner ) ) {
+			return new \WP_Error( 'agents_chat_run_not_found', 'No chat run was found for the requested session owner.' );
+		}
+
+		return array(
+			'run_id'            => $run_id,
+			'owner_fingerprint' => $stored_owner,
+		);
 	}
 
 	/** @param array<string,mixed>|null $owner */
