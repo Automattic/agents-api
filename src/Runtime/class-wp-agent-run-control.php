@@ -7,6 +7,8 @@
 
 namespace AgentsAPI\AI;
 
+use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -234,7 +236,7 @@ class WP_Agent_Run_Control {
 	 * @param array<string,mixed> $run       Run fields.
 	 * @return array<string,mixed>
 	 */
-	public static function start_run( string $store_key, string $run_id, array $run = array() ): array {
+	public static function start_run( string $store_key, string $run_id, array $run = array(), ?WP_Agent_Workspace_Scope $workspace = null ): array {
 		$now = self::now();
 		$run = array_merge(
 			$run,
@@ -247,10 +249,10 @@ class WP_Agent_Run_Control {
 			)
 		);
 
-		$state                    = self::state( $store_key );
+		$state                    = self::state( $store_key, $workspace );
 		$state['runs'][ $run_id ] = $run;
 		$state                    = self::record_event_in_state( $state, $run_id, 'run_started', array( 'status' => self::STATUS_RUNNING ) );
-		self::save_state( $store_key, $state );
+		self::save_state( $store_key, $state, $workspace );
 
 		return self::normalize_run( $run );
 	}
@@ -283,8 +285,8 @@ class WP_Agent_Run_Control {
 	 * @param string $status    Terminal status.
 	 * @return array<string,mixed>|null
 	 */
-	public static function finish_run( string $store_key, string $run_id, string $status = self::STATUS_COMPLETED ): ?array {
-		$state = self::state( $store_key );
+	public static function finish_run( string $store_key, string $run_id, string $status = self::STATUS_COMPLETED, ?WP_Agent_Workspace_Scope $workspace = null ): ?array {
+		$state = self::state( $store_key, $workspace );
 		if ( ! isset( $state['runs'][ $run_id ] ) ) {
 			return null;
 		}
@@ -298,7 +300,7 @@ class WP_Agent_Run_Control {
 
 		$state['runs'][ $run_id ] = $run;
 		$state                    = self::record_event_in_state( $state, $run_id, 'run_finished', array( 'status' => $run['status'] ) );
-		self::save_state( $store_key, $state );
+		self::save_state( $store_key, $state, $workspace );
 
 		return self::normalize_run( $run );
 	}
@@ -308,8 +310,8 @@ class WP_Agent_Run_Control {
 	 *
 	 * @return array<string,mixed>|null
 	 */
-	public static function get_run( string $store_key, string $run_id ): ?array {
-		$state = self::state( $store_key );
+	public static function get_run( string $store_key, string $run_id, ?WP_Agent_Workspace_Scope $workspace = null ): ?array {
+		$state = self::state( $store_key, $workspace );
 		$run   = $state['runs'][ $run_id ] ?? null;
 		return is_array( $run ) ? self::normalize_run( $run ) : null;
 	}
@@ -319,8 +321,8 @@ class WP_Agent_Run_Control {
 	 *
 	 * @return array<string,mixed>|null
 	 */
-	public static function request_cancel( string $store_key, string $run_id ): ?array {
-		$state = self::state( $store_key );
+	public static function request_cancel( string $store_key, string $run_id, ?WP_Agent_Workspace_Scope $workspace = null ): ?array {
+		$state = self::state( $store_key, $workspace );
 		if ( ! isset( $state['runs'][ $run_id ] ) ) {
 			return null;
 		}
@@ -333,7 +335,7 @@ class WP_Agent_Run_Control {
 
 		$state['runs'][ $run_id ] = $run;
 		$state                    = self::record_event_in_state( $state, $run_id, 'cancel_requested', array( 'status' => $run['status'] ) );
-		self::save_state( $store_key, $state );
+		self::save_state( $store_key, $state, $workspace );
 
 		return self::normalize_run( $run );
 	}
@@ -346,13 +348,13 @@ class WP_Agent_Run_Control {
 	/**
 	 * @return array<string,mixed>|null
 	 */
-	public static function list_events( string $store_key, string $run_id, string $cursor = '', int $limit = 100 ): ?array {
-		$run = self::get_run( $store_key, $run_id );
+	public static function list_events( string $store_key, string $run_id, string $cursor = '', int $limit = 100, ?WP_Agent_Workspace_Scope $workspace = null ): ?array {
+		$run = self::get_run( $store_key, $run_id, $workspace );
 		if ( null === $run ) {
 			return null;
 		}
 
-		$state  = self::state( $store_key );
+		$state  = self::state( $store_key, $workspace );
 		$events = array_values( $state['events'][ $run_id ] ?? array() );
 		$offset = max( 0, self::int_value( $cursor ) );
 		$limit  = max( 1, min( 500, $limit ) );
@@ -385,16 +387,37 @@ class WP_Agent_Run_Control {
 		self::$store = null;
 	}
 
+	public static function supports_workspace_state(): bool {
+		return self::store() instanceof WP_Agent_Workspace_Run_Control_Store;
+	}
+
 	/** @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} */
-	public static function state( string $store_key ): array {
-		return self::store()->get_state( $store_key );
+	public static function state( string $store_key, ?WP_Agent_Workspace_Scope $workspace = null ): array {
+		$store = self::store();
+		if ( null === $workspace ) {
+			return $store->get_state( $store_key );
+		}
+		if ( ! $store instanceof WP_Agent_Workspace_Run_Control_Store ) {
+			throw new \RuntimeException( 'The registered run-control store does not support explicit workspaces.' );
+		}
+
+		return $store->get_workspace_state( $store_key, $workspace );
 	}
 
 	/**
 	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state
 	 */
-	public static function save_state( string $store_key, array $state ): void {
-		self::store()->save_state( $store_key, $state );
+	public static function save_state( string $store_key, array $state, ?WP_Agent_Workspace_Scope $workspace = null ): void {
+		$store = self::store();
+		if ( null === $workspace ) {
+			$store->save_state( $store_key, $state );
+			return;
+		}
+		if ( ! $store instanceof WP_Agent_Workspace_Run_Control_Store ) {
+			throw new \RuntimeException( 'The registered run-control store does not support explicit workspaces.' );
+		}
+
+		$store->save_workspace_state( $store_key, $workspace, $state );
 	}
 
 	public static function now(): string {

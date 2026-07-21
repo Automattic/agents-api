@@ -177,6 +177,8 @@ class WP_Agent_Default_Chat_Handler {
 		$loop_options = array(
 			'system_prompt' => $system_prompt,
 			'max_turns'     => $max_turns,
+			'workspace'     => self::workspace_from_input( $input ),
+			'principal'     => $input['principal'] ?? null,
 			'context'       => array(
 				'session_id'             => $session_id,
 				'agent_slug'             => $agent_slug,
@@ -485,7 +487,7 @@ class WP_Agent_Default_Chat_Handler {
 		}
 
 		try {
-			$workspace = WP_Agent_Workspace_Scope::from_parts( 'site', self::default_workspace_id() );
+			$workspace = self::workspace_from_input( $input ) ?? WP_Agent_Workspace_Scope::from_parts( 'site', self::default_workspace_id() );
 		} catch ( \Throwable $error ) {
 			unset( $error );
 			return '';
@@ -505,6 +507,20 @@ class WP_Agent_Default_Chat_Handler {
 		}
 
 		return $session_id;
+	}
+
+	/** @param array<string,mixed> $input Canonical chat input. */
+	private static function workspace_from_input( array $input ): ?WP_Agent_Workspace_Scope {
+		if ( ! is_array( $input['workspace'] ?? null ) ) {
+			return null;
+		}
+
+		try {
+			return WP_Agent_Workspace_Scope::from_array( $input['workspace'] );
+		} catch ( \InvalidArgumentException $error ) {
+			unset( $error );
+			return null;
+		}
 	}
 
 	/**
