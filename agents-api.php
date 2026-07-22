@@ -79,7 +79,8 @@ if ( defined( 'AGENTS_API_LOADED' ) ) {
 	};
 
 	$agents_api_symbol_files = array_merge(
-		glob( __DIR__ . '/src/*/{class,interface}-*.php', GLOB_BRACE ) ?: array(),
+		glob( __DIR__ . '/src/*/class-*.php' ) ?: array(),
+		glob( __DIR__ . '/src/*/interface-*.php' ) ?: array(),
 		array( __DIR__ . '/src/Channels/register-default-agents-chat-handler.php' )
 	);
 	foreach ( $agents_api_symbol_files as $agents_api_symbol_file ) {
