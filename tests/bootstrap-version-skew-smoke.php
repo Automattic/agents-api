@@ -32,6 +32,11 @@ function agents_api_copy_directory( string $source, string $destination ): void 
 
 agents_api_copy_directory( $root . '/src', $old_copy . '/src' );
 $old_bootstrap = (string) file_get_contents( $root . '/agents-api.php' );
+if ( str_contains( $old_bootstrap, 'GLOB_BRACE' ) ) {
+	fwrite( STDERR, "FAIL: bootstrap discovery depends on the optional GLOB_BRACE flag.\n" );
+	exit( 1 );
+}
+
 $old_bootstrap = str_replace(
 	"require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel.php';\n",
 	'',
@@ -59,4 +64,4 @@ if ( $hook_count !== count( $GLOBALS['__agents_api_smoke_actions'] ) ) {
 	exit( 1 );
 }
 
-echo "PASS: newer copy tops up missing classes without repeating hooks.\n";
+echo "PASS: portable discovery tops up missing classes without repeating hooks.\n";
