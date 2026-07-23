@@ -18,9 +18,10 @@ require_once __DIR__ . '/agents-api-smoke-helpers.php';
 
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {
-		public function __construct( private string $code = '', private string $message = '' ) {}
+		public function __construct( private string $code = '', private string $message = '', private mixed $data = null ) {}
 		public function get_error_code(): string { return $this->code; }
 		public function get_error_message(): string { return $this->message; }
+		public function get_error_data(): mixed { return $this->data; }
 	}
 }
 
@@ -255,6 +256,7 @@ $other_principal = WP_Agent_Execution_Principal::user_session( 8, 'demo-agent', 
 $forbidden       = agents_get_conversation_session( array( 'principal' => $other_principal, 'session_id' => 's-1' ) );
 smoke_assert( true, $forbidden instanceof WP_Error, 'get blocks sessions owned by another user', $failures, $passes );
 smoke_assert( 'agents_conversation_session_forbidden', $forbidden instanceof WP_Error ? $forbidden->get_error_code() : '', 'forbidden error code', $failures, $passes );
+smoke_assert( 403, $forbidden instanceof WP_Error ? ( $forbidden->get_error_data()['status'] ?? null ) : null, 'forbidden error carries REST status', $failures, $passes );
 
 $audience_without_owner = WP_Agent_Execution_Principal::audience( 'audience:public', 'demo-agent' );
 $owner_required         = agents_list_conversation_sessions( array( 'principal' => $audience_without_owner ) );
@@ -369,6 +371,7 @@ smoke_assert( 'p-1', $audience_loaded['session']['session_id'] ?? null, 'princip
 $other_audience = WP_Agent_Execution_Principal::audience( 'audience:public', 'demo-agent', WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, array(), null, null, array(), 'browser:two' );
 $blocked_owner  = agents_get_conversation_session( array( 'principal' => $other_audience, 'session_id' => 'p-1', 'workspace' => array( 'workspace_type' => 'site', 'workspace_id' => '42' ) ) );
 smoke_assert( 'agents_conversation_session_not_found', $blocked_owner instanceof WP_Error ? $blocked_owner->get_error_code() : '', 'principal owner key blocks other audience sessions', $failures, $passes );
+smoke_assert( 404, $blocked_owner instanceof WP_Error ? ( $blocked_owner->get_error_data()['status'] ?? null ) : null, 'foreign principal read carries non-enumerating REST status', $failures, $passes );
 
 // REST callers cannot impersonate other owners via the principal field — the
 // principal is resolved from the request, not from the body.
@@ -392,6 +395,7 @@ $forged_get = agents_get_conversation_session(
 	)
 );
 smoke_assert( 'agents_conversation_session_not_found', $forged_get instanceof WP_Error ? $forged_get->get_error_code() : '', 'REST principal passthrough is ignored on get', $failures, $passes );
+smoke_assert( 404, $forged_get instanceof WP_Error ? ( $forged_get->get_error_data()['status'] ?? null ) : null, 'missing REST session carries not-found status', $failures, $passes );
 
 $forged_list = agents_list_conversation_sessions(
 	array(
