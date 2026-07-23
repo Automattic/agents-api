@@ -479,7 +479,7 @@ function agents_conversation_sessions_owned_session( string $session_id, array $
 	if ( $context['store'] instanceof WP_Agent_Principal_Conversation_Session_Reader ) {
 		$session = $context['store']->get_session_for_owner( $workspace, $context['owner'], $session_id );
 		if ( ! is_array( $session ) ) {
-			return new \WP_Error( 'agents_conversation_session_not_found', 'Conversation session not found.' );
+			return new \WP_Error( 'agents_conversation_session_not_found', 'Conversation session not found.', array( 'status' => 404 ) );
 		}
 
 		return agents_conversation_sessions_array_value( $session );
@@ -487,12 +487,12 @@ function agents_conversation_sessions_owned_session( string $session_id, array $
 
 	$session = $context['store']->get_session( $session_id );
 	if ( ! is_array( $session ) ) {
-		return new \WP_Error( 'agents_conversation_session_not_found', 'Conversation session not found.' );
+		return new \WP_Error( 'agents_conversation_session_not_found', 'Conversation session not found.', array( 'status' => 404 ) );
 	}
 
 	$session = agents_conversation_sessions_array_value( $session );
 	if ( ! agents_conversation_sessions_session_matches_owner( $session, $context['owner'] ) && ! agents_conversation_sessions_can_manage_any() ) {
-		return new \WP_Error( 'agents_conversation_session_forbidden', 'The current principal cannot access this conversation session.' );
+		return new \WP_Error( 'agents_conversation_session_forbidden', 'The current principal cannot access this conversation session.', array( 'status' => 403 ) );
 	}
 
 	return $session;
