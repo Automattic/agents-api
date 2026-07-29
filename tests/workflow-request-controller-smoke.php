@@ -17,8 +17,19 @@ require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-result.php
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-recorder.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-context.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-runner.php';
+require_once __DIR__ . '/../src/Workflows/interface-wp-agent-workflow-branch-executor.php';
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-action-scheduler-bridge.php';
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-action-scheduler-branch-executor.php';
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-scoped-drain.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-awaiter.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-request-controller.php';
+
+$GLOBALS['controller_unscheduled'] = array();
+if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
+	function as_unschedule_all_actions( string $hook, ?array $args = array(), string $group = '' ): void {
+		$GLOBALS['controller_unscheduled'][] = array( $hook, $args, $group );
+	}
+}
 
 use AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store;
 use AgentsAPI\AI\WP_Agent_Run_Control;
@@ -53,9 +64,10 @@ final class Controller_Runner extends WP_Agent_Workflow_Runner {
 }
 final class Controller_Awaiter extends WP_Agent_Workflow_Run_Awaiter {
 	public int $calls = 0;
+	public array $last_options = array();
 	public function __construct( private Controller_Recorder $recorder ) {}
 	public function await( string $id, WP_Agent_Workflow_Run_Recorder $recorder, array $options = array() ) {
-		++$this->calls; $r = $this->recorder->find( $id );
+		++$this->calls; $this->last_options = $options; $r = $this->recorder->find( $id );
 		if ( ! empty( $options['complete'] ) && null !== $r ) { $this->recorder->update( $r->with( array( 'status' => WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, 'ended_at' => 2 ) ) ); }
 		return array();
 	}
@@ -74,6 +86,9 @@ controller_assert( 1 === $runner->starts, 'duplicate starts reserve one durable 
 controller_assert( $one['run_id'] === $duplicate['run_id'], 'duplicate starts return the original run identity' );
 $two = $controller->start( 'two', $spec );
 controller_assert( 2 === $runner->starts && $one['run_id'] !== $two['run_id'], 'operation scopes are isolated' );
+controller_assert( 'running' === $controller->get_status( 'two' )['status'], 'public get-status returns reconnectable operation state' );
+$controller->reconnect( 'two', array( 'await' => array( 'time_limit_ms' => 999999, 'limit' => 999999 ) ) );
+controller_assert( 5000 === $awaiter->last_options['time_limit_ms'] && 25 === $awaiter->last_options['limit'], 'advance clamps wall-clock and action budgets' );
 controller_assert( true === $one['reconnectable'], 'interrupted suspended request is reconnectable' );
 $complete = $controller->reconnect( 'one', array( 'await' => array( 'complete' => true ) ) );
 controller_assert( true === $complete['terminal'] && 'succeeded' === $complete['status'], 'reconnect advances the original suspended run' );
@@ -85,5 +100,21 @@ $cancelled = $controller->start( 'cancelled', $spec, array( 'status' => 'cancell
 controller_assert( $failed['terminal'] && $cancelled['terminal'], 'failed and cancelled runs are terminal' );
 controller_assert( in_array( 'failed', $cleaned, true ) && in_array( 'cancelled', $cleaned, true ), 'failed and cancelled runs release terminal cleanup' );
 controller_assert( array() === ( $controller->get( 'one' )['lease'] ?? null ), 'terminal lease is cleared' );
+$one_group_cleanup = array_filter( $GLOBALS['controller_unscheduled'], static function ( array $call ) use ( $one ): bool { return 'agents-api-run-' . md5( $one['run_id'] ) === $call[2]; } );
+controller_assert( 2 === count( $one_group_cleanup ), 'terminal cleanup removes only the run-scoped branch and resume actions' );
+controller_assert( array() === array_filter( $one_group_cleanup, static fn ( array $call ): bool => null !== $call[1] ), 'terminal cleanup matches every argument shape in the run-scoped group' );
+$state = WP_Agent_Run_Control::state( 'controller-test' );
+$state['runs']['two']['lease'] = array( 'token' => 'other-worker', 'worker_id' => 'worker-a', 'expires_at' => time() + 60 );
+WP_Agent_Run_Control::store()->save_state( 'controller-test', $state );
+$busy = $controller->advance( 'two', array( 'worker_id' => 'worker-b' ) );
+controller_assert( true === $busy['busy'], 'concurrent worker lane claim is rejected while lease is active' );
+$state = WP_Agent_Run_Control::state( 'controller-test' );
+$state['runs']['two']['lease']['expires_at'] = 0;
+WP_Agent_Run_Control::store()->save_state( 'controller-test', $state );
+$reclaimed = $controller->advance( 'two', array( 'worker_id' => 'worker-b' ) );
+controller_assert( false === $reclaimed['busy'], 'expired worker lane is reclaimed deterministically' );
+$cancelled_operation = $controller->cancel( 'two' );
+controller_assert( true === $cancelled_operation['terminal'] && 'cancelled' === $cancelled_operation['status'], 'public cancel atomically records a terminal disposition' );
+controller_assert( isset( WP_Agent_Run_Control::state( 'controller-test' )['idempotency']['two'] ), 'idempotency key and authoritative run identity are persisted together' );
 echo "Passed: $passes, Failed: " . count( $fails ) . "\n";
 exit( empty( $fails ) ? 0 : 1 );
