@@ -14,7 +14,7 @@
  * @param array<array-key, mixed> $args  Arguments to pass to the hook.
  * @param string                  $group Group to assign the action to.
  */
-function as_unschedule_all_actions( string $hook, array $args = array(), string $group = '' ): void {}
+function as_unschedule_all_actions( string $hook, ?array $args = array(), string $group = '' ): void {}
 
 /**
  * @param int                     $timestamp When the first instance should run.
