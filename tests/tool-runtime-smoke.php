@@ -673,7 +673,7 @@ $submitted_result = AgentsAPI\AI\WP_Agent_Runtime_Tool_Result::normalize(
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Result::STATUS_SUBMITTED, $submitted_result['status'], 'runtime tool result has canonical submitted status', $failures, $passes );
 agents_api_smoke_assert_equals( 123, $submitted_result['result']['post_id'] ?? null, 'runtime tool result preserves payload', $failures, $passes );
 
-$runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+$runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Atomic_Store {
 	public array $requests = array();
 	public array $results  = array();
 
@@ -686,13 +686,23 @@ $runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_
 	}
 
 	public function complete( string $request_id, array $result ): void {
-		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED;
-		$this->requests[ $request_id ]['result'] = $result;
-		$this->results[ $request_id ]            = $result;
+		$this->transition_pending( $request_id, AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED, $result );
 	}
 
 	public function timeout( string $request_id ): void {
-		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT;
+		$this->transition_pending( $request_id, AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT );
+	}
+
+	public function transition_pending( string $request_id, string $status, ?array $result = null ): bool {
+		if ( ! isset( $this->requests[ $request_id ] ) || AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== ( $this->requests[ $request_id ]['status'] ?? '' ) ) {
+			return false;
+		}
+		$this->requests[ $request_id ]['status'] = $status;
+		if ( null !== $result ) {
+			$this->requests[ $request_id ]['result'] = $result;
+			$this->results[ $request_id ]            = $result;
+		}
+		return true;
 	}
 
 	public function recent_pending( array $query = array() ): array {
@@ -794,7 +804,7 @@ try {
 agents_api_smoke_assert_equals( true, $duplicate_refused, 'duplicate runtime tool completion without prior result is refused', $failures, $passes );
 agents_api_smoke_assert_equals( 0, $terminal_without_result_store->complete_calls, 'refused duplicate runtime tool completion does not write', $failures, $passes );
 
-$timeout_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+$timeout_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Atomic_Store {
 	public array $requests = array();
 
 	public function create( array $request ): void {
@@ -806,12 +816,20 @@ $timeout_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Reque
 	}
 
 	public function complete( string $request_id, array $result ): void {
-		unset( $result );
-		$this->requests[ $request_id ]['status'] = 'completed';
+		$this->transition_pending( $request_id, AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED, $result );
 	}
 
 	public function timeout( string $request_id ): void {
-		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT;
+		$this->transition_pending( $request_id, AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT );
+	}
+
+	public function transition_pending( string $request_id, string $status, ?array $result = null ): bool {
+		unset( $result );
+		if ( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== ( $this->requests[ $request_id ]['status'] ?? '' ) ) {
+			return false;
+		}
+		$this->requests[ $request_id ]['status'] = $status;
+		return true;
 	}
 
 	public function recent_pending( array $query = array() ): array {

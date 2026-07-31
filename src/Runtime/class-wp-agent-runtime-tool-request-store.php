@@ -38,9 +38,7 @@ interface WP_Agent_Runtime_Tool_Request_Store {
 	 * Mark a pending request complete with a client-submitted result.
 	 *
 	 * Implementations should transition only pending records. Duplicate
-	 * completions for terminal records must leave existing store data unchanged;
-	 * callers use `get()` before this method to return a retained prior result or
-	 * reject the duplicate when no prior result is available.
+	 * completions for terminal records must leave existing store data unchanged.
 	 *
 	 * @param string               $request_id Runtime tool request id.
 	 * @param array<string, mixed> $result Normalized runtime tool result.
@@ -49,6 +47,8 @@ interface WP_Agent_Runtime_Tool_Request_Store {
 
 	/**
 	 * Mark a pending request timed out.
+	 *
+	 * Implementations should transition only pending records.
 	 *
 	 * @param string $request_id Runtime tool request id.
 	 */
@@ -65,4 +65,27 @@ interface WP_Agent_Runtime_Tool_Request_Store {
 	 * @return array<int, array<string, mixed>> Normalized pending requests.
 	 */
 	public function recent_pending( array $query = array() ): array;
+}
+
+/**
+ * Atomic terminal-transition capability for exact-once lifecycle operations.
+ *
+ * Hosts using submit, timeout, or cancel must implement this additive contract.
+ * The legacy store interface remains load-compatible for create and read paths.
+ */
+interface WP_Agent_Runtime_Tool_Request_Atomic_Store extends WP_Agent_Runtime_Tool_Request_Store {
+
+	/**
+	 * Conditionally transition a pending request to a terminal status.
+	 *
+	 * Implementations must use a compare-and-set write and return `true` only for
+	 * the caller that changed the pending record. Completed transitions must retain
+	 * the normalized result under `result` for duplicate resolution.
+	 *
+	 * @param string                    $request_id Runtime tool request id.
+	 * @param string                    $status Target terminal request status.
+	 * @param array<string, mixed>|null $result Normalized completion result, when completing.
+	 * @return bool True when this call transitioned the pending record.
+	 */
+	public function transition_pending( string $request_id, string $status, ?array $result = null ): bool;
 }
