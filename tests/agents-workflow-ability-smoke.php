@@ -27,7 +27,9 @@ if ( ! class_exists( 'WP_Error' ) ) {
 }
 
 if ( ! function_exists( 'current_user_can' ) ) {
-	function current_user_can( string $cap ): bool { unset( $cap ); return $GLOBALS['__can'] ?? false; }
+	function current_user_can( string $cap ): bool {
+		return 'read' === $cap ? ( $GLOBALS['__can_read'] ?? $GLOBALS['__can'] ?? false ) : ( $GLOBALS['__can'] ?? false );
+	}
 } else {
 	add_filter(
 		'user_has_cap',
@@ -78,6 +80,7 @@ use function AgentsAPI\AI\Workflows\agents_validate_workflow;
 use function AgentsAPI\AI\Workflows\register_workflow_handler;
 use function AgentsAPI\AI\Workflows\agents_get_workflow_run;
 use function AgentsAPI\AI\Workflows\agents_list_workflow_run_events;
+use function AgentsAPI\AI\Workflows\agents_workflow_run_read_permission;
 
 // ─── Permission gate ─────────────────────────────────────────────────
 
@@ -236,6 +239,8 @@ smoke_assert( 'test', $manager_run['metadata']['provider'] ?? null, 'manager get
 smoke_assert( 'secret-token', $manager_run['metadata']['token'] ?? null, 'manager get-workflow-run preserves operator metadata', $failures, $passes );
 
 $GLOBALS['__can'] = false;
+$GLOBALS['__can_read'] = true;
+smoke_assert( true, agents_workflow_run_read_permission( array() ), 'observer has workflow run read permission', $failures, $passes );
 $observer_run     = agents_get_workflow_run( array( 'run_id' => 'run-redact-1' ) );
 smoke_assert( 'test', $observer_run['metadata']['provider'] ?? null, 'observer get-workflow-run preserves safe metadata', $failures, $passes );
 smoke_assert( '[redacted]', $observer_run['metadata']['token'] ?? null, 'observer get-workflow-run redacts metadata secrets', $failures, $passes );
