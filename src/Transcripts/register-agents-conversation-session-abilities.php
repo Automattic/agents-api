@@ -344,18 +344,28 @@ function agents_conversation_session_owner_from_input( array $input, WP_Agent_Ex
 		return new \WP_Error( 'agents_conversation_session_non_isolating_owner', 'Public audience is not an isolating conversation session owner.' );
 	}
 
-	$principal_owner = $principal->conversation_owner();
+	// Normalize user keys that clients may prefix with "user:" so the binding
+	// check below compares against the canonical numeric key.
 	if ( WP_Agent_Execution_Principal::OWNER_TYPE_USER === $type ) {
-		if ( ! is_array( $principal_owner ) || WP_Agent_Execution_Principal::OWNER_TYPE_USER !== $principal_owner['type'] || preg_replace( '/^user:/', '', $key ) !== (string) $principal_owner['key'] ) {
-			return new \WP_Error( 'agents_conversation_session_user_owner_forbidden', 'User conversation session owners must match the authenticated user principal.' );
-		}
+		$key = (string) preg_replace( '/^user:/', '', $key );
+	}
 
-		$key = (string) $principal_owner['key'];
+	// Bind every asserted owner to the authenticated principal's own owner.
+	// Identity is established by the resolved principal, never declared in the
+	// request body, so a caller can only ever address the owner it actually
+	// holds. This fails closed for user and non-user (token/audience/system/
+	// runtime/custom) owner types alike.
+	$principal_owner = $principal->conversation_owner();
+	if ( ! is_array( $principal_owner ) || $principal_owner['type'] !== $type || (string) $principal_owner['key'] !== $key ) {
+		$code = WP_Agent_Execution_Principal::OWNER_TYPE_USER === $type
+			? 'agents_conversation_session_user_owner_forbidden'
+			: 'agents_conversation_session_owner_forbidden';
+		return new \WP_Error( $code, 'Conversation session owner must match the authenticated principal.' );
 	}
 
 	return array(
 		'type' => $type,
-		'key'  => $key,
+		'key'  => (string) $principal_owner['key'],
 	);
 }
 
@@ -491,7 +501,14 @@ function agents_conversation_sessions_owned_session( string $session_id, array $
 	}
 
 	$session = agents_conversation_sessions_array_value( $session );
-	if ( ! agents_conversation_sessions_session_matches_owner( $session, $context['owner'] ) && ! agents_conversation_sessions_can_manage_any() ) {
+
+	// A store that resolves rows by session id alone cannot prove workspace
+	// isolation, so verify both the requested workspace and the owner before
+	// treating the row as owned. This mirrors the canonical
+	// WP_Agent_Conversation_Sessions::get_owned_session() fallback.
+	$matches = agents_conversation_sessions_session_matches_workspace( $session, $workspace )
+		&& agents_conversation_sessions_session_matches_owner( $session, $context['owner'] );
+	if ( ! $matches && ! agents_conversation_sessions_can_manage_any() ) {
 		return new \WP_Error( 'agents_conversation_session_forbidden', 'The current principal cannot access this conversation session.', array( 'status' => 403 ) );
 	}
 
@@ -511,6 +528,15 @@ function agents_conversation_sessions_session_matches_owner( array $session, arr
 	}
 
 	return WP_Agent_Execution_Principal::OWNER_TYPE_USER === $owner['type'] && agents_conversation_sessions_int_value( $session['user_id'] ?? 0 ) === (int) $owner['key'];
+}
+
+/**
+ * @param array<string,mixed>       $session   Session row.
+ * @param WP_Agent_Workspace_Scope $workspace Requested workspace scope.
+ */
+function agents_conversation_sessions_session_matches_workspace( array $session, WP_Agent_Workspace_Scope $workspace ): bool {
+	return agents_conversation_sessions_string_value( $session['workspace_type'] ?? null ) === $workspace->workspace_type
+		&& agents_conversation_sessions_string_value( $session['workspace_id'] ?? null ) === $workspace->workspace_id;
 }
 
 function agents_conversation_sessions_can_manage_any(): bool {
