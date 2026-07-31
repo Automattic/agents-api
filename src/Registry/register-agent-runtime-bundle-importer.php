@@ -231,15 +231,16 @@ add_filter(
 		$source_type    = $string_value( $bundle['source_type'] ?? null, $spec['source_type'] ?? null, 'runtime-agent-package' );
 		$source_package = $string_value( $bundle['source_package'] ?? null, $spec['source_package'] ?? null, $bundle['package_slug'] ?? null, $spec['package_slug'] ?? null, $bundle['bundle_slug'] ?? null );
 		$source_version = $string_value( $bundle['source_version'] ?? null, $spec['source_version'] ?? null, $bundle['package_version'] ?? null, $spec['package_version'] ?? null, $bundle['bundle_version'] ?? null );
-		if ( '' !== $source_package || '' !== $source_version ) {
-			$meta = array_merge(
-				array(
-					'source_type'    => $source_type,
-					'source_package' => $source_package,
-					'source_version' => $source_version,
-				),
-				$meta
-			);
+		// Provenance is derived by the importer from host-trusted spec/input, so it must
+		// win over any source_* keys smuggled inside the bundle's own agent.meta. Merge
+		// the bundle meta as the base, then let the importer-derived provenance override
+		// the reserved keys (mirrors class-wp-agent-installed-agent-projector.php).
+		$meta['source_type'] = $source_type;
+		if ( '' !== $source_package ) {
+			$meta['source_package'] = $source_package;
+		}
+		if ( '' !== $source_version ) {
+			$meta['source_version'] = $source_version;
 		}
 
 		$registered = $registry->register(
