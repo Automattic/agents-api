@@ -90,7 +90,7 @@ agents_api_smoke_assert_equals( 'boolean', $submit_schema['properties']['resume'
 $list_schema = $GLOBALS['__agents_api_smoke_abilities'][ AgentsAPI\AI\AGENTS_LIST_RUNTIME_TOOL_REQUESTS_ABILITY ]['input_schema'] ?? array();
 agents_api_smoke_assert_equals( 'integer', $list_schema['properties']['limit']['type'] ?? '', 'list schema exposes generic limit query hint', $failures, $passes );
 
-$runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+$runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Atomic_Store {
 	public array $requests = array();
 
 	public function create( array $request ): void {
@@ -101,17 +101,23 @@ $runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_
 		return $this->requests[ $request_id ] ?? null;
 	}
 
-	public function complete( string $request_id, array $result ): bool {
-		if ( ! isset( $this->requests[ $request_id ] ) || AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== ( $this->requests[ $request_id ]['status'] ?? '' ) ) {
-			return false;
-		}
-		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED;
-		$this->requests[ $request_id ]['result'] = $result;
-		return true;
+	public function complete( string $request_id, array $result ): void {
+		$this->transition_pending( $request_id, AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED, $result );
 	}
 
 	public function timeout( string $request_id ): void {
-		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT;
+		$this->transition_pending( $request_id, AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT );
+	}
+
+	public function transition_pending( string $request_id, string $status, ?array $result = null ): bool {
+		if ( ! isset( $this->requests[ $request_id ] ) || AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== ( $this->requests[ $request_id ]['status'] ?? '' ) ) {
+			return false;
+		}
+		$this->requests[ $request_id ]['status'] = $status;
+		if ( null !== $result ) {
+			$this->requests[ $request_id ]['result'] = $result;
+		}
+		return true;
 	}
 
 	public function recent_pending( array $query = array() ): array {
@@ -192,5 +198,15 @@ $cancel = agents_api_smoke_execute_runtime_tool_ability(
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT, $cancel['status'] ?? '', 'cancel ability applies canonical timeout transition', $failures, $passes );
 agents_api_smoke_assert_equals( true, $cancel['cancelled'] ?? false, 'cancel ability marks cancellation envelope', $failures, $passes );
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT, $runtime_tool_store->requests[ $timeout_request['request_id'] ]['status'] ?? '', 'cancel ability delegates terminal transition to store', $failures, $passes );
+
+$cancel_replay = agents_api_smoke_execute_runtime_tool_ability(
+	AgentsAPI\AI\AGENTS_CANCEL_RUNTIME_TOOL_REQUEST_ABILITY,
+	array(
+		'request_id' => $timeout_request['request_id'],
+		'resume'     => false,
+	)
+);
+agents_api_smoke_assert_equals( true, $cancel_replay['cancelled'] ?? false, 'replayed cancel preserves the public cancelled discriminator', $failures, $passes );
+agents_api_smoke_assert_equals( true, $cancel_replay['duplicate'] ?? false, 'replayed cancel is idempotent through the public ability', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API runtime-tool lifecycle abilities', $failures, $passes );

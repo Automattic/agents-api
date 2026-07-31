@@ -111,7 +111,12 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 		}
 
 		$normalized_result = WP_Agent_Runtime_Tool_Result::from_request( $normalized_request, $result );
-		$claimed           = $store->complete( self::string_field( $normalized_request, 'request_id' ), $normalized_result );
+		$claimed           = self::transition_pending(
+			$store,
+			self::string_field( $normalized_request, 'request_id' ),
+			WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED,
+			$normalized_result
+		);
 
 		if ( ! $claimed ) {
 			return self::lost_completion_race( $store, $normalized_request );
@@ -199,7 +204,14 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 			)
 		);
 
-		$store->timeout( self::string_field( $normalized_request, 'request_id' ) );
+		$claimed = self::transition_pending(
+			$store,
+			self::string_field( $normalized_request, 'request_id' ),
+			WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT
+		);
+		if ( ! $claimed ) {
+			return self::lost_timeout_race( $store, $normalized_request );
+		}
 
 		do_action( 'agents_api_runtime_tool_request_timed_out', $timeout_request, $timeout_result, $context );
 
@@ -218,6 +230,41 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 		}
 
 		return $envelope;
+	}
+
+	/**
+	 * Resolve a timeout/cancel that lost the terminal transition race.
+	 *
+	 * @param WP_Agent_Runtime_Tool_Request_Store $store Request store.
+	 * @param array<string, mixed>                $normalized_request Normalized request identity.
+	 * @return array<string, mixed> Duplicate terminal envelope.
+	 */
+	private static function lost_timeout_race( WP_Agent_Runtime_Tool_Request_Store $store, array $normalized_request ): array {
+		$terminal = $store->get( self::string_field( $normalized_request, 'request_id' ) );
+		if ( null !== $terminal ) {
+			$status = is_string( $terminal['status'] ?? null ) ? $terminal['status'] : '';
+			if ( '' !== $status && WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== $status ) {
+				return self::terminal_replay_envelope( $terminal, WP_Agent_Runtime_Tool_Request::normalize( $terminal ), $status );
+			}
+		}
+
+		throw new \InvalidArgumentException( 'invalid_runtime_tool_timeout: terminal transition was not retained' );
+	}
+
+	/**
+	 * Claim a terminal transition through the additive atomic-store contract.
+	 *
+	 * @param WP_Agent_Runtime_Tool_Request_Store $store Request store.
+	 * @param string                              $request_id Runtime tool request id.
+	 * @param string                              $status Target terminal request status.
+	 * @param array<string, mixed>|null           $result Normalized completion result.
+	 */
+	private static function transition_pending( WP_Agent_Runtime_Tool_Request_Store $store, string $request_id, string $status, ?array $result = null ): bool {
+		if ( ! $store instanceof WP_Agent_Runtime_Tool_Request_Atomic_Store ) {
+			throw new \InvalidArgumentException( 'invalid_runtime_tool_store: atomic terminal transitions are required' );
+		}
+
+		return $store->transition_pending( $request_id, $status, $result );
 	}
 
 	/**

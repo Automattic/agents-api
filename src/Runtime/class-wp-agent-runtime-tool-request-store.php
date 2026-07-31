@@ -37,30 +37,18 @@ interface WP_Agent_Runtime_Tool_Request_Store {
 	/**
 	 * Mark a pending request complete with a client-submitted result.
 	 *
-	 * Implementations must transition only pending records and should back the
-	 * write with a conditional/compare-and-set update so concurrent completions
-	 * of the same request cannot both succeed. Return `true` only when this call
-	 * transitioned a pending record to complete (the caller "won" the exact-once
-	 * completion). Return `false` when the record was already terminal, so the
-	 * caller can re-read the retained winner result and treat the call as a
-	 * duplicate instead of firing completion side effects a second time.
-	 *
-	 * Duplicate completions for terminal records must leave existing store data
-	 * unchanged.
+	 * Implementations should transition only pending records. Duplicate
+	 * completions for terminal records must leave existing store data unchanged.
 	 *
 	 * @param string               $request_id Runtime tool request id.
 	 * @param array<string, mixed> $result Normalized runtime tool result.
-	 * @return bool True when this call transitioned a pending record to complete.
 	 */
-	public function complete( string $request_id, array $result ): bool;
+	public function complete( string $request_id, array $result ): void;
 
 	/**
 	 * Mark a pending request timed out.
 	 *
-	 * Implementations should transition only pending records. The lifecycle layer
-	 * short-circuits terminal records before calling this method, so a timeout of
-	 * an already-terminal request is treated as an idempotent duplicate and this
-	 * method is not invoked again.
+	 * Implementations should transition only pending records.
 	 *
 	 * @param string $request_id Runtime tool request id.
 	 */
@@ -77,4 +65,27 @@ interface WP_Agent_Runtime_Tool_Request_Store {
 	 * @return array<int, array<string, mixed>> Normalized pending requests.
 	 */
 	public function recent_pending( array $query = array() ): array;
+}
+
+/**
+ * Atomic terminal-transition capability for exact-once lifecycle operations.
+ *
+ * Hosts using submit, timeout, or cancel must implement this additive contract.
+ * The legacy store interface remains load-compatible for create and read paths.
+ */
+interface WP_Agent_Runtime_Tool_Request_Atomic_Store extends WP_Agent_Runtime_Tool_Request_Store {
+
+	/**
+	 * Conditionally transition a pending request to a terminal status.
+	 *
+	 * Implementations must use a compare-and-set write and return `true` only for
+	 * the caller that changed the pending record. Completed transitions must retain
+	 * the normalized result under `result` for duplicate resolution.
+	 *
+	 * @param string                    $request_id Runtime tool request id.
+	 * @param string                    $status Target terminal request status.
+	 * @param array<string, mixed>|null $result Normalized completion result, when completing.
+	 * @return bool True when this call transitioned the pending record.
+	 */
+	public function transition_pending( string $request_id, string $status, ?array $result = null ): bool;
 }

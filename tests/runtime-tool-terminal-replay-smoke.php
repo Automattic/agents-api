@@ -31,7 +31,7 @@ agents_api_smoke_require_module();
  * Store that transitions only pending records, mirroring the exact-once
  * contract host implementations must back with a compare-and-set write.
  */
-$store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+$store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Atomic_Store {
 	/** @var array<string, array<string, mixed>> */
 	public array $requests = array();
 	public int $timeout_calls = 0;
@@ -44,18 +44,26 @@ $store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store
 		return $this->requests[ $request_id ] ?? null;
 	}
 
-	public function complete( string $request_id, array $result ): bool {
-		if ( ! isset( $this->requests[ $request_id ] ) || AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== ( $this->requests[ $request_id ]['status'] ?? '' ) ) {
-			return false;
-		}
-		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED;
-		$this->requests[ $request_id ]['result'] = $result;
-		return true;
+	public function complete( string $request_id, array $result ): void {
+		$this->transition_pending( $request_id, AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED, $result );
 	}
 
 	public function timeout( string $request_id ): void {
-		++$this->timeout_calls;
-		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT;
+		$this->transition_pending( $request_id, AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT );
+	}
+
+	public function transition_pending( string $request_id, string $status, ?array $result = null ): bool {
+		if ( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT === $status ) {
+			++$this->timeout_calls;
+		}
+		if ( ! isset( $this->requests[ $request_id ] ) || AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== ( $this->requests[ $request_id ]['status'] ?? '' ) ) {
+			return false;
+		}
+		$this->requests[ $request_id ]['status'] = $status;
+		if ( null !== $result ) {
+			$this->requests[ $request_id ]['result'] = $result;
+		}
+		return true;
 	}
 
 	public function recent_pending( array $query = array() ): array {
@@ -73,6 +81,48 @@ $continuation = static function ( array $request, array $result, array $context 
 	++$resume_calls;
 	return array( 'resumed' => true );
 };
+
+// The additive atomic capability preserves class-loading compatibility for
+// existing stores while refusing unsafe terminal writes before mutation.
+$legacy_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+	/** @var array<string, mixed> */
+	public array $request = array();
+	public int $complete_calls = 0;
+
+	public function create( array $request ): void {
+		$this->request = $request;
+	}
+
+	public function get( string $request_id ): ?array {
+		unset( $request_id );
+		return $this->request;
+	}
+
+	public function complete( string $request_id, array $result ): void {
+		unset( $request_id, $result );
+		++$this->complete_calls;
+	}
+
+	public function timeout( string $request_id ): void {
+		unset( $request_id );
+	}
+
+	public function recent_pending( array $query = array() ): array {
+		unset( $query );
+		return array();
+	}
+};
+
+$legacy_request = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::from_tool_call( 'client/choose_post', 'call_legacy_store', array(), array( 'run_id' => 'run-legacy-store' ) );
+$legacy_store->create( $legacy_request );
+$legacy_refused = false;
+try {
+	AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::submit_result( $legacy_store, array( 'request_id' => $legacy_request['request_id'] ) );
+} catch ( InvalidArgumentException $error ) {
+	$legacy_refused = 'invalid_runtime_tool_store: atomic terminal transitions are required' === $error->getMessage();
+}
+agents_api_smoke_assert_equals( true, $legacy_refused, 'legacy store remains load-compatible but unsafe terminal mutation fails closed', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $legacy_store->complete_calls, 'legacy store is refused before a non-atomic completion write', $failures, $passes );
 
 // ---------------------------------------------------------------------------
 // Finding 1 & 2: timeout/cancel replay of an already-terminal request.
@@ -103,6 +153,62 @@ agents_api_smoke_assert_equals( true, $replay_cancel['duplicate'] ?? false, 'rep
 agents_api_smoke_assert_equals( 1, $resume_calls, 'replayed cancel does not resume the continuation again', $failures, $passes );
 agents_api_smoke_assert_equals( 1, $store->timeout_calls, 'replayed cancel does not write to the store again', $failures, $passes );
 
+// Model two timeout callers that both read pending before the store's atomic
+// transition. Only the winner may fire terminal side effects.
+$timeout_race_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Atomic_Store {
+	/** @var array<string, mixed> */
+	public array $request = array();
+	public bool $won_by_other = false;
+
+	public function create( array $request ): void {
+		$this->request = $request;
+	}
+
+	public function get( string $request_id ): ?array {
+		unset( $request_id );
+		if ( $this->won_by_other ) {
+			$this->request['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT;
+		}
+		return $this->request;
+	}
+
+	public function complete( string $request_id, array $result ): void {
+		unset( $request_id, $result );
+	}
+
+	public function timeout( string $request_id ): void {
+		unset( $request_id );
+	}
+
+	public function transition_pending( string $request_id, string $status, ?array $result = null ): bool {
+		unset( $request_id, $status, $result );
+		$this->won_by_other = true;
+		return false;
+	}
+
+	public function recent_pending( array $query = array() ): array {
+		unset( $query );
+		return array();
+	}
+};
+
+$timeout_race_request = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::from_tool_call( 'client/choose_post', 'call_timeout_race', array(), array( 'run_id' => 'run-timeout-race' ) );
+$timeout_race_store->create( $timeout_race_request );
+$timeout_hooks_before = did_action( 'agents_api_runtime_tool_request_timed_out' );
+$timeout_race_resumes = 0;
+$timeout_race = AgentsAPI\AI\WP_Agent_Runtime_Tool_Lifecycle::timeout_request(
+	$timeout_race_store,
+	$timeout_race_request['request_id'],
+	static function () use ( &$timeout_race_resumes ): array {
+		++$timeout_race_resumes;
+		return array( 'resumed' => true );
+	}
+);
+agents_api_smoke_assert_equals( true, $timeout_race['duplicate'] ?? false, 'losing timeout resolves as a duplicate', $failures, $passes );
+agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT, $timeout_race['status'] ?? '', 'losing timeout returns the retained terminal status', $failures, $passes );
+agents_api_smoke_assert_equals( $timeout_hooks_before, did_action( 'agents_api_runtime_tool_request_timed_out' ), 'losing timeout does not fire the terminal hook', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $timeout_race_resumes, 'losing timeout does not resume the continuation', $failures, $passes );
+
 // A request that was completed first must also reject a later timeout/cancel
 // terminal replay without side effects.
 $completed_request = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::from_tool_call( 'client/choose_post', 'call_complete_then_timeout', array(), array( 'run_id' => 'run-complete-then-timeout' ) );
@@ -126,11 +232,11 @@ agents_api_smoke_assert_equals( $hooks_before, did_action( 'agents_api_runtime_t
 // ---------------------------------------------------------------------------
 
 /**
- * Store whose complete() always reports a loss (another caller already won),
+ * Store whose atomic transition always reports a loss (another caller won),
  * exposing the retained winner result on the subsequent get(). Models the race
  * window where two callers both read a pending record before either writes.
  */
-$racing_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+$racing_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Atomic_Store {
 	/** @var array<string, mixed> */
 	public array $request = array();
 	public bool $won_by_other = false;
@@ -154,15 +260,19 @@ $racing_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Reques
 		return $this->request;
 	}
 
-	public function complete( string $request_id, array $result ): bool {
+	public function complete( string $request_id, array $result ): void {
 		unset( $request_id, $result );
-		++$this->complete_calls;
-		$this->won_by_other = true;
-		return false;
 	}
 
 	public function timeout( string $request_id ): void {
 		unset( $request_id );
+	}
+
+	public function transition_pending( string $request_id, string $status, ?array $result = null ): bool {
+		unset( $request_id, $status, $result );
+		++$this->complete_calls;
+		$this->won_by_other = true;
+		return false;
 	}
 
 	public function recent_pending( array $query = array() ): array {

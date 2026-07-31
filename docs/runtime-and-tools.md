@@ -415,6 +415,7 @@ Public lifecycle contracts:
 - `WP_Agent_Runtime_Tool_Request` normalizes pending requests and timeout transitions.
 - `WP_Agent_Runtime_Tool_Result` normalizes submitted client/runtime results, including results normalized against a stored request.
 - `WP_Agent_Runtime_Tool_Request_Store` is the host persistence boundary with `create`, `get`, `complete`, `timeout`, and `recent_pending` methods.
+- `WP_Agent_Runtime_Tool_Request_Atomic_Store` adds the compare-and-set `transition_pending` capability required by submit, timeout, and cancel. Legacy stores remain compatible for create and read paths but terminal lifecycle calls fail closed until this capability is implemented.
 - `WP_Agent_Runtime_Tool_Continuation` is the host resume boundary for continuing a paused run after submit or timeout.
 - `WP_Agent_Runtime_Tool_Lifecycle` coordinates create, submit, timeout, recent-pending reads, transcript-compatible result payloads, and continuation callbacks.
 
