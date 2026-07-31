@@ -202,8 +202,8 @@ function agents_reconcile_workflow_branch_locked( WP_Agent_Workflow_Run_Recorder
 
 	// Bind the completion to the handle's stored key too: the caller may not
 	// remap its output onto a different branch's aggregate key. An empty stored
-	// or asserted key skips this check to stay backward compatible with frames
-	// that did not stamp a key.
+	// key preserves compatibility with frames that did not stamp one; otherwise
+	// the stored key remains authoritative when the caller omits it.
 	$stored_key   = agents_workflow_string( $stored_handle['key'] ?? '' );
 	$asserted_key = agents_workflow_string( $branch_result['key'] ?? '' );
 	if ( '' !== $stored_key && '' !== $asserted_key && $stored_key !== $asserted_key ) {
@@ -214,10 +214,15 @@ function agents_reconcile_workflow_branch_locked( WP_Agent_Workflow_Run_Recorder
 	}
 
 	$status = agents_workflow_string( $branch_result['status'] ?? '' );
-	$status = ( WP_Agent_Workflow_Run_Result::STATUS_FAILED === $status ) ? WP_Agent_Workflow_Run_Result::STATUS_FAILED : WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED;
+	if ( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED !== $status && WP_Agent_Workflow_Run_Result::STATUS_FAILED !== $status ) {
+		return new \WP_Error(
+			'agents_reconcile_workflow_branch_invalid_status',
+			sprintf( 'Branch result status `%s` is not terminal for handle `%s`.', $status, $handle_id )
+		);
+	}
 
 	$completed[ $handle_id ] = array(
-		'key'    => agents_workflow_string( $branch_result['key'] ?? '' ),
+		'key'    => '' !== $stored_key ? $stored_key : $asserted_key,
 		'status' => $status,
 		'output' => $branch_result['output'] ?? null,
 		'steps'  => is_array( $branch_result['steps'] ?? null ) ? $branch_result['steps'] : array(),

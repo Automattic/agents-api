@@ -414,6 +414,28 @@ smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $final->get_status
 $bundle = $final->get_output()['steps']['scatter']['final']['final_bundle'] ?? '';
 smoke_assert( 'FUSED[A|B]', $bundle, 'auth: aggregate fused the GENUINE branch outputs (no HACK)', $failures, $passes );
 
+// The stored key remains authoritative when a legitimate callback cannot recover
+// its descriptor and therefore omits the key.
+$key_run = ( new WP_Agent_Workflow_Runner( $recorder ) )->run( auth_roles_spec(), array(), array( 'run_id' => 'auth-key' ) );
+$key_descriptors = Auth_Executor::$dispatched;
+$invalid_status = agents_reconcile_workflow_branch(
+	'auth-key',
+	(string) $key_descriptors[0]['handle_id'],
+	array( 'key' => 'a', 'status' => 'pending', 'output' => array( 'fragment' => 'HACK' ) )
+);
+smoke_assert( 'agents_reconcile_workflow_branch_invalid_status', is_wp_error( $invalid_status ) ? $invalid_status->get_error_code() : '', 'auth: nonterminal status rejected', $failures, $passes );
+smoke_assert( 0, auth_completed_count( $recorder, 'auth-key' ), 'auth: invalid status did not complete the stored handle', $failures, $passes );
+$missing_key = agents_reconcile_workflow_branch(
+	'auth-key',
+	(string) $key_descriptors[0]['handle_id'],
+	array( 'status' => WP_Agent_Workflow_Run_Result::STATUS_FAILED, 'output' => null )
+);
+smoke_assert_true( ! is_wp_error( $missing_key ), 'auth: omitted asserted key uses the stored key', $failures, $passes );
+$missing_key_frame = $recorder->find( 'auth-key' )->get_suspension();
+$missing_key_entry = $missing_key_frame['completed'][ (string) $key_descriptors[0]['handle_id'] ] ?? array();
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $key_run->get_status(), 'auth: omitted-key fixture starts suspended', $failures, $passes );
+smoke_assert( 'a', $missing_key_entry['key'] ?? '', 'auth: completed entry keeps authoritative stored key', $failures, $passes );
+
 // ═════════════════════════════════════════════════════════════════════════════
 // FINDING 2: when the per-run reconcile lock cannot be acquired, with_lock() must
 // FAIL CLOSED (retryable WP_Error) and must NOT run the critical section.
