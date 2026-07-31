@@ -143,7 +143,10 @@ function agents_run_task( array $input ) {
 		'target_kind'    => $target['kind'],
 		'resource_class' => $placement['resource_class'] ?? '',
 	);
-	WP_Agent_Task_Run_Control::start_run( $run_id, $session_id, $executor_id, $metadata );
+	$started = WP_Agent_Task_Run_Control::start_run( $run_id, $session_id, $executor_id, $metadata, agents_task_current_owner() );
+	if ( is_wp_error( $started ) ) {
+		return $started;
+	}
 
 	$result = call_user_func( $handler, $input, $target );
 	if ( is_wp_error( $result ) ) {
@@ -178,14 +181,15 @@ function agents_run_task( array $input ) {
 
 	$result = agents_task_string_keyed_array( $result );
 	$result = array_merge(
+		$result,
 		array(
 			'schema'      => 'agents-api/task-result/v1',
 			'run_id'      => $run_id,
 			'session_id'  => $session_id,
 			'executor_id' => $executor_id,
-		),
-		$result
+		)
 	);
+	unset( $result['owner'] );
 
 	try {
 		return WP_Agent_Task_Run_Control::save_run( $result );
@@ -238,22 +242,16 @@ function agents_list_execution_targets( array $input ) {
  * @return array<string,mixed>|\WP_Error
  */
 function agents_get_task_run( array $input ) {
-	$handler = apply_filters( 'wp_agent_task_run_status_handler', null, $input );
-	if ( is_callable( $handler ) ) {
-		$result = agents_task_normalize_run_control_result( call_user_func( $handler, $input ), 'agents_task_run_invalid_status' );
-		return is_wp_error( $result ) ? $result : agents_task_run_observer_payload( $result, $input );
+	$run = agents_task_resolve_run( $input );
+	if ( is_wp_error( $run ) ) {
+		return $run;
 	}
 
-	$run                  = WP_Agent_Task_Run_Control::get_run( agents_task_string( $input['run_id'] ?? '' ) );
-	$requested_session_id = agents_task_string( $input['session_id'] ?? '' );
-	if ( null !== $run && agents_task_string( $run['session_id'] ?? '' ) !== $requested_session_id ) {
+	if ( ! agents_task_manage_permission() && ! agents_task_current_user_owns_run( $run ) ) {
 		return new \WP_Error( 'agents_task_run_not_found', 'No task run was found for the requested session_id and run_id.' );
 	}
-	if ( null !== $run ) {
-		return agents_task_run_observer_payload( $run, $input );
-	}
 
-	return new \WP_Error( 'agents_task_run_not_found', 'No task run was found for the requested run_id.' );
+	return agents_task_run_observer_payload( $run, $input );
 }
 
 /**
@@ -476,17 +474,60 @@ function agents_run_task_permission( array $input ): bool {
 	return (bool) apply_filters( 'agents_task_permission', $allowed, $input );
 }
 
-/** @param array<string,mixed> $input Ability input. */
+/**
+ * Cancellation acts on an EXISTING run, so authorize against the run's stored
+ * owner rather than the trivially self-satisfiable client session_owner claim.
+ *
+ * @param array<string,mixed> $input Ability input.
+ */
 function agents_cancel_task_run_permission( array $input ): bool {
-	$allowed = agents_task_write_permission( $input );
+	$run     = agents_task_resolve_run( $input );
+	$allowed = agents_task_manage_permission() || ( is_array( $run ) && agents_task_current_user_owns_run( $run ) );
 	$allowed = (bool) apply_filters( 'agents_cancel_task_run_permission', $allowed, $input );
 	return (bool) apply_filters( 'agents_task_permission', $allowed, $input );
 }
 
-/** @param array<string,mixed> $input Ability input. */
+/**
+ * Resolve a run from the configured status backend and verify its address.
+ *
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed>|\WP_Error
+ */
+function agents_task_resolve_run( array $input ) {
+	$handler = apply_filters( 'wp_agent_task_run_status_handler', null, $input );
+	if ( is_callable( $handler ) ) {
+		$run = agents_task_normalize_run_control_result( call_user_func( $handler, $input ), 'agents_task_run_invalid_status' );
+	} else {
+		$run = WP_Agent_Task_Run_Control::get_run( agents_task_string( $input['run_id'] ?? '' ) );
+	}
+
+	if ( is_wp_error( $run ) ) {
+		return $run;
+	}
+
+	$requested_run_id     = agents_task_string( $input['run_id'] ?? '' );
+	$requested_session_id = agents_task_string( $input['session_id'] ?? '' );
+	if ( ! is_array( $run ) || agents_task_string( $run['run_id'] ?? '' ) !== $requested_run_id || agents_task_string( $run['session_id'] ?? '' ) !== $requested_session_id ) {
+		return new \WP_Error( 'agents_task_run_not_found', 'No task run was found for the requested session_id and run_id.' );
+	}
+
+	return $run;
+}
+
+/** True when the current request can manage the site (manager bypass). */
+function agents_task_manage_permission(): bool {
+	return function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
+}
+
+/**
+ * Ownership gate for CREATING a run: the client stamps itself as the owner of a
+ * brand-new run/session it is dispatching. Safe as a creation stamp because the
+ * run does not yet exist and cannot belong to another principal.
+ *
+ * @param array<string,mixed> $input Ability input.
+ */
 function agents_task_write_permission( array $input ): bool {
-	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
-	return $allowed || agents_task_current_user_owns_session( $input );
+	return agents_task_manage_permission() || agents_task_current_user_owns_session( $input );
 }
 
 /** @param array<string,mixed> $input Ability input. */
@@ -498,6 +539,38 @@ function agents_task_current_user_owns_session( array $input ): bool {
 
 	$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
 	return 0 < $user_id && agents_task_string( $owner['key'] ?? '' ) === (string) $user_id;
+}
+
+/**
+ * Ownership gate for acting on an EXISTING run: compare the run's server-stored
+ * owner against the current user. Fails closed when the run is absent or has no
+ * stored owner, so a caller who lacks manage_options cannot self-assert access.
+ *
+ * @param array<string,mixed>|null $run Stored run resolved via get_run(), or null.
+ */
+function agents_task_current_user_owns_run( ?array $run ): bool {
+	if ( null === $run ) {
+		return false;
+	}
+
+	$owner = is_array( $run['owner'] ?? null ) ? agents_task_string_keyed_array( $run['owner'] ) : array();
+	if ( 'user' !== agents_task_string( $owner['type'] ?? '' ) ) {
+		return false;
+	}
+
+	$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
+	return 0 < $user_id && agents_task_string( $owner['key'] ?? '' ) === (string) $user_id;
+}
+
+/**
+ * Resolve the authenticated principal that owns a newly created run. Bound to
+ * the server-verified current user, never to a client-asserted session_owner.
+ *
+ * @return array<string,mixed>
+ */
+function agents_task_current_owner(): array {
+	$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
+	return 0 < $user_id ? array( 'type' => 'user', 'key' => (string) $user_id ) : array();
 }
 
 function agents_task_optional_string( mixed $value ): ?string {

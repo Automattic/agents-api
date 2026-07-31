@@ -82,6 +82,7 @@ class WP_Agent_Task_Run_Control {
 			'session_id'        => $session_id,
 			'status'            => $status,
 			'executor_id'       => $executor_id,
+			'owner'             => self::owner_value( $run['owner'] ?? array() ),
 			'execution_metrics' => self::execution_metrics_value( $run['execution_metrics'] ?? array(), $executor_id ),
 			'artifact_refs'     => self::list_value( $run['artifact_refs'] ?? array() ),
 			'diagnostics'       => self::map_value( $run['diagnostics'] ?? array() ),
@@ -152,27 +153,38 @@ class WP_Agent_Task_Run_Control {
 	}
 
 	/**
-	 * Start or update an addressable task run in the default store.
+	 * Start an addressable task run in the default store.
 	 *
 	 * @param string              $run_id      Run ID.
 	 * @param string              $session_id  Session ID.
 	 * @param string              $executor_id Executor ID.
 	 * @param array<string,mixed> $metadata    Run metadata.
-	 * @return array<string,mixed> Normalized run.
+	 * @param array<string,mixed> $owner       Owning principal tuple ({type,key}).
+	 * @return array<string,mixed>|\WP_Error Normalized run, or an error when already claimed.
 	 */
-	public static function start_run( string $run_id, string $session_id, string $executor_id, array $metadata = array() ): array {
-		$now = self::now();
+	public static function start_run( string $run_id, string $session_id, string $executor_id, array $metadata = array(), array $owner = array() ) {
+		$now   = self::now();
+		$state = self::state();
+		$owner = self::owner_value( $owner );
+
+		if ( isset( $state['runs'][ $run_id ] ) ) {
+			return new \WP_Error( 'agents_task_run_already_started', 'The run_id has already been claimed for execution.' );
+		}
+		if ( function_exists( 'add_option' ) && ! add_option( self::claim_option_key( $run_id ), $now, '', false ) ) {
+			return new \WP_Error( 'agents_task_run_already_started', 'The run_id has already been claimed for execution.' );
+		}
+
 		$run = array(
 			'run_id'      => $run_id,
 			'session_id'  => $session_id,
 			'executor_id' => $executor_id,
 			'status'      => self::STATUS_RUNNING,
+			'owner'       => $owner,
 			'started_at'  => $metadata['started_at'] ?? $now,
 			'updated_at'  => $now,
 			'metadata'    => $metadata,
 		);
 
-		$state                    = self::state();
 		$state['runs'][ $run_id ] = $run;
 		self::save_state( $state );
 
@@ -190,7 +202,13 @@ class WP_Agent_Task_Run_Control {
 		$normalized['updated_at'] = '' !== $normalized['updated_at'] ? $normalized['updated_at'] : self::now();
 		$run_id                   = self::string_value( $normalized['run_id'] );
 
-		$state                    = self::state();
+		$state = self::state();
+
+		// Ownership is server-bound at start_run and cannot be replaced by an executor.
+		if ( isset( $state['runs'][ $run_id ]['owner'] ) ) {
+			$normalized['owner'] = self::owner_value( $state['runs'][ $run_id ]['owner'] );
+		}
+
 		$state['runs'][ $run_id ] = $normalized;
 		self::save_state( $state );
 
@@ -248,6 +266,10 @@ class WP_Agent_Task_Run_Control {
 		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (string) $value : '';
 	}
 
+	private static function claim_option_key( string $run_id ): string {
+		return self::OPTION_KEY . '_claim_' . md5( $run_id );
+	}
+
 	/** @return array<string,mixed> */
 	private static function map_value( mixed $value ): array {
 		if ( ! is_array( $value ) ) {
@@ -262,6 +284,25 @@ class WP_Agent_Task_Run_Control {
 		}
 
 		return $map;
+	}
+
+	/**
+	 * Normalize a stored owning-principal tuple, dropping partial/invalid claims.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function owner_value( mixed $value ): array {
+		$owner = self::map_value( $value );
+		$type  = self::non_empty_string_value( $owner['type'] ?? null );
+		$key   = self::non_empty_string_value( $owner['key'] ?? null );
+		if ( null === $type || null === $key ) {
+			return array();
+		}
+
+		return array(
+			'type' => $type,
+			'key'  => $key,
+		);
 	}
 
 	/** @return array<string,mixed> */
