@@ -100,7 +100,7 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 						) + $context
 					);
 
-					if ( false === $result ) {
+					if ( false === $result || null === $result || is_wp_error( $result ) ) {
 						$failed[] = self::entry_with_status( $entry, 'failed', 'callback_failed' );
 						continue;
 					}

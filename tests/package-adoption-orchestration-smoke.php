@@ -11,6 +11,32 @@ if ( ! defined( 'ABSPATH' ) ) {
 	define( 'ABSPATH', __DIR__ . '/' );
 }
 
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		private string $code;
+		private string $message;
+		private $data;
+
+		public function __construct( string $code = '', string $message = '', $data = null ) {
+			$this->code    = $code;
+			$this->message = $message;
+			$this->data    = $data;
+		}
+
+		public function get_error_code(): string {
+			return $this->code;
+		}
+
+		public function get_error_message(): string {
+			return $this->message;
+		}
+
+		public function get_error_data() {
+			return $this->data;
+		}
+	}
+}
+
 $failures = array();
 $passes   = 0;
 
@@ -188,5 +214,64 @@ $imported_slugs = array_column( $GLOBALS['__agents_api_adoption_imports'], 'arti
 agents_api_smoke_assert_equals( true, isset( $recorded_payloads['local-edit'] ), 'recorded snapshot preserves approved artifact id', $failures, $passes );
 agents_api_smoke_assert_equals( 'remote', $recorded_payloads['local-edit']['body'], 'recorded snapshot captures target payload', $failures, $passes );
 agents_api_smoke_assert_equals( true, in_array( 'local-edit', $imported_slugs, true ), 'import callback receives approved artifact', $failures, $passes );
+
+echo "\n[4] Non-truthy import results (null / WP_Error) are treated as failures, never recorded:\n";
+
+// An artifact type whose import callback returns WP_Error (e.g. invalid payload).
+wp_register_agent_package_artifact_type(
+	'example/error-import',
+	array(
+		'import_callback' => static function ( WP_Agent_Package_Artifact $artifact, array $context ): WP_Error {
+			unset( $artifact, $context );
+			return new WP_Error( 'import_failed', 'Import rejected the payload.' );
+		},
+	)
+);
+
+// An artifact type with NO import callback registered: the dispatcher returns null.
+wp_register_agent_package_artifact_type(
+	'example/no-import',
+	array(
+		'label' => 'No import callback',
+	)
+);
+
+$failing_package = WP_Agent_Package::from_array(
+	array(
+		'slug'      => 'failing-package',
+		'version'   => '1.0.0',
+		'agent'     => array(
+			'slug'  => 'failing-agent',
+			'label' => 'Failing Agent',
+		),
+		'artifacts' => array(
+			array( 'type' => 'example/error-import', 'slug' => 'error-artifact', 'source' => 'artifacts/error.md' ),
+			array( 'type' => 'example/no-import', 'slug' => 'null-artifact', 'source' => 'artifacts/null.md' ),
+		),
+	)
+);
+
+$failing_target = array(
+	array( 'artifact_type' => 'example/error-import', 'artifact_id' => 'error-artifact', 'source' => 'artifacts/error.md', 'payload' => array( 'body' => 'new' ) ),
+	array( 'artifact_type' => 'example/no-import', 'artifact_id' => 'null-artifact', 'source' => 'artifacts/null.md', 'payload' => array( 'body' => 'new' ) ),
+);
+
+$failing_store        = new Agents_API_Test_Package_State_Store( array(), array(), $failing_target );
+$failing_orchestrator = new WP_Agent_Package_Adoption_Orchestrator( $failing_store );
+
+$failing_result = $failing_orchestrator->adopt(
+	new WP_Agent_Package_Adoption_Request(
+		$failing_package,
+		array(
+			'operation' => 'upgrade',
+			'context'   => array( 'timestamp' => '2026-05-25T01:00:00Z' ),
+		)
+	)
+);
+
+agents_api_smoke_assert_equals( 'failed', $failing_result->get_status(), 'null and WP_Error imports produce a failed status', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $failing_result->get_applied_artifacts() ), 'no artifacts recorded as applied', $failures, $passes );
+agents_api_smoke_assert_equals( 2, count( $failing_result->get_failed_artifacts() ), 'both non-truthy imports are marked failed', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $failing_store->recorded ), 'no installed snapshots recorded for failed imports', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API package adoption orchestration', $failures, $passes );
