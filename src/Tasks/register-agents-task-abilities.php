@@ -143,7 +143,10 @@ function agents_run_task( array $input ) {
 		'target_kind'    => $target['kind'],
 		'resource_class' => $placement['resource_class'] ?? '',
 	);
-	WP_Agent_Task_Run_Control::start_run( $run_id, $session_id, $executor_id, $metadata, agents_task_current_owner() );
+	$started = WP_Agent_Task_Run_Control::start_run( $run_id, $session_id, $executor_id, $metadata, agents_task_current_owner() );
+	if ( is_wp_error( $started ) ) {
+		return $started;
+	}
 
 	$result = call_user_func( $handler, $input, $target );
 	if ( is_wp_error( $result ) ) {
@@ -178,14 +181,15 @@ function agents_run_task( array $input ) {
 
 	$result = agents_task_string_keyed_array( $result );
 	$result = array_merge(
+		$result,
 		array(
 			'schema'      => 'agents-api/task-result/v1',
 			'run_id'      => $run_id,
 			'session_id'  => $session_id,
 			'executor_id' => $executor_id,
-		),
-		$result
+		)
 	);
+	unset( $result['owner'] );
 
 	try {
 		return WP_Agent_Task_Run_Control::save_run( $result );
@@ -238,28 +242,16 @@ function agents_list_execution_targets( array $input ) {
  * @return array<string,mixed>|\WP_Error
  */
 function agents_get_task_run( array $input ) {
-	$handler = apply_filters( 'wp_agent_task_run_status_handler', null, $input );
-	if ( is_callable( $handler ) ) {
-		$result = agents_task_normalize_run_control_result( call_user_func( $handler, $input ), 'agents_task_run_invalid_status' );
-		return is_wp_error( $result ) ? $result : agents_task_run_observer_payload( $result, $input );
+	$run = agents_task_resolve_run( $input );
+	if ( is_wp_error( $run ) ) {
+		return $run;
 	}
 
-	$run                  = WP_Agent_Task_Run_Control::get_run( agents_task_string( $input['run_id'] ?? '' ) );
-	$requested_session_id = agents_task_string( $input['session_id'] ?? '' );
-	if ( null !== $run && agents_task_string( $run['session_id'] ?? '' ) !== $requested_session_id ) {
+	if ( ! agents_task_manage_permission() && ! agents_task_current_user_owns_run( $run ) ) {
 		return new \WP_Error( 'agents_task_run_not_found', 'No task run was found for the requested session_id and run_id.' );
 	}
-	if ( null !== $run ) {
-		// Authorize reads against the stored owner, not a client-asserted principal.
-		// Managers bypass; everyone else must own the run. Fail closed with the same
-		// generic error so the boundary is not an existence oracle.
-		if ( ! agents_task_unredacted_read_permission( $input ) && ! agents_task_current_user_owns_run( $run ) ) {
-			return new \WP_Error( 'agents_task_run_not_found', 'No task run was found for the requested session_id and run_id.' );
-		}
-		return agents_task_run_observer_payload( $run, $input );
-	}
 
-	return new \WP_Error( 'agents_task_run_not_found', 'No task run was found for the requested run_id.' );
+	return agents_task_run_observer_payload( $run, $input );
 }
 
 /**
@@ -489,10 +481,37 @@ function agents_run_task_permission( array $input ): bool {
  * @param array<string,mixed> $input Ability input.
  */
 function agents_cancel_task_run_permission( array $input ): bool {
-	$run     = WP_Agent_Task_Run_Control::get_run( agents_task_string( $input['run_id'] ?? '' ) );
-	$allowed = agents_task_manage_permission() || agents_task_current_user_owns_run( $run );
+	$run     = agents_task_resolve_run( $input );
+	$allowed = agents_task_manage_permission() || ( is_array( $run ) && agents_task_current_user_owns_run( $run ) );
 	$allowed = (bool) apply_filters( 'agents_cancel_task_run_permission', $allowed, $input );
 	return (bool) apply_filters( 'agents_task_permission', $allowed, $input );
+}
+
+/**
+ * Resolve a run from the configured status backend and verify its address.
+ *
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed>|\WP_Error
+ */
+function agents_task_resolve_run( array $input ) {
+	$handler = apply_filters( 'wp_agent_task_run_status_handler', null, $input );
+	if ( is_callable( $handler ) ) {
+		$run = agents_task_normalize_run_control_result( call_user_func( $handler, $input ), 'agents_task_run_invalid_status' );
+	} else {
+		$run = WP_Agent_Task_Run_Control::get_run( agents_task_string( $input['run_id'] ?? '' ) );
+	}
+
+	if ( is_wp_error( $run ) ) {
+		return $run;
+	}
+
+	$requested_run_id     = agents_task_string( $input['run_id'] ?? '' );
+	$requested_session_id = agents_task_string( $input['session_id'] ?? '' );
+	if ( ! is_array( $run ) || agents_task_string( $run['run_id'] ?? '' ) !== $requested_run_id || agents_task_string( $run['session_id'] ?? '' ) !== $requested_session_id ) {
+		return new \WP_Error( 'agents_task_run_not_found', 'No task run was found for the requested session_id and run_id.' );
+	}
+
+	return $run;
 }
 
 /** True when the current request can manage the site (manager bypass). */

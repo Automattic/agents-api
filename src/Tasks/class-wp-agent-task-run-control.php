@@ -153,23 +153,25 @@ class WP_Agent_Task_Run_Control {
 	}
 
 	/**
-	 * Start or update an addressable task run in the default store.
+	 * Start an addressable task run in the default store.
 	 *
 	 * @param string              $run_id      Run ID.
 	 * @param string              $session_id  Session ID.
 	 * @param string              $executor_id Executor ID.
 	 * @param array<string,mixed> $metadata    Run metadata.
 	 * @param array<string,mixed> $owner       Owning principal tuple ({type,key}).
-	 * @return array<string,mixed> Normalized run.
+	 * @return array<string,mixed>|\WP_Error Normalized run, or an error when already claimed.
 	 */
-	public static function start_run( string $run_id, string $session_id, string $executor_id, array $metadata = array(), array $owner = array() ): array {
+	public static function start_run( string $run_id, string $session_id, string $executor_id, array $metadata = array(), array $owner = array() ) {
 		$now   = self::now();
 		$state = self::state();
 		$owner = self::owner_value( $owner );
 
-		// Never let a re-issued start_run silently drop the bound owner.
-		if ( array() === $owner && isset( $state['runs'][ $run_id ]['owner'] ) ) {
-			$owner = self::owner_value( $state['runs'][ $run_id ]['owner'] );
+		if ( isset( $state['runs'][ $run_id ] ) ) {
+			return new \WP_Error( 'agents_task_run_already_started', 'The run_id has already been claimed for execution.' );
+		}
+		if ( function_exists( 'add_option' ) && ! add_option( self::claim_option_key( $run_id ), $now, '', false ) ) {
+			return new \WP_Error( 'agents_task_run_already_started', 'The run_id has already been claimed for execution.' );
 		}
 
 		$run = array(
@@ -202,8 +204,8 @@ class WP_Agent_Task_Run_Control {
 
 		$state = self::state();
 
-		// Executor result payloads carry no owner; keep the principal bound at start_run.
-		if ( array() === $normalized['owner'] && isset( $state['runs'][ $run_id ]['owner'] ) ) {
+		// Ownership is server-bound at start_run and cannot be replaced by an executor.
+		if ( isset( $state['runs'][ $run_id ]['owner'] ) ) {
 			$normalized['owner'] = self::owner_value( $state['runs'][ $run_id ]['owner'] );
 		}
 
@@ -262,6 +264,10 @@ class WP_Agent_Task_Run_Control {
 
 	private static function string_value( mixed $value ): string {
 		return is_int( $value ) || is_float( $value ) || is_string( $value ) || is_bool( $value ) ? (string) $value : '';
+	}
+
+	private static function claim_option_key( string $run_id ): string {
+		return self::OPTION_KEY . '_claim_' . md5( $run_id );
 	}
 
 	/** @return array<string,mixed> */
