@@ -44,10 +44,22 @@ final class WP_Agent_Byte_Limit_Tool_Result_Truncator implements WP_Agent_Tool_R
 			);
 		}
 
-		$excerpt   = substr( (string) $encoded, 0, $this->max_bytes );
-		$metadata  = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
-		$preserved = $this->preserve_result_metadata( $result );
-		$truncated = $result;
+		$excerpt            = substr( (string) $encoded, 0, $this->max_bytes );
+		$metadata           = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
+		$preserved          = $this->preserve_result_metadata( $result );
+		$citations_dropped  = $preserved['citations_dropped'];
+		$truncated          = $result;
+
+		unset( $metadata['citations_dropped'] );
+		if ( array_key_exists( WP_Agent_Citation_Metadata::KEY, $metadata ) ) {
+			$bounded_metadata = $this->bound_citations( $metadata[ WP_Agent_Citation_Metadata::KEY ] );
+			$citations_dropped += $bounded_metadata['citations_dropped'];
+			if ( empty( $bounded_metadata['citations'] ) && $bounded_metadata['citations_dropped'] > 0 ) {
+				unset( $metadata[ WP_Agent_Citation_Metadata::KEY ] );
+			} else {
+				$metadata[ WP_Agent_Citation_Metadata::KEY ] = $bounded_metadata['citations'];
+			}
+		}
 
 		$truncated['result'] = array_merge(
 			array(
@@ -73,10 +85,10 @@ final class WP_Agent_Byte_Limit_Tool_Result_Truncator implements WP_Agent_Tool_R
 			'excerpt_bytes'  => strlen( $excerpt ),
 		);
 
-		if ( $preserved['citations_dropped'] > 0 ) {
-			$truncated['result']['citations_dropped']   = $preserved['citations_dropped'];
-			$truncated['metadata']['citations_dropped'] = $preserved['citations_dropped'];
-			$out_metadata['citations_dropped']          = $preserved['citations_dropped'];
+		if ( $citations_dropped > 0 ) {
+			$truncated['result']['citations_dropped']   = $citations_dropped;
+			$truncated['metadata']['citations_dropped'] = $citations_dropped;
+			$out_metadata['citations_dropped']          = $citations_dropped;
 		}
 
 		return array(
@@ -107,30 +119,67 @@ final class WP_Agent_Byte_Limit_Tool_Result_Truncator implements WP_Agent_Tool_R
 			);
 		}
 
-		$normalized = WP_Agent_Citation_Metadata::normalize_many( $payload[ WP_Agent_Citation_Metadata::KEY ] );
-
-		$kept    = array();
-		$dropped = 0;
-		foreach ( $normalized as $citation ) {
-			$candidate = $kept;
-			$candidate[] = $citation;
-
-			$encoded = wp_json_encode( $candidate );
-			if ( false === $encoded || strlen( (string) $encoded ) > $this->max_bytes ) {
-				$dropped = count( $normalized ) - count( $kept );
-				break;
-			}
-
-			$kept = $candidate;
-		}
+		$bounded = $this->bound_citations( $payload[ WP_Agent_Citation_Metadata::KEY ] );
 
 		$metadata = array();
-		if ( ! empty( $kept ) ) {
-			$metadata[ WP_Agent_Citation_Metadata::KEY ] = $kept;
+		if ( ! empty( $bounded['citations'] ) || 0 === $bounded['citations_dropped'] ) {
+			$metadata[ WP_Agent_Citation_Metadata::KEY ] = $bounded['citations'];
 		}
 
 		return array(
 			'metadata'          => $metadata,
+			'citations_dropped' => $bounded['citations_dropped'],
+		);
+	}
+
+	/**
+	 * Normalize and retain the leading citations that fit the byte ceiling.
+	 *
+	 * @param mixed $citations Raw citation list.
+	 * @return array{citations: array<int, array<string,mixed>>, citations_dropped: int}
+	 */
+	private function bound_citations( $citations ): array {
+		if ( ! is_array( $citations ) ) {
+			return array(
+				'citations'         => array(),
+				'citations_dropped' => 0,
+			);
+		}
+
+		$kept          = array();
+		$dropped       = 0;
+		$encoded_bytes = 2; // JSON array brackets.
+		$overflowed    = false;
+
+		foreach ( $citations as $citation ) {
+			if ( ! is_array( $citation ) ) {
+				continue;
+			}
+
+			$citation = WP_Agent_Citation_Metadata::normalize( $citation );
+			if ( empty( $citation ) ) {
+				continue;
+			}
+
+			if ( $overflowed ) {
+				++$dropped;
+				continue;
+			}
+
+			$encoded   = wp_json_encode( $citation );
+			$separator = empty( $kept ) ? 0 : 1;
+			if ( false === $encoded || $encoded_bytes + $separator + strlen( (string) $encoded ) > $this->max_bytes ) {
+				$overflowed = true;
+				++$dropped;
+				continue;
+			}
+
+			$kept[] = $citation;
+			$encoded_bytes += $separator + strlen( (string) $encoded );
+		}
+
+		return array(
+			'citations'         => $kept,
 			'citations_dropped' => $dropped,
 		);
 	}
