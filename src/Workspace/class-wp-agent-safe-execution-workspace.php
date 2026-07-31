@@ -285,10 +285,10 @@ final class WP_Agent_Safe_Execution_Workspace {
 	 *
 	 * The parent directory is resolved with realpath() and re-validated against
 	 * the workspace root, then the leaf is recomposed from that resolved parent
-	 * plus the sanitized basename. A leaf that is itself a symlink is rejected so
-	 * neither a read nor a write can follow a leaf symlink out of the isolated
-	 * root — closing the dangling-symlink escape and narrowing the remaining
-	 * TOCTOU window to an ancestor-directory swap.
+	 * plus the sanitized basename. A leaf that is already a symlink is rejected so
+	 * neither a read nor a write follows a planted leaf symlink out of the isolated
+	 * root. Path-based PHP filesystem APIs cannot prevent a concurrent replacement
+	 * between this validation and the subsequent file operation.
 	 *
 	 * @param array<string,mixed> $input      Ability input.
 	 * @param bool                $must_exist Whether the leaf must already exist.
@@ -312,7 +312,15 @@ final class WP_Agent_Safe_Execution_Workspace {
 
 		$candidate   = $workspace . DIRECTORY_SEPARATOR . $relative;
 		$parent_real = realpath( dirname( $candidate ) );
-		if ( false === $parent_real || ! self::is_inside( $parent_real, $workspace ) ) {
+		if ( false === $parent_real ) {
+			if ( $must_exist ) {
+				return new \WP_Error( 'agents_workspace_path_not_found', 'Safe execution workspace path does not exist.' );
+			}
+
+			return new \WP_Error( 'agents_workspace_path_escape', 'Safe execution workspace path escapes the workspace root.' );
+		}
+
+		if ( ! self::is_inside( $parent_real, $workspace ) ) {
 			return new \WP_Error( 'agents_workspace_path_escape', 'Safe execution workspace path escapes the workspace root.' );
 		}
 

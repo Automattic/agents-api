@@ -169,6 +169,15 @@ $read_result = call_user_func(
 );
 agents_api_smoke_assert_equals( '<main>Hello</main>', $read_result['content'] ?? '', 'read returns written workspace file', $failures, $passes );
 
+$missing_read = call_user_func(
+	$read,
+	array(
+		'handle' => 'site-generation',
+		'path'   => 'missing/child.txt',
+	)
+);
+agents_api_smoke_assert_equals( 'agents_workspace_path_not_found', $missing_read instanceof WP_Error ? $missing_read->get_error_code() : '', 'read preserves not-found error for a missing parent', $failures, $passes );
+
 $listed = call_user_func( $list, array() );
 agents_api_smoke_assert_equals( 'site-generation', $listed['workspaces'][0]['handle'] ?? '', 'list returns prepared workspace', $failures, $passes );
 
@@ -201,11 +210,11 @@ $symlink_write = call_user_func(
 	)
 );
 agents_api_smoke_assert_equals( true, $symlink_write instanceof WP_Error, 'write rejects a leaf symlink', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_workspace_path_escape', $symlink_write instanceof WP_Error ? $symlink_write->get_error_code() : '', 'write reports a leaf symlink as a path escape', $failures, $passes );
 agents_api_smoke_assert_equals( false, file_exists( $captured ), 'write does not follow a leaf symlink outside the workspace', $failures, $passes );
 
-// Leaf symlink escape on read: a symlink leaf (even one that resolves back
-// inside the workspace) is rejected rather than dereferenced, closing the same
-// TOCTOU leaf-swap window for reads.
+// Leaf symlink escape on read: a planted symlink leaf (even one that resolves
+// back inside the workspace) is rejected rather than dereferenced.
 file_put_contents( $root . '/site-generation/secret.txt', 'SECRET' );
 symlink( 'secret.txt', $root . '/site-generation/alias.txt' );
 
@@ -217,6 +226,7 @@ $symlink_read = call_user_func(
 	)
 );
 agents_api_smoke_assert_equals( true, $symlink_read instanceof WP_Error, 'read rejects a leaf symlink', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_workspace_path_escape', $symlink_read instanceof WP_Error ? $symlink_read->get_error_code() : '', 'read reports a leaf symlink as a path escape', $failures, $passes );
 
 agents_api_workspace_smoke_rm( $outside );
 
