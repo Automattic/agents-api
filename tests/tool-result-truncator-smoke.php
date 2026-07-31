@@ -131,4 +131,76 @@ $untruncated = ( new AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator( 100
 
 agents_api_smoke_assert_equals( false, $untruncated['truncated'], 'byte-limit truncator leaves small results unchanged', $failures, $passes );
 
+// Preserved citation metadata must stay bounded to the truncator byte ceiling
+// so a citation-heavy result cannot defeat the advertised byte bound.
+$many_citations = array();
+for ( $i = 0; $i < 500; $i++ ) {
+	$many_citations[] = array(
+		'source_url'   => 'https://example.test/source-' . $i,
+		'source_title' => str_repeat( 'title', 8 ),
+	);
+}
+
+$citation_budget      = 256;
+$citation_heavy       = ( new AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator( $citation_budget ) )->truncate_result(
+	array(
+		'success' => true,
+		'result'  => array(
+			'body'      => str_repeat( 'y', 5000 ),
+			'citations' => $many_citations,
+		),
+	),
+	'client/large-result'
+);
+$citation_replacement = $citation_heavy['result']['result'] ?? array();
+$preserved_citations  = $citation_replacement['citations'] ?? array();
+$encoded_citations    = (string) wp_json_encode( $preserved_citations );
+
+agents_api_smoke_assert_equals( true, strlen( $encoded_citations ) <= $citation_budget, 'preserved citations stay within the truncator byte budget', $failures, $passes );
+agents_api_smoke_assert_equals( true, count( $preserved_citations ) < count( $many_citations ), 'citation-heavy result drops trailing citations', $failures, $passes );
+$payload_citations_dropped = count( $many_citations ) - count( $preserved_citations );
+agents_api_smoke_assert_equals( $payload_citations_dropped, $citation_replacement['citations_dropped'] ?? 0, 'dropped payload citation count is exact', $failures, $passes );
+agents_api_smoke_assert_equals( $payload_citations_dropped, $citation_heavy['metadata']['citations_dropped'] ?? 0, 'dropped citation count surfaces in event metadata', $failures, $passes );
+
+// Tool-result metadata is the canonical citation location and must be subject
+// to the same bound instead of being copied intact into the replacement.
+$canonical_citation_heavy = ( new AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator( $citation_budget ) )->truncate_result(
+	array(
+		'success'  => true,
+		'result'   => array( 'body' => str_repeat( 'm', 5000 ) ),
+		'metadata' => array(
+			'citations'         => $many_citations,
+			'citations_dropped' => 999,
+		),
+	),
+	'client/large-result'
+);
+$canonical_metadata       = $canonical_citation_heavy['result']['metadata'] ?? array();
+$canonical_citations      = $canonical_metadata['citations'] ?? array();
+$canonical_dropped        = count( $many_citations ) - count( $canonical_citations );
+
+agents_api_smoke_assert_equals( true, strlen( (string) wp_json_encode( $canonical_citations ) ) <= $citation_budget, 'canonical metadata citations stay within the truncator byte budget', $failures, $passes );
+agents_api_smoke_assert_equals( 'https://example.test/source-0', $canonical_citations[0]['source_url'] ?? '', 'canonical metadata citations preserve source order', $failures, $passes );
+agents_api_smoke_assert_equals( $canonical_dropped, $canonical_metadata['citations_dropped'] ?? 0, 'canonical metadata records the exact dropped citation count', $failures, $passes );
+agents_api_smoke_assert_equals( $canonical_dropped, $canonical_citation_heavy['metadata']['citations_dropped'] ?? 0, 'canonical citation drops surface in event metadata', $failures, $passes );
+
+// Fail closed: when even the first normalized citation exceeds the remaining
+// budget, the citations array is omitted entirely rather than preserved.
+$fail_closed          = ( new AgentsAPI\AI\WP_Agent_Byte_Limit_Tool_Result_Truncator( 5 ) )->truncate_result(
+	array(
+		'success' => true,
+		'result'  => array(
+			'body'      => str_repeat( 'z', 200 ),
+			'citations' => array(
+				array( 'source_url' => 'https://example.test/way-too-long-to-fit-in-a-tiny-budget' ),
+			),
+		),
+	),
+	'client/large-result'
+);
+$fail_closed_result   = $fail_closed['result']['result'] ?? array();
+
+agents_api_smoke_assert_equals( false, isset( $fail_closed_result['citations'] ), 'oversized first citation is omitted entirely (fail closed)', $failures, $passes );
+agents_api_smoke_assert_equals( 1, $fail_closed_result['citations_dropped'] ?? 0, 'fail-closed drop is recorded exactly', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API tool result truncator', $failures, $passes );
