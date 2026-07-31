@@ -183,6 +183,43 @@ $traversal = call_user_func(
 agents_api_smoke_assert_equals( true, $traversal instanceof WP_Error, 'write rejects parent traversal', $failures, $passes );
 agents_api_smoke_assert_equals( false, file_exists( $root . '/escape.txt' ), 'traversal does not write outside workspace', $failures, $passes );
 
+// Leaf symlink escape (CWE-59 / CWE-367): a symlink planted at the leaf must not
+// be followed on write. Without the fix the write is done through the unresolved
+// pathname, so file_put_contents() follows a dangling symlink and creates the
+// external target outside the isolated workspace root.
+$outside = sys_get_temp_dir() . '/agents-api-safe-workspace-outside-' . bin2hex( random_bytes( 4 ) );
+mkdir( $outside, 0755, true );
+$captured = $outside . '/captured.txt';
+symlink( $captured, $root . '/site-generation/leak.txt' );
+
+$symlink_write = call_user_func(
+	$write,
+	array(
+		'handle'  => 'site-generation',
+		'path'    => 'leak.txt',
+		'content' => 'leaked',
+	)
+);
+agents_api_smoke_assert_equals( true, $symlink_write instanceof WP_Error, 'write rejects a leaf symlink', $failures, $passes );
+agents_api_smoke_assert_equals( false, file_exists( $captured ), 'write does not follow a leaf symlink outside the workspace', $failures, $passes );
+
+// Leaf symlink escape on read: a symlink leaf (even one that resolves back
+// inside the workspace) is rejected rather than dereferenced, closing the same
+// TOCTOU leaf-swap window for reads.
+file_put_contents( $root . '/site-generation/secret.txt', 'SECRET' );
+symlink( 'secret.txt', $root . '/site-generation/alias.txt' );
+
+$symlink_read = call_user_func(
+	$read,
+	array(
+		'handle' => 'site-generation',
+		'path'   => 'alias.txt',
+	)
+);
+agents_api_smoke_assert_equals( true, $symlink_read instanceof WP_Error, 'read rejects a leaf symlink', $failures, $passes );
+
+agents_api_workspace_smoke_rm( $outside );
+
 // The site root itself is, by definition, "site-containing" in every backend —
 // using ABSPATH avoids assuming the plugin happens to live inside the site tree.
 add_filter( 'agents_api_safe_workspace_root', static fn(): string => rtrim( (string) ABSPATH, '/\\' ), 20 );
