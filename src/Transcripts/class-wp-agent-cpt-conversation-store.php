@@ -421,17 +421,27 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			return false;
 		}
 
-		$existing = $this->read_lock( $post->ID );
-		if ( null === $existing ) {
+		// Capture the exact raw stored value, not just its decoded form, so the
+		// delete can be scoped to it below.
+		$existing_raw = get_post_meta( $post->ID, self::META_LOCK, true );
+		if ( ! is_string( $existing_raw ) || '' === $existing_raw ) {
 			return false;
 		}
 
-		if ( ( $existing['token'] ?? '' ) !== $lock_token ) {
+		$existing = json_decode( $existing_raw, true );
+		if ( ! is_array( $existing ) || ( $existing['token'] ?? '' ) !== $lock_token ) {
 			return false;
 		}
 
-		delete_post_meta( $post->ID, self::META_LOCK );
-		return true;
+		// Value-conditional delete: WordPress lowers a non-empty $meta_value into
+		// a "DELETE ... WHERE meta_value = %s" clause, so the release only removes
+		// the row still holding *this* exact lock value. If the lock expired and
+		// was reacquired via the CAS in acquire_session_lock() between our read
+		// and this delete, the stored value no longer matches $existing_raw, no
+		// row is deleted, and this stale releaser cannot clobber the new owner —
+		// honoring "a stale token must not release a lock reacquired after TTL".
+		$deleted = delete_post_meta( $post->ID, self::META_LOCK, $existing_raw );
+		return (bool) $deleted;
 	}
 
 	/* ----------------------------- Internals ------------------------------ */
