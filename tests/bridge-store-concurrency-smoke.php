@@ -18,13 +18,11 @@
  * an ack that read a pre-enqueue snapshot writes back a queue missing the item a
  * concurrent enqueue just committed.
  *
- * This test models cross-process concurrency FAITHFULLY against the REAL lock,
- * exactly like tests/workflow-reconcile-race-smoke.php: freeze_reads() pins
- * get_option() of the queue to a shared pre-write snapshot that two simultaneous
- * processes would both read — but ONLY while no bridge lock is held. Once the fix
- * takes the add_option()-CAS lock, the second writer's read bypasses the frozen
- * snapshot and sees the committed queue, exactly as a real DB lock would force a
- * blocked second process to read fresh.
+ * This deterministic harness pins get_option() to the shared pre-write snapshot
+ * that two simultaneous processes could both observe. While the mocked advisory
+ * lock is held, reads instead see committed state, modeling the ordering contract
+ * imposed by MySQL GET_LOCK(). It verifies the store's critical-section boundary
+ * and fail-closed behavior; it is not a live multi-process MySQL integration test.
  *
  * It FAILS before the fix (an item is lost) and PASSES after (the critical
  * section is serialized cross-process, so every write survives).
@@ -41,17 +39,42 @@ echo "bridge-store-concurrency-smoke\n";
 
 const BRIDGE_QUEUE_OPTION = 'wp_agent_bridge_queue';
 
-$GLOBALS['__bridge_options'] = array();
+$GLOBALS['__bridge_options']      = array();
+$GLOBALS['__bridge_lock_held']    = false;
+$GLOBALS['__bridge_lock_available'] = true;
 // When set, get_option() serves this frozen snapshot for the queue option — the
 // stale pre-write read that two simultaneous processes would both observe — but
-// only while no bridge lock row is held (a held lock means a real second process
+// only while no advisory lock is held (a held lock means a real second process
 // would have blocked and then read fresh).
 $GLOBALS['__bridge_frozen_queue'] = null;
 
 function bridge_lock_held(): bool {
-	$option = 'wp_agent_bridge_lock_' . md5( BRIDGE_QUEUE_OPTION );
-	return array_key_exists( $option, $GLOBALS['__bridge_options'] );
+	return $GLOBALS['__bridge_lock_held'];
 }
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public function prepare( string $query, ...$args ): string {
+			return vsprintf( str_replace( array( '%s', '%d' ), array( "'%s'", '%d' ), $query ), $args );
+		}
+
+		public function get_var( string $query ) {
+			if ( str_contains( $query, 'GET_LOCK' ) ) {
+				if ( ! $GLOBALS['__bridge_lock_available'] || $GLOBALS['__bridge_lock_held'] ) {
+					return '0';
+				}
+				$GLOBALS['__bridge_lock_held'] = true;
+				return '1';
+			}
+			if ( str_contains( $query, 'RELEASE_LOCK' ) ) {
+				$GLOBALS['__bridge_lock_held'] = false;
+				return '1';
+			}
+			return null;
+		}
+	}
+}
+$GLOBALS['wpdb'] = new wpdb();
 
 if ( ! function_exists( 'get_option' ) ) {
 	function get_option( string $option, $default = false ) {
@@ -181,6 +204,19 @@ bridge_assert( array( 'q-c' ), $ids, 'ack racing enqueue: acked item gone, fresh
 // Sanity — the lock leaves no residual lock row behind after each call.
 // ═══════════════════════════════════════════════════════════════════════════
 bridge_assert( false, bridge_lock_held(), 'lock is released after each critical section', $failures, $passes );
+
+// Acquisition failure must not run an unprotected queue mutation.
+$GLOBALS['__bridge_lock_available'] = false;
+$before                              = $GLOBALS['__bridge_options'][ BRIDGE_QUEUE_OPTION ];
+$timed_out                           = false;
+try {
+	$store->enqueue( bridge_item( 'q-d', 'D' ) );
+} catch ( RuntimeException $error ) {
+	$timed_out = true;
+}
+$GLOBALS['__bridge_lock_available'] = true;
+bridge_assert( true, $timed_out, 'lock timeout fails closed', $failures, $passes );
+bridge_assert( $before, $GLOBALS['__bridge_options'][ BRIDGE_QUEUE_OPTION ], 'lock timeout does not mutate the queue', $failures, $passes );
 
 echo "\nPassed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
