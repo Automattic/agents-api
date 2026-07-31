@@ -147,6 +147,16 @@ function wp_delete_post( int $post_id, bool $force = false ) {
 }
 
 function get_post_meta( int $post_id, string $key = '', bool $single = false ) {
+	// One-shot TOCTOU interposer: simulate the store reading a lock value that a
+	// concurrent runner overwrites before the follow-up delete lands. When armed
+	// for this (post_id, key), return the stale raw value once for a single read
+	// while the underlying stored value already reflects the reacquired lock.
+	if ( $single && isset( $GLOBALS['__toctou_stale'] ) && is_array( $GLOBALS['__toctou_stale'] )
+		&& $GLOBALS['__toctou_stale']['post_id'] === $post_id && $GLOBALS['__toctou_stale']['key'] === $key ) {
+		$stale = (string) $GLOBALS['__toctou_stale']['value'];
+		unset( $GLOBALS['__toctou_stale'] );
+		return $stale;
+	}
 	$all = $GLOBALS['__meta'][ $post_id ] ?? array();
 	if ( '' === $key ) {
 		return $all;
@@ -281,6 +291,20 @@ if ( ! class_exists( 'WPDB_Cpt_Store_Shim' ) ) {
 				return 0;
 			}
 			$GLOBALS['__meta'][ $post_id ][ $key ][0] = $new;
+			return 1;
+		}
+
+		public function delete( string $table, array $where, array $where_format = array() ) {
+			unset( $table, $where_format );
+			$post_id = (int) ( $where['post_id'] ?? 0 );
+			$key     = (string) ( $where['meta_key'] ?? '' );
+			$value   = (string) ( $where['meta_value'] ?? '' );
+
+			$values = $GLOBALS['__meta'][ $post_id ][ $key ] ?? array();
+			if ( empty( $values ) || (string) $values[0] !== $value ) {
+				return 0;
+			}
+			unset( $GLOBALS['__meta'][ $post_id ][ $key ] );
 			return 1;
 		}
 	}
@@ -435,6 +459,50 @@ if ( isset( $GLOBALS['__posts'] ) && is_array( $GLOBALS['__posts'] ) ) {
 update_post_meta( $post_id, '_agents_api_lock', wp_json_encode( array( 'token' => 'stale', 'expires' => time() - 10 ) ) );
 $token3 = $store->acquire_session_lock( $lock_session, 300 );
 smoke_assert( true, is_string( $token3 ) && '' !== $token3, 'expired lock is reclaimed via compare-and-swap', $failures, $passes );
+
+echo "\n[9] Stale release cannot clobber a lock reacquired after TTL (TOCTOU):\n";
+// Only exercisable under the in-memory shim, where we can interpose a single
+// stale read between release_session_lock()'s read and its direct delete. The
+// shim's value-conditional delete mirrors the atomic database predicate.
+if ( isset( $GLOBALS['__posts'] ) && is_array( $GLOBALS['__posts'] ) ) {
+	$race_session = $store->create_session( $workspace, 7, 'demo-agent', array(), 'chat' );
+
+	$race_post_id = null;
+	foreach ( $GLOBALS['__posts'] as $pid => $p ) {
+		if ( (string) get_post_meta( $pid, '_agents_api_session_id', true ) === $race_session ) {
+			$race_post_id = (int) $pid;
+			break;
+		}
+	}
+
+	// Runner A holds the lock; capture its exact stored value (the "stale" read).
+	$token_a   = $store->acquire_session_lock( $race_session, 300 );
+	$stale_raw = (string) get_post_meta( $race_post_id, '_agents_api_lock', true );
+	smoke_assert( true, is_string( $token_a ) && '' !== $token_a, 'runner A acquires the lock', $failures, $passes );
+
+	// Runner B reacquires after A's TTL: overwrite the stored lock with a fresh
+	// token/value, exactly as acquire_session_lock()'s CAS would.
+	$token_b  = 'token-b-reacquired';
+	$value_b  = wp_json_encode( array( 'token' => $token_b, 'expires' => time() + 300 ) );
+	update_post_meta( $race_post_id, '_agents_api_lock', $value_b );
+
+	// Arm the interposer so runner A's release reads its own stale value (token A)
+	// and passes the token check, but the underlying row already holds B's value.
+	$GLOBALS['__toctou_stale'] = array(
+		'post_id' => $race_post_id,
+		'key'     => '_agents_api_lock',
+		'value'   => $stale_raw,
+	);
+	$released = $store->release_session_lock( $race_session, (string) $token_a );
+
+	smoke_assert( false, $released, 'stale release reports no row removed', $failures, $passes );
+	$surviving = (string) get_post_meta( $race_post_id, '_agents_api_lock', true );
+	smoke_assert( $value_b, $surviving, 'reacquired lock survives the stale release', $failures, $passes );
+	smoke_assert( null, $store->acquire_session_lock( $race_session, 300 ), 'reacquired lock is still active, blocking new acquire', $failures, $passes );
+	unset( $GLOBALS['__toctou_stale'] );
+} else {
+	echo "  SKIP TOCTOU interposition (requires in-memory shim)\n";
+}
 
 if ( $failures ) {
 	echo "\nFAILED: " . count( $failures ) . " CPT conversation store assertions failed.\n";
