@@ -228,18 +228,14 @@ add_filter(
 
 		$config         = is_array( $agent['agent_config'] ?? null ) ? $agent['agent_config'] : array();
 		$meta           = is_array( $agent['meta'] ?? null ) ? $agent['meta'] : array();
-		$source_type    = $string_value( $bundle['source_type'] ?? null, $spec['source_type'] ?? null, 'runtime-agent-package' );
-		$source_package = $string_value( $bundle['source_package'] ?? null, $spec['source_package'] ?? null, $bundle['package_slug'] ?? null, $spec['package_slug'] ?? null, $bundle['bundle_slug'] ?? null );
-		$source_version = $string_value( $bundle['source_version'] ?? null, $spec['source_version'] ?? null, $bundle['package_version'] ?? null, $spec['package_version'] ?? null, $bundle['bundle_version'] ?? null );
+		$source_type    = $string_value( $spec['source_type'] ?? null, $bundle['source_type'] ?? null, 'runtime-agent-package' );
+		$source_package = $string_value( $spec['source_package'] ?? null, $bundle['source_package'] ?? null, $spec['package_slug'] ?? null, $bundle['package_slug'] ?? null, $bundle['bundle_slug'] ?? null );
+		$source_version = $string_value( $spec['source_version'] ?? null, $bundle['source_version'] ?? null, $spec['package_version'] ?? null, $bundle['package_version'] ?? null, $bundle['bundle_version'] ?? null );
 		if ( '' !== $source_package || '' !== $source_version ) {
-			$meta = array_merge(
-				array(
-					'source_type'    => $source_type,
-					'source_package' => $source_package,
-					'source_version' => $source_version,
-				),
-				$meta
-			);
+			// Keep the reserved provenance tuple authoritative and internally consistent.
+			$meta['source_type']    = $source_type;
+			$meta['source_package'] = $source_package;
+			$meta['source_version'] = $source_version;
 		}
 
 		$registered = $registry->register(
