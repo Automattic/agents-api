@@ -135,13 +135,12 @@ function agents_chat_dispatch( array $input ) {
 		return $run_context;
 	}
 
-	$run_id = agents_chat_optional_string( $input['run_id'] ?? null );
-	if ( null === $run_id ) {
+	// Assign the run_id before handler selection so handlers registered on
+	// wp_agent_chat_handler observe the same run_id the runtime receives.
+	// agents_chat_run_claimed reuses this value rather than regenerating it.
+	if ( null === agents_chat_optional_string( $input['run_id'] ?? null ) ) {
 		$input['run_id'] = WP_Agent_Chat_Run_Control::generate_run_id();
-		$run_id          = $input['run_id'];
 	}
-	$run_claim_token                = WP_Agent_Chat_Run_Control::generate_run_id( 'claim_' );
-	$input['_agents_run_claim_token'] = $run_claim_token;
 
 	/**
 	 * Filter the chat runtime handler.
@@ -176,6 +175,57 @@ function agents_chat_dispatch( array $input ) {
 		);
 	}
 
+	return agents_chat_run_claimed(
+		$input,
+		static function ( array $claimed_input ) use ( $handler ) {
+			return call_user_func( $handler, $claimed_input );
+		},
+		$run_context
+	);
+}
+
+/**
+ * Execute a runtime callable inside the canonical exact-once run boundary.
+ *
+ * Reserves the run before the runtime executes — `start_run()` for a turn that
+ * continues a session, `claim_pending_run()` for a session-less turn — so a
+ * replayed `run_id` fails closed with `agents_chat_run_already_started` instead
+ * of repeating the runtime's tool/provider side effects. The runtime call is
+ * bracketed by the active-claim window and the resulting run is finalized with
+ * the outcome status.
+ *
+ * This is the single exact-once boundary shared by the synchronous agents/chat
+ * dispatcher and the JSON-RPC streaming envelope, so both wire surfaces enforce
+ * one replay guard rather than duplicating (or omitting) it. Callers must
+ * confirm a runtime is available before invoking this, so a no-runtime turn
+ * never reserves a run.
+ *
+ * @since 0.103.0
+ *
+ * @param array<mixed>                 $input Canonical chat input. The `run_id` and the internal
+ *                                            claim token are injected before `$run` executes.
+ * @param callable(array<mixed>):mixed $run   Runtime callable. Receives the claimed input and
+ *                                            returns canonical output array or WP_Error.
+ * @param array{workspace:?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope,owner:?array{type:string,key:string},conversation_store:?\AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store}|null $run_context
+ *                                            Pre-resolved context when the caller must validate before handler selection.
+ * @return array<string,mixed>|\WP_Error Canonical output, or WP_Error when the run cannot be claimed
+ *                                       (e.g. a replayed run_id) or the runtime fails.
+ */
+function agents_chat_run_claimed( array $input, callable $run, ?array $run_context = null ) {
+	$run_context = $run_context ?? WP_Agent_Chat_Run_Control::context_from_input( $input );
+	if ( is_wp_error( $run_context ) ) {
+		do_action( 'agents_chat_dispatch_failed', $run_context->get_error_code(), $input );
+		return $run_context;
+	}
+
+	$run_id = agents_chat_optional_string( $input['run_id'] ?? null );
+	if ( null === $run_id ) {
+		$input['run_id'] = WP_Agent_Chat_Run_Control::generate_run_id();
+		$run_id          = $input['run_id'];
+	}
+	$run_claim_token                  = WP_Agent_Chat_Run_Control::generate_run_id( 'claim_' );
+	$input['_agents_run_claim_token'] = $run_claim_token;
+
 	$session_id = agents_chat_optional_string( $input['session_id'] ?? null );
 	$agent      = agents_chat_optional_string( $input['agent'] ?? null ) ?? '';
 	if ( null !== $session_id ) {
@@ -198,28 +248,27 @@ function agents_chat_dispatch( array $input ) {
 
 	WP_Agent_Chat_Run_Control::activate_run_claim( $run_id, $run_claim_token );
 	try {
-		$result = call_user_func( $handler, $input );
+		$result = call_user_func( $run, $input );
+	} catch ( \Throwable $error ) {
+		WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_context['workspace'] );
+		throw $error;
 	} finally {
 		WP_Agent_Chat_Run_Control::deactivate_run_claim( $run_id, $run_claim_token );
 	}
 
 	if ( is_wp_error( $result ) ) {
-		if ( null !== $session_id ) {
-			WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_context['workspace'] );
-		}
+		WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_context['workspace'] );
 
-		/** This action is documented above. */
+		/** This action is documented on agents_chat_dispatch. */
 		do_action( 'agents_chat_dispatch_failed', $result->get_error_code(), $input );
 
 		return $result;
 	}
 
 	if ( ! is_array( $result ) ) {
-		if ( null !== $session_id ) {
-			WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_context['workspace'] );
-		}
+		WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_context['workspace'] );
 
-		/** This action is documented above. */
+		/** This action is documented on agents_chat_dispatch. */
 		do_action( 'agents_chat_dispatch_failed', 'invalid_result', $input );
 
 		return new \WP_Error(
@@ -229,30 +278,25 @@ function agents_chat_dispatch( array $input ) {
 	}
 
 	$result = agents_chat_string_keyed_array( $result );
-	if ( null === agents_chat_optional_string( $result['run_id'] ?? null ) ) {
-		$result['run_id'] = $input['run_id'];
-	}
-	if ( null === $session_id ) {
-		$result['run_id'] = $run_id;
-	}
+	$result['run_id'] = $run_id;
 
-	$result_run_id       = agents_chat_optional_string( $result['run_id'] ?? null ) ?? $run_id;
 	$resolved_session_id = agents_chat_optional_string( $result['session_id'] ?? null ) ?? $session_id;
 	if ( null !== $resolved_session_id ) {
 		if ( null === $session_id ) {
-			$started = WP_Agent_Chat_Run_Control::start_run( $result_run_id, $resolved_session_id, array( 'agent' => $agent, '_claim_token' => $run_claim_token ), $run_context['workspace'], $run_context['owner'], $run_context['conversation_store'] );
+			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $resolved_session_id, array( 'agent' => $agent, '_claim_token' => $run_claim_token ), $run_context['workspace'], $run_context['owner'], $run_context['conversation_store'] );
 			if ( is_wp_error( $started ) ) {
+				WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_context['workspace'] );
 				do_action( 'agents_chat_dispatch_failed', $started->get_error_code(), $input );
 				return $started;
 			}
 		}
+	}
 
-		$status = WP_Agent_Run_Outcome::run_control_status( $result );
-		$finished = WP_Agent_Chat_Run_Control::finish_run( $result_run_id, $status, $run_context['workspace'] );
-		if ( is_wp_error( $finished ) ) {
-			do_action( 'agents_chat_dispatch_failed', $finished->get_error_code(), $input );
-			return $finished;
-		}
+	$status   = WP_Agent_Run_Outcome::run_control_status( $result );
+	$finished = WP_Agent_Chat_Run_Control::finish_run( $run_id, $status, $run_context['workspace'] );
+	if ( is_wp_error( $finished ) ) {
+		do_action( 'agents_chat_dispatch_failed', $finished->get_error_code(), $input );
+		return $finished;
 	}
 
 	return $result;

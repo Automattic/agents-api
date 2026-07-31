@@ -274,9 +274,19 @@ function agents_chat_jsonrpc_stream( $rpc_id, array $input ): void {
 			);
 		};
 
-		$output = call_user_func( $stream_handler, $input, $emit );
+		// Reserve the run before the streaming runtime executes so a replayed
+		// run_id fails closed (agents_chat_run_already_started) instead of
+		// repeating tool/provider side effects. This is the same exact-once
+		// boundary the synchronous agents/chat dispatcher enforces.
+		$output = agents_chat_run_claimed(
+			$input,
+			static function ( array $claimed_input ) use ( $stream_handler, $emit ) {
+				return call_user_func( $stream_handler, $claimed_input, $emit );
+			}
+		);
 	} else {
-		// Graceful degradation: no streaming runtime, run the sync handler.
+		// Graceful degradation: no streaming runtime, run the sync handler
+		// (agents/chat -> agents_chat_dispatch), which claims the run itself.
 		$output = agents_chat_jsonrpc_run_sync( $input );
 	}
 
@@ -287,7 +297,7 @@ function agents_chat_jsonrpc_stream( $rpc_id, array $input ): void {
 		return;
 	}
 
-	$output = \AgentsAPI\AI\agents_api_string_keyed_array( is_array( $output ) ? $output : array() );
+	$output = \AgentsAPI\AI\agents_api_string_keyed_array( $output );
 	if ( '' === \AgentsAPI\AI\agents_api_scalar_to_string( $output['run_id'] ?? null ) ) {
 		$output['run_id'] = $task_id;
 	}
