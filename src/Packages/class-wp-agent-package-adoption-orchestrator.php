@@ -90,6 +90,12 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 					}
 
 					$artifact = self::artifact_from_entry( $package, $entry, $target_row );
+					$type     = wp_get_agent_package_artifact_type( $artifact->get_type() );
+					if ( null === $type || ! is_callable( $type->get_import_callback() ) ) {
+						$failed[] = self::entry_with_status( $entry, 'failed', 'callback_failed' );
+						continue;
+					}
+
 					$result   = WP_Agent_Package_Artifact_Callbacks::import(
 						$artifact,
 						array(
@@ -100,7 +106,7 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 						) + $context
 					);
 
-					if ( false === $result || null === $result || is_wp_error( $result ) ) {
+					if ( false === $result || is_wp_error( $result ) ) {
 						$failed[] = self::entry_with_status( $entry, 'failed', 'callback_failed' );
 						continue;
 					}
