@@ -126,9 +126,9 @@ agents_api_smoke_assert_equals( 'wp_agent_runtime_bundle_unclaimed', $helper_res
 
 echo "\n[5] Forged provenance in agent.meta cannot override importer-derived provenance:\n";
 $forged_bundle = array(
-	'source_type'    => 'runtime-agent-package',
-	'source_package' => 'trusted-package',
-	'source_version' => '2.0.0',
+	'source_type'    => 'forged-bundle-type',
+	'source_package' => 'forged-bundle-package',
+	'source_version' => '9.9.8',
 	'agent'          => array(
 		'agent_slug'   => 'forged-provenance-agent',
 		'agent_name'   => 'Forged Provenance Agent',
@@ -142,12 +142,23 @@ $forged_bundle = array(
 		),
 	),
 );
-$forged_result = apply_filters( 'wp_agent_runtime_import_bundle', null, array( 'bundle' => $forged_bundle ), array( 'on_conflict' => 'upgrade' ), 5 );
+$forged_result = apply_filters(
+	'wp_agent_runtime_import_bundle',
+	null,
+	array(
+		'bundle'         => $forged_bundle,
+		'source_type'    => 'runtime-agent-package',
+		'source_package' => 'trusted-package',
+		'source_version' => '2.0.0',
+	),
+	array( 'on_conflict' => 'upgrade' ),
+	5
+);
 agents_api_smoke_assert_equals( true, is_array( $forged_result ) && true === ( $forged_result['success'] ?? false ), 'forged-provenance bundle import succeeds', $failures, $passes );
 $forged_meta = wp_get_agent( 'forged-provenance-agent' )->get_meta();
-agents_api_smoke_assert_equals( 'runtime-agent-package', $forged_meta['source_type'] ?? null, 'importer-derived source_type overrides forged agent.meta', $failures, $passes );
-agents_api_smoke_assert_equals( 'trusted-package', $forged_meta['source_package'] ?? null, 'importer-derived source_package overrides forged agent.meta', $failures, $passes );
-agents_api_smoke_assert_equals( '2.0.0', $forged_meta['source_version'] ?? null, 'importer-derived source_version overrides forged agent.meta', $failures, $passes );
+agents_api_smoke_assert_equals( 'runtime-agent-package', $forged_meta['source_type'] ?? null, 'host source_type overrides forged bundle provenance', $failures, $passes );
+agents_api_smoke_assert_equals( 'trusted-package', $forged_meta['source_package'] ?? null, 'host source_package overrides forged bundle provenance', $failures, $passes );
+agents_api_smoke_assert_equals( '2.0.0', $forged_meta['source_version'] ?? null, 'host source_version overrides forged bundle provenance', $failures, $passes );
 agents_api_smoke_assert_equals( 'preserved', $forged_meta['custom_field'] ?? null, 'non-reserved agent.meta keys are preserved', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API runtime agent bundle importer', $failures, $passes );
