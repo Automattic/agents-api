@@ -150,7 +150,7 @@ final class WP_Agent_Safe_Execution_Workspace {
 	public static function read_file( array $input ): array|\WP_Error {
 		$handle   = self::handle( $input['handle'] ?? '' );
 		$relative = self::relative_path( $input['path'] ?? '' );
-		$path     = self::contained_path( $input, true );
+		$path     = self::safe_leaf_path( $input, true );
 		if ( is_wp_error( $handle ) ) {
 			return $handle;
 		}
@@ -187,33 +187,32 @@ final class WP_Agent_Safe_Execution_Workspace {
 	 * @return array<string,mixed>|\WP_Error
 	 */
 	public static function write_file( array $input ): array|\WP_Error {
-		$content  = is_scalar( $input['content'] ?? null ) ? (string) $input['content'] : '';
-		$handle   = self::handle( $input['handle'] ?? '' );
-		$relative = self::relative_path( $input['path'] ?? '' );
-		$path     = self::contained_path( $input, false );
+		$content   = is_scalar( $input['content'] ?? null ) ? (string) $input['content'] : '';
+		$handle    = self::handle( $input['handle'] ?? '' );
+		$relative  = self::relative_path( $input['path'] ?? '' );
+		$workspace = self::workspace_path( $handle );
 		if ( is_wp_error( $handle ) ) {
 			return $handle;
 		}
 		if ( is_wp_error( $relative ) ) {
 			return $relative;
 		}
-		if ( is_wp_error( $path ) ) {
-			return $path;
+		if ( is_wp_error( $workspace ) ) {
+			return $workspace;
 		}
 
-		$parent = dirname( $path );
+		$parent = dirname( $workspace . DIRECTORY_SEPARATOR . $relative );
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- This module's primitive is a local filesystem workspace root.
 		if ( ! is_dir( $parent ) && ! mkdir( $parent, 0755, true ) ) {
 			return new \WP_Error( 'agents_workspace_directory_create_failed', 'Safe execution workspace directory could not be created.' );
 		}
 
-		$parent_real = realpath( $parent );
-		$workspace   = self::workspace_path( $handle );
-		if ( is_wp_error( $workspace ) || false === $parent_real || ! self::is_inside( $parent_real, $workspace ) ) {
-			return new \WP_Error( 'agents_workspace_path_escape', 'Safe execution workspace write path escapes the workspace root.' );
+		$path = self::safe_leaf_path( $input, false );
+		if ( is_wp_error( $path ) ) {
+			return $path;
 		}
 
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- This writes a validated local workspace file.
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- This writes a symlink-checked path recomposed from the resolved, contained parent.
 		if ( false === file_put_contents( $path, $content ) ) {
 			return new \WP_Error( 'agents_workspace_file_write_failed', 'Safe execution workspace file could not be written.' );
 		}
@@ -281,10 +280,21 @@ final class WP_Agent_Safe_Execution_Workspace {
 	}
 
 	/**
-	 * @param array<string,mixed> $input Ability input.
+	 * Resolve a workspace-relative input path to a concrete leaf path that sits
+	 * directly inside the resolved workspace.
+	 *
+	 * The parent directory is resolved with realpath() and re-validated against
+	 * the workspace root, then the leaf is recomposed from that resolved parent
+	 * plus the sanitized basename. A leaf that is already a symlink is rejected so
+	 * neither a read nor a write follows a planted leaf symlink out of the isolated
+	 * root. Path-based PHP filesystem APIs cannot prevent a concurrent replacement
+	 * between this validation and the subsequent file operation.
+	 *
+	 * @param array<string,mixed> $input      Ability input.
+	 * @param bool                $must_exist Whether the leaf must already exist.
 	 * @return string|\WP_Error
 	 */
-	private static function contained_path( array $input, bool $must_exist ): string|\WP_Error {
+	private static function safe_leaf_path( array $input, bool $must_exist ): string|\WP_Error {
 		$handle = self::handle( $input['handle'] ?? '' );
 		if ( is_wp_error( $handle ) ) {
 			return $handle;
@@ -300,17 +310,30 @@ final class WP_Agent_Safe_Execution_Workspace {
 			return $relative;
 		}
 
-		$candidate = $workspace . DIRECTORY_SEPARATOR . $relative;
-		$real      = realpath( $candidate );
-		if ( false !== $real ) {
-			return self::is_inside( $real, $workspace ) ? $real : new \WP_Error( 'agents_workspace_path_escape', 'Safe execution workspace path escapes the workspace root.' );
+		$candidate   = $workspace . DIRECTORY_SEPARATOR . $relative;
+		$parent_real = realpath( dirname( $candidate ) );
+		if ( false === $parent_real ) {
+			if ( $must_exist ) {
+				return new \WP_Error( 'agents_workspace_path_not_found', 'Safe execution workspace path does not exist.' );
+			}
+
+			return new \WP_Error( 'agents_workspace_path_escape', 'Safe execution workspace path escapes the workspace root.' );
 		}
 
-		if ( $must_exist ) {
+		if ( ! self::is_inside( $parent_real, $workspace ) ) {
+			return new \WP_Error( 'agents_workspace_path_escape', 'Safe execution workspace path escapes the workspace root.' );
+		}
+
+		$path = $parent_real . DIRECTORY_SEPARATOR . basename( $relative );
+		if ( is_link( $path ) ) {
+			return new \WP_Error( 'agents_workspace_path_escape', 'Safe execution workspace path resolves through a symlink.' );
+		}
+
+		if ( $must_exist && ! file_exists( $path ) ) {
 			return new \WP_Error( 'agents_workspace_path_not_found', 'Safe execution workspace path does not exist.' );
 		}
 
-		return self::is_inside( dirname( $candidate ), $workspace ) ? $candidate : new \WP_Error( 'agents_workspace_path_escape', 'Safe execution workspace path escapes the workspace root.' );
+		return $path;
 	}
 
 	/**
