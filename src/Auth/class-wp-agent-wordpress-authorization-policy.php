@@ -48,7 +48,10 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 			// untouched and only substitutes the safe-default deny-list for
 			// autonomous principals lacking explicit shaping — mirroring the
 			// class_exists guard in WP_Agent_Execution_Principal::is_autonomous_execution().
-			if ( ! array_key_exists( 'capability_ceiling', $context ) && class_exists( 'WP_Agent_Autonomous_Capability_Policy' ) ) {
+			if (
+				( ! array_key_exists( 'capability_ceiling', $context ) || null === $context['capability_ceiling'] )
+				&& class_exists( 'WP_Agent_Autonomous_Capability_Policy' )
+			) {
 				$ceiling = WP_Agent_Autonomous_Capability_Policy::resolve_ceiling( $principal );
 			}
 

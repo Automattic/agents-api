@@ -316,5 +316,12 @@ agents_api_smoke_assert_equals(
 	$failures,
 	$passes
 );
+agents_api_smoke_assert_equals(
+	false,
+	$autonomous_policy->can( $autonomous_principal, 'publish_posts', array( 'capability_ceiling' => null ) ),
+	'null context ceiling cannot bypass the autonomous safe default',
+	$failures,
+	$passes
+);
 
 agents_api_smoke_finish( 'Agents API authorization', $failures, $passes );
