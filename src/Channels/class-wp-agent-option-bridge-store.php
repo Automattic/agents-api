@@ -32,18 +32,26 @@ final class WP_Agent_Option_Bridge_Store implements WP_Agent_Bridge_Store {
 	}
 
 	public function enqueue( WP_Agent_Bridge_Queue_Item $item ): WP_Agent_Bridge_Queue_Item {
-		$queue = $this->read_queue();
+		// Serialize the read-modify-write on the shared queue option so a
+		// concurrent enqueue/ack cannot read a stale snapshot and clobber this
+		// write (a lost update that silently drops a queued message).
+		return WP_Agent_Bridge_Store_Lock::with_lock(
+			self::QUEUE_OPTION,
+			function () use ( $item ): WP_Agent_Bridge_Queue_Item {
+				$queue = $this->read_queue();
 
-		if ( isset( $queue[ $item->queue_id ] ) && is_array( $queue[ $item->queue_id ] ) ) {
-			$existing = WP_Agent_Bridge_Queue_Item::from_array( $this->string_keyed_array( $queue[ $item->queue_id ] ) );
-			if ( $existing->client_id !== $item->client_id ) {
-				throw new \InvalidArgumentException( 'Cannot overwrite a queue item owned by another client.' );
+				if ( isset( $queue[ $item->queue_id ] ) && is_array( $queue[ $item->queue_id ] ) ) {
+					$existing = WP_Agent_Bridge_Queue_Item::from_array( $this->string_keyed_array( $queue[ $item->queue_id ] ) );
+					if ( $existing->client_id !== $item->client_id ) {
+						throw new \InvalidArgumentException( 'Cannot overwrite a queue item owned by another client.' );
+					}
+				}
+
+				$queue[ $item->queue_id ] = $item->to_array();
+				update_option( self::QUEUE_OPTION, $queue, false );
+				return $item;
 			}
-		}
-
-		$queue[ $item->queue_id ] = $item->to_array();
-		update_option( self::QUEUE_OPTION, $queue, false );
-		return $item;
+		);
 	}
 
 	public function pending( string $client_id, int $limit = 25, array $session_ids = array() ): array {
@@ -78,28 +86,37 @@ final class WP_Agent_Option_Bridge_Store implements WP_Agent_Bridge_Store {
 	public function ack( string $client_id, array $queue_ids ): int {
 		$client_id = $this->normalize_id( $client_id );
 		$queue_ids = array_fill_keys( array_map( 'strval', $queue_ids ), true );
-		$queue     = $this->read_queue();
-		$acked     = 0;
 
-		foreach ( $queue as $queue_id => $data ) {
-			if ( ! isset( $queue_ids[ (string) $queue_id ] ) || ! is_array( $data ) ) {
-				continue;
+		// Serialize the read-modify-write on the shared queue option so a
+		// concurrent enqueue cannot have its just-queued item deleted by this
+		// ack writing back a snapshot taken before that enqueue committed.
+		return WP_Agent_Bridge_Store_Lock::with_lock(
+			self::QUEUE_OPTION,
+			function () use ( $client_id, $queue_ids ): int {
+				$queue = $this->read_queue();
+				$acked = 0;
+
+				foreach ( $queue as $queue_id => $data ) {
+					if ( ! isset( $queue_ids[ (string) $queue_id ] ) || ! is_array( $data ) ) {
+						continue;
+					}
+
+					$item = WP_Agent_Bridge_Queue_Item::from_array( $this->string_keyed_array( $data ) );
+					if ( $item->client_id !== $client_id ) {
+						continue;
+					}
+
+					unset( $queue[ $queue_id ] );
+					++$acked;
+				}
+
+				if ( $acked > 0 ) {
+					update_option( self::QUEUE_OPTION, $queue, false );
+				}
+
+				return $acked;
 			}
-
-			$item = WP_Agent_Bridge_Queue_Item::from_array( $this->string_keyed_array( $data ) );
-			if ( $item->client_id !== $client_id ) {
-				continue;
-			}
-
-			unset( $queue[ $queue_id ] );
-			++$acked;
-		}
-
-		if ( $acked > 0 ) {
-			update_option( self::QUEUE_OPTION, $queue, false );
-		}
-
-		return $acked;
+		);
 	}
 
 	/**

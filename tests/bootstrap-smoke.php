@@ -127,6 +127,7 @@ agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Ag
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge_Client' ), 'WP_Agent_Bridge_Client value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge_Queue_Item' ), 'WP_Agent_Bridge_Queue_Item value object is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, interface_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge_Store' ), 'WP_Agent_Bridge_Store contract is available', $failures, $passes );
+agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge_Store_Lock' ), 'WP_Agent_Bridge_Store_Lock implementation is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Option_Bridge_Store' ), 'WP_Agent_Option_Bridge_Store implementation is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Channels\WP_Agent_Bridge' ), 'WP_Agent_Bridge facade is available', $failures, $passes );
 agents_api_smoke_assert_equals( true, class_exists( 'AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Awaiter' ), 'WP_Agent_Workflow_Run_Awaiter service is available', $failures, $passes );

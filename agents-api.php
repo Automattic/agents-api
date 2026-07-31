@@ -286,6 +286,7 @@ require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-message-idempotency.
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge-client.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge-queue-item.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge-store.php';
+require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge-store-lock.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-option-bridge-store.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-bridge.php';
 require_once AGENTS_API_PATH . 'src/Channels/class-wp-agent-channel.php';
