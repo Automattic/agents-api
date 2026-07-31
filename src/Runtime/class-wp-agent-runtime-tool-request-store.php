@@ -37,18 +37,30 @@ interface WP_Agent_Runtime_Tool_Request_Store {
 	/**
 	 * Mark a pending request complete with a client-submitted result.
 	 *
-	 * Implementations should transition only pending records. Duplicate
-	 * completions for terminal records must leave existing store data unchanged;
-	 * callers use `get()` before this method to return a retained prior result or
-	 * reject the duplicate when no prior result is available.
+	 * Implementations must transition only pending records and should back the
+	 * write with a conditional/compare-and-set update so concurrent completions
+	 * of the same request cannot both succeed. Return `true` only when this call
+	 * transitioned a pending record to complete (the caller "won" the exact-once
+	 * completion). Return `false` when the record was already terminal, so the
+	 * caller can re-read the retained winner result and treat the call as a
+	 * duplicate instead of firing completion side effects a second time.
+	 *
+	 * Duplicate completions for terminal records must leave existing store data
+	 * unchanged.
 	 *
 	 * @param string               $request_id Runtime tool request id.
 	 * @param array<string, mixed> $result Normalized runtime tool result.
+	 * @return bool True when this call transitioned a pending record to complete.
 	 */
-	public function complete( string $request_id, array $result ): void;
+	public function complete( string $request_id, array $result ): bool;
 
 	/**
 	 * Mark a pending request timed out.
+	 *
+	 * Implementations should transition only pending records. The lifecycle layer
+	 * short-circuits terminal records before calling this method, so a timeout of
+	 * an already-terminal request is treated as an idempotent duplicate and this
+	 * method is not invoked again.
 	 *
 	 * @param string $request_id Runtime tool request id.
 	 */

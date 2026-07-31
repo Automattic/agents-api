@@ -685,10 +685,14 @@ $runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_
 		return $this->requests[ $request_id ] ?? null;
 	}
 
-	public function complete( string $request_id, array $result ): void {
+	public function complete( string $request_id, array $result ): bool {
+		if ( ! isset( $this->requests[ $request_id ] ) || AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== ( $this->requests[ $request_id ]['status'] ?? '' ) ) {
+			return false;
+		}
 		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED;
 		$this->requests[ $request_id ]['result'] = $result;
 		$this->results[ $request_id ]            = $result;
+		return true;
 	}
 
 	public function timeout( string $request_id ): void {
@@ -761,9 +765,10 @@ $terminal_without_result_store = new class() implements AgentsAPI\AI\WP_Agent_Ru
 		return $this->requests[ $request_id ] ?? null;
 	}
 
-	public function complete( string $request_id, array $result ): void {
+	public function complete( string $request_id, array $result ): bool {
 		++$this->complete_calls;
 		$this->attempted_data = compact( 'request_id', 'result' );
+		return false;
 	}
 
 	public function timeout( string $request_id ): void {
@@ -805,9 +810,13 @@ $timeout_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Reque
 		return $this->requests[ $request_id ] ?? null;
 	}
 
-	public function complete( string $request_id, array $result ): void {
+	public function complete( string $request_id, array $result ): bool {
 		unset( $result );
+		if ( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== ( $this->requests[ $request_id ]['status'] ?? '' ) ) {
+			return false;
+		}
 		$this->requests[ $request_id ]['status'] = 'completed';
+		return true;
 	}
 
 	public function timeout( string $request_id ): void {

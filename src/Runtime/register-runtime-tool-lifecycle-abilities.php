@@ -511,6 +511,7 @@ function agents_runtime_tool_terminal_output_schema(): array {
 			'status'                => array( 'type' => 'string' ),
 			'request'               => agents_runtime_tool_request_schema(),
 			'result'                => agents_runtime_tool_result_schema(),
+			'duplicate'             => array( 'type' => 'boolean' ),
 			'tool_result_message'   => array( 'type' => 'object' ),
 			'tool_execution_result' => array( 'type' => 'object' ),
 			'continuation_result'   => array( 'type' => array( 'object', 'null' ) ),

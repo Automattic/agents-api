@@ -101,9 +101,13 @@ $runtime_tool_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_
 		return $this->requests[ $request_id ] ?? null;
 	}
 
-	public function complete( string $request_id, array $result ): void {
+	public function complete( string $request_id, array $result ): bool {
+		if ( ! isset( $this->requests[ $request_id ] ) || AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== ( $this->requests[ $request_id ]['status'] ?? '' ) ) {
+			return false;
+		}
 		$this->requests[ $request_id ]['status'] = AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED;
 		$this->requests[ $request_id ]['result'] = $result;
+		return true;
 	}
 
 	public function timeout( string $request_id ): void {

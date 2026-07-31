@@ -111,7 +111,11 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 		}
 
 		$normalized_result = WP_Agent_Runtime_Tool_Result::from_request( $normalized_request, $result );
-		$store->complete( self::string_field( $normalized_request, 'request_id' ), $normalized_result );
+		$claimed           = $store->complete( self::string_field( $normalized_request, 'request_id' ), $normalized_result );
+
+		if ( ! $claimed ) {
+			return self::lost_completion_race( $store, $normalized_request );
+		}
 
 		return array(
 			'request'   => $normalized_request,
@@ -119,6 +123,38 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 			'completed' => true,
 			'duplicate' => false,
 		);
+	}
+
+	/**
+	 * Resolve a completion that lost the exact-once race to another caller.
+	 *
+	 * The store reported that this call did not transition the pending record, so
+	 * a concurrent completion already won. Re-read the now-terminal record and
+	 * return its retained winner result as a duplicate so completion side effects
+	 * (submitted hook, continuation resume) fire only for the winning submission.
+	 *
+	 * @param WP_Agent_Runtime_Tool_Request_Store $store Request store.
+	 * @param array<string, mixed>                $normalized_request Normalized request identity.
+	 * @return array{request: array<string, mixed>, result: array<string, mixed>, completed: bool, duplicate: bool} Duplicate completion envelope.
+	 */
+	private static function lost_completion_race( WP_Agent_Runtime_Tool_Request_Store $store, array $normalized_request ): array {
+		$request_id = self::string_field( $normalized_request, 'request_id' );
+		$terminal   = $store->get( $request_id );
+
+		if ( null !== $terminal ) {
+			$terminal_request = WP_Agent_Runtime_Tool_Request::normalize( $terminal );
+			$stored_result    = self::stored_completion_result( $terminal, $terminal_request );
+			if ( null !== $stored_result ) {
+				return array(
+					'request'   => $terminal_request,
+					'result'    => $stored_result,
+					'completed' => false,
+					'duplicate' => true,
+				);
+			}
+		}
+
+		throw new \InvalidArgumentException( 'invalid_runtime_tool_result: request is not pending' );
 	}
 
 	/**
@@ -141,8 +177,19 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 			throw new \InvalidArgumentException( 'invalid_runtime_tool_timeout: request not found' );
 		}
 
+		$status             = is_string( $request['status'] ?? null ) ? $request['status'] : '';
 		$normalized_request = WP_Agent_Runtime_Tool_Request::normalize( $request );
-		$timeout_request    = WP_Agent_Runtime_Tool_Request::timeout( $normalized_request );
+
+		// Read the stored status BEFORE normalize() rewrites it to pending. A
+		// request that is already terminal must not re-transition the store,
+		// re-fire the timeout hook, or re-invoke the host continuation on replay:
+		// the timeout/cancel abilities are annotated idempotent, so treat a repeat
+		// terminal call as a fail-closed duplicate mirroring complete_if_pending().
+		if ( '' !== $status && WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== $status ) {
+			return self::terminal_replay_envelope( $request, $normalized_request, $status );
+		}
+
+		$timeout_request = WP_Agent_Runtime_Tool_Request::timeout( $normalized_request );
 		$timeout_result     = WP_Agent_Runtime_Tool_Result::from_request(
 			$normalized_request,
 			array(
@@ -160,6 +207,7 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 			'status'                => WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT,
 			'request'               => $timeout_request,
 			'result'                => $timeout_result,
+			'duplicate'             => false,
 			'tool_result_message'   => self::tool_result_message_payload( $normalized_request, $timeout_result ),
 			'tool_execution_result' => self::tool_execution_result_payload( $normalized_request, $timeout_result ),
 			'continuation_result'   => null,
@@ -170,6 +218,47 @@ class WP_Agent_Runtime_Tool_Lifecycle {
 		}
 
 		return $envelope;
+	}
+
+	/**
+	 * Build an idempotent terminal envelope for a replayed timeout/cancel call.
+	 *
+	 * The stored record is already terminal, so no store transition, terminal
+	 * hook, or continuation resume runs. The envelope carries the retained result
+	 * when the store exposes one, otherwise a status-only terminal result, and is
+	 * marked as a duplicate so callers can distinguish a replay from a first
+	 * terminal transition.
+	 *
+	 * @param array<string, mixed> $request Raw stored request.
+	 * @param array<string, mixed> $normalized_request Normalized request identity.
+	 * @param string               $status Retained terminal status.
+	 * @return array<string, mixed> Duplicate terminal envelope.
+	 */
+	private static function terminal_replay_envelope( array $request, array $normalized_request, string $status ): array {
+		$stored_result = self::stored_completion_result( $request, $normalized_request );
+		if ( null === $stored_result ) {
+			$stored_result = WP_Agent_Runtime_Tool_Result::from_request(
+				$normalized_request,
+				array(
+					'success'  => false,
+					'error'    => 'Runtime tool request is already terminal.',
+					'metadata' => array( 'status' => $status ),
+				)
+			);
+		}
+
+		$terminal_request           = $normalized_request;
+		$terminal_request['status'] = $status;
+
+		return array(
+			'status'                => $status,
+			'request'               => $terminal_request,
+			'result'                => $stored_result,
+			'duplicate'             => true,
+			'tool_result_message'   => self::tool_result_message_payload( $normalized_request, $stored_result ),
+			'tool_execution_result' => self::tool_execution_result_payload( $normalized_request, $stored_result ),
+			'continuation_result'   => null,
+		);
 	}
 
 	/**
