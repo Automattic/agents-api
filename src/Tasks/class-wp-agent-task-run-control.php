@@ -82,6 +82,7 @@ class WP_Agent_Task_Run_Control {
 			'session_id'        => $session_id,
 			'status'            => $status,
 			'executor_id'       => $executor_id,
+			'owner'             => self::owner_value( $run['owner'] ?? array() ),
 			'execution_metrics' => self::execution_metrics_value( $run['execution_metrics'] ?? array(), $executor_id ),
 			'artifact_refs'     => self::list_value( $run['artifact_refs'] ?? array() ),
 			'diagnostics'       => self::map_value( $run['diagnostics'] ?? array() ),
@@ -158,21 +159,30 @@ class WP_Agent_Task_Run_Control {
 	 * @param string              $session_id  Session ID.
 	 * @param string              $executor_id Executor ID.
 	 * @param array<string,mixed> $metadata    Run metadata.
+	 * @param array<string,mixed> $owner       Owning principal tuple ({type,key}).
 	 * @return array<string,mixed> Normalized run.
 	 */
-	public static function start_run( string $run_id, string $session_id, string $executor_id, array $metadata = array() ): array {
-		$now = self::now();
+	public static function start_run( string $run_id, string $session_id, string $executor_id, array $metadata = array(), array $owner = array() ): array {
+		$now   = self::now();
+		$state = self::state();
+		$owner = self::owner_value( $owner );
+
+		// Never let a re-issued start_run silently drop the bound owner.
+		if ( array() === $owner && isset( $state['runs'][ $run_id ]['owner'] ) ) {
+			$owner = self::owner_value( $state['runs'][ $run_id ]['owner'] );
+		}
+
 		$run = array(
 			'run_id'      => $run_id,
 			'session_id'  => $session_id,
 			'executor_id' => $executor_id,
 			'status'      => self::STATUS_RUNNING,
+			'owner'       => $owner,
 			'started_at'  => $metadata['started_at'] ?? $now,
 			'updated_at'  => $now,
 			'metadata'    => $metadata,
 		);
 
-		$state                    = self::state();
 		$state['runs'][ $run_id ] = $run;
 		self::save_state( $state );
 
@@ -190,7 +200,13 @@ class WP_Agent_Task_Run_Control {
 		$normalized['updated_at'] = '' !== $normalized['updated_at'] ? $normalized['updated_at'] : self::now();
 		$run_id                   = self::string_value( $normalized['run_id'] );
 
-		$state                    = self::state();
+		$state = self::state();
+
+		// Executor result payloads carry no owner; keep the principal bound at start_run.
+		if ( array() === $normalized['owner'] && isset( $state['runs'][ $run_id ]['owner'] ) ) {
+			$normalized['owner'] = self::owner_value( $state['runs'][ $run_id ]['owner'] );
+		}
+
 		$state['runs'][ $run_id ] = $normalized;
 		self::save_state( $state );
 
@@ -262,6 +278,25 @@ class WP_Agent_Task_Run_Control {
 		}
 
 		return $map;
+	}
+
+	/**
+	 * Normalize a stored owning-principal tuple, dropping partial/invalid claims.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function owner_value( mixed $value ): array {
+		$owner = self::map_value( $value );
+		$type  = self::non_empty_string_value( $owner['type'] ?? null );
+		$key   = self::non_empty_string_value( $owner['key'] ?? null );
+		if ( null === $type || null === $key ) {
+			return array();
+		}
+
+		return array(
+			'type' => $type,
+			'key'  => $key,
+		);
 	}
 
 	/** @return array<string,mixed> */

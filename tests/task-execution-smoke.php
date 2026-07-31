@@ -125,7 +125,7 @@ agents_api_smoke_assert_equals( true, call_user_func( $task_read_permission, arr
 agents_api_smoke_assert_equals( false, call_user_func( $task_run_permission, array( 'task' => array( 'id' => 'task-1' ), 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'read-only user cannot queue task run by id alone', $failures, $passes );
 agents_api_smoke_assert_equals( false, call_user_func( $task_cancel_permission, array( 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'read-only user cannot cancel task run by id alone', $failures, $passes );
 agents_api_smoke_assert_equals( true, call_user_func( $task_run_permission, array( 'task' => array( 'id' => 'task-1' ), 'session_id' => 'task-session-1', 'run_id' => 'task-run-1', 'session_owner' => array( 'type' => 'user', 'key' => '123' ) ) ), 'session owner can queue task run', $failures, $passes );
-agents_api_smoke_assert_equals( true, call_user_func( $task_cancel_permission, array( 'session_id' => 'task-session-1', 'run_id' => 'task-run-1', 'session_owner' => array( 'type' => 'user', 'key' => '123' ) ) ), 'session owner can cancel task run', $failures, $passes );
+agents_api_smoke_assert_equals( false, call_user_func( $task_cancel_permission, array( 'session_id' => 'task-session-1', 'run_id' => 'task-run-1', 'session_owner' => array( 'type' => 'user', 'key' => '123' ) ) ), 'self-asserted owner cannot cancel a run with no stored owner', $failures, $passes );
 $GLOBALS['__agents_api_smoke_caps']['manage_options'] = true;
 agents_api_smoke_assert_equals( true, call_user_func( $task_run_permission, array( 'task' => array( 'id' => 'task-1' ), 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'manager can queue task run without owner claim', $failures, $passes );
 agents_api_smoke_assert_equals( true, call_user_func( $task_cancel_permission, array( 'session_id' => 'task-session-1', 'run_id' => 'task-run-1' ) ), 'manager can cancel task run without owner claim', $failures, $passes );
@@ -252,6 +252,10 @@ agents_api_smoke_assert_equals( 42, $result['execution_metrics']['wall_time_ms']
 agents_api_smoke_assert_equals( 11, $result['execution_metrics']['per_tool_timings_ms']['inspect'] ?? null, 'run-task normalizes per-tool timing metrics', $failures, $passes );
 agents_api_smoke_assert_equals( 'artifact-1', $result['artifact_refs'][0]['id'] ?? null, 'run-task preserves artifact refs', $failures, $passes );
 
+$dispatched_run = AgentsAPI\AI\Tasks\WP_Agent_Task_Run_Control::get_run( $result['run_id'] );
+agents_api_smoke_assert_equals( 'user', $dispatched_run['owner']['type'] ?? null, 'run-task binds run to authenticated principal type', $failures, $passes );
+agents_api_smoke_assert_equals( '123', $dispatched_run['owner']['key'] ?? null, 'run-task binds run to authenticated principal id', $failures, $passes );
+
 $stored = AgentsAPI\AI\Tasks\agents_get_task_run(
 	array(
 		'session_id' => $result['session_id'],
@@ -286,6 +290,31 @@ $cancelled = AgentsAPI\AI\Tasks\agents_cancel_task_run(
 );
 agents_api_smoke_assert_equals( 'cancelling', $cancelled['status'] ?? null, 'cancel-task-run marks running runs as cancelling', $failures, $passes );
 agents_api_smoke_assert_equals( true, $cancelled['cancelled'] ?? null, 'cancel-task-run reports cancellation accepted', $failures, $passes );
+
+// Ownership is authorized against the run's stored owner, not client-asserted input.
+$GLOBALS['__agents_api_smoke_caps']['manage_options'] = false;
+$GLOBALS['__agents_api_smoke_user_id']                = 123;
+AgentsAPI\AI\Tasks\WP_Agent_Task_Run_Control::start_run( 'task-run-owned', 'task-session-owned', 'fake-executor', array(), array( 'type' => 'user', 'key' => '123' ) );
+
+agents_api_smoke_assert_equals( true, call_user_func( $task_cancel_permission, array( 'session_id' => 'task-session-owned', 'run_id' => 'task-run-owned' ) ), 'stored owner can cancel their own run', $failures, $passes );
+
+$owner_read = AgentsAPI\AI\Tasks\agents_get_task_run( array( 'session_id' => 'task-session-owned', 'run_id' => 'task-run-owned' ) );
+agents_api_smoke_assert_equals( 'task-run-owned', $owner_read['run_id'] ?? null, 'stored owner can read their own run', $failures, $passes );
+
+// A different read user cannot cancel or read another principal's run, even with a self-asserted owner claim.
+$GLOBALS['__agents_api_smoke_user_id'] = 456;
+agents_api_smoke_assert_equals( false, call_user_func( $task_cancel_permission, array( 'session_id' => 'task-session-owned', 'run_id' => 'task-run-owned', 'session_owner' => array( 'type' => 'user', 'key' => '456' ) ) ), 'non-owner read user cannot cancel another principal run', $failures, $passes );
+
+$cross_read = AgentsAPI\AI\Tasks\agents_get_task_run( array( 'session_id' => 'task-session-owned', 'run_id' => 'task-run-owned' ) );
+agents_api_smoke_assert_equals( true, $cross_read instanceof WP_Error, 'non-owner read user cannot read another principal run', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_task_run_not_found', $cross_read->get_error_code(), 'cross-principal read fails closed with generic not_found', $failures, $passes );
+
+// Managers still bypass ownership for both read and cancel.
+$GLOBALS['__agents_api_smoke_caps']['manage_options'] = true;
+agents_api_smoke_assert_equals( true, call_user_func( $task_cancel_permission, array( 'session_id' => 'task-session-owned', 'run_id' => 'task-run-owned' ) ), 'manager can cancel any stored run', $failures, $passes );
+$manager_read = AgentsAPI\AI\Tasks\agents_get_task_run( array( 'session_id' => 'task-session-owned', 'run_id' => 'task-run-owned' ) );
+agents_api_smoke_assert_equals( 'task-run-owned', $manager_read['run_id'] ?? null, 'manager can read any stored run', $failures, $passes );
+$GLOBALS['__agents_api_smoke_user_id'] = 123;
 
 add_filter(
 	'wp_agent_task_handler',
