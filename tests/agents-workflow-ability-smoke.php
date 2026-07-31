@@ -27,7 +27,9 @@ if ( ! class_exists( 'WP_Error' ) ) {
 }
 
 if ( ! function_exists( 'current_user_can' ) ) {
-	function current_user_can( string $cap ): bool { unset( $cap ); return $GLOBALS['__can'] ?? false; }
+	function current_user_can( string $cap ): bool {
+		return 'read' === $cap ? ( $GLOBALS['__can_read'] ?? $GLOBALS['__can'] ?? false ) : ( $GLOBALS['__can'] ?? false );
+	}
 } else {
 	add_filter(
 		'user_has_cap',
@@ -76,6 +78,9 @@ use function AgentsAPI\AI\Workflows\agents_run_workflow_dispatch;
 use function AgentsAPI\AI\Workflows\agents_run_workflow_permission;
 use function AgentsAPI\AI\Workflows\agents_validate_workflow;
 use function AgentsAPI\AI\Workflows\register_workflow_handler;
+use function AgentsAPI\AI\Workflows\agents_get_workflow_run;
+use function AgentsAPI\AI\Workflows\agents_list_workflow_run_events;
+use function AgentsAPI\AI\Workflows\agents_workflow_run_read_permission;
 
 // ─── Permission gate ─────────────────────────────────────────────────
 
@@ -197,6 +202,90 @@ add_filter(
 );
 agents_run_workflow_dispatch( array( 'workflow_id' => 'whatever' ) );
 smoke_assert( true, in_array( 'no_handler', $failed_reasons, true ), 'dispatch_failed fires with no_handler', $failures, $passes );
+
+// ─── read-observer redaction: get-workflow-run ───────────────────────
+//
+// A read-capable but non-manager reader who learns an opaque run_id must
+// receive redacted run metadata; managers keep full fidelity. Without the
+// observer projection both callers would see the raw consumer-supplied
+// metadata (secret token below), which is the information-disclosure gap
+// this test guards against.
+
+if ( function_exists( 'remove_all_filters' ) ) {
+	remove_all_filters( 'wp_agent_workflow_run_status_handler' );
+	remove_all_filters( 'wp_agent_workflow_run_events_handler' );
+}
+
+add_filter(
+	'wp_agent_workflow_run_status_handler',
+	static fn() => static fn( array $input ): array => array(
+		'run_id'      => (string) ( $input['run_id'] ?? '' ),
+		'status'      => 'running',
+		'started_at'  => '2026-01-01T00:00:00Z',
+		'updated_at'  => '2026-01-01T00:00:01Z',
+		'workflow_id' => 'demo/redaction',
+		'metadata'    => array(
+			'provider' => 'test',
+			'token'    => 'secret-token',
+		),
+	),
+	10,
+	2
+);
+
+$GLOBALS['__can'] = true;
+$manager_run      = agents_get_workflow_run( array( 'run_id' => 'run-redact-1' ) );
+smoke_assert( 'test', $manager_run['metadata']['provider'] ?? null, 'manager get-workflow-run preserves safe metadata', $failures, $passes );
+smoke_assert( 'secret-token', $manager_run['metadata']['token'] ?? null, 'manager get-workflow-run preserves operator metadata', $failures, $passes );
+
+$GLOBALS['__can'] = false;
+$GLOBALS['__can_read'] = true;
+smoke_assert( true, agents_workflow_run_read_permission( array() ), 'observer has workflow run read permission', $failures, $passes );
+$observer_run     = agents_get_workflow_run( array( 'run_id' => 'run-redact-1' ) );
+smoke_assert( 'test', $observer_run['metadata']['provider'] ?? null, 'observer get-workflow-run preserves safe metadata', $failures, $passes );
+smoke_assert( '[redacted]', $observer_run['metadata']['token'] ?? null, 'observer get-workflow-run redacts metadata secrets', $failures, $passes );
+
+// ─── read-observer redaction: list-workflow-run-events ───────────────
+
+add_filter(
+	'wp_agent_workflow_run_events_handler',
+	static fn() => static fn( array $input ): array => array(
+		'run_id'      => (string) ( $input['run_id'] ?? '' ),
+		'status'      => 'running',
+		'started_at'  => '2026-01-01T00:00:00Z',
+		'updated_at'  => '2026-01-01T00:00:01Z',
+		'workflow_id' => 'demo/redaction',
+		'metadata'    => array(
+			'provider' => 'test',
+			'token'    => 'secret-token',
+		),
+		'events'      => array(
+			array(
+				'id'       => 'evt_1',
+				'type'     => 'run_started',
+				'metadata' => array(
+					'provider' => 'test',
+					'token'    => 'event-secret-token',
+				),
+			),
+		),
+		'cursor'      => 'evt_1',
+		'has_more'    => false,
+	),
+	10,
+	2
+);
+
+$GLOBALS['__can'] = true;
+$manager_events   = agents_list_workflow_run_events( array( 'run_id' => 'run-redact-1' ) );
+smoke_assert( 'secret-token', $manager_events['metadata']['token'] ?? null, 'manager list-events preserves operator run metadata', $failures, $passes );
+smoke_assert( 'event-secret-token', $manager_events['events'][0]['metadata']['token'] ?? null, 'manager list-events preserves operator event metadata', $failures, $passes );
+
+$GLOBALS['__can'] = false;
+$observer_events  = agents_list_workflow_run_events( array( 'run_id' => 'run-redact-1' ) );
+smoke_assert( 'test', $observer_events['metadata']['provider'] ?? null, 'observer list-events preserves safe run metadata', $failures, $passes );
+smoke_assert( '[redacted]', $observer_events['metadata']['token'] ?? null, 'observer list-events redacts run metadata secrets', $failures, $passes );
+smoke_assert( '[redacted]', $observer_events['events'][0]['metadata']['token'] ?? null, 'observer list-events redacts event metadata secrets', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );

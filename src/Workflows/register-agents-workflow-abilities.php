@@ -314,7 +314,8 @@ function agents_describe_workflow( array $input ): array {
 function agents_get_workflow_run( array $input ) {
 	$handler = apply_filters( 'wp_agent_workflow_run_status_handler', null, $input );
 	if ( is_callable( $handler ) ) {
-		return \AgentsAPI\AI\WP_Agent_Run_Control::normalize_run_result( call_user_func( $handler, $input ), 'agents_workflow_run_invalid_status' );
+		$result = \AgentsAPI\AI\WP_Agent_Run_Control::normalize_run_result( call_user_func( $handler, $input ), 'agents_workflow_run_invalid_status' );
+		return is_wp_error( $result ) ? $result : agents_workflow_run_observer_payload( $result, $input );
 	}
 
 	$run = \AgentsAPI\AI\WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, agents_workflow_string( $input['run_id'] ?? '' ) );
@@ -322,7 +323,7 @@ function agents_get_workflow_run( array $input ) {
 		return new \WP_Error( 'agents_workflow_run_not_found', 'No workflow run was found for the requested run_id.' );
 	}
 
-	return $run;
+	return agents_workflow_run_observer_payload( $run, $input );
 }
 
 /**
@@ -351,7 +352,8 @@ function agents_cancel_workflow_run( array $input ) {
 function agents_list_workflow_run_events( array $input ) {
 	$handler = apply_filters( 'wp_agent_workflow_run_events_handler', null, $input );
 	if ( is_callable( $handler ) ) {
-		return \AgentsAPI\AI\WP_Agent_Run_Control::normalize_events_result( call_user_func( $handler, $input ), 'agents_workflow_run_invalid_events_result' );
+		$result = \AgentsAPI\AI\WP_Agent_Run_Control::normalize_events_result( call_user_func( $handler, $input ), 'agents_workflow_run_invalid_events_result' );
+		return is_wp_error( $result ) ? $result : agents_workflow_run_observer_payload( $result, $input );
 	}
 
 	$result = \AgentsAPI\AI\WP_Agent_Run_Control::list_events(
@@ -365,7 +367,7 @@ function agents_list_workflow_run_events( array $input ) {
 		return new \WP_Error( 'agents_workflow_run_not_found', 'No workflow run was found for the requested run_id.' );
 	}
 
-	return $result;
+	return agents_workflow_run_observer_payload( $result, $input );
 }
 
 /**
@@ -427,6 +429,32 @@ function agents_validate_workflow_permission( array $input ): bool {
 function agents_workflow_run_read_permission( array $input ): bool {
 	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'read' ) : false;
 	return (bool) apply_filters( 'agents_workflow_run_read_permission', $allowed, $input );
+}
+
+/**
+ * Gate for whether a reader may see unredacted workflow run metadata. The
+ * read gate above stays permissive (any `read`-capable user can poll a run
+ * they know the id of), but sensitive run metadata is only exposed to
+ * managers by default — mirroring the chat/task/runtime-package abilities.
+ *
+ * @param array<string,mixed> $input Ability input.
+ */
+function agents_workflow_run_unredacted_read_permission( array $input ): bool {
+	$allowed = function_exists( 'current_user_can' ) ? current_user_can( 'manage_options' ) : false;
+	return (bool) apply_filters( 'agents_workflow_run_unredacted_read_permission', $allowed, $input );
+}
+
+/**
+ * Project a run/event-page payload for the current reader: full fidelity for
+ * privileged callers, redacted metadata for everyone else. Fails closed —
+ * non-managers never receive raw run metadata.
+ *
+ * @param array<string,mixed> $payload Run or event-page payload.
+ * @param array<string,mixed> $input Ability input.
+ * @return array<string,mixed>
+ */
+function agents_workflow_run_observer_payload( array $payload, array $input ): array {
+	return agents_workflow_run_unredacted_read_permission( $input ) ? $payload : \AgentsAPI\AI\WP_Agent_Run_Control::redacted_observer_payload( $payload );
 }
 
 /** @param array<string,mixed> $input Ability input. */
