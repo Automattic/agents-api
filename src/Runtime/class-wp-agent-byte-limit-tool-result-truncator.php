@@ -44,20 +44,21 @@ final class WP_Agent_Byte_Limit_Tool_Result_Truncator implements WP_Agent_Tool_R
 			);
 		}
 
-		$excerpt            = substr( (string) $encoded, 0, $this->max_bytes );
-		$metadata           = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
-		$preserved_metadata = $this->preserve_result_metadata( $result );
-		$truncated          = $result;
+		$excerpt   = substr( (string) $encoded, 0, $this->max_bytes );
+		$metadata  = isset( $result['metadata'] ) && is_array( $result['metadata'] ) ? $result['metadata'] : array();
+		$preserved = $this->preserve_result_metadata( $result );
+		$truncated = $result;
 
-		$truncated['result']   = array_merge(
+		$truncated['result'] = array_merge(
 			array(
 				'truncated'      => true,
 				'excerpt'        => $excerpt,
 				'original_bytes' => $original_bytes,
 				'excerpt_bytes'  => strlen( $excerpt ),
 			),
-			$preserved_metadata
+			$preserved['metadata']
 		);
+
 		$truncated['metadata'] = array_merge(
 			$metadata,
 			array(
@@ -67,30 +68,70 @@ final class WP_Agent_Byte_Limit_Tool_Result_Truncator implements WP_Agent_Tool_R
 			)
 		);
 
+		$out_metadata = array(
+			'original_bytes' => $original_bytes,
+			'excerpt_bytes'  => strlen( $excerpt ),
+		);
+
+		if ( $preserved['citations_dropped'] > 0 ) {
+			$truncated['result']['citations_dropped']   = $preserved['citations_dropped'];
+			$truncated['metadata']['citations_dropped'] = $preserved['citations_dropped'];
+			$out_metadata['citations_dropped']          = $preserved['citations_dropped'];
+		}
+
 		return array(
 			'result'    => $truncated,
 			'truncated' => true,
-			'metadata'  => array(
-				'original_bytes' => $original_bytes,
-				'excerpt_bytes'  => strlen( $excerpt ),
-			),
+			'metadata'  => $out_metadata,
 		);
 	}
 
 	/**
 	 * Preserve compact result metadata from oversized result payloads.
 	 *
+	 * Citation metadata is attacker-influenceable and otherwise unbounded, so
+	 * the normalized citations are capped to the truncator byte ceiling. The
+	 * excerpt keeps its own allotment; trailing citations are dropped (failing
+	 * closed to no citations key when even the first citation overflows) once
+	 * the encoded list would exceed the budget derived from max_bytes.
+	 *
 	 * @param array<string,mixed> $result Tool execution result.
-	 * @return array<string,mixed> Preserved metadata fields.
+	 * @return array{metadata: array<string,mixed>, citations_dropped: int} Preserved metadata plus drop count.
 	 */
 	private function preserve_result_metadata( array $result ): array {
 		$payload = isset( $result['result'] ) && is_array( $result['result'] ) ? $result['result'] : array();
 		if ( ! array_key_exists( WP_Agent_Citation_Metadata::KEY, $payload ) ) {
-			return array();
+			return array(
+				'metadata'          => array(),
+				'citations_dropped' => 0,
+			);
+		}
+
+		$normalized = WP_Agent_Citation_Metadata::normalize_many( $payload[ WP_Agent_Citation_Metadata::KEY ] );
+
+		$kept    = array();
+		$dropped = 0;
+		foreach ( $normalized as $citation ) {
+			$candidate = $kept;
+			$candidate[] = $citation;
+
+			$encoded = wp_json_encode( $candidate );
+			if ( false === $encoded || strlen( (string) $encoded ) > $this->max_bytes ) {
+				$dropped = count( $normalized ) - count( $kept );
+				break;
+			}
+
+			$kept = $candidate;
+		}
+
+		$metadata = array();
+		if ( ! empty( $kept ) ) {
+			$metadata[ WP_Agent_Citation_Metadata::KEY ] = $kept;
 		}
 
 		return array(
-			WP_Agent_Citation_Metadata::KEY => WP_Agent_Citation_Metadata::normalize_many( $payload[ WP_Agent_Citation_Metadata::KEY ] ),
+			'metadata'          => $metadata,
+			'citations_dropped' => $dropped,
 		);
 	}
 }
