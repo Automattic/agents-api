@@ -120,6 +120,7 @@ use function AgentsAPI\AI\Channels\agents_chat_input_schema;
 use function AgentsAPI\AI\Channels\agents_chat_output_schema;
 use function AgentsAPI\AI\Channels\register_chat_handler;
 use function AgentsAPI\AI\Channels\agents_chat_run_claimed;
+use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_stream;
 use function AgentsAPI\AI\Channels\register_chat_stream_handler;
 use const AgentsAPI\AI\Channels\AGENTS_CHAT_ABILITY;
 
@@ -143,7 +144,20 @@ smoke_assert( 'agents_chat_no_handler', $result->get_error_code(), 'no_handler_e
 smoke_assert( 'no_handler', $dispatch_failures[0]['reason'] ?? 'missing', 'no_handler_fires_dispatch_failed', $failures, $passes );
 smoke_assert( 'foo', $dispatch_failures[0]['agent'] ?? 'missing', 'no_handler_observability_includes_input', $failures, $passes );
 
+// Context validation remains ahead of handler selection, matching the public
+// dispatch contract before the exact-once boundary was shared with streaming.
+smoke_reset_chat_filters();
+$handler_selection_calls = 0;
+add_filter( 'wp_agent_chat_handler', static function ( $handler ) use ( &$handler_selection_calls ) {
+	++$handler_selection_calls;
+	return $handler;
+} );
+$invalid_workspace = agents_chat_dispatch( array( 'agent' => 'foo', 'message' => 'hi', 'workspace' => 'invalid' ) );
+smoke_assert( 'agents_chat_run_invalid_workspace', $invalid_workspace instanceof WP_Error ? $invalid_workspace->get_error_code() : '', 'invalid_context_precedes_handler_selection', $failures, $passes );
+smoke_assert( 0, $handler_selection_calls, 'invalid_context_skips_handler_selection', $failures, $passes );
+
 // 3. Registered handler is called with the canonical input and its result is returned.
+smoke_reset_chat_filters();
 $captured = array();
 register_chat_handler( static function ( array $input ) use ( &$captured ) {
 	$captured = $input;
@@ -308,6 +322,20 @@ smoke_assert( true, $replay_claim instanceof WP_Error, 'run_claimed_replay_fails
 smoke_assert( 'agents_chat_run_already_started', $replay_claim instanceof WP_Error ? $replay_claim->get_error_code() : '', 'run_claimed_replay_error_code', $failures, $passes );
 smoke_assert( 1, $claimed_calls, 'run_claimed_replay_does_not_reinvoke_runtime', $failures, $passes );
 
+$failed_claim = agents_chat_run_claimed(
+	array( 'agent' => 'x', 'message' => 'hi', 'run_id' => 'failed-claim-1' ),
+	static fn() => new WP_Error( 'runtime_failed', 'Runtime failed.' )
+);
+$failed_run = AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'failed-claim-1' );
+smoke_assert( true, $failed_claim instanceof WP_Error, 'run_claimed_runtime_error_propagates', $failures, $passes );
+smoke_assert( AgentsAPI\AI\WP_Agent_Chat_Run_Control::STATUS_FAILED, $failed_run['status'] ?? null, 'run_claimed_runtime_error_terminalizes_pending_run', $failures, $passes );
+
+$canonical_id = agents_chat_run_claimed(
+	array( 'agent' => 'runtime-local-agent', 'message' => 'hi', 'session_id' => 'runtime-s-1', 'run_id' => 'claimed-id-1', 'principal' => $runtime_principal ),
+	static fn() => array( 'session_id' => 'runtime-s-1', 'reply' => 'ok', 'run_id' => 'runtime-id' )
+);
+smoke_assert( 'claimed-id-1', $canonical_id['run_id'] ?? null, 'run_claimed_keeps_claimed_run_id_authoritative', $failures, $passes );
+
 // 12. Streaming envelope composition: driving a registered stream handler through
 // the same exact-once boundary (as agents_chat_jsonrpc_stream now does) gives the
 // streaming runtime the identical replay protection the synchronous path enjoys.
@@ -347,6 +375,28 @@ $stream_replay = $run_streaming( $stream_input );
 smoke_assert( true, $stream_replay instanceof WP_Error, 'stream_replay_fails_closed', $failures, $passes );
 smoke_assert( 'agents_chat_run_already_started', $stream_replay instanceof WP_Error ? $stream_replay->get_error_code() : '', 'stream_replay_error_code', $failures, $passes );
 smoke_assert( 1, $stream_calls, 'stream_replay_does_not_reinvoke_runtime', $failures, $passes );
+
+// 13. Exercise the actual JSON-RPC streaming envelope so the route-to-claim
+// wiring, rather than only an equivalent composition, guards the replay.
+if ( function_exists( 'remove_all_filters' ) ) {
+	remove_all_filters( 'wp_agent_chat_stream_handler' );
+} else {
+	unset( $GLOBALS['__agents_api_smoke_actions']['wp_agent_chat_stream_handler'] );
+}
+$jsonrpc_stream_calls = 0;
+register_chat_stream_handler(
+	static function ( array $in, callable $emit ) use ( &$jsonrpc_stream_calls ): array {
+		++$jsonrpc_stream_calls;
+		$emit( array( 'type' => 'content', 'text' => 'tok' ) );
+		return array( 'session_id' => '', 'reply' => 'stream ok', 'run_id' => $in['run_id'], 'completed' => true );
+	}
+);
+$jsonrpc_stream_input = array( 'agent' => 'x', 'message' => 'go', 'run_id' => 'jsonrpc-stream-replay-1' );
+agents_chat_jsonrpc_stream( 'rpc-first', $jsonrpc_stream_input );
+agents_chat_jsonrpc_stream( 'rpc-replay', $jsonrpc_stream_input );
+$jsonrpc_stream_run = AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'jsonrpc-stream-replay-1' );
+smoke_assert( 1, $jsonrpc_stream_calls, 'jsonrpc_stream_replay_does_not_reinvoke_runtime', $failures, $passes );
+smoke_assert( AgentsAPI\AI\WP_Agent_Chat_Run_Control::STATUS_COMPLETED, $jsonrpc_stream_run['status'] ?? null, 'jsonrpc_stream_finalizes_claimed_run', $failures, $passes );
 
 // ─── Done ───────────────────────────────────────────────────────────
 
