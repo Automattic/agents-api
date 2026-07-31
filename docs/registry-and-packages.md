@@ -129,7 +129,7 @@ Normalized package fields:
 | `version` | Non-empty version string, default `1.0.0`. |
 | `agent` | `WP_Agent` definition. |
 | `capabilities` | Sorted, unique capability/component strings. |
-| `artifacts` | Sorted `WP_Agent_Package_Artifact` declarations. |
+| `artifacts` | Sorted `WP_Agent_Package_Artifact` declarations, unique by normalized `(type, slug)` identity. |
 | `meta` | Package-owned JSON-friendly metadata. |
 
 Construct from a manifest with `WP_Agent_Package::from_array( $manifest )`.

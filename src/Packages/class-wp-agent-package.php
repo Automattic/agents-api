@@ -271,6 +271,18 @@ if ( ! class_exists( 'WP_Agent_Package' ) ) {
 				}
 			);
 
+			$seen = array();
+			foreach ( $prepared as $artifact ) {
+				$key = $artifact->get_type() . ':' . $artifact->get_slug();
+				if ( isset( $seen[ $key ] ) ) {
+					throw new InvalidArgumentException(
+						sprintf( 'Agent package declares duplicate artifact identity: %s.', esc_html( $key ) )
+					);
+				}
+
+				$seen[ $key ] = true;
+			}
+
 			return $prepared;
 		}
 
