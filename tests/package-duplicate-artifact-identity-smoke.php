@@ -48,10 +48,15 @@ try {
 					'slug'   => 'farewell',
 					'source' => 'prompts/farewell.md',
 				),
+				array(
+					'type'   => 'example/template',
+					'slug'   => 'welcome',
+					'source' => 'templates/welcome.html',
+				),
 			),
 		)
 	);
-	$distinct_ok = 2 === count( $package->get_artifacts() );
+	$distinct_ok = 3 === count( $package->get_artifacts() );
 } catch ( InvalidArgumentException $e ) {
 	$distinct_ok = false;
 }
@@ -85,7 +90,7 @@ try {
 		)
 	);
 } catch ( InvalidArgumentException $e ) {
-	$duplicate_rejected = true;
+	$duplicate_rejected = 'Agent package declares duplicate artifact identity: example/prompt:welcome.' === $e->getMessage();
 }
 agents_api_smoke_assert_equals( true, $duplicate_rejected, 'two artifacts with the same (type, slug) throw', $failures, $passes );
 
@@ -115,7 +120,7 @@ try {
 		)
 	);
 } catch ( InvalidArgumentException $e ) {
-	$normalized_collision_rejected = true;
+	$normalized_collision_rejected = 'Agent package declares duplicate artifact identity: example/prompt:welcome-note.' === $e->getMessage();
 }
 agents_api_smoke_assert_equals( true, $normalized_collision_rejected, 'slugs that normalize to the same value collide', $failures, $passes );
 
