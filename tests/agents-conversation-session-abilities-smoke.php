@@ -337,19 +337,36 @@ $audience_created = agents_create_conversation_session( array( 'principal' => $a
 smoke_assert( 'p-1', $audience_created['session']['session_id'] ?? null, 'principal store creates audience-owned session', $failures, $passes );
 smoke_assert( 'browser:one', $principal_store->sessions['p-1']['owner_key'] ?? null, 'principal store receives opaque owner key', $failures, $passes );
 
+// An explicit session_owner is honored only when it re-asserts the owner the
+// resolved principal already holds; the resolver — not the request body —
+// establishes identity.
+$audience_explicit      = WP_Agent_Execution_Principal::audience( 'audience:public', 'demo-agent', WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST, array(), null, null, array(), 'browser:explicit' );
 $explicit_owner_created = agents_create_conversation_session(
 	array(
-		'principal'     => $audience_without_owner,
+		'principal'     => $audience_explicit,
 		'session_owner' => array(
-			'type' => 'browser',
+			'type' => 'audience',
 			'key'  => 'browser:explicit',
 		),
 		'workspace'     => array( 'workspace_type' => 'site', 'workspace_id' => '42' ),
 	)
 );
-smoke_assert( 'p-2', $explicit_owner_created['session']['session_id'] ?? null, 'explicit session_owner creates audience transcript session', $failures, $passes );
-smoke_assert( 'browser', $principal_store->sessions['p-2']['owner_type'] ?? null, 'principal store receives explicit owner type', $failures, $passes );
+smoke_assert( 'p-2', $explicit_owner_created['session']['session_id'] ?? null, 'matching explicit session_owner creates audience transcript session', $failures, $passes );
+smoke_assert( 'audience', $principal_store->sessions['p-2']['owner_type'] ?? null, 'principal store receives explicit owner type', $failures, $passes );
 smoke_assert( 'browser:explicit', $principal_store->sessions['p-2']['owner_key'] ?? null, 'principal store receives explicit owner key', $failures, $passes );
+
+// A forged session_owner that the principal does not hold fails closed.
+$forged_owner_rejected = agents_create_conversation_session(
+	array(
+		'principal'     => $audience_with_owner,
+		'session_owner' => array(
+			'type' => 'audience',
+			'key'  => 'browser:someone-else',
+		),
+		'workspace'     => array( 'workspace_type' => 'site', 'workspace_id' => '42' ),
+	)
+);
+smoke_assert( 'agents_conversation_session_owner_forbidden', $forged_owner_rejected instanceof WP_Error ? $forged_owner_rejected->get_error_code() : '', 'forged session_owner not held by principal is rejected', $failures, $passes );
 
 $public_owner_rejected = agents_list_conversation_sessions(
 	array(
