@@ -248,42 +248,97 @@ agents_api_smoke_assert_equals( array( 'tool_call', 'tool_result' ), array_colum
 agents_api_smoke_assert_equals( 'error', $reject_result['tool_events'][1]['status'] ?? '', 'reject decision records error tool event status', $failures, $passes );
 agents_api_smoke_assert_equals( 'rejected', $reject_result['tool_observability']['calls'][0]['status'] ?? '', 'tool observability distinguishes mediator rejection from execution failure', $failures, $passes );
 
-$executor->executed = array();
-$replace_result     = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
-	array( array( 'role' => 'user', 'content' => 'replace result' ) ),
-	static function ( array $messages ): array {
+$executor->executed        = array();
+$replace_turns             = 0;
+$replace_context_observed  = false;
+$replace_executor_at_retry = null;
+$replace_observer_events   = array();
+$replace_result            = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'summarize with required context' ) ),
+	static function ( array $messages, array $context ) use ( &$replace_turns, &$replace_context_observed ): array {
+		++$replace_turns;
+
+		if ( 1 === $context['turn'] ) {
+			return array(
+				'messages'   => $messages,
+				'tool_calls' => array(
+					array(
+						'id'         => 'call_context',
+						'name'       => 'client/summarize',
+						'parameters' => array( 'text' => 'draft' ),
+					),
+				),
+			);
+		}
+
+		if ( 2 === $context['turn'] ) {
+			foreach ( $messages as $message ) {
+				if ( 'call_context' === ( $message['metadata']['tool_call_id'] ?? '' ) ) {
+					$replace_context_observed = 'context-123' === ( $message['payload']['result']['required_context']['context_id'] ?? '' );
+				}
+			}
+
+			return array(
+				'messages'   => $messages,
+				'tool_calls' => array(
+					array(
+						'id'         => 'call_retry',
+						'name'       => 'client/summarize',
+						'parameters' => array(
+							'text'       => 'draft with context',
+							'context_id' => 'context-123',
+						),
+					),
+				),
+			);
+		}
+
 		return array(
 			'messages'   => $messages,
-			'tool_calls' => array(
-				array(
-					'id'         => 'call_replace',
-					'name'       => 'client/summarize',
-					'parameters' => array( 'text' => 'replace me' ),
-				),
-			),
+			'content'    => 'Summary complete.',
+			'tool_calls' => array(),
 		);
 	},
 	array(
-		'max_turns'         => 1,
+		'max_turns'         => 4,
 		'tool_executor'     => $executor,
 		'tool_declarations' => $tools,
-		'pre_tool_mediator' => static function (): array {
-			return array(
-				'action' => 'replace_result',
-				'result' => array(
-					'success' => true,
-					'result'  => array( 'summary' => 'supplied by mediator' ),
-				),
-			);
+		'pre_tool_mediator' => static function ( array $context ) use ( $executor, &$replace_executor_at_retry ): array {
+			if ( 'call_context' === ( $context['tool_call_id'] ?? '' ) ) {
+				return array(
+					'action' => 'replace_result',
+					'result' => array(
+						'success' => true,
+						'result'  => array(
+							'required_context' => array( 'context_id' => 'context-123' ),
+							'instruction'      => 'Retry with the required context.',
+						),
+					),
+					'complete' => false,
+				);
+			}
+
+			$replace_executor_at_retry = count( $executor->executed );
+			return array( 'action' => 'proceed' );
+		},
+		'on_event'          => static function ( string $event ) use ( &$replace_observer_events ): void {
+			$replace_observer_events[] = $event;
 		},
 	)
 );
 
-agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'replace mediator prevents executor call', $failures, $passes );
-agents_api_smoke_assert_equals( true, $replace_result['tool_execution_results'][0]['result']['success'] ?? false, 'replace decision records successful tool result', $failures, $passes );
-agents_api_smoke_assert_equals( 'supplied by mediator', $replace_result['tool_execution_results'][0]['result']['result']['summary'] ?? '', 'replace decision records supplied payload', $failures, $passes );
-agents_api_smoke_assert_equals( true, $replace_result['tool_audit_events'][0]['success'] ?? false, 'replace decision records successful audit event', $failures, $passes );
-agents_api_smoke_assert_equals( 'success', $replace_result['tool_events'][1]['status'] ?? '', 'replace decision records success tool event status', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $replace_executor_at_retry, 'successful replacement skips executor before revised retry', $failures, $passes );
+agents_api_smoke_assert_equals( true, $replace_context_observed, 'next provider turn observes mediator context in canonical transcript', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $executor->executed ), 'executor runs exactly once after mediator proceeds', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'text' => 'draft with context', 'context_id' => 'context-123' ), $executor->executed[0]['parameters'] ?? array(), 'executor receives revised retry arguments', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'call_context', 'call_retry' ), array_column( $replace_result['tool_execution_results'], 'tool_call_id' ), 'replacement and retry produce canonical tool results', $failures, $passes );
+agents_api_smoke_assert_equals( true, $replace_result['tool_execution_results'][0]['result']['success'] ?? false, 'mediator context result is successful', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'tool_call', 'tool_result', 'tool_call', 'tool_result' ), array_column( $replace_result['tool_events'], 'type' ), 'replacement and retry produce canonical tool events', $failures, $passes );
+agents_api_smoke_assert_equals( array( true, true ), array_column( $replace_result['tool_audit_events'], 'success' ), 'replacement and retry produce successful audit events', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'turn_started', 'tool_call', 'tool_result', 'turn_started', 'tool_call', 'tool_result', 'turn_started', 'completed' ), $replace_observer_events, 'replacement workflow emits normal observer events', $failures, $passes );
+agents_api_smoke_assert_equals( 3, $replace_turns, 'replacement workflow reaches a natural completion turn', $failures, $passes );
+agents_api_smoke_assert_equals( true, $replace_result['completed'] ?? false, 'replacement workflow completes naturally', $failures, $passes );
+agents_api_smoke_assert_equals( 'Summary complete.', $replace_result['final_content'] ?? '', 'natural completion preserves final provider content', $failures, $passes );
 
 echo "\n[2] Loop runs without mediation when no tool_executor is provided (backwards compatible):\n";
 $executor->executed = array();

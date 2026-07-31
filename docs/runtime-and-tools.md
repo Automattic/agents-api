@@ -378,6 +378,34 @@ array(
 
 `proceed` preserves normal execution. `reject` creates a normalized failed tool result without calling the executor. `replace_result` appends the supplied normalized result without calling the executor. Setting `complete` truthy stops the mediated turn after the canonical tool-result message and result/event/audit entries have been appended.
 
+#### Successful pre-tool completion
+
+A mediator can successfully complete a call before execution by returning `replace_result` with a normalized successful result. The loop skips executor dispatch and records that result through the same canonical transcript message, `tool_execution_results`, `tool_events`, and `tool_audit_events` surfaces as an executor result. With `complete: false`, the result is available to the next provider turn and normal conversation-loop continuation remains enabled.
+
+For example, a host can supply context that was unavailable in the first call and let the model retry the same tool with revised arguments:
+
+```php
+'pre_tool_mediator' => static function ( array $context ): array {
+	if ( empty( $context['parameters']['context_id'] ) ) {
+		return array(
+			'action' => 'replace_result',
+			'result' => array(
+				'success' => true,
+				'result'  => array(
+					'required_context' => array( 'context_id' => 'context-123' ),
+					'instruction'      => 'Retry this tool with the required context.',
+				),
+			),
+			'complete' => false,
+		);
+	}
+
+	return array( 'action' => 'proceed' );
+},
+```
+
+On the next provider turn, the canonical tool-result message contains `required_context` and the retry instruction. A later call with `context_id` proceeds through the ordinary executor path; Agents API does not define a product-specific retry policy or result type.
+
 ### Durable runtime-tool lifecycle
 
 External runtime tools can pause the loop with `status: runtime_tool_pending`. Agents API owns the product-neutral lifecycle contract for those requests while hosts own concrete storage, queues, session lookup, and continuation scheduling.
