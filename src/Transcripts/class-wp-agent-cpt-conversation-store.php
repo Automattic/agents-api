@@ -416,6 +416,9 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 	}
 
 	public function release_session_lock( string $session_id, string $lock_token ): bool {
+		global $wpdb;
+		/** @var \wpdb $wpdb */
+
 		$post = $this->find_post_by_session_id( $session_id );
 		if ( null === $post ) {
 			return false;
@@ -433,15 +436,26 @@ final class WP_Agent_Cpt_Conversation_Store implements WP_Agent_Principal_Conver
 			return false;
 		}
 
-		// Value-conditional delete: WordPress lowers a non-empty $meta_value into
-		// a "DELETE ... WHERE meta_value = %s" clause, so the release only removes
-		// the row still holding *this* exact lock value. If the lock expired and
-		// was reacquired via the CAS in acquire_session_lock() between our read
-		// and this delete, the stored value no longer matches $existing_raw, no
-		// row is deleted, and this stale releaser cannot clobber the new owner —
-		// honoring "a stale token must not release a lock reacquired after TTL".
-		$deleted = delete_post_meta( $post->ID, self::META_LOCK, $existing_raw );
-		return (bool) $deleted;
+		// Delete only the exact value we validated. This must be one database query:
+		// delete_post_meta() first selects matching meta IDs and then deletes them,
+		// leaving another race if an expired lock is reacquired between those calls.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$rows = $wpdb->delete(
+			$wpdb->postmeta,
+			array(
+				'post_id'    => $post->ID,
+				'meta_key'   => self::META_LOCK,
+				'meta_value' => $existing_raw,
+			),
+			array( '%d', '%s', '%s' )
+		);
+
+		if ( false === $rows || 0 === $rows ) {
+			return false;
+		}
+
+		wp_cache_delete( $post->ID, 'post_meta' );
+		return true;
 	}
 
 	/* ----------------------------- Internals ------------------------------ */

@@ -181,30 +181,7 @@ function add_post_meta( int $post_id, string $key, $value, bool $unique = false 
 	return $post_id * 1000 + 1;
 }
 
-function delete_post_meta( int $post_id, string $key, $meta_value = '' ): bool {
-	// Mirror WordPress: a non-empty $meta_value scopes the delete to rows whose
-	// stored value matches (the "DELETE ... WHERE meta_value = %s" clause).
-	if ( '' !== $meta_value && ( ! is_string( $meta_value ) || '' !== $meta_value ) ) {
-		$values = $GLOBALS['__meta'][ $post_id ][ $key ] ?? array();
-		$kept   = array();
-		$hit    = false;
-		foreach ( $values as $value ) {
-			if ( ! $hit && (string) $value === (string) $meta_value ) {
-				$hit = true;
-				continue;
-			}
-			$kept[] = $value;
-		}
-		if ( ! $hit ) {
-			return false;
-		}
-		if ( empty( $kept ) ) {
-			unset( $GLOBALS['__meta'][ $post_id ][ $key ] );
-		} else {
-			$GLOBALS['__meta'][ $post_id ][ $key ] = $kept;
-		}
-		return true;
-	}
+function delete_post_meta( int $post_id, string $key ): bool {
 	unset( $GLOBALS['__meta'][ $post_id ][ $key ] );
 	return true;
 }
@@ -314,6 +291,20 @@ if ( ! class_exists( 'WPDB_Cpt_Store_Shim' ) ) {
 				return 0;
 			}
 			$GLOBALS['__meta'][ $post_id ][ $key ][0] = $new;
+			return 1;
+		}
+
+		public function delete( string $table, array $where, array $where_format = array() ) {
+			unset( $table, $where_format );
+			$post_id = (int) ( $where['post_id'] ?? 0 );
+			$key     = (string) ( $where['meta_key'] ?? '' );
+			$value   = (string) ( $where['meta_value'] ?? '' );
+
+			$values = $GLOBALS['__meta'][ $post_id ][ $key ] ?? array();
+			if ( empty( $values ) || (string) $values[0] !== $value ) {
+				return 0;
+			}
+			unset( $GLOBALS['__meta'][ $post_id ][ $key ] );
 			return 1;
 		}
 	}
@@ -471,8 +462,8 @@ smoke_assert( true, is_string( $token3 ) && '' !== $token3, 'expired lock is rec
 
 echo "\n[9] Stale release cannot clobber a lock reacquired after TTL (TOCTOU):\n";
 // Only exercisable under the in-memory shim, where we can interpose a single
-// stale read between release_session_lock()'s read and its delete. Under real
-// WordPress the atomic value-conditional delete provides the same guarantee.
+// stale read between release_session_lock()'s read and its direct delete. The
+// shim's value-conditional delete mirrors the atomic database predicate.
 if ( isset( $GLOBALS['__posts'] ) && is_array( $GLOBALS['__posts'] ) ) {
 	$race_session = $store->create_session( $workspace, 7, 'demo-agent', array(), 'chat' );
 
