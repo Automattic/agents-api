@@ -40,6 +40,21 @@ if ( ! class_exists( 'WP_Agent_WordPress_Authorization_Policy' ) ) {
 				$ceiling = WP_Agent_Capability_Ceiling::from_array( $this->string_keyed_array( $ceiling ) );
 			}
 
+			// When the ceiling is derived from the principal (no explicit host
+			// override in context), resolve it through the autonomous capability
+			// policy so the documented deny-by-default ceiling for autonomous
+			// principals is actually enforced at this shared boundary.
+			// resolve_ceiling fails closed: it returns any host-shaped ceiling
+			// untouched and only substitutes the safe-default deny-list for
+			// autonomous principals lacking explicit shaping — mirroring the
+			// class_exists guard in WP_Agent_Execution_Principal::is_autonomous_execution().
+			if (
+				( ! array_key_exists( 'capability_ceiling', $context ) || null === $context['capability_ceiling'] )
+				&& class_exists( 'WP_Agent_Autonomous_Capability_Policy' )
+			) {
+				$ceiling = WP_Agent_Autonomous_Capability_Policy::resolve_ceiling( $principal );
+			}
+
 			if ( $ceiling instanceof WP_Agent_Capability_Ceiling && ! $ceiling->allows_capability( $capability ) ) {
 				return false;
 			}

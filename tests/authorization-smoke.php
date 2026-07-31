@@ -235,4 +235,93 @@ $audience_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::audience( 'audi
 agents_api_smoke_assert_equals( true, $audience_policy->can_access_agent( $audience_principal, 'viewer-agent', WP_Agent_Access_Grant::ROLE_VIEWER ), 'policy accepts principal-aware audience grant', $failures, $passes );
 agents_api_smoke_assert_equals( false, $audience_policy->can_access_agent( $audience_principal, 'viewer-agent', WP_Agent_Access_Grant::ROLE_OPERATOR ), 'policy rejects audience grant below operator level', $failures, $passes );
 
+echo "\n[autonomous deny-by-default] Agent-token principal without an allow-list cannot exercise content-mutating capabilities:\n";
+
+// Owner 7 is a privileged WordPress user that CAN publish/edit/delete/manage.
+$privileged_user_can = static function ( int $user_id, string $capability ): bool {
+	unset( $capability );
+	return 7 === $user_id;
+};
+
+$autonomous_policy = new WP_Agent_WordPress_Authorization_Policy( null, $privileged_user_can );
+
+// Agent-token principal bound to the privileged owner, carrying the
+// token-derived ceiling with a null allow-list (no explicit host shaping) —
+// exactly what WP_Agent_Token_Authenticator attaches for a token created with
+// allowed_capabilities = null.
+$null_cap_token = new WP_Agent_Token(
+	77,
+	'automation-agent',
+	7,
+	WP_Agent_Token::hash_token( 'wp_agent_automation-agent_secret' ),
+	'wp_agent_au',
+	'Automation',
+	null,
+	'2099-01-01 00:00:00'
+);
+$autonomous_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::agent_token(
+	7,
+	'automation-agent',
+	77,
+	AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+	array(),
+	null,
+	null,
+	$null_cap_token->capability_ceiling()
+);
+
+agents_api_smoke_assert_equals( true, $autonomous_principal->is_autonomous_execution(), 'agent-token principal is autonomous', $failures, $passes );
+agents_api_smoke_assert_equals( false, $autonomous_policy->can( $autonomous_principal, 'publish_posts' ), 'autonomous agent-token cannot publish posts even when the owner can', $failures, $passes );
+agents_api_smoke_assert_equals( false, $autonomous_policy->can( $autonomous_principal, 'delete_posts' ), 'autonomous agent-token cannot delete posts even when the owner can', $failures, $passes );
+agents_api_smoke_assert_equals( false, $autonomous_policy->can( $autonomous_principal, 'manage_options' ), 'autonomous agent-token cannot manage options even when the owner can', $failures, $passes );
+agents_api_smoke_assert_equals( true, $autonomous_policy->can( $autonomous_principal, 'read' ), 'autonomous agent-token keeps non-mutating read access', $failures, $passes );
+
+// A non-autonomous interactive principal with the same privileged owner is
+// unaffected and can still publish.
+$interactive_owner = AgentsAPI\AI\WP_Agent_Execution_Principal::user_session(
+	7,
+	'editor-agent',
+	AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST
+);
+agents_api_smoke_assert_equals( false, $interactive_owner->is_autonomous_execution(), 'user-session principal is not autonomous', $failures, $passes );
+agents_api_smoke_assert_equals( true, $autonomous_policy->can( $interactive_owner, 'publish_posts' ), 'interactive principal can still publish posts', $failures, $passes );
+
+// An explicit host grant that includes publish_posts is respected even for an
+// autonomous agent-token principal — the safe default never narrows a
+// deliberate host decision.
+$explicit_grant   = new WP_Agent_Capability_Ceiling( 7, array( 'publish_posts', 'read' ) );
+$granted_principal = new AgentsAPI\AI\WP_Agent_Execution_Principal(
+	7,
+	'automation-agent',
+	AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_AGENT_TOKEN,
+	AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_REST,
+	77,
+	array(),
+	null,
+	null,
+	$explicit_grant
+);
+agents_api_smoke_assert_equals( true, $autonomous_policy->can( $granted_principal, 'publish_posts' ), 'explicit host grant lets an autonomous principal publish', $failures, $passes );
+
+// A host-supplied context override ceiling still takes precedence and is not
+// second-guessed by the autonomous policy.
+agents_api_smoke_assert_equals(
+	true,
+	$autonomous_policy->can(
+		$autonomous_principal,
+		'publish_posts',
+		array( 'capability_ceiling' => new WP_Agent_Capability_Ceiling( 7, array( 'publish_posts' ) ) )
+	),
+	'host context ceiling override still authorizes publish for an autonomous principal',
+	$failures,
+	$passes
+);
+agents_api_smoke_assert_equals(
+	false,
+	$autonomous_policy->can( $autonomous_principal, 'publish_posts', array( 'capability_ceiling' => null ) ),
+	'null context ceiling cannot bypass the autonomous safe default',
+	$failures,
+	$passes
+);
+
 agents_api_smoke_finish( 'Agents API authorization', $failures, $passes );
