@@ -77,6 +77,7 @@ function remote_bridge_assert( $expected, $actual, string $name, array &$failure
 require_once __DIR__ . '/../src/Channels/class-wp-agent-bridge-client.php';
 require_once __DIR__ . '/../src/Channels/class-wp-agent-bridge-queue-item.php';
 require_once __DIR__ . '/../src/Channels/class-wp-agent-bridge-store.php';
+require_once __DIR__ . '/../src/Channels/class-wp-agent-bridge-store-lock.php';
 require_once __DIR__ . '/../src/Channels/class-wp-agent-option-bridge-store.php';
 require_once __DIR__ . '/../src/Channels/class-wp-agent-bridge.php';
 
