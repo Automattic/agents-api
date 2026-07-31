@@ -772,14 +772,40 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 				),
 				'item'   => null,
 			);
-			agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
+			self::reconcile_branch_result( $payload, $branch_result );
 			return;
 		}
 
 		$key           = self::string_value( $descriptor['key'] ?? '' );
 		$branch_result = self::execute_branch( $descriptor, $key );
 
-		agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
+		self::reconcile_branch_result( $payload, $branch_result );
+	}
+
+	/**
+	 * Reconcile a completed branch, re-enqueuing it when lock contention prevents
+	 * the result from being recorded. Other errors are authoritative and are not
+	 * retried.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param array<mixed>        $payload       Original branch action payload.
+	 * @param array<string,mixed> $branch_result Terminal branch result.
+	 * @return void
+	 */
+	private static function reconcile_branch_result( array $payload, array $branch_result ): void {
+		$run_id    = self::string_value( $payload['run_id'] ?? '' );
+		$handle_id = self::string_value( $payload['handle_id'] ?? '' );
+		$result    = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
+
+		if ( ! is_wp_error( $result ) || 'agents_reconcile_lock_unavailable' !== $result->get_error_code() ) {
+			return;
+		}
+
+		$action_id = self::enqueue_async_action( self::BRANCH_HOOK, array( $payload ), self::group_for_run( $run_id ) );
+		if ( $action_id <= 0 ) {
+			throw new \RuntimeException( sprintf( 'Could not re-enqueue branch `%s` for run `%s` after reconcile lock contention.', $handle_id, $run_id ) );
+		}
 	}
 
 	/**

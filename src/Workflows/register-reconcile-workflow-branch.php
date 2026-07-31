@@ -181,11 +181,48 @@ function agents_reconcile_workflow_branch_locked( WP_Agent_Workflow_Run_Recorder
 		return $result;
 	}
 
+	// Bind the completion to server-stored suspension state: only a handle id
+	// that was actually recorded when the run suspended may complete. A
+	// caller-asserted handle id that is not among the stored handles is rejected
+	// (fail closed) so a forged/unknown id cannot inflate the completed[]
+	// accounting and prematurely trip the all-terminal gate below.
+	$stored_handle = null;
+	foreach ( $handles as $handle ) {
+		if ( is_array( $handle ) && agents_workflow_string( $handle['id'] ?? '' ) === $handle_id ) {
+			$stored_handle = $handle;
+			break;
+		}
+	}
+	if ( null === $stored_handle ) {
+		return new \WP_Error(
+			'agents_reconcile_workflow_branch_unknown_handle',
+			sprintf( 'Handle id `%s` is not a known suspended branch of run `%s`.', $handle_id, $run_id )
+		);
+	}
+
+	// Bind the completion to the handle's stored key too: the caller may not
+	// remap its output onto a different branch's aggregate key. An empty stored
+	// key preserves compatibility with frames that did not stamp one; otherwise
+	// the stored key remains authoritative when the caller omits it.
+	$stored_key   = agents_workflow_string( $stored_handle['key'] ?? '' );
+	$asserted_key = agents_workflow_string( $branch_result['key'] ?? '' );
+	if ( '' !== $stored_key && '' !== $asserted_key && $stored_key !== $asserted_key ) {
+		return new \WP_Error(
+			'agents_reconcile_workflow_branch_key_mismatch',
+			sprintf( 'branch_result key `%s` does not match the stored key `%s` for handle `%s`.', $asserted_key, $stored_key, $handle_id )
+		);
+	}
+
 	$status = agents_workflow_string( $branch_result['status'] ?? '' );
-	$status = ( WP_Agent_Workflow_Run_Result::STATUS_FAILED === $status ) ? WP_Agent_Workflow_Run_Result::STATUS_FAILED : WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED;
+	if ( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED !== $status && WP_Agent_Workflow_Run_Result::STATUS_FAILED !== $status ) {
+		return new \WP_Error(
+			'agents_reconcile_workflow_branch_invalid_status',
+			sprintf( 'Branch result status `%s` is not terminal for handle `%s`.', $status, $handle_id )
+		);
+	}
 
 	$completed[ $handle_id ] = array(
-		'key'    => agents_workflow_string( $branch_result['key'] ?? '' ),
+		'key'    => '' !== $stored_key ? $stored_key : $asserted_key,
 		'status' => $status,
 		'output' => $branch_result['output'] ?? null,
 		'steps'  => is_array( $branch_result['steps'] ?? null ) ? $branch_result['steps'] : array(),
@@ -316,7 +353,7 @@ function agents_workflow_defer_resume( string $run_id, WP_Agent_Workflow_Run_Res
  * @template T
  * @param string       $run_id   Suspended run id whose reconcile is serialized.
  * @param callable():T $critical The load → merge → decide → resume-dispatch section.
- * @return T
+ * @return T|\WP_Error The section's result, or a retryable WP_Error when the lock could not be acquired.
  */
 function agents_workflow_reconcile_with_lock( string $run_id, callable $critical ) {
 	/**

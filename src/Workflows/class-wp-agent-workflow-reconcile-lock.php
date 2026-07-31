@@ -75,16 +75,21 @@ final class WP_Agent_Workflow_Reconcile_Lock {
 	private const TTL_SECONDS = 60;
 
 	/**
-	 * Max acquisition attempts before giving up. With the sleep below this is a
-	 * bounded wait; a reconcile section is short, so contenders win quickly.
+	 * Max acquisition attempts before giving up. Sized (with the backoff below) so
+	 * the total bounded wait covers {@see self::TTL_SECONDS}: a healthy holder's
+	 * short section releases far sooner, and a crashed holder's lock row expires
+	 * within the TTL and is then reclaimed. So acquisition effectively always
+	 * succeeds in normal operation and the fail-closed path in {@see self::with_lock()}
+	 * is only a genuine last resort. 3000 × 20ms ≈ 60s = TTL_SECONDS.
 	 *
 	 * @since 0.5.0
 	 */
-	private const MAX_ATTEMPTS = 50;
+	private const MAX_ATTEMPTS = 3000;
 
 	/**
-	 * Per-attempt backoff (microseconds). 20ms × 50 attempts ≈ 1s worst-case
-	 * wait — well under the TTL, so a waiter either wins or reclaims a stale lock.
+	 * Per-attempt backoff (microseconds). 20ms × 3000 attempts ≈ 60s worst-case
+	 * wait — matching the TTL, so a waiter either wins, reclaims a stale lock once
+	 * it expires, or (only under pathological sustained contention) fails closed.
 	 *
 	 * @since 0.5.0
 	 */
@@ -93,34 +98,67 @@ final class WP_Agent_Workflow_Reconcile_Lock {
 	/**
 	 * Run one callback under an exclusive per-run lock. The callback runs at most
 	 * once and only while the lock is held; the lock is always released, even if
-	 * the callback throws. When the lock genuinely cannot be acquired (a wedged
-	 * holder that never expires) the callback still runs — stranding the branch
-	 * would be strictly worse than a best-effort merge, and the TTL makes a real
-	 * crash reclaimable so this fallback is rare.
+	 * the callback throws.
+	 *
+	 * FAIL CLOSED. The reconcile critical section is a read-modify-write on the
+	 * suspension frame's `completed[]` map; running it WITHOUT the lock risks a
+	 * lost update that permanently strands the run SUSPENDED. So when acquisition
+	 * ultimately fails, the callback is NOT run — instead a retryable WP_Error is
+	 * returned so the executor re-enqueues the branch and reconcile is retried once
+	 * the contention clears. Because the acquire loop's bounded wait covers the
+	 * TTL (a live holder releases quickly, a crashed holder's row expires and is
+	 * reclaimed), this last-resort error is unreachable in normal operation.
+	 *
+	 * When there is no option layer at all (a non-WordPress harness) there is
+	 * nothing to serialize against and callers are already single-process, so the
+	 * callback runs directly.
 	 *
 	 * @since 0.5.0
 	 *
 	 * @template T
 	 * @param string           $run_id   Run whose reconcile section is serialized.
 	 * @param callable():T     $critical The critical section (find → merge → decide).
-	 * @return T The callback's return value.
+	 * @return T|\WP_Error The callback's return value, or a retryable WP_Error when the lock could not be acquired.
 	 */
 	public static function with_lock( string $run_id, callable $critical ) {
+		if ( ! self::has_option_layer() ) {
+			// No option layer (e.g. a non-WordPress harness) — nothing to lock
+			// against; callers are already single-process there.
+			return $critical();
+		}
+
 		$token = self::acquire( $run_id );
+		if ( null === $token ) {
+			// Acquisition ultimately failed under sustained contention. Fail closed:
+			// do NOT run the unguarded read-modify-write. Return a retryable error so
+			// the branch is re-enqueued rather than risking a lost update.
+			return new \WP_Error(
+				'agents_reconcile_lock_unavailable',
+				sprintf( 'Could not acquire the reconcile lock for run `%s` after %d attempts; retry the branch reconcile.', $run_id, self::MAX_ATTEMPTS )
+			);
+		}
+
 		try {
 			return $critical();
 		} finally {
-			if ( null !== $token ) {
-				self::release( $run_id, $token );
-			}
+			self::release( $run_id, $token );
 		}
 	}
 
 	/**
+	 * Whether the WordPress option layer used by the lock is available.
+	 *
+	 * @since 0.5.0
+	 */
+	private static function has_option_layer(): bool {
+		return function_exists( 'add_option' ) && function_exists( 'get_option' ) && function_exists( 'delete_option' );
+	}
+
+	/**
 	 * Acquire the per-run lock, blocking with bounded retries. Returns the lock
-	 * token on success, or null when acquisition ultimately failed (the caller
-	 * proceeds without the lock rather than dropping the branch — see
-	 * {@see self::with_lock()}).
+	 * token on success, or null when acquisition ultimately failed — in which case
+	 * {@see self::with_lock()} fails closed and returns a retryable error rather
+	 * than running the critical section unguarded.
 	 *
 	 * @since 0.5.0
 	 *

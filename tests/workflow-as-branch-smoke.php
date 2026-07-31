@@ -465,6 +465,31 @@ $handles = $frame['handles'] ?? array();
 smoke_assert( 2, count( $handles ), 'frame carries 2 sibling handles', $failures, $passes );
 smoke_assert_true( is_int( $handles[0]['ref'] ?? null ) && $handles[0]['ref'] > 0, 'handle ref is the AS action id', $failures, $passes );
 
+// A contended reconcile must enqueue another branch action instead of silently
+// completing the current action without recording its result.
+$lock_attempts = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function ( $override, string $run_id, callable $critical ) use ( &$lock_attempts ) {
+		unset( $override );
+		if ( 'as-A' === $run_id && 0 === $lock_attempts++ ) {
+			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+		}
+		return $critical();
+	},
+	10,
+	3
+);
+$branch_count_before_retry = count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK ) );
+AS_Shim::fire( $branch_actions[0]['id'] );
+$branch_actions_with_retry = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+smoke_assert( $branch_count_before_retry + 1, count( $branch_actions_with_retry ), 'lock contention: branch action re-enqueued', $failures, $passes );
+smoke_assert( 0, count( $recorder->find( 'as-A' )->get_suspension()['completed'] ?? array() ), 'lock contention: result not recorded without lock', $failures, $passes );
+$retry_action = $branch_actions_with_retry[ count( $branch_actions_with_retry ) - 1 ];
+AS_Shim::fire( $retry_action['id'] );
+smoke_assert( 1, count( $recorder->find( 'as-A' )->get_suspension()['completed'] ?? array() ), 'lock contention: queued retry records completion', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+
 // TABLE-FREE: the frame lives in metadata._suspension, not a new table.
 smoke_assert_true( is_array( $recorder->find( 'as-A' )->get_suspension()['handles'] ?? null ), 'table-free: frame in metadata._suspension while suspended', $failures, $passes );
 smoke_assert( $tables_before, $recorder->tables(), 'table-free: NO new table created on suspend', $failures, $passes );
@@ -473,7 +498,6 @@ smoke_assert( $tables_before, $recorder->tables(), 'table-free: NO new table cre
 // Firing the SECOND (last) branch action makes reconcile observe all-terminal
 // and enqueue a claimed RESUME action (deferred, not inline).
 $resume_before = count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK ) );
-AS_Shim::fire( $branch_actions[0]['id'] );
 $mid = $recorder->find( 'as-A' );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $mid->get_status(), 'AS path: still SUSPENDED after 1 of 2 branch actions', $failures, $passes );
 smoke_assert( $resume_before, count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK ) ), 'AS path: no resume enqueued before all branches terminal', $failures, $passes );
