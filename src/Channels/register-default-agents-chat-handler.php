@@ -491,26 +491,38 @@ class WP_Agent_Default_Chat_Handler {
 		}
 
 		try {
-			$user_id = self::resolve_user_id( $input );
-			if ( $user_id > 0 ) {
-				return $store->create_session(
-					$workspace,
-					$user_id,
-					$agent_slug,
-					array( 'source' => 'agents-api-default-chat-handler' ),
-					'chat'
-				);
-			}
-
 			$principal = $input['principal'] ?? null;
 			if ( is_array( $principal ) ) {
 				$principal = WP_Agent_Execution_Principal::from_array( agents_chat_string_keyed_array( $principal ) );
 			}
 			$owner = $principal instanceof WP_Agent_Execution_Principal ? $principal->conversation_owner() : null;
-			if ( $store instanceof WP_Agent_Principal_Conversation_Store && is_array( $owner ) ) {
-				return $store->create_session_for_owner(
+			if ( is_array( $owner ) ) {
+				if ( WP_Agent_Execution_Principal::OWNER_TYPE_USER === $owner['type'] && is_numeric( $owner['key'] ) && (int) $owner['key'] > 0 ) {
+					return $store->create_session(
+						$workspace,
+						(int) $owner['key'],
+						$agent_slug,
+						array( 'source' => 'agents-api-default-chat-handler' ),
+						'chat'
+					);
+				}
+				if ( $store instanceof WP_Agent_Principal_Conversation_Store ) {
+					return $store->create_session_for_owner(
+						$workspace,
+						$owner,
+						$agent_slug,
+						array( 'source' => 'agents-api-default-chat-handler' ),
+						'chat'
+					);
+				}
+				return '';
+			}
+
+			$user_id = self::resolve_user_id( $input );
+			if ( $user_id > 0 ) {
+				return $store->create_session(
 					$workspace,
-					$owner,
+					$user_id,
 					$agent_slug,
 					array( 'source' => 'agents-api-default-chat-handler' ),
 					'chat'
