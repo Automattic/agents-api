@@ -38,12 +38,14 @@
 namespace AgentsAPI\AI\Channels;
 
 use AgentsAPI\AI\WP_Agent_Conversation_Loop;
+use AgentsAPI\AI\WP_Agent_Execution_Principal;
 use AgentsAPI\AI\WP_Agent_Message;
 use AgentsAPI\AI\Tools\WP_Agent_Ability_Tool_Executor;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Executor_Registry;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Sessions;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store;
+use AgentsAPI\Core\Database\Chat\WP_Agent_Principal_Conversation_Store;
 use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 
 defined( 'ABSPATH' ) || exit;
@@ -469,13 +471,11 @@ class WP_Agent_Default_Chat_Handler {
 	}
 
 	/**
-	 * Best-effort creation of a transcript session row for a user-owned chat.
+	 * Best-effort creation of a transcript session row for the authenticated owner.
 	 *
-	 * The default driver stays generic: it only creates a row when a store is
-	 * registered and a WordPress user owns the turn (the contracts-only default
-	 * CPT store keys sessions by user id). Anonymous or principal-owned chats run
-	 * statelessly with a synthesized session id rather than coupling this default
-	 * to a specific principal-store implementation.
+	 * User-owned sessions retain the legacy store path. Non-user principals use
+	 * the optional principal-aware store contract when available; otherwise they
+	 * remain stateless with a synthesized session id.
 	 *
 	 * @param WP_Agent_Conversation_Store $store      Resolved conversation store.
 	 * @param string                      $agent_slug Registered agent slug.
@@ -483,11 +483,6 @@ class WP_Agent_Default_Chat_Handler {
 	 * @return string Created session id, or empty string when none was created.
 	 */
 	private static function create_session( WP_Agent_Conversation_Store $store, string $agent_slug, array $input ): string {
-		$user_id = self::resolve_user_id( $input );
-		if ( $user_id <= 0 ) {
-			return '';
-		}
-
 		try {
 			$workspace = self::workspace_from_input( $input ) ?? WP_Agent_Workspace_Scope::from_parts( 'site', self::default_workspace_id() );
 		} catch ( \Throwable $error ) {
@@ -496,19 +491,37 @@ class WP_Agent_Default_Chat_Handler {
 		}
 
 		try {
-			$session_id = $store->create_session(
-				$workspace,
-				$user_id,
-				$agent_slug,
-				array( 'source' => 'agents-api-default-chat-handler' ),
-				'chat'
-			);
+			$user_id = self::resolve_user_id( $input );
+			if ( $user_id > 0 ) {
+				return $store->create_session(
+					$workspace,
+					$user_id,
+					$agent_slug,
+					array( 'source' => 'agents-api-default-chat-handler' ),
+					'chat'
+				);
+			}
+
+			$principal = $input['principal'] ?? null;
+			if ( is_array( $principal ) ) {
+				$principal = WP_Agent_Execution_Principal::from_array( agents_chat_string_keyed_array( $principal ) );
+			}
+			$owner = $principal instanceof WP_Agent_Execution_Principal ? $principal->conversation_owner() : null;
+			if ( $store instanceof WP_Agent_Principal_Conversation_Store && is_array( $owner ) ) {
+				return $store->create_session_for_owner(
+					$workspace,
+					$owner,
+					$agent_slug,
+					array( 'source' => 'agents-api-default-chat-handler' ),
+					'chat'
+				);
+			}
 		} catch ( \Throwable $error ) {
 			unset( $error );
 			return '';
 		}
 
-		return $session_id;
+		return '';
 	}
 
 	/** @param array<string,mixed> $input Canonical chat input. */

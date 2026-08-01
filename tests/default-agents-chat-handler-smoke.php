@@ -164,7 +164,7 @@ namespace {
 
 	if ( ! function_exists( 'get_current_user_id' ) ) {
 		function get_current_user_id(): int {
-			return 0;
+			return (int) ( $GLOBALS['__chat_handler_user_id'] ?? 0 );
 		}
 	}
 
@@ -377,6 +377,83 @@ namespace {
 		}
 	}
 
+	class Agents_Chat_Principal_Conversation_Store implements \AgentsAPI\Core\Database\Chat\WP_Agent_Principal_Conversation_Store {
+		/** @var array<string,array<string,mixed>> */
+		public array $sessions = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $principal_creations = array();
+		/** @var int[] */
+		public array $user_creations = array();
+
+		public function create_session( \AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace, int $user_id, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ): string {
+			$this->user_creations[] = $user_id;
+			return $this->create_session_for_owner( $workspace, array( 'type' => 'user', 'key' => (string) $user_id ), $agent_slug, $metadata, $context );
+		}
+
+		public function create_session_for_owner( \AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace, array $owner, string $agent_slug = '', array $metadata = array(), string $context = 'chat' ): string {
+			$session_id = 'principal-session-' . ( count( $this->sessions ) + 1 );
+			$row        = array(
+				'session_id'     => $session_id,
+				'workspace_type' => $workspace->workspace_type,
+				'workspace_id'   => $workspace->workspace_id,
+				'owner_type'     => $owner['type'],
+				'owner_key'      => $owner['key'],
+				'agent_slug'     => $agent_slug,
+				'messages'       => array(),
+				'metadata'       => $metadata,
+				'context'        => $context,
+			);
+			$this->sessions[ $session_id ] = $row;
+			$this->principal_creations[]   = $row;
+			return $session_id;
+		}
+
+		public function list_sessions( \AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace, int $user_id, array $args = array() ): array {
+			unset( $workspace, $user_id, $args );
+			return array_values( $this->sessions );
+		}
+
+		public function list_sessions_for_owner( \AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace, array $owner, array $args = array() ): array {
+			unset( $workspace, $owner, $args );
+			return array_values( $this->sessions );
+		}
+
+		public function get_session( string $session_id ): ?array {
+			return $this->sessions[ $session_id ] ?? null;
+		}
+
+		public function update_session( string $session_id, array $messages, array $metadata = array(), string $provider = '', string $model = '', ?string $provider_response_id = null ): bool {
+			if ( ! isset( $this->sessions[ $session_id ] ) ) {
+				return false;
+			}
+			$this->sessions[ $session_id ] = array_merge( $this->sessions[ $session_id ], compact( 'messages', 'metadata', 'provider', 'model', 'provider_response_id' ) );
+			return true;
+		}
+
+		public function delete_session( string $session_id ): bool {
+			unset( $this->sessions[ $session_id ] );
+			return true;
+		}
+
+		public function get_recent_pending_session( \AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace, int $user_id, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array {
+			unset( $workspace, $user_id, $seconds, $context, $token_id );
+			return null;
+		}
+
+		public function get_recent_pending_session_for_owner( \AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace, array $owner, int $seconds = 600, string $context = 'chat', ?int $token_id = null ): ?array {
+			unset( $workspace, $owner, $seconds, $context, $token_id );
+			return null;
+		}
+
+		public function update_title( string $session_id, string $title ): bool {
+			if ( ! isset( $this->sessions[ $session_id ] ) ) {
+				return false;
+			}
+			$this->sessions[ $session_id ]['title'] = $title;
+			return true;
+		}
+	}
+
 	use function AgentsAPI\AI\Channels\agents_chat_dispatch;
 	use function AgentsAPI\AI\Channels\register_chat_handler;
 
@@ -567,6 +644,39 @@ namespace {
 	agents_api_smoke_assert_equals( true, $request_model instanceof \WordPress\AiClient\Providers\Models\Contracts\ModelInterface, 'request-supplied provider/model resolve to a ModelInterface for dispatch', $failures, $passes );
 	agents_api_smoke_assert_equals( 'request-provider', $request_model->provider_id ?? '', 'request provider overrides/supplies the dispatch provider', $failures, $passes );
 	agents_api_smoke_assert_equals( 'request-model', $request_model->model_id ?? '', 'request model overrides/supplies the dispatch model', $failures, $passes );
+
+	echo "\n[2b] Principal-owned turns create an authoritative session before run control finalizes:\n";
+	$principal_store = new Agents_Chat_Principal_Conversation_Store();
+	$store_filter    = static fn() => $principal_store;
+	add_filter( 'wp_agent_conversation_store', $store_filter );
+	$runtime_principal = \AgentsAPI\AI\WP_Agent_Execution_Principal::runtime(
+		'contained-runtime',
+		'kitchen-brain',
+		array( 'source' => 'test-runtime' ),
+		'wp-codebox',
+		'wp-codebox-cli',
+		array( 'runtime_type' => 'wordpress-playground' )
+	);
+	$reset_provider();
+	$principal_output = agents_chat_dispatch(
+		array(
+			'agent'     => 'kitchen-brain',
+			'message'   => 'Run as the contained runtime.',
+			'principal' => $runtime_principal->to_array(),
+		)
+	);
+
+	agents_api_smoke_assert_equals( false, $principal_output instanceof WP_Error, 'principal-owned dispatch completes without an ownership error', $failures, $passes );
+	agents_api_smoke_assert_equals( 'principal-session-1', $principal_output['session_id'] ?? '', 'principal-owned dispatch returns the authoritative session id', $failures, $passes );
+	agents_api_smoke_assert_equals( 'runtime', $principal_store->principal_creations[0]['owner_type'] ?? '', 'session owner type comes from the resolved runtime principal', $failures, $passes );
+	agents_api_smoke_assert_equals( 'contained-runtime', $principal_store->principal_creations[0]['owner_key'] ?? '', 'session owner key comes from the resolved runtime principal', $failures, $passes );
+	agents_api_smoke_assert_equals( true, is_string( $principal_output['run_id'] ?? null ) && '' !== $principal_output['run_id'], 'run control finalizes and returns the principal-owned run id', $failures, $passes );
+	$GLOBALS['__chat_handler_user_id'] = 17;
+	$reset_provider();
+	$user_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute( array( 'agent' => 'kitchen-brain', 'message' => 'Run as a WordPress user.' ) );
+	$GLOBALS['__chat_handler_user_id'] = 0;
+	agents_api_smoke_assert_equals( false, $user_output instanceof WP_Error, 'user-owned dispatch remains compatible', $failures, $passes );
+	agents_api_smoke_assert_equals( 17, $principal_store->user_creations[0] ?? 0, 'user-owned dispatch retains the legacy integer-user store method', $failures, $passes );
 
 	echo "\n[3] Error contracts: empty message, unknown agent, missing provider:\n";
 	$empty = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute( array( 'agent' => 'kitchen-brain', 'message' => '   ' ) );
