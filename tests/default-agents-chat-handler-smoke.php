@@ -657,6 +657,7 @@ namespace {
 		'wp-codebox-cli',
 		array( 'runtime_type' => 'wordpress-playground' )
 	);
+	$GLOBALS['__chat_handler_user_id'] = 1;
 	$reset_provider();
 	$principal_output = agents_chat_dispatch(
 		array(
@@ -670,6 +671,7 @@ namespace {
 	agents_api_smoke_assert_equals( 'principal-session-1', $principal_output['session_id'] ?? '', 'principal-owned dispatch returns the authoritative session id', $failures, $passes );
 	agents_api_smoke_assert_equals( 'runtime', $principal_store->principal_creations[0]['owner_type'] ?? '', 'session owner type comes from the resolved runtime principal', $failures, $passes );
 	agents_api_smoke_assert_equals( 'contained-runtime', $principal_store->principal_creations[0]['owner_key'] ?? '', 'session owner key comes from the resolved runtime principal', $failures, $passes );
+	agents_api_smoke_assert_equals( array(), $principal_store->user_creations, 'ambient WordPress user does not replace the explicit runtime owner', $failures, $passes );
 	agents_api_smoke_assert_equals( true, is_string( $principal_output['run_id'] ?? null ) && '' !== $principal_output['run_id'], 'run control finalizes and returns the principal-owned run id', $failures, $passes );
 	$GLOBALS['__chat_handler_user_id'] = 17;
 	$reset_provider();
