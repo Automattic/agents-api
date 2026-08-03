@@ -185,6 +185,12 @@ class WP_Agent_Conversation_Loop {
 			}
 		}
 
+		// Tracks a deliberate turn-runner contract violation (non-array return),
+		// which is finalized in place and re-thrown to the caller. The fail-closed
+		// guard below must let this specific throw keep escaping rather than
+		// convert it into a structured failure result.
+		$loop_contract_error = null;
+
 		try {
 			for ( $turn = 1; $turn <= $max_turns; ++$turn ) {
 				$wall_clock_exceeded = self::check_wall_clock_budget( $budgets, $wall_clock_started_at, $wall_clock_initial, $on_event );
@@ -218,12 +224,8 @@ class WP_Agent_Conversation_Loop {
 				try {
 					$result = call_user_func( $turn_runner, $messages, $turn_context );
 				} catch ( \Throwable $error ) {
-					self::emit_event( $on_event, 'failed', array(
-						'turn'  => $turn,
-						'error' => $error->getMessage(),
-					) );
-
-					$failure_result = self::failure_result(
+					return self::finalize_loop_failure(
+						$on_event,
 						$messages,
 						$tool_results,
 						$tool_events,
@@ -232,23 +234,21 @@ class WP_Agent_Conversation_Loop {
 						$error,
 						$turn,
 						$total_usage,
-						$request_metadata
+						$request_metadata,
+						$run_id,
+						$lock_session_id,
+						$run_workspace,
+						$transcript_persister,
+						$options
 					);
-
-					if ( '' !== $run_id && '' !== $lock_session_id ) {
-						WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_workspace );
-					}
-
-					self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
-					return $failure_result;
 				}
 
 				if ( ! is_array( $result ) ) {
-					$error = new \InvalidArgumentException( 'invalid_agent_conversation_loop: turn runner must return an array' );
+					$loop_contract_error = new \InvalidArgumentException( 'invalid_agent_conversation_loop: turn runner must return an array' );
 
 					self::emit_event( $on_event, 'failed', array(
 						'turn'  => $turn,
-						'error' => $error->getMessage(),
+						'error' => $loop_contract_error->getMessage(),
 					) );
 
 					self::persist_transcript( $transcript_persister, $messages, $options, array(
@@ -259,7 +259,7 @@ class WP_Agent_Conversation_Loop {
 						'events'                 => $events,
 					) );
 
-					throw $error;
+					throw $loop_contract_error;
 				}
 
 				$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event, $run_workspace, $run_owner );
@@ -557,6 +557,37 @@ class WP_Agent_Conversation_Loop {
 			) );
 
 			return $final_result;
+		} catch ( \Throwable $error ) {
+			// A deliberate turn-runner contract violation (non-array return) is
+			// finalized in place and re-thrown to the caller; keep it escaping.
+			if ( null !== $loop_contract_error && $error === $loop_contract_error ) {
+				throw $error;
+			}
+
+			// Fail closed. An unguarded throw from anywhere in the loop body --
+			// compaction/summarizer, tool-call normalization, message construction,
+			// mediation, or the runtime-tool store -- would otherwise escape run()
+			// leaving the run stuck in STATUS_RUNNING with no `failed` event and no
+			// persisted transcript. Finalize identically to the turn-runner boundary
+			// (finish_run -> FAILED, persist transcript, emit `failed`) so the
+			// `finally` below still releases the transcript lock.
+			return self::finalize_loop_failure(
+				$on_event,
+				$messages,
+				$tool_results,
+				$tool_events,
+				$tool_audit_events,
+				$events,
+				$error,
+				$turns_run,
+				$total_usage,
+				$request_metadata,
+				$run_id,
+				$lock_session_id,
+				$run_workspace,
+				$transcript_persister,
+				$options
+			);
 		} finally {
 			if ( null !== $transcript_lock && null !== $lock_token && '' !== $lock_session_id ) {
 				try {
@@ -1088,6 +1119,77 @@ class WP_Agent_Conversation_Loop {
 			'runtime_tool_pending'   => $runtime_tool_pending,
 			'spin_signatures'        => $spin_signatures,
 		);
+	}
+
+	/**
+	 * Fail closed: finalize a run that threw and return the structured failure result.
+	 *
+	 * Shared by the turn-runner boundary and the outer loop-body guard so an
+	 * unguarded `\Throwable` from anywhere in the loop finalizes identically:
+	 * emit the `failed` event, mark run-control FAILED, persist the transcript,
+	 * and return the normalized failure result. Without this, a throw from
+	 * compaction, tool-call normalization, message construction, mediation, or
+	 * the runtime-tool store would escape `run()` and leave the run stuck in
+	 * STATUS_RUNNING with no `failed` event and no persisted transcript.
+	 *
+	 * @param callable|null                                                        $on_event             Event sink.
+	 * @param array<int, array<string, mixed>>                                     $messages             Current transcript messages.
+	 * @param array<int, array<string, mixed>>                                     $tool_results         Accumulated tool execution results.
+	 * @param array<mixed>                                                         $tool_events          Accumulated canonical tool events.
+	 * @param array<int, array<string, mixed>>                                     $tool_audit_events    Accumulated audit events.
+	 * @param array<int, array<string, mixed>>                                     $events               Accumulated loop events.
+	 * @param \Throwable                                                           $error                Runtime error.
+	 * @param int                                                                  $turn                 Current turn.
+	 * @param array<string, mixed>                                                 $usage                Accumulated usage.
+	 * @param array<string, mixed>                                                 $request_metadata     Latest request metadata.
+	 * @param string                                                               $run_id               Run identifier, or '' when run control is disabled.
+	 * @param string                                                               $lock_session_id      Session id, or '' when run control is disabled.
+	 * @param \AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope|null              $run_workspace        Run workspace scope.
+	 * @param WP_Agent_Transcript_Persister|null                                   $transcript_persister Transcript persister.
+	 * @param array<string, mixed>                                                 $options              Loop options.
+	 * @return array<string, mixed> Normalized conversation result.
+	 */
+	private static function finalize_loop_failure(
+		?callable $on_event,
+		array $messages,
+		array $tool_results,
+		array $tool_events,
+		array $tool_audit_events,
+		array $events,
+		\Throwable $error,
+		int $turn,
+		array $usage,
+		array $request_metadata,
+		string $run_id,
+		string $lock_session_id,
+		?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $run_workspace,
+		?WP_Agent_Transcript_Persister $transcript_persister,
+		array $options
+	): array {
+		self::emit_event( $on_event, 'failed', array(
+			'turn'  => $turn,
+			'error' => $error->getMessage(),
+		) );
+
+		$failure_result = self::failure_result(
+			$messages,
+			$tool_results,
+			$tool_events,
+			$tool_audit_events,
+			$events,
+			$error,
+			$turn,
+			$usage,
+			$request_metadata
+		);
+
+		if ( '' !== $run_id && '' !== $lock_session_id ) {
+			WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_workspace );
+		}
+
+		self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
+
+		return $failure_result;
 	}
 
 	/**
