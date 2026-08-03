@@ -130,6 +130,7 @@
       "php tests/workflow-runner-smoke.php",
       "php tests/workflow-parallel-smoke.php",
       "php tests/workflow-parallel-async-smoke.php",
+      "php tests/workflow-parallel-spec-validation-parity-smoke.php",
       "php tests/workflow-as-branch-smoke.php",
       "php tests/workflow-branch-concurrency-gate-smoke.php",
       "php tests/workflow-scoped-drain-smoke.php",
