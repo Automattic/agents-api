@@ -121,6 +121,39 @@ $task_envelope = WP_Agent_Task_Run_Control::to_run_result_envelope(
 agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_CANCELLING, $task_envelope->get_status(), 'task cancelling status is shared', $failures, $passes );
 agents_api_smoke_assert_equals( 'queued cancel', $task_envelope->get_outputs()['summary'] ?? '', 'task output maps to outputs', $failures, $passes );
 agents_api_smoke_assert_equals( 'executor-1', $task_envelope->get_metadata()['executor_id'] ?? '', 'task executor id maps to metadata', $failures, $passes );
+agents_api_smoke_assert_equals( true, $task_envelope->get_cancellation()['requested'] ?? false, 'cancelling task run populates cancellation', $failures, $passes );
+agents_api_smoke_assert_equals( 'cancelling', $task_envelope->get_cancellation()['status'] ?? '', 'cancellation carries the task status', $failures, $passes );
+agents_api_smoke_assert_equals( array(), $task_envelope->get_error(), 'non-failed task run carries empty error', $failures, $passes );
+
+$failed_task_envelope = WP_Agent_Task_Run_Control::to_run_result_envelope(
+	array(
+		'run_id'      => 'task-run-failed',
+		'session_id'  => 'session-1',
+		'executor_id' => 'executor-1',
+		'status'      => 'failed',
+		'diagnostics' => array(
+			'error_code'    => 'executor_boom',
+			'error_message' => 'Executor exploded.',
+		),
+	)
+);
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_FAILED, $failed_task_envelope->get_status(), 'failed task status is shared', $failures, $passes );
+agents_api_smoke_assert_equals( 'executor_boom', $failed_task_envelope->get_error()['code'] ?? '', 'failed task run maps diagnostics code into envelope error', $failures, $passes );
+agents_api_smoke_assert_equals( 'Executor exploded.', $failed_task_envelope->get_error()['message'] ?? '', 'failed task run maps diagnostics message into envelope error', $failures, $passes );
+agents_api_smoke_assert_equals( 'executor_boom', $failed_task_envelope->get_error()['data']['diagnostics']['error_code'] ?? '', 'failed task run preserves raw diagnostics under error data', $failures, $passes );
+agents_api_smoke_assert_equals( false, array() === $failed_task_envelope->get_error(), 'failed task run never carries an empty error', $failures, $passes );
+
+$succeeded_task_envelope = WP_Agent_Task_Run_Control::to_run_result_envelope(
+	array(
+		'run_id'      => 'task-run-succeeded',
+		'session_id'  => 'session-1',
+		'executor_id' => 'executor-1',
+		'status'      => 'succeeded',
+		'output'      => array( 'summary' => 'done' ),
+	)
+);
+agents_api_smoke_assert_equals( array(), $succeeded_task_envelope->get_error(), 'successful task run carries empty error', $failures, $passes );
+agents_api_smoke_assert_equals( array(), $succeeded_task_envelope->get_cancellation(), 'successful task run carries empty cancellation', $failures, $passes );
 
 echo "\n[5] Package adoption results expose canonical envelope refs:\n";
 $recorded = new WP_Agent_Package_Installed_Artifact(
