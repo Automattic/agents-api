@@ -38,6 +38,7 @@
       "php tests/package-duplicate-artifact-identity-smoke.php",
       "php tests/package-capability-contract-smoke.php",
       "php tests/package-adoption-orchestration-smoke.php",
+      "php tests/package-adoption-result-canonical-status-smoke.php",
       "php tests/execution-principal-smoke.php",
       "php tests/effective-agent-resolver-smoke.php",
       "php tests/runtime-profile-smoke.php",
