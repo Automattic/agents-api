@@ -72,10 +72,6 @@ function agents_frontend_chat_rest_permission( \WP_REST_Request $request ): bool
 	$agent   = \AgentsAPI\AI\agents_api_scalar_to_string( $input['agent'] ?? null );
 	$allowed = '' !== $agent && agents_chat_permission( $input );
 
-	if ( ! $allowed && '' !== $agent ) {
-		$allowed = \WP_Agent_Access::can_current_principal_access_agent( $agent, \WP_Agent_Access_Grant::ROLE_OPERATOR, agents_frontend_chat_rest_scope( $request ) );
-	}
-
 	/**
 	 * Filter the frontend chat REST permission decision.
 	 *
@@ -83,7 +79,7 @@ function agents_frontend_chat_rest_permission( \WP_REST_Request $request ): bool
 	 * @param array<mixed>            $input   Canonical agents/chat input.
 	 * @param \WP_REST_Request $request REST request.
 	 */
-	$allowed = (bool) apply_filters( 'agents_frontend_chat_rest_permission', $allowed, $input, $request );
+	$allowed = $allowed && (bool) apply_filters( 'agents_frontend_chat_rest_permission', $allowed, $input, $request );
 
 	if ( $allowed ) {
 		return true;
@@ -139,6 +135,8 @@ function agents_frontend_chat_rest_input( \WP_REST_Request $request ) {
 		'session_id'     => null !== $session_id ? \AgentsAPI\AI\agents_api_scalar_to_string( $session_id ) : null,
 		'attachments'    => is_array( $attachments ) ? $attachments : array(),
 		'client_context' => $client_context,
+		'workspace_id'   => $request->get_param( 'workspace_id' ),
+		'client_id'      => $request->get_param( 'client_id' ),
 	);
 
 	/**

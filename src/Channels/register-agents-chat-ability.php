@@ -326,9 +326,11 @@ function agents_chat_string_keyed_array( array $data ): array {
 }
 
 /**
- * Permission gate for `agents/chat`. Defaults to `manage_options`; consumers
- * with their own auth model (HMAC-signed webhook, OAuth bearer, etc.) can
- * widen the gate per-request via the `agents_chat_permission` filter.
+ * Permission gate for `agents/chat`.
+ *
+ * Administrators and principals with an operator grant for the requested agent
+ * can chat. Consumers with their own auth model (HMAC-signed webhook, OAuth
+ * bearer, etc.) can widen the gate per-request via the filters below.
  *
  * @since 0.103.0
  *
@@ -357,10 +359,19 @@ function agents_chat_permission( array $input ): bool {
 		$allowed = (bool) apply_filters( 'agents_chat_runtime_principal_permission', $allowed, $principal, $input );
 	}
 
+	$agent = sanitize_title( agents_chat_optional_string( $input['agent'] ?? null ) ?? '' );
+	if ( ! $allowed && null === $principal && '' !== $agent && class_exists( '\WP_Agent_Access' ) && class_exists( '\WP_Agent_Access_Grant' ) ) {
+		$allowed = \WP_Agent_Access::can_current_principal_access_agent(
+			$agent,
+			\WP_Agent_Access_Grant::ROLE_OPERATOR,
+			agents_chat_access_scope( $input )
+		);
+	}
+
 	/**
 	 * Filter the permission decision for the canonical chat ability.
 	 *
-	 * @param bool  $allowed Default: current_user_can( 'manage_options' ).
+	 * @param bool  $allowed Administrator, operator-grant, or runtime-principal decision.
 	 * @param array<mixed> $input   The canonical input being authorized.
 	 */
 	return (bool) apply_filters(
@@ -368,6 +379,24 @@ function agents_chat_permission( array $input ): bool {
 		$allowed,
 		$input
 	);
+}
+
+/**
+ * Build the canonical access scope used by every agents/chat transport.
+ *
+ * @param array<mixed> $input Canonical chat input.
+ * @return array<string,mixed>
+ */
+function agents_chat_access_scope( array $input ): array {
+	$input = agents_chat_string_keyed_array( $input );
+	$scope = \AgentsAPI\AI\Auth\agents_access_request_scope( $input );
+	if ( is_array( $input['client_context'] ?? null ) ) {
+		$client_context            = agents_chat_strip_runtime_tool_declaration_fields( agents_chat_string_keyed_array( $input['client_context'] ) );
+		$scope['client_context']   = $client_context;
+		$scope['request_metadata'] = array( 'client_context' => $client_context );
+	}
+
+	return $scope;
 }
 
 /**
@@ -414,6 +443,14 @@ function agents_chat_input_schema(): array {
 		'required'   => array( 'agent', 'message' ),
 		'properties' => array(
 			'workspace'             => agents_chat_workspace_schema(),
+			'workspace_id'          => array(
+				'type'        => array( 'string', 'null' ),
+				'description' => 'Optional host access-scope identifier. This narrows agent grant resolution and does not replace the canonical conversation workspace.',
+			),
+			'client_id'             => array(
+				'type'        => array( 'string', 'null' ),
+				'description' => 'Optional host client identifier used when resolving scoped agent grants.',
+			),
 			'agent'                 => array(
 				'type'        => 'string',
 				'description' => 'Slug or ID of the registered agent that should handle this turn.',
