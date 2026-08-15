@@ -120,16 +120,15 @@ function agents_chat_jsonrpc_permission( \WP_REST_Request $request ): bool|\WP_E
 		);
 	}
 
-	$input   = array( 'agent' => $agent );
-	$allowed = agents_chat_permission( $input );
-
-	if ( ! $allowed ) {
-		$allowed = \WP_Agent_Access::can_current_principal_access_agent(
-			$agent,
-			\WP_Agent_Access_Grant::ROLE_OPERATOR,
-			agents_chat_jsonrpc_scope( $request )
+	$input = agents_chat_jsonrpc_request_input( $request );
+	if ( is_wp_error( $input ) ) {
+		$input = array(
+			'agent'        => $agent,
+			'workspace_id' => $request->get_param( 'workspace_id' ),
+			'client_id'    => $request->get_param( 'client_id' ),
 		);
 	}
+	$allowed = agents_chat_permission( $input );
 
 	/**
 	 * Filter the JSON-RPC chat permission decision.
@@ -138,7 +137,7 @@ function agents_chat_jsonrpc_permission( \WP_REST_Request $request ): bool|\WP_E
 	 * @param string           $agent   Agent slug from the URL.
 	 * @param \WP_REST_Request $request REST request.
 	 */
-	$allowed = (bool) apply_filters( 'agents_chat_jsonrpc_permission', $allowed, $agent, $request );
+	$allowed = $allowed && (bool) apply_filters( 'agents_chat_jsonrpc_permission', $allowed, $agent, $request );
 
 	if ( $allowed ) {
 		return true;
@@ -171,7 +170,7 @@ function agents_chat_jsonrpc_dispatch( \WP_REST_Request $request ): \WP_REST_Res
 		);
 	}
 
-	$input = agents_chat_jsonrpc_input_from_params( $params, $agent, $body );
+	$input = agents_chat_jsonrpc_request_input( $request );
 	if ( is_wp_error( $input ) ) {
 		return rest_ensure_response(
 			agents_chat_jsonrpc_error_frame( $rpc_id, AGENTS_CHAT_JSONRPC_ERR_INVALID_PARAMS, $input->get_error_message() )
@@ -200,6 +199,45 @@ function agents_chat_jsonrpc_dispatch( \WP_REST_Request $request ): \WP_REST_Res
 	return rest_ensure_response(
 		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ) )
 	);
+}
+
+/**
+ * Build and cache the canonical JSON-RPC input for one REST request.
+ *
+ * Permission and dispatch must observe one filtered input so stateful host
+ * filters cannot authorize one context and execute another.
+ *
+ * @param \WP_REST_Request $request REST request.
+ * @return array<string,mixed>|\WP_Error
+ */
+function agents_chat_jsonrpc_request_input( \WP_REST_Request $request ) {
+	static $cache = null;
+
+	if ( ! $cache instanceof \SplObjectStorage ) {
+		$cache = new \SplObjectStorage();
+	}
+	if ( $cache->offsetExists( $request ) ) {
+		$cached = $cache[ $request ];
+		if ( is_array( $cached ) ) {
+			return \AgentsAPI\AI\agents_api_string_keyed_array( $cached );
+		}
+		if ( is_wp_error( $cached ) ) {
+			return $cached;
+		}
+		return new \WP_Error( 'agents_chat_jsonrpc_invalid_params', 'The cached JSON-RPC chat input is invalid.' );
+	}
+
+	$agent  = sanitize_title( \AgentsAPI\AI\agents_api_scalar_to_string( $request->get_param( 'agent_id' ) ) );
+	$body   = $request->get_json_params();
+	$params = isset( $body['params'] ) && is_array( $body['params'] ) ? $body['params'] : array();
+	$input  = agents_chat_jsonrpc_input_from_params( $params, $agent, $body );
+	if ( is_array( $input ) ) {
+		$input['workspace_id'] = $request->get_param( 'workspace_id' );
+		$input['client_id']    = $request->get_param( 'client_id' );
+	}
+
+	$cache[ $request ] = $input;
+	return $input;
 }
 
 /**

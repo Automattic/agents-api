@@ -131,6 +131,7 @@ use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_extract_text;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_client_context;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_method_sends;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_method_streams;
+use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_request_input;
 use function AgentsAPI\AI\Channels\agents_chat_input_schema;
 use function AgentsAPI\AI\Channels\register_chat_stream_handler;
 
@@ -203,6 +204,32 @@ agents_api_smoke_assert_equals( array( 'first' => 'a', 'shared' => 'new', 'secon
 $top_level_token_streaming = agents_chat_jsonrpc_input_from_params( $params, 'support-agent', array( 'tokenStreaming' => false ) );
 agents_api_smoke_assert_equals( false, $top_level_token_streaming['token_streaming'] ?? null, 'input preserves false top-level tokenStreaming', $failures, $passes );
 
+$jsonrpc_filter_calls = 0;
+add_filter(
+	'agents_chat_jsonrpc_input',
+	static function ( array $filtered ) use ( &$jsonrpc_filter_calls ): array {
+		++$jsonrpc_filter_calls;
+		return $filtered;
+	}
+);
+$cached_request = new WP_REST_Request(
+	array( 'agent_id' => 'support-agent', 'workspace_id' => 'site:42' ),
+	array( 'jsonrpc' => '2.0', 'id' => 'cached', 'method' => 'message/send', 'params' => $params )
+);
+$cached_first  = agents_chat_jsonrpc_request_input( $cached_request );
+$cached_second = agents_chat_jsonrpc_request_input( $cached_request );
+agents_api_smoke_assert_equals( 1, $jsonrpc_filter_calls, 'request input filter runs once across permission and dispatch reads', $failures, $passes );
+agents_api_smoke_assert_equals( $cached_first, $cached_second, 'request input cache preserves one canonical filtered input', $failures, $passes );
+
+add_filter( 'agents_chat_permission', static fn() => true );
+$invalid_version_request = new WP_REST_Request(
+	array( 'agent_id' => 'support-agent' ),
+	array( 'jsonrpc' => '1.0', 'id' => 'invalid-version', 'method' => 'message/send', 'params' => array() )
+);
+agents_api_smoke_assert_equals( true, AgentsAPI\AI\Channels\agents_chat_jsonrpc_permission( $invalid_version_request ), 'authorized malformed request reaches JSON-RPC dispatcher', $failures, $passes );
+$invalid_version_response = agents_chat_jsonrpc_dispatch( $invalid_version_request );
+agents_api_smoke_assert_equals( -32600, $invalid_version_response->data['error']['code'] ?? null, 'malformed request retains JSON-RPC invalid-request frame', $failures, $passes );
+
 // --- Legacy Agent Protocol method aliases -----------------------------------
 agents_api_smoke_assert_equals( true, agents_chat_jsonrpc_method_sends( 'message/send' ), 'message/send maps to sync send', $failures, $passes );
 agents_api_smoke_assert_equals( true, agents_chat_jsonrpc_method_sends( 'tasks/send' ), 'tasks/send maps to sync send', $failures, $passes );
@@ -222,7 +249,7 @@ $GLOBALS['__agents_api_smoke_abilities']['agents/chat'] = new class() {
 };
 $alias_response = agents_chat_jsonrpc_dispatch(
 	new WP_REST_Request(
-		array( 'agent_id' => 'support-agent' ),
+		array( 'agent_id' => 'support-agent', 'workspace_id' => 'site:42', 'client_id' => 'rpc-client-1' ),
 		array(
 			'jsonrpc' => '2.0',
 			'id'      => 'rpc-alias',
@@ -234,6 +261,8 @@ $alias_response = agents_chat_jsonrpc_dispatch(
 agents_api_smoke_assert_equals( 'rpc-alias', $alias_response->data['id'] ?? null, 'tasks/send dispatch echoes rpc id', $failures, $passes );
 agents_api_smoke_assert_equals( 'alias ok', $alias_response->data['result']['status']['message']['parts'][0]['text'] ?? null, 'tasks/send dispatch runs sync handler', $failures, $passes );
 agents_api_smoke_assert_equals( 'trace-1', $GLOBALS['__agents_api_smoke_jsonrpc_last_input']['client_context']['traceId'] ?? null, 'tasks/send dispatch preserves clientContext', $failures, $passes );
+agents_api_smoke_assert_equals( 'site:42', $GLOBALS['__agents_api_smoke_jsonrpc_last_input']['workspace_id'] ?? null, 'tasks/send dispatch preserves canonical access workspace', $failures, $passes );
+agents_api_smoke_assert_equals( 'rpc-client-1', $GLOBALS['__agents_api_smoke_jsonrpc_last_input']['client_id'] ?? null, 'tasks/send dispatch preserves canonical access client', $failures, $passes );
 
 // extract_text directly
 agents_api_smoke_assert_equals( 'ab', agents_chat_jsonrpc_extract_text( array( 'parts' => array( array( 'type' => 'text', 'text' => 'a' ), array( 'type' => 'text', 'text' => 'b' ) ) ) ), 'extract_text concatenates', $failures, $passes );

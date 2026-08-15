@@ -152,8 +152,8 @@ add_filter(
 );
 add_filter(
 	'agents_chat_permission',
-	static function (): bool {
-		return (bool) $GLOBALS['__agents_api_smoke_allow_chat'];
+	static function ( bool $allowed ): bool {
+		return $allowed || (bool) $GLOBALS['__agents_api_smoke_allow_chat'];
 	}
 );
 
@@ -181,7 +181,10 @@ $ability  = new class( $captured ) {
 		$this->captured =& $captured;
 	}
 
-	public function execute( array $input ): array {
+	public function execute( array $input ) {
+		if ( ! AgentsAPI\AI\Channels\agents_chat_permission( $input ) ) {
+			return new WP_Error( 'ability_invalid_permissions', 'Ability permission denied.' );
+		}
 		$this->captured = $input;
 		return array(
 			'session_id' => 's-1',
@@ -230,9 +233,7 @@ $request = agents_api_smoke_rest_request(
 $permission = AgentsAPI\AI\Channels\agents_frontend_chat_rest_permission( $request );
 agents_api_smoke_assert_equals( true, $permission, 'permission allows operator grant', $failures, $passes );
 
-$GLOBALS['__agents_api_smoke_allow_chat'] = true;
 $response = AgentsAPI\AI\Channels\agents_frontend_chat_rest_dispatch( $request );
-$GLOBALS['__agents_api_smoke_allow_chat'] = false;
 $response_data = $response instanceof WP_REST_Response && method_exists( $response, 'get_data' ) ? $response->get_data() : ( $response->data ?? null );
 agents_api_smoke_assert_equals( true, $response instanceof WP_REST_Response, 'dispatch returns REST response', $failures, $passes );
 agents_api_smoke_assert_equals( 'hello from adapter', $response_data['reply'] ?? null, 'dispatch returns ability reply', $failures, $passes );
@@ -241,6 +242,8 @@ agents_api_smoke_assert_equals( 'rest-source-item-1', $response_data['metadata']
 agents_api_smoke_assert_equals( 'support-agent', $captured['agent'] ?? null, 'dispatch sanitizes agent slug', $failures, $passes );
 agents_api_smoke_assert_equals( 'Hi there', $captured['message'] ?? null, 'dispatch forwards message', $failures, $passes );
 agents_api_smoke_assert_equals( 'rest', $captured['client_context']['source'] ?? null, 'dispatch marks REST source', $failures, $passes );
+agents_api_smoke_assert_equals( 'site:42', $captured['workspace_id'] ?? null, 'dispatch preserves canonical access workspace', $failures, $passes );
+agents_api_smoke_assert_equals( 'browser-1', $captured['client_id'] ?? null, 'dispatch preserves canonical access client', $failures, $passes );
 agents_api_smoke_assert_equals( 'block-chat', $captured['client_context']['client_name'] ?? null, 'dispatch preserves client name', $failures, $passes );
 agents_api_smoke_assert_equals( 'selected-material-123', $captured['client_context']['host_context']['opaque_id'] ?? null, 'dispatch preserves caller-owned context metadata', $failures, $passes );
 	agents_api_smoke_assert_equals( array( 'current-item' ), $captured['client_context']['host_context']['hints'] ?? null, 'dispatch preserves nested caller-owned context metadata', $failures, $passes );
@@ -265,7 +268,13 @@ add_filter( 'agents_frontend_chat_rest_permission', static fn() => true );
 $filtered = AgentsAPI\AI\Channels\agents_frontend_chat_rest_permission(
 	agents_api_smoke_rest_request( array( 'agent' => 'other-agent', 'message' => 'Allowed by host' ) )
 );
-agents_api_smoke_assert_equals( true, $filtered, 'permission is filterable for hosts', $failures, $passes );
+agents_api_smoke_assert_equals( true, $filtered instanceof WP_Error, 'transport filter cannot widen canonical permission', $failures, $passes );
+$GLOBALS['__agents_api_smoke_allow_chat'] = true;
+$filtered = AgentsAPI\AI\Channels\agents_frontend_chat_rest_permission(
+	agents_api_smoke_rest_request( array( 'agent' => 'other-agent', 'message' => 'Allowed by canonical host policy' ) )
+);
+$GLOBALS['__agents_api_smoke_allow_chat'] = false;
+agents_api_smoke_assert_equals( true, $filtered, 'canonical permission filter remains host extension seam', $failures, $passes );
 
 $invalid = AgentsAPI\AI\Channels\agents_frontend_chat_rest_dispatch( agents_api_smoke_rest_request( array( 'agent' => '', 'message' => '' ) ) );
 agents_api_smoke_assert_equals( true, $invalid instanceof WP_Error, 'dispatch rejects empty input', $failures, $passes );

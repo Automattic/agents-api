@@ -91,6 +91,7 @@
       "php tests/provider-turn-adapter-smoke.php",
       "php tests/default-provider-turn-adapter-smoke.php",
       "php tests/agents-chat-ability-smoke.php",
+      "php tests/chat-permission-parity-smoke.php",
       "php tests/default-agents-chat-handler-smoke.php",
       "php tests/tool-observability-smoke.php",
       "php tests/ability-tool-executor-smoke.php",
