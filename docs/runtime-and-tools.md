@@ -22,13 +22,13 @@ Consumers own provider/model dispatch, prompt assembly, concrete tools, durable 
 
 ## Provider-turn dispatch
 
-`WP_Agent_Default_Provider_Turn_Adapter` uses the bare wp-ai-client prompt builder by default. A caller may inject `dispatch_provider` through the constructor options or `set_dispatch_provider()`; that explicit callable is authoritative. When no explicit dispatcher exists, the adapter applies `wp_agent_provider_turn_dispatch` with `null` and the `WP_Agent_Provider_Turn_Request`. A host can return a callable, preserving an earlier callable when present so multiple host integrations arbitrate predictably:
+`WP_Agent_Default_Provider_Turn_Adapter` uses the bare wp-ai-client prompt builder by default. A caller may inject `dispatch_provider` through the constructor options or `set_dispatch_provider()`; that explicit callable is authoritative. When no explicit dispatcher exists, the adapter applies `wp_agent_provider_turn_dispatch` with `null`, the `WP_Agent_Provider_Turn_Request`, and the effective provider/model IDs after request metadata has been resolved against constructor defaults. A host can return a callable, preserving an earlier callable when present so multiple host integrations arbitrate predictably:
 
 ```php
 add_filter(
 	'wp_agent_provider_turn_dispatch',
-	static function ( $dispatcher, WP_Agent_Provider_Turn_Request $request ) {
-		if ( null !== $dispatcher || 'example-provider' !== ( $request->model()['provider_id'] ?? '' ) ) {
+	static function ( $dispatcher, WP_Agent_Provider_Turn_Request $request, string $provider_id, string $model_id ) {
+		if ( null !== $dispatcher || 'example-provider' !== $provider_id ) {
 			return $dispatcher;
 		}
 
@@ -37,11 +37,11 @@ add_filter(
 		};
 	},
 	10,
-	2
+	4
 );
 ```
 
-Returning `null` or any non-callable value retains the exact bare-builder path. The discovered callable receives one normalized payload array with `provider_id`, `model_id`, `system_prompt`, canonical `messages`, mapped `prompt_parts`, mapped `history`, mapped `function_declarations`, adapter `options`, and the full `request`. The adapter retains generic retry behavior and result normalization for both explicit and discovered dispatchers.
+Returning `null` or any non-callable value retains the exact bare-builder path. The additive provider/model filter arguments let selective hosts make the same routing decision whether those values came from request metadata or adapter defaults; existing callbacks that accept only the first two arguments remain compatible. The discovered callable receives one normalized payload array with `provider_id`, `model_id`, `system_prompt`, canonical `messages`, mapped `prompt_parts`, mapped `history`, mapped `function_declarations`, adapter `options`, and the full `request`. The adapter retains generic retry behavior and result normalization for both explicit and discovered dispatchers.
 
 ## Task execution targets
 
