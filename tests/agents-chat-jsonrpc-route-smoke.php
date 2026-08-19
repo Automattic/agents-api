@@ -205,21 +205,27 @@ $top_level_token_streaming = agents_chat_jsonrpc_input_from_params( $params, 'su
 agents_api_smoke_assert_equals( false, $top_level_token_streaming['token_streaming'] ?? null, 'input preserves false top-level tokenStreaming', $failures, $passes );
 
 $jsonrpc_filter_calls = 0;
+$jsonrpc_filter_body  = array();
 add_filter(
 	'agents_chat_jsonrpc_input',
-	static function ( array $filtered ) use ( &$jsonrpc_filter_calls ): array {
+	static function ( array $filtered, array $filtered_params, string $filtered_agent, array $body ) use ( &$jsonrpc_filter_calls, &$jsonrpc_filter_body ): array {
+		unset( $filtered_params, $filtered_agent );
 		++$jsonrpc_filter_calls;
+		$jsonrpc_filter_body = $body;
 		return $filtered;
-	}
+	},
+	10,
+	4
 );
 $cached_request = new WP_REST_Request(
 	array( 'agent_id' => 'support-agent', 'workspace_id' => 'site:42' ),
-	array( 'jsonrpc' => '2.0', 'id' => 'cached', 'method' => 'message/send', 'params' => $params )
+	array( 'jsonrpc' => '2.0', 'id' => 'cached', 'method' => 'message/send', 'params' => $params, 'constructor_arguments' => array( 'mode' => 'host' ) )
 );
 $cached_first  = agents_chat_jsonrpc_request_input( $cached_request );
 $cached_second = agents_chat_jsonrpc_request_input( $cached_request );
 agents_api_smoke_assert_equals( 1, $jsonrpc_filter_calls, 'request input filter runs once across permission and dispatch reads', $failures, $passes );
 agents_api_smoke_assert_equals( $cached_first, $cached_second, 'request input cache preserves one canonical filtered input', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'mode' => 'host' ), $jsonrpc_filter_body['constructor_arguments'] ?? null, 'request input filter receives the full JSON-RPC body', $failures, $passes );
 
 add_filter( 'agents_chat_permission', static fn() => true );
 $invalid_version_request = new WP_REST_Request(
@@ -302,6 +308,29 @@ agents_api_smoke_assert_equals( 'task-1', $delta_frame['params']['id'] ?? null, 
 $result_frame = agents_chat_jsonrpc_result_frame( 'rpc-1', $task );
 agents_api_smoke_assert_equals( 'rpc-1', $result_frame['id'] ?? null, 'result frame echoes rpc id', $failures, $passes );
 agents_api_smoke_assert_equals( true, isset( $result_frame['result']['status'] ), 'result frame wraps Task', $failures, $passes );
+
+$terminal_filter = static function ( array $frame, array $default_task, array $output, $rpc_id ): array {
+	$frame['result']['host'] = array(
+		'default_task_id' => $default_task['id'] ?? '',
+		'metadata'        => $output['metadata']['host'] ?? array(),
+		'rpc_id'          => $rpc_id,
+	);
+	return $frame;
+};
+add_filter( 'agents_chat_jsonrpc_terminal_frame', $terminal_filter, 10, 4 );
+$projected_output = array( 'run_id' => 'host-run', 'session_id' => 'host-session', 'reply' => 'host reply', 'metadata' => array( 'host' => array( 'trace_id' => 'trace-9' ) ) );
+$projected_task   = agents_chat_jsonrpc_task_from_output( $projected_output );
+$projected_frame  = agents_chat_jsonrpc_result_frame( 'host-rpc', $projected_task, $projected_output );
+agents_api_smoke_assert_equals( 'host-run', $projected_frame['result']['host']['default_task_id'] ?? '', 'host terminal projection receives the default Task', $failures, $passes );
+agents_api_smoke_assert_equals( 'trace-9', $projected_frame['result']['host']['metadata']['trace_id'] ?? '', 'host terminal projection receives canonical output metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'host-rpc', $projected_frame['result']['host']['rpc_id'] ?? '', 'host terminal projection receives the JSON-RPC id', $failures, $passes );
+unset( $GLOBALS['__agents_api_smoke_actions']['agents_chat_jsonrpc_terminal_frame'] );
+
+$invalid_terminal_filter = static fn() => 'invalid';
+add_filter( 'agents_chat_jsonrpc_terminal_frame', $invalid_terminal_filter );
+$fallback_frame = agents_chat_jsonrpc_result_frame( 'fallback-rpc', $projected_task, $projected_output );
+agents_api_smoke_assert_equals( $projected_task, $fallback_frame['result'] ?? null, 'invalid terminal projection retains the canonical frame', $failures, $passes );
+unset( $GLOBALS['__agents_api_smoke_actions']['agents_chat_jsonrpc_terminal_frame'] );
 
 $error_frame = agents_chat_jsonrpc_error_frame( 'rpc-1', -32601, 'nope' );
 agents_api_smoke_assert_equals( -32601, $error_frame['error']['code'] ?? null, 'error frame carries code', $failures, $passes );
