@@ -16,6 +16,7 @@ if ( ! class_exists( 'WP_Agent_Memory_Layer' ) ) {
 		public const WORKSPACE = 'workspace';
 		public const AGENT     = 'agent';
 		public const USER      = 'user';
+		public const PRINCIPAL = 'principal';
 		public const NETWORK   = 'network';
 		public const SHARED    = 'shared';
 
@@ -29,6 +30,7 @@ if ( ! class_exists( 'WP_Agent_Memory_Layer' ) ) {
 				self::WORKSPACE,
 				self::AGENT,
 				self::USER,
+				self::PRINCIPAL,
 				self::NETWORK,
 				self::SHARED,
 			);
