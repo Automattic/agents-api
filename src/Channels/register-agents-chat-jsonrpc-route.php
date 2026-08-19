@@ -197,7 +197,7 @@ function agents_chat_jsonrpc_dispatch( \WP_REST_Request $request ): \WP_REST_Res
 	}
 
 	return rest_ensure_response(
-		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ) )
+		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ), $output )
 	);
 }
 
@@ -341,7 +341,7 @@ function agents_chat_jsonrpc_stream( $rpc_id, array $input ): void {
 	}
 
 	\AgentsAPI\AI\agents_api_emit_sse_json_frame(
-		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ) )
+		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ), $output )
 	);
 }
 
@@ -398,9 +398,10 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	 * @param array<string,mixed> $input  Canonical agents/chat input.
 	 * @param array<mixed>        $params JSON-RPC params.
 	 * @param string              $agent  Agent slug.
+	 * @param array<mixed>        $body   Full JSON-RPC request body.
 	 */
 	/** @var mixed $filtered Hosts may return invalid values from this filter. */
-	$filtered = apply_filters( 'agents_chat_jsonrpc_input', $input, $params, $agent );
+	$filtered = apply_filters( 'agents_chat_jsonrpc_input', $input, $params, $agent, $body );
 
 	if ( ! is_array( $filtered ) ) {
 		return $input;
@@ -496,14 +497,32 @@ function agents_chat_jsonrpc_agent_message( string $text, string $run_id ): arra
  *
  * @param string|int|null     $rpc_id JSON-RPC request id.
  * @param array<string,mixed> $task   Task object.
+ * @param array<string,mixed> $output Original canonical agents/chat output.
  * @return array<string,mixed>
  */
-function agents_chat_jsonrpc_result_frame( $rpc_id, array $task ): array {
-	return array(
+function agents_chat_jsonrpc_result_frame( $rpc_id, array $task, array $output = array() ): array {
+	$frame = array(
 		'jsonrpc' => AGENTS_CHAT_JSONRPC_VERSION,
 		'id'      => $rpc_id,
 		'result'  => $task,
 	);
+
+	/**
+	 * Filters the complete terminal JSON-RPC frame.
+	 *
+	 * Hosts can preserve an established A2A envelope by projecting canonical
+	 * output metadata without replacing input mapping, execution, or streaming.
+	 * Invalid filter values retain the canonical default frame.
+	 *
+	 * @param array<string,mixed> $frame  Default terminal frame.
+	 * @param array<string,mixed> $task   Default Task projection.
+	 * @param array<string,mixed> $output Original canonical agents/chat output.
+	 * @param string|int|null     $rpc_id JSON-RPC request id.
+	 */
+	/** @var mixed $filtered Hosts may return invalid values from this filter. */
+	$filtered = apply_filters( 'agents_chat_jsonrpc_terminal_frame', $frame, $task, $output, $rpc_id );
+
+	return is_array( $filtered ) ? \AgentsAPI\AI\agents_api_string_keyed_array( $filtered ) : $frame;
 }
 
 /**
