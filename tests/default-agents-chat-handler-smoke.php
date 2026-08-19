@@ -363,6 +363,29 @@ namespace {
 	require_once __DIR__ . '/class-agents-api-memory-atomic-run-control-store.php';
 	\AgentsAPI\AI\WP_Agent_Run_Control::set_store( new \Agents_API_Memory_Atomic_Run_Control_Store() );
 
+	class Agents_Chat_Runtime_Profile_Provider implements \AgentsAPI\AI\WP_Agent_Runtime_Profile_Provider {
+		/** @var array<int,array<string,mixed>> */
+		public array $contexts = array();
+
+		public function resolve_agent_runtime_profile( \WP_Agent $agent, array $context ): ?\AgentsAPI\AI\WP_Agent_Runtime_Profile {
+			if ( 'profile-brain' !== $agent->get_slug() ) {
+				return null;
+			}
+
+			$this->contexts[] = $context;
+			return new \AgentsAPI\AI\WP_Agent_Runtime_Profile(
+				$agent->get_slug(),
+				'profile-provider',
+				'profile-model',
+				array( 'private_token' => 'never-expose-this' ),
+				array(
+					'provider_id' => array( 'source' => 'host-profile', 'path' => 'provider_id', 'private_token' => 'never-expose-provenance' ),
+					'model_id'    => array( 'source' => 'host-profile', 'path' => 'model_id' ),
+				)
+			);
+		}
+	}
+
 	class Agents_Chat_Runtime_Overlay_Executor implements \AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
 		/** @var array<int,array<string,mixed>> */
 		public array $calls = array();
@@ -622,7 +645,74 @@ namespace {
 	agents_api_smoke_assert_equals( false, $mandatory_output instanceof WP_Error, 'mandatory tool overlay runs successfully', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $overlay_executor->calls ), 'mandatory tool bypasses allow_only after overlay', $failures, $passes );
 
-	echo "\n[2] Provider/model fall back to the request when the agent config omits them:\n";
+	echo "\n[2] Native chat resolves host runtime profiles and publishes safe provenance:\n";
+	$profile_provider = new Agents_Chat_Runtime_Profile_Provider();
+	$profile_turn_contexts = array();
+	add_filter(
+		'agents_api_runtime_profile_providers',
+		static function ( array $providers ) use ( $profile_provider ): array {
+			$providers[] = $profile_provider;
+			return $providers;
+		}
+	);
+	add_filter(
+		'wp_agent_provider_turn_dispatch',
+		static function ( $dispatcher, $request ) use ( &$profile_turn_contexts ) {
+			$context = $request instanceof \AgentsAPI\AI\WP_Agent_Provider_Turn_Request ? $request->context() : array();
+			if ( 'profile-brain' === ( $context['agent_slug'] ?? '' ) ) {
+				$profile_turn_contexts[] = $context;
+			}
+			return $dispatcher;
+		},
+		10,
+		2
+	);
+	$registry->register(
+		'profile-brain',
+		array(
+			'label'          => 'Profile Brain',
+			'default_config' => array( 'system_prompt' => 'You are profile-driven.' ),
+		)
+	);
+	$reset_provider();
+	$profile_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array(
+			'agent'          => 'profile-brain',
+			'message'        => 'use the host profile',
+			'workspace_id'   => 'site-42',
+			'client_context' => array( 'source' => 'channel' ),
+		)
+	);
+	$profile_model = $GLOBALS['__adapter_smoke']['model'] ?? null;
+	$profile_metadata = $profile_output['metadata']['agents_api']['runtime_profile'] ?? array();
+	agents_api_smoke_assert_equals( false, $profile_output instanceof WP_Error, 'host-profile turn returns canonical output', $failures, $passes );
+	agents_api_smoke_assert_equals( 'profile-provider', $profile_model->provider_id ?? '', 'host profile selects the dispatch provider', $failures, $passes );
+	agents_api_smoke_assert_equals( 'profile-model', $profile_model->model_id ?? '', 'host profile selects the dispatch model', $failures, $passes );
+	agents_api_smoke_assert_equals( 'host-profile', $profile_metadata['provenance']['provider_id']['source'] ?? '', 'canonical metadata exposes provider provenance', $failures, $passes );
+	agents_api_smoke_assert_equals( 'chat', $profile_provider->contexts[0]['mode'] ?? '', 'host profile receives canonical chat mode', $failures, $passes );
+	agents_api_smoke_assert_equals( 'site-42', $profile_provider->contexts[0]['workspace_id'] ?? '', 'host profile receives normalized workspace context', $failures, $passes );
+	agents_api_smoke_assert_equals( 'never-expose-this', $profile_turn_contexts[0]['runtime_profile']['identity']['private_token'] ?? '', 'resolved profile identity remains available to internal provider dispatch', $failures, $passes );
+	$profile_metadata_json = json_encode( $profile_metadata );
+	agents_api_smoke_assert_equals( false, is_string( $profile_metadata_json ) && str_contains( $profile_metadata_json, 'never-expose-this' ), 'canonical metadata excludes private profile identity', $failures, $passes );
+	agents_api_smoke_assert_equals( false, is_string( $profile_metadata_json ) && str_contains( $profile_metadata_json, 'never-expose-provenance' ), 'canonical metadata allowlists public provenance fields', $failures, $passes );
+
+	echo "\n[2a] Explicit provider/model remain authoritative over a host profile:\n";
+	$reset_provider();
+	$explicit_profile_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array(
+			'agent'    => 'profile-brain',
+			'message'  => 'use explicit binding',
+			'provider' => 'explicit-provider',
+			'model'    => 'explicit-model',
+		)
+	);
+	$explicit_profile_model = $GLOBALS['__adapter_smoke']['model'] ?? null;
+	$explicit_profile_metadata = $explicit_profile_output['metadata']['agents_api']['runtime_profile'] ?? array();
+	agents_api_smoke_assert_equals( 'explicit-provider', $explicit_profile_model->provider_id ?? '', 'explicit provider overrides the host profile', $failures, $passes );
+	agents_api_smoke_assert_equals( 'explicit-model', $explicit_profile_model->model_id ?? '', 'explicit model overrides the host profile', $failures, $passes );
+	agents_api_smoke_assert_equals( 'context', $explicit_profile_metadata['provenance']['provider_id']['source'] ?? '', 'explicit provider provenance remains observable', $failures, $passes );
+
+	echo "\n[2b] Provider/model fall back to the request when the agent config omits them:\n";
 	$registry->register(
 		'bare-brain',
 		array(
@@ -645,7 +735,7 @@ namespace {
 	agents_api_smoke_assert_equals( 'request-provider', $request_model->provider_id ?? '', 'request provider overrides/supplies the dispatch provider', $failures, $passes );
 	agents_api_smoke_assert_equals( 'request-model', $request_model->model_id ?? '', 'request model overrides/supplies the dispatch model', $failures, $passes );
 
-	echo "\n[2b] Principal-owned turns create an authoritative session before run control finalizes:\n";
+	echo "\n[2c] Principal-owned turns create an authoritative session before run control finalizes:\n";
 	$principal_store = new Agents_Chat_Principal_Conversation_Store();
 	$store_filter    = static fn() => $principal_store;
 	add_filter( 'wp_agent_conversation_store', $store_filter );
