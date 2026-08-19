@@ -903,6 +903,7 @@ namespace {
 	echo "\n[9] Host dispatch discovery uses request context, preserves explicit precedence, and falls back safely:\n";
 	$host_dispatch_payload = null;
 	$host_filter_initial   = 'not-called';
+	$host_resolved_model   = null;
 	$host_dispatch_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
 		array( array( 'role' => 'user', 'content' => 'host dispatch' ) ),
 		array(),
@@ -912,8 +913,9 @@ namespace {
 	);
 	add_filter(
 		'wp_agent_provider_turn_dispatch',
-		static function ( $dispatcher, $request ) use ( &$host_dispatch_payload, &$host_filter_initial, $make_result ) {
+		static function ( $dispatcher, $request, $provider_id, $model_id ) use ( &$host_dispatch_payload, &$host_filter_initial, &$host_resolved_model, $make_result ) {
 			$host_filter_initial = $dispatcher;
+			$host_resolved_model = array( $provider_id, $model_id );
 			$GLOBALS['__adapter_smoke']['host_dispatch_request'] = $request;
 			return static function ( array $payload ) use ( &$host_dispatch_payload, $make_result ) {
 				$host_dispatch_payload = $payload;
@@ -921,16 +923,34 @@ namespace {
 			};
 		},
 		10,
-		2
+		4
 	);
 	$GLOBALS['__adapter_smoke']          = array();
 	$host_raw = ( new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fallback-provider', 'fallback-model', 'sys' ) )->run_turn( $host_dispatch_request );
 	agents_api_smoke_assert_equals( null, $host_filter_initial, 'host dispatch filter starts with null when no dispatcher is explicit', $failures, $passes );
 	agents_api_smoke_assert_equals( 'host dispatched', $host_raw['content'], 'host-discovered dispatcher drives the shared normalization tail', $failures, $passes );
 	agents_api_smoke_assert_equals( $host_dispatch_request, $GLOBALS['__adapter_smoke']['host_dispatch_request'] ?? null, 'host dispatch filter receives the exact provider-turn request context', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'host-provider', 'host-model' ), $host_resolved_model, 'host dispatch filter receives effective request model overrides', $failures, $passes );
 	agents_api_smoke_assert_equals( 'host-provider', $host_dispatch_payload['provider_id'] ?? '', 'host-discovered dispatcher receives normalized provider payload', $failures, $passes );
 	agents_api_smoke_assert_equals( $host_dispatch_request, $host_dispatch_payload['request'] ?? null, 'host-discovered dispatcher payload retains the full request', $failures, $passes );
 	agents_api_smoke_assert_equals( false, isset( $GLOBALS['__adapter_smoke']['model'] ), 'host-discovered dispatcher bypasses the bare builder', $failures, $passes );
+	$GLOBALS['__agents_api_smoke_actions']['wp_agent_provider_turn_dispatch'] = array();
+
+	$fallback_resolved_model = null;
+	add_filter(
+		'wp_agent_provider_turn_dispatch',
+		static function ( $dispatcher, $request, $provider_id, $model_id ) use ( &$fallback_resolved_model, $make_result ) {
+			unset( $dispatcher, $request );
+			$fallback_resolved_model = array( $provider_id, $model_id );
+			return static fn ( array $payload ) => $make_result( 'fallback ids dispatched', array(), array( 1, 1, 2 ) );
+		},
+		10,
+		4
+	);
+	$fallback_discovery_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'constructor defaults' ) ) );
+	$fallback_discovery_result  = ( new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fallback-provider', 'fallback-model', 'sys' ) )->run_turn( $fallback_discovery_request );
+	agents_api_smoke_assert_equals( 'fallback ids dispatched', $fallback_discovery_result['content'], 'host dispatcher can claim a request whose effective model comes from constructor defaults', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'fallback-provider', 'fallback-model' ), $fallback_resolved_model, 'host dispatch filter receives effective constructor fallback ids', $failures, $passes );
 	$GLOBALS['__agents_api_smoke_actions']['wp_agent_provider_turn_dispatch'] = array();
 
 	$discovery_calls = 0;

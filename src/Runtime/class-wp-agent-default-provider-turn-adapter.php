@@ -265,7 +265,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 		$prompt_context        = self::split_prompt_context( $messages );
 		$function_declarations = self::function_declarations( $request->toolDeclarations() );
 
-		$dispatcher = $this->resolve_dispatch_provider( $request );
+		$dispatcher = $this->resolve_dispatch_provider( $request, $provider_id, $model_id );
 		if ( null !== $dispatcher ) {
 			$dispatch = function () use ( $dispatcher, $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations ) {
 				return $this->dispatch_via_provider( $dispatcher, $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations );
@@ -835,10 +835,12 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 * hosts may provide a callable through `wp_agent_provider_turn_dispatch`.
 	 * Returning null or a non-callable preserves the bare-builder default.
 	 *
-	 * @param WP_Agent_Provider_Turn_Request $request Provider-turn request passed to host discovery.
+	 * @param WP_Agent_Provider_Turn_Request $request     Provider-turn request passed to host discovery.
+	 * @param string                         $provider_id Effective provider identifier.
+	 * @param string                         $model_id    Effective model identifier.
 	 * @return callable|null Dispatch provider, when available.
 	 */
-	private function resolve_dispatch_provider( WP_Agent_Provider_Turn_Request $request ): ?callable {
+	private function resolve_dispatch_provider( WP_Agent_Provider_Turn_Request $request, string $provider_id, string $model_id ): ?callable {
 		if ( null !== $this->dispatch_provider ) {
 			return $this->dispatch_provider;
 		}
@@ -857,8 +859,10 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 		 *
 		 * @param callable|null                   $dispatcher Host dispatch provider, or null for the default path.
 		 * @param WP_Agent_Provider_Turn_Request $request    Full provider-turn request for host routing context.
+		 * @param string                          $provider_id Effective provider identifier after request/default resolution.
+		 * @param string                          $model_id    Effective model identifier after request/default resolution.
 		 */
-		$dispatcher = apply_filters( 'wp_agent_provider_turn_dispatch', null, $request );
+		$dispatcher = apply_filters( 'wp_agent_provider_turn_dispatch', null, $request, $provider_id, $model_id );
 
 		return is_callable( $dispatcher ) ? $dispatcher : null;
 	}
