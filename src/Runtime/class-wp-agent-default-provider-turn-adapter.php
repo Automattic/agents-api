@@ -38,12 +38,15 @@ defined( 'ABSPATH' ) || exit;
  * authenticated, transport-tuned, cached, model-config-aware, or vision-capable
  * request cannot influence the bare builder this adapter constructs by default.
  * For that case the adapter exposes a second injectable "dispatch provider"
- * strategy, symmetric with the prompt-input one. When a dispatcher is injected,
- * the adapter still owns the generic mapping (provider/model/system/messages/
+ * strategy, symmetric with the prompt-input one. An explicitly injected
+ * dispatcher takes precedence; otherwise a host can discover one through the
+ * `wp_agent_provider_turn_dispatch` filter. The adapter still owns the generic
+ * mapping (provider/model/system/messages/
  * declarations) and the generic tail (tool-call extraction, text/usage
  * normalization, result-shape assembly); the consumer owns only request
  * construction and dispatch, returning a wp-ai-client `GenerativeAiResult`. When
- * no dispatcher is injected the adapter builds and dispatches the bare
+ * no explicit or host-discovered dispatcher is available, the adapter builds and
+ * dispatches the bare
  * `wp_ai_client_prompt()` builder exactly as before — the seam is a pure
  * addition with no behavior change on the default path.
  */
@@ -130,7 +133,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	/** @var callable|null Injectable prompt-input strategy, defaulting to identity. */
 	private $prompt_input_provider;
 
-	/** @var callable|null Injectable dispatch strategy, defaulting to the bare builder. */
+	/** @var callable|null Explicit dispatch strategy, taking precedence over host discovery. */
 	private $dispatch_provider;
 
 	/** @var callable|null Injectable sleep strategy, defaulting to usleep(). Replaced in tests with a non-sleeping spy. */
@@ -210,7 +213,8 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 * transport tuning, caching, model-config, multimodal parts, and the actual
 	 * dispatch call.
 	 *
-	 * Passing `null` restores the default bare-builder dispatch.
+	 * Passing `null` removes the explicit dispatcher, allowing host discovery and,
+	 * when none is discovered, the default bare-builder dispatch.
 	 *
 	 * The provider is called as `$dispatcher( array $payload )` and receives a
 	 * single associative array with these keys (the mapped builder inputs, not a
@@ -261,9 +265,10 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 		$prompt_context        = self::split_prompt_context( $messages );
 		$function_declarations = self::function_declarations( $request->toolDeclarations() );
 
-		if ( null !== $this->dispatch_provider ) {
-			$dispatch = function () use ( $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations ) {
-				return $this->dispatch_via_provider( $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations );
+		$dispatcher = $this->resolve_dispatch_provider( $request );
+		if ( null !== $dispatcher ) {
+			$dispatch = function () use ( $dispatcher, $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations ) {
+				return $this->dispatch_via_provider( $dispatcher, $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations );
 			};
 		} else {
 			$dispatch = function () use ( $provider_id, $model_id, $system_prompt, $prompt_context, $function_declarations ) {
@@ -291,7 +296,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	/**
 	 * Dispatch one provider request with deterministic retry-on-transient backoff.
 	 *
-	 * Wraps the single provider-dispatch call (bare builder or injected dispatcher)
+	 * Wraps the single provider-dispatch call (bare builder or explicit/discovered dispatcher)
 	 * — NOT the whole loop turn — so a retry never re-runs the loop's mediated tool
 	 * execution and never duplicates tool side effects. The adapter's own turn has
 	 * no side effects beyond the model request, so re-dispatching is safe.
@@ -621,7 +626,8 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 *
 	 * This is the original, unmodified dispatch: it constructs a
 	 * `wp_ai_client_prompt()` builder from the mapped inputs and calls
-	 * `generate_text_result()`. It runs only when no dispatch provider is injected.
+	 * `generate_text_result()`. It runs only when neither an explicit nor a
+	 * host-discovered dispatch provider is available.
 	 *
 	 * @param string                                                          $provider_id           Resolved provider id.
 	 * @param string                                                          $model_id              Resolved model id.
@@ -823,7 +829,42 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	}
 
 	/**
-	 * Delegate request construction and dispatch to the injected dispatch provider.
+	 * Resolve an explicit or host-discovered dispatch provider.
+	 *
+	 * Explicit constructor/setter injection is authoritative. When none exists,
+	 * hosts may provide a callable through `wp_agent_provider_turn_dispatch`.
+	 * Returning null or a non-callable preserves the bare-builder default.
+	 *
+	 * @param WP_Agent_Provider_Turn_Request $request Provider-turn request passed to host discovery.
+	 * @return callable|null Dispatch provider, when available.
+	 */
+	private function resolve_dispatch_provider( WP_Agent_Provider_Turn_Request $request ): ?callable {
+		if ( null !== $this->dispatch_provider ) {
+			return $this->dispatch_provider;
+		}
+
+		if ( ! function_exists( 'apply_filters' ) ) {
+			return null;
+		}
+
+		/**
+		 * Filters the host provider-turn dispatcher for the default adapter.
+		 *
+		 * Explicit `dispatch_provider` constructor/setter injection takes precedence,
+		 * so this filter runs only when no explicit dispatcher exists. Return a
+		 * callable that accepts the documented normalized dispatch payload, or return
+		 * the incoming null to retain the default wp-ai-client builder path.
+		 *
+		 * @param callable|null                   $dispatcher Host dispatch provider, or null for the default path.
+		 * @param WP_Agent_Provider_Turn_Request $request    Full provider-turn request for host routing context.
+		 */
+		$dispatcher = apply_filters( 'wp_agent_provider_turn_dispatch', null, $request );
+
+		return is_callable( $dispatcher ) ? $dispatcher : null;
+	}
+
+	/**
+	 * Delegate request construction and dispatch to an explicit or discovered provider.
 	 *
 	 * The provider receives the mapped builder inputs (see {@see self::set_dispatch_provider()}
 	 * for the exact payload contract) and returns a wp-ai-client GenerativeAiResult
@@ -839,12 +880,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 * @param array<int,object>                                               $function_declarations Mapped function declarations.
 	 * @return mixed wp-ai-client GenerativeAiResult or WP_Error.
 	 */
-	private function dispatch_via_provider( WP_Agent_Provider_Turn_Request $request, string $provider_id, string $model_id, string $system_prompt, array $messages, array $prompt_context, array $function_declarations ) {
-		$dispatcher = $this->dispatch_provider;
-		if ( ! is_callable( $dispatcher ) ) {
-			throw new \RuntimeException( 'Dispatch provider is unavailable.' );
-		}
-
+	private function dispatch_via_provider( callable $dispatcher, WP_Agent_Provider_Turn_Request $request, string $provider_id, string $model_id, string $system_prompt, array $messages, array $prompt_context, array $function_declarations ) {
 		$payload = array(
 			'provider_id'           => $provider_id,
 			'model_id'              => $model_id,
