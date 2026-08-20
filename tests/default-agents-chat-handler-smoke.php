@@ -548,6 +548,64 @@ namespace {
 	$tool_observability_json = json_encode( $tool_observability );
 	agents_api_smoke_assert_equals( false, is_string( $tool_observability_json ) && str_contains( $tool_observability_json, 'risotto' ), 'canonical tool observability omits argument values', $failures, $passes );
 
+	echo "\n[1a] Runtime config resolves per request without mutating registered defaults:\n";
+	$runtime_config_calls = array();
+	add_filter(
+		'agents_api_runtime_agent_config',
+		static function ( $config, $agent, array $input ) use ( &$runtime_config_calls ) {
+			$runtime_config_calls[] = array( 'config' => $config, 'agent' => $agent, 'input' => $input );
+			$mode                   = $input['client_context']['runtime_config_mode'] ?? '';
+			if ( 'invalid' === $mode ) {
+				return 'invalid';
+			}
+			if ( 'resolved' === $mode ) {
+				$config['provider']      = 'request-provider';
+				$config['model']         = 'request-model';
+				$config['system_prompt'] = 'Request-scoped kitchen brain.';
+			}
+			return $config;
+		},
+		10,
+		3
+	);
+	$reset_provider();
+	$runtime_config_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array(
+			'agent'          => 'kitchen-brain',
+			'message'        => 'Use request config.',
+			'client_context' => array( 'runtime_config_mode' => 'resolved' ),
+		)
+	);
+	$runtime_config_model = $GLOBALS['__adapter_smoke']['model'] ?? null;
+	agents_api_smoke_assert_equals( false, $runtime_config_output instanceof WP_Error, 'request-scoped config executes successfully', $failures, $passes );
+	agents_api_smoke_assert_equals( 'request-provider', $runtime_config_model->provider_id ?? '', 'resolved config selects the request provider', $failures, $passes );
+	agents_api_smoke_assert_equals( 'request-model', $runtime_config_model->model_id ?? '', 'resolved config selects the request model', $failures, $passes );
+	agents_api_smoke_assert_equals( 'Request-scoped kitchen brain.', $GLOBALS['__adapter_smoke']['system'] ?? '', 'resolved config supplies the request system prompt', $failures, $passes );
+	agents_api_smoke_assert_equals( true, $runtime_config_calls[0]['agent'] instanceof WP_Agent, 'resolver receives the selected registered agent', $failures, $passes );
+	agents_api_smoke_assert_equals( 'resolved', $runtime_config_calls[0]['input']['client_context']['runtime_config_mode'] ?? '', 'resolver receives canonical request context', $failures, $passes );
+
+	$reset_provider();
+	$default_config_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array(
+			'agent'   => 'kitchen-brain',
+			'message' => 'Use defaults again.',
+		)
+	);
+	$default_config_model = $GLOBALS['__adapter_smoke']['model'] ?? null;
+	agents_api_smoke_assert_equals( false, $default_config_output instanceof WP_Error, 'the next request executes successfully', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-provider', $default_config_model->provider_id ?? '', 'the next request retains the registered provider', $failures, $passes );
+	agents_api_smoke_assert_equals( 'fake-model', $default_config_model->model_id ?? '', 'the next request retains the registered model', $failures, $passes );
+	agents_api_smoke_assert_equals( 'You are the kitchen brain.', $GLOBALS['__adapter_smoke']['system'] ?? '', 'the next request retains the registered prompt', $failures, $passes );
+
+	$invalid_runtime_config = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array(
+			'agent'          => 'kitchen-brain',
+			'message'        => 'Reject invalid config.',
+			'client_context' => array( 'runtime_config_mode' => 'invalid' ),
+		)
+	);
+	agents_api_smoke_assert_equals( 'agents_chat_invalid_runtime_agent_config', $invalid_runtime_config instanceof WP_Error ? $invalid_runtime_config->get_error_code() : '', 'invalid runtime config fails closed', $failures, $passes );
+
 	echo "\n[1b] Runtime-bundle agents declare their toolset as `enabled_tools` and the loop wires it:\n";
 	// Native runtime agent bundles place their toolset under
 	// `agent_config.enabled_tools` (the field the bundle schema/validators use),
