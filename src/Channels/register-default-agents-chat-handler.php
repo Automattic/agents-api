@@ -101,7 +101,10 @@ class WP_Agent_Default_Chat_Handler {
 			return $agent;
 		}
 
-		$config = ( $agent instanceof \WP_Agent ) ? $agent->get_default_config() : array();
+		$config = self::resolve_runtime_config( $agent, $input );
+		if ( is_wp_error( $config ) ) {
+			return $config;
+		}
 		$runtime_profile = self::resolve_runtime_profile( $agent, $input, $config );
 
 		$provider = self::first_non_empty(
@@ -232,6 +235,56 @@ class WP_Agent_Default_Chat_Handler {
 		}
 
 		return self::to_canonical_output( $session_id, $result, $runtime_profile );
+	}
+
+	/**
+	 * Resolve the effective registered-agent config for one chat request.
+	 *
+	 * Hosts can derive trusted runtime values from canonical input without
+	 * mutating the registered agent or leaking one request's config into another.
+	 *
+	 * @param \WP_Agent|null      $agent Selected registered agent, or null.
+	 * @param array<string,mixed> $input Canonical agents/chat input.
+	 * @return array<string,mixed>|\WP_Error Effective request config, or error.
+	 */
+	private static function resolve_runtime_config( ?\WP_Agent $agent, array $input ) {
+		$config = $agent instanceof \WP_Agent ? $agent->get_default_config() : array();
+		if ( ! $agent instanceof \WP_Agent ) {
+			return $config;
+		}
+
+		/**
+		 * Filters a registered agent's effective config for one chat request.
+		 *
+		 * @param array<string,mixed> $config Registered agent default config.
+		 * @param \WP_Agent           $agent  Selected registered agent.
+		 * @param array<string,mixed> $input  Canonical agents/chat input.
+		 */
+		$resolved = self::apply_runtime_config_filters( $config, $agent, $input );
+		if ( is_wp_error( $resolved ) ) {
+			return $resolved;
+		}
+		if ( ! is_array( $resolved ) ) {
+			return new \WP_Error(
+				'agents_chat_invalid_runtime_agent_config',
+				'The runtime agent config must be an array or WP_Error.',
+				array( 'status' => 500 )
+			);
+		}
+
+		return \AgentsAPI\AI\agents_api_string_keyed_array( $resolved );
+	}
+
+	/**
+	 * Invoke the host runtime-config boundary without assuming filter output type.
+	 *
+	 * @param array<string,mixed> $config Registered agent default config.
+	 * @param \WP_Agent           $agent  Selected registered agent.
+	 * @param array<string,mixed> $input  Canonical agents/chat input.
+	 * @return mixed Filtered runtime config.
+	 */
+	private static function apply_runtime_config_filters( array $config, \WP_Agent $agent, array $input ) {
+		return apply_filters( 'agents_api_runtime_agent_config', $config, $agent, $input );
 	}
 
 	/**
