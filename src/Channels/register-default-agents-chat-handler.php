@@ -42,6 +42,7 @@ use AgentsAPI\AI\WP_Agent_Execution_Principal;
 use AgentsAPI\AI\WP_Agent_Message;
 use AgentsAPI\AI\WP_Agent_Runtime_Profile;
 use AgentsAPI\AI\Tools\WP_Agent_Ability_Tool_Executor;
+use AgentsAPI\AI\Tools\WP_Agent_Default_Chat_Tool_Executor;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Executor_Registry;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Sessions;
@@ -201,13 +202,21 @@ class WP_Agent_Default_Chat_Handler {
 			'agent_slug'      => $agent_slug,
 			'session_id'      => $session_id,
 			'run_id'          => is_string( $input['run_id'] ?? null ) ? trim( $input['run_id'] ) : '',
+			'principal'       => $input['principal'] ?? null,
 			'runtime_profile' => $runtime_profile instanceof WP_Agent_Runtime_Profile ? $runtime_profile->to_array() : null,
+			'client_context'  => self::runtime_client_context( $input ),
 		);
 		$executor_registry = WP_Agent_Tool_Executor_Registry::fromFilters( $runtime_context );
 		$tool_declarations = self::resolve_tool_declarations( $config, self::runtime_tool_declarations( $agent, $runtime_context ), $executor_registry );
 		if ( is_wp_error( $tool_declarations ) ) {
 			return $tool_declarations;
 		}
+		$trusted_runtime_tools = array_keys(
+			array_filter(
+				$tool_declarations,
+				static fn( array $declaration ): bool => WP_Agent_Tool_Declaration::EXECUTOR_CLIENT === ( $declaration['executor'] ?? null )
+			)
+		);
 		$tool_declarations = ( new \WP_Agent_Tool_Policy() )->resolve(
 			$tool_declarations,
 			array(
@@ -215,6 +224,9 @@ class WP_Agent_Default_Chat_Handler {
 				'allow_only'   => is_array( $input['allow_only'] ?? null ) ? $input['allow_only'] : array(),
 				'tool_policy'  => is_array( $input['tool_policy'] ?? null ) ? $input['tool_policy'] : array(),
 				'principal'    => $input['principal'] ?? null,
+				// These client tools were added by the server-only declaration filter,
+				// not supplied by the caller, so they are trusted policy opt-ins.
+				'runtime_tools' => $trusted_runtime_tools,
 			)
 		);
 
@@ -242,7 +254,11 @@ class WP_Agent_Default_Chat_Handler {
 			// The loop also consults the #377 per-target executor registry
 			// (`agents_api_tool_executors`) for declarations that select another
 			// execution environment, so consumers can override per tool target.
-			$loop_options['tool_executor'] = new WP_Agent_Ability_Tool_Executor();
+			$loop_options['tool_executor'] = new WP_Agent_Default_Chat_Tool_Executor( new WP_Agent_Ability_Tool_Executor() );
+		}
+		$runtime_tool_store = \AgentsAPI\AI\agents_runtime_tool_request_store_optional( $runtime_context );
+		if ( null !== $runtime_tool_store ) {
+			$loop_options['runtime_tool_request_store'] = $runtime_tool_store;
 		}
 		if ( ! empty( $tool_call_rules ) ) {
 			// Declarative deterministic tool-call gating. The loop enforces these
@@ -437,8 +453,10 @@ class WP_Agent_Default_Chat_Handler {
 	 * Runtime overlays come only from the server-side
 	 * `agents_api_runtime_tool_declarations` filter after the agent, generated
 	 * session id, and run id are resolved. Each entry must name an existing
-	 * canonical enabled tool. Overlays can replace only model-facing description,
-	 * parameters, and runtime execution metadata.
+	 * canonical enabled tool. Host overlays can replace only model-facing
+	 * description, parameters, and runtime execution metadata. Client overlays
+	 * are additional, request-scoped declarations and suspend at the runtime-tool
+	 * continuation boundary instead of being dispatched as abilities.
 	 *
 	 * @param array<string,mixed> $config Agent default config.
 	 * @param array<mixed>        $overlays Server-provided declaration overlays.
@@ -495,6 +513,10 @@ class WP_Agent_Default_Chat_Handler {
 		$executor_registry = $executor_registry ?? new WP_Agent_Tool_Executor_Registry();
 		$seen_names        = array();
 		$seen_aliases      = array();
+		$reserved_aliases  = array();
+		foreach ( $declarations as $name => $declaration ) {
+			$reserved_aliases[ WP_Agent_Tool_Declaration::providerSafeName( $name ) ] = true;
+		}
 		foreach ( $overlays as $map_name => $overlay ) {
 			if ( ! is_string( $map_name ) || ! is_array( $overlay ) ) {
 				return self::runtime_tool_declaration_error( 'declaration' );
@@ -506,17 +528,26 @@ class WP_Agent_Default_Chat_Handler {
 				return self::runtime_tool_declaration_error( $error->getMessage() );
 			}
 
-			$name = $normalized['name'] ?? '';
-			if ( ! is_string( $name ) || $map_name !== $name || ! isset( $declarations[ $name ] ) || isset( $seen_names[ $name ] ) ) {
+			$name      = $normalized['name'] ?? '';
+			$is_client = WP_Agent_Tool_Declaration::EXECUTOR_CLIENT === ( $normalized['executor'] ?? null );
+			if ( ! is_string( $name ) || $map_name !== $name || isset( $seen_names[ $name ] ) || ( ! $is_client && ! isset( $declarations[ $name ] ) ) || ( $is_client && isset( $declarations[ $name ] ) ) ) {
 				return self::runtime_tool_declaration_error( 'name' );
 			}
 			$seen_names[ $name ] = true;
 
 			$alias = $normalized['provider_safe_name'] ?? WP_Agent_Tool_Declaration::providerSafeName( $name );
-			if ( ! is_string( $alias ) || isset( $seen_aliases[ $alias ] ) ) {
+			if ( ! is_string( $alias ) || isset( $seen_aliases[ $alias ] ) || ( $is_client && isset( $reserved_aliases[ $alias ] ) ) ) {
 				return self::runtime_tool_declaration_error( 'provider_safe_name' );
 			}
 			$seen_aliases[ $alias ] = true;
+
+			if ( $is_client ) {
+				if ( '' !== WP_Agent_Tool_Executor_Registry::targetIdFromDeclaration( $normalized ) ) {
+					return self::runtime_tool_declaration_error( 'executor_target' );
+				}
+				$declarations[ $name ] = $normalized;
+				continue;
+			}
 
 			$target_id      = WP_Agent_Tool_Executor_Registry::targetIdFromDeclaration( $normalized );
 			$runtime        = is_array( $normalized['runtime'] ?? null ) ? $normalized['runtime'] : array();
@@ -546,6 +577,22 @@ class WP_Agent_Default_Chat_Handler {
 	private static function runtime_tool_declarations( ?\WP_Agent $agent, array $runtime_context ): array {
 		$overlays = apply_filters( 'agents_api_runtime_tool_declarations', array(), $agent, $runtime_context );
 		return is_array( $overlays ) ? $overlays : array( '__invalid__' => $overlays );
+	}
+
+	/**
+	 * Provide trusted filters sanitized client-supplied context data.
+	 *
+	 * This context is not an authorization signal. A runtime declaration filter
+	 * must establish authorization from a server-authenticated principal or its
+	 * own trusted transport binding before it exposes a client tool.
+	 *
+	 * @param array<string,mixed> $input Canonical chat input.
+	 * @return array<string,mixed>
+	 */
+	private static function runtime_client_context( array $input ): array {
+		$client_context = is_array( $input['client_context'] ?? null ) ? \AgentsAPI\AI\agents_api_string_keyed_array( $input['client_context'] ) : array();
+
+		return agents_chat_strip_runtime_tool_declaration_fields( $client_context );
 	}
 
 	/**
@@ -756,13 +803,25 @@ class WP_Agent_Default_Chat_Handler {
 			static fn( $value ): bool => null !== $value
 		);
 
-		return array(
+		$output = array(
 			'session_id' => $session_id,
 			'reply'      => is_string( $result['final_content'] ?? null ) ? $result['final_content'] : '',
 			'messages'   => self::to_canonical_messages( is_array( $result['messages'] ?? null ) ? array_values( $result['messages'] ) : array() ),
 			'completed'  => (bool) ( $result['completed'] ?? true ),
 			'metadata'   => array( 'agents_api' => $metadata ),
 		);
+		$run_outcome_status = is_array( $result['run_outcome'] ?? null ) && is_string( $result['run_outcome']['status'] ?? null ) ? $result['run_outcome']['status'] : null;
+		if ( null !== $run_outcome_status ) {
+			$output['status'] = $run_outcome_status;
+		}
+		if ( is_array( $result['runtime_tool_pending'] ?? null ) ) {
+			$output['runtime_tool_pending'] = $result['runtime_tool_pending'];
+		}
+		if ( is_array( $result['run_outcome'] ?? null ) ) {
+			$output['run_outcome'] = $result['run_outcome'];
+		}
+
+		return $output;
 	}
 
 	/**

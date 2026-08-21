@@ -738,6 +738,187 @@ namespace {
 	agents_api_smoke_assert_equals( false, $mandatory_output instanceof WP_Error, 'mandatory tool overlay runs successfully', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $overlay_executor->calls ), 'mandatory tool bypasses allow_only after overlay', $failures, $passes );
 
+	echo "\n[1e] Trusted runtime filters add request-scoped client tools that suspend safely:\n";
+	$client_overlay_contexts = array();
+	$trusted_client_principal = \AgentsAPI\AI\WP_Agent_Execution_Principal::runtime(
+		'authenticated-client-runtime',
+		'client-brain',
+		array(),
+		'client-workspace',
+		'frontend-chat'
+	)->to_array();
+	$runtime_tool_store = new class() implements \AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Atomic_Store {
+		/** @var array<string,array<string,mixed>> */
+		public array $requests = array();
+
+		public function create( array $request ): void {
+			$this->requests[ $request['request_id'] ] = $request;
+		}
+
+		public function get( string $request_id ): ?array {
+			return $this->requests[ $request_id ] ?? null;
+		}
+
+		public function complete( string $request_id, array $result ): void {
+			$this->transition_pending( $request_id, \AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED, $result );
+		}
+
+		public function timeout( string $request_id ): void {
+			$this->transition_pending( $request_id, \AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_TIMEOUT );
+		}
+
+		public function transition_pending( string $request_id, string $status, ?array $result = null ): bool {
+			if ( \AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING !== ( $this->requests[ $request_id ]['status'] ?? '' ) ) {
+				return false;
+			}
+			$this->requests[ $request_id ]['status'] = $status;
+			if ( null !== $result ) {
+				$this->requests[ $request_id ]['result'] = $result;
+			}
+			return true;
+		}
+
+		public function recent_pending( array $query = array() ): array {
+			unset( $query );
+			return array_values( $this->requests );
+		}
+	};
+	add_filter(
+		'agents_api_runtime_tool_declarations',
+		static function ( array $declarations, $agent, array $context ) use ( &$client_overlay_contexts ): array {
+			unset( $agent );
+			$principal = is_array( $context['principal'] ?? null ) ? $context['principal'] : array();
+			if (
+				'client-brain' !== ( $context['agent_slug'] ?? '' )
+				|| \AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_RUNTIME !== ( $principal['auth_source'] ?? null )
+				|| \AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_RUNTIME !== ( $principal['request_context'] ?? null )
+			) {
+				return $declarations;
+			}
+
+			$client_overlay_contexts[] = $context;
+			$declarations['client/notify'] = array(
+				'name'        => 'client/notify',
+				'source'      => 'client',
+				'description' => 'Notify the active client.',
+				'parameters'  => array(
+					'type'       => 'object',
+					'required'   => array( 'message' ),
+					'properties' => array( 'message' => array( 'type' => 'string' ) ),
+				),
+				'executor'    => 'client',
+				'scope'       => 'run',
+			);
+			if ( true === ( $context['client_context']['client_alias_collision'] ?? false ) ) {
+				$declarations['client/notify--copy'] = array(
+					'name'        => 'client/notify--copy',
+					'source'      => 'client',
+					'description' => 'A colliding client tool alias.',
+					'parameters'  => array(),
+					'executor'    => 'client',
+					'scope'       => 'run',
+				);
+				$declarations['client/notify__copy'] = array(
+					'name'        => 'client/notify__copy',
+					'source'      => 'client',
+					'description' => 'Another colliding client tool alias.',
+					'parameters'  => array(),
+					'executor'    => 'client',
+					'scope'       => 'run',
+				);
+			}
+			return $declarations;
+		},
+		20,
+		3
+	);
+	add_filter(
+		'wp_agent_runtime_tool_request_store',
+		static function ( $store, array $input ) use ( $runtime_tool_store ) {
+			return 'client-runtime-run' === ( $input['run_id'] ?? '' ) || isset( $input['request_id'] ) ? $runtime_tool_store : $store;
+		},
+		10,
+		2
+	);
+	$registry->register(
+		'client-brain',
+		array(
+			'label'          => 'Client Brain',
+			'default_config' => array( 'provider' => 'fake-provider', 'model' => 'fake-model' ),
+		)
+	);
+	$GLOBALS['__chat_handler_ability_calls'] = array();
+	$GLOBALS['__adapter_smoke']               = array(
+		'turn'            => 0,
+		'results_by_turn' => array(
+			1 => $make_result( '', array( array( 'name' => 'client__notify', 'parameters' => array( 'message' => 'Dinner is ready.' ), 'id' => 'client-call-1' ) ), array( 3, 1, 4 ) ),
+		),
+	);
+	$untrusted_client_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array( 'agent' => 'client-brain', 'message' => 'Do not trust this caller flag.', 'client_context' => array( 'enable_client_notify' => true ) )
+	);
+	$untrusted_declaration_names = array_map( static fn( $declaration ): string => $declaration->name, $GLOBALS['__adapter_smoke']['declarations'] ?? array() );
+	agents_api_smoke_assert_equals( false, in_array( 'client/notify', $untrusted_declaration_names, true ), 'caller client_context flags do not authorize client tools', $failures, $passes );
+
+	$GLOBALS['__adapter_smoke'] = array(
+		'turn'            => 0,
+		'results_by_turn' => array(
+			1 => $make_result( '', array( array( 'name' => 'client__notify', 'parameters' => array( 'message' => 'Dinner is ready.' ), 'id' => 'client-call-1' ) ), array( 3, 1, 4 ) ),
+		),
+	);
+	$client_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array(
+			'agent'          => 'client-brain',
+			'message'        => 'Notify me.',
+			'run_id'         => 'client-runtime-run',
+			'principal'      => $trusted_client_principal,
+			'client_context' => array(
+				'enable_client_notify'         => true,
+				'runtime_tool_declarations'    => array( 'client/attacker' => array( 'name' => 'client/attacker' ) ),
+			),
+		)
+	);
+	$client_declaration_names = array_map( static fn( $declaration ): string => $declaration->name, $GLOBALS['__adapter_smoke']['declarations'] ?? array() );
+	$pending_client_tool      = $client_output['runtime_tool_pending'] ?? array();
+	agents_api_smoke_assert_equals( true, in_array( 'client/notify', $client_declaration_names, true ), 'the model receives the trusted client declaration', $failures, $passes );
+	agents_api_smoke_assert_equals( false, array_key_exists( 'runtime_tool_declarations', $client_overlay_contexts[0]['client_context'] ?? array() ), 'runtime declaration fields remain stripped before the trusted filter', $failures, $passes );
+	agents_api_smoke_assert_equals( false, $client_output['completed'] ?? true, 'a client tool call leaves the chat turn incomplete', $failures, $passes );
+	agents_api_smoke_assert_equals( 'runtime_tool_pending', $client_output['status'] ?? '', 'a client tool call returns the canonical pending status', $failures, $passes );
+	agents_api_smoke_assert_equals( 'runtime_tool_pending', $client_output['run_outcome']['status'] ?? '', 'the canonical run outcome is pending', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client/notify', $pending_client_tool['tool_name'] ?? '', 'pending client request retains the canonical tool name', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client-call-1', $pending_client_tool['tool_call_id'] ?? '', 'pending client request retains the provider tool call id', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'message' => 'Dinner is ready.' ), $pending_client_tool['parameters'] ?? array(), 'pending client request retains the prepared parameters', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client-runtime-run', $pending_client_tool['run_id'] ?? '', 'pending client request retains the canonical run id', $failures, $passes );
+	agents_api_smoke_assert_equals( 0, count( $GLOBALS['__chat_handler_ability_calls'] ), 'a client tool call never reaches the ability executor', $failures, $passes );
+	agents_api_smoke_assert_equals( $pending_client_tool, $runtime_tool_store->get( $pending_client_tool['request_id'] ?? '' ), 'host-provided request store persists the pending client tool', $failures, $passes );
+	agents_api_smoke_assert_equals( $runtime_tool_store, \AgentsAPI\AI\agents_runtime_tool_request_store( array( 'request_id' => $pending_client_tool['request_id'] ?? '' ) ), 'generic lifecycle abilities resolve the same host request store', $failures, $passes );
+	$submission = \AgentsAPI\AI\agents_runtime_tool_submit_result( array( 'request_id' => $pending_client_tool['request_id'] ?? '', 'success' => true, 'result' => array( 'delivered' => true ), 'resume' => false ) );
+	agents_api_smoke_assert_equals( \AgentsAPI\AI\WP_Agent_Runtime_Tool_Result::STATUS_SUBMITTED, $submission['status'] ?? '', 'generic submit lifecycle addresses the persisted client request', $failures, $passes );
+	agents_api_smoke_assert_equals( \AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_COMPLETED, $runtime_tool_store->get( $pending_client_tool['request_id'] ?? '' )['status'] ?? '', 'generic submit lifecycle completes the persisted client request', $failures, $passes );
+	$output_schema = \AgentsAPI\AI\Channels\agents_chat_output_schema();
+	$pending_schema = $output_schema['properties']['runtime_tool_pending'] ?? array();
+	$outcome_schema = $output_schema['properties']['run_outcome'] ?? array();
+	agents_api_smoke_assert_equals( 'string', $output_schema['properties']['status']['type'] ?? '', 'output schema types the top-level status', $failures, $passes );
+	agents_api_smoke_assert_equals( array(), array_diff( $pending_schema['required'] ?? array(), array_keys( $pending_client_tool ) ), 'pending output satisfies its required schema fields', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'runtime_tool_pending' ), $pending_schema['properties']['status']['enum'] ?? array(), 'pending schema constrains the canonical pending status', $failures, $passes );
+	agents_api_smoke_assert_equals( 'agents-api.run-outcome', $outcome_schema['properties']['schema']['enum'][0] ?? '', 'run outcome schema constrains its reusable envelope', $failures, $passes );
+
+	$GLOBALS['__adapter_smoke'] = array(
+		'turn'            => 0,
+		'results_by_turn' => array(
+			1 => $make_result( '', array( array( 'name' => 'client__notify', 'parameters' => array( 'message' => 'No id.' ), 'id' => '' ) ), array( 3, 1, 4 ) ),
+		),
+	);
+	$missing_id_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array( 'agent' => 'client-brain', 'message' => 'Notify without an id.', 'principal' => $trusted_client_principal )
+	);
+	agents_api_smoke_assert_equals( 'tool-call-1-1', $missing_id_output['runtime_tool_pending']['tool_call_id'] ?? '', 'a missing provider tool-call id receives the canonical generated id', $failures, $passes );
+
+	$alias_collision_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array( 'agent' => 'client-brain', 'message' => 'Reject colliding aliases.', 'principal' => $trusted_client_principal, 'client_context' => array( 'client_alias_collision' => true ) )
+	);
+	agents_api_smoke_assert_equals( 'agents_chat_invalid_runtime_tool_declaration', $alias_collision_output instanceof WP_Error ? $alias_collision_output->get_error_code() : '', 'client declarations with colliding provider-safe aliases are rejected', $failures, $passes );
+
 	echo "\n[2] Native chat resolves host runtime profiles and publishes safe provenance:\n";
 	$profile_provider = new Agents_Chat_Runtime_Profile_Provider();
 	$profile_turn_contexts = array();
