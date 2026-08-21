@@ -399,7 +399,7 @@ namespace {
 	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__adapter_smoke']['prompt_parts'] ?? array() ), 'run_turn sends the latest user turn as the current prompt', $failures, $passes );
 	agents_api_smoke_assert_equals( 2, count( $GLOBALS['__adapter_smoke']['history'] ?? array() ), 'run_turn sends earlier turns as history', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__adapter_smoke']['declarations'] ?? array() ), 'run_turn maps tool declarations to function declarations', $failures, $passes );
-	agents_api_smoke_assert_equals( 'client/lookup', $GLOBALS['__adapter_smoke']['declarations'][0]->name ?? '', 'function declaration carries the logical tool name', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client__lookup', $GLOBALS['__adapter_smoke']['declarations'][0]->name ?? '', 'function declaration carries the provider-safe tool name', $failures, $passes );
 	$model_parameters = $GLOBALS['__adapter_smoke']['declarations'][0]->parameters ?? array();
 	agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $model_parameters['properties'] ?? array() ), 'function declaration excludes authoritative parameters from model input', $failures, $passes );
 	agents_api_smoke_assert_equals( array( 'query' ), $model_parameters['required'] ?? array(), 'function declaration excludes authoritative parameters from model requirements', $failures, $passes );
@@ -865,7 +865,7 @@ namespace {
 	agents_api_smoke_assert_equals( 1, count( $dispatch_payload['prompt_parts'] ?? array() ), 'dispatch payload carries the current-prompt message parts', $failures, $passes );
 	agents_api_smoke_assert_equals( 2, count( $dispatch_payload['history'] ?? array() ), 'dispatch payload carries the history messages', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $dispatch_payload['function_declarations'] ?? array() ), 'dispatch payload carries the function declarations', $failures, $passes );
-	agents_api_smoke_assert_equals( 'client/lookup', $dispatch_payload['function_declarations'][0]->name ?? '', 'dispatch payload function declaration carries the logical tool name', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client__lookup', $dispatch_payload['function_declarations'][0]->name ?? '', 'dispatch payload function declaration carries the provider-safe tool name', $failures, $passes );
 	agents_api_smoke_assert_equals( 0.5, $dispatch_payload['options']['temperature'] ?? null, 'dispatch payload carries adapter options (temperature)', $failures, $passes );
 	agents_api_smoke_assert_equals( 256, $dispatch_payload['options']['max_tokens'] ?? null, 'dispatch payload carries adapter options (max_tokens)', $failures, $passes );
 	agents_api_smoke_assert_equals( true, ( $dispatch_payload['request'] ?? null ) instanceof AgentsAPI\AI\WP_Agent_Provider_Turn_Request, 'dispatch payload carries the WP_Agent_Provider_Turn_Request', $failures, $passes );
@@ -1143,11 +1143,38 @@ namespace {
 	agents_api_smoke_assert_equals( true, false !== strpos( $wrapped_empty, '"parameters":{' ), 'wrapped tool payload contains "parameters":{ (an object)', $failures, $passes );
 	agents_api_smoke_assert_equals( false, false !== strpos( $wrapped_empty, '"parameters":[' ), 'wrapped tool payload never contains "parameters":[ (the OpenAI 400 shape)', $failures, $passes );
 
-	// The real-schema tool: object stays an object and the declared schema is preserved verbatim.
-	$real_json = json_encode( $decls_by_name['client/lookup']->parameters ?? null );
+	// The real-schema tool: object stays an object and the declared schema is preserved
+	// verbatim. Keyed by the provider-safe alias, because that is the name the
+	// declaration is emitted under (see the provider-safe assertions below).
+	$real_json = json_encode( $decls_by_name['client__lookup']->parameters ?? null );
 	agents_api_smoke_assert_equals( true, '{' === substr( $real_json, 0, 1 ), 'real-schema tool parameters remain a JSON object', $failures, $passes );
 	agents_api_smoke_assert_equals( true, false !== strpos( $real_json, '"query"' ), 'real-schema tool preserves its declared properties unchanged', $failures, $passes );
-	agents_api_smoke_assert_equals( 'object', $decls_by_name['client/lookup']->parameters['type'] ?? '', 'real-schema tool keeps its declared type', $failures, $passes );
+	agents_api_smoke_assert_equals( 'object', $decls_by_name['client__lookup']->parameters['type'] ?? '', 'real-schema tool keeps its declared type', $failures, $passes );
+
+	/*
+	 * Provider-safe tool names.
+	 *
+	 * Provider tool-name validation rejects the `/` in a canonical namespaced
+	 * name — the same constraint #320 addressed for client runtime declarations.
+	 * Host tools derived from abilities cannot dodge it, because the Abilities API
+	 * requires a namespaced name, so the alias has to be what reaches the provider.
+	 * Mediation still resolves the canonical declaration, because
+	 * WP_Agent_Tool_Execution_Core maps the emitted name back through
+	 * canonicalNameForProviderToolName().
+	 */
+	agents_api_smoke_assert_equals( true, isset( $decls_by_name['client__lookup'] ), 'namespaced tool is emitted under its provider-safe alias', $failures, $passes );
+	agents_api_smoke_assert_equals( false, isset( $decls_by_name['client/lookup'] ), 'namespaced tool is never emitted under its canonical name', $failures, $passes );
+	agents_api_smoke_assert_equals( true, isset( $decls_by_name['workspace_show'] ), 'an already provider-safe name is emitted unchanged', $failures, $passes );
+
+	foreach ( array_keys( $decls_by_name ) as $emitted_name ) {
+		agents_api_smoke_assert_equals(
+			1,
+			preg_match( '/^[a-zA-Z0-9_-]{1,128}$/', (string) $emitted_name ),
+			sprintf( 'emitted tool name "%s" satisfies provider tool-name validation', $emitted_name ),
+			$failures,
+			$passes
+		);
+	}
 
 	agents_api_smoke_finish( 'Agents API default provider-turn adapter', $failures, $passes );
 }
