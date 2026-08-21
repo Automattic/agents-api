@@ -459,6 +459,19 @@ function agents_chat_input_schema(): array {
 				'type'        => 'string',
 				'description' => 'User-side text for the agent to respond to.',
 			),
+			'history'               => array(
+				'type'        => 'array',
+				'description' => 'Optional caller-supplied text backscroll for stateless execution. An authoritative conversation store takes precedence when configured.',
+				'default'     => array(),
+				'items'       => array(
+					'type'       => 'object',
+					'required'   => array( 'role', 'content' ),
+					'properties' => array(
+						'role'    => array( 'type' => 'string', 'enum' => array( 'user', 'assistant' ) ),
+						'content' => array( 'type' => 'string' ),
+					),
+				),
+			),
 			'session_id'            => array(
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Existing session ID to continue, or null to start a new session.',

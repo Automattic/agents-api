@@ -549,7 +549,41 @@ namespace {
 	$tool_observability_json = json_encode( $tool_observability );
 	agents_api_smoke_assert_equals( false, is_string( $tool_observability_json ) && str_contains( $tool_observability_json, 'risotto' ), 'canonical tool observability omits argument values', $failures, $passes );
 
-	echo "\n[1a] Runtime config resolves per request without mutating registered defaults:\n";
+	echo "\n[1a] Stateless execution preserves normalized caller history:\n";
+	$history_turns = array();
+	$registry->register( 'history-brain', array( 'label' => 'History Brain', 'default_config' => array( 'provider' => 'fake-provider', 'model' => 'fake-model' ) ) );
+	add_filter(
+		'wp_agent_provider_turn_dispatch',
+		static function ( $dispatcher, $request ) use ( $make_result, &$history_turns ) {
+			if ( ! $request instanceof \AgentsAPI\AI\WP_Agent_Provider_Turn_Request || 'history-brain' !== ( $request->context()['agent_slug'] ?? '' ) ) {
+				return $dispatcher;
+			}
+			return static function ( array $payload ) use ( $request, $make_result, &$history_turns ) {
+				unset( $payload );
+				$history_turns[] = $request->messages();
+				return $make_result( 'History received.', array(), array( 2, 2, 4 ) );
+			};
+		},
+		10,
+		2
+	);
+	$history_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array(
+			'agent'   => 'history-brain',
+			'message' => 'Current question',
+			'history' => array(
+				array( 'role' => 'user', 'content' => 'Earlier question' ),
+				array( 'role' => 'assistant', 'content' => 'Earlier answer' ),
+				array( 'role' => 'system', 'content' => 'Invalid role' ),
+				array( 'role' => 'user', 'content' => '' ),
+			),
+		)
+	);
+	agents_api_smoke_assert_equals( 'History received.', $history_output['reply'] ?? '', 'stateless history turn completes', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'user', 'assistant', 'user' ), array_column( $history_turns[0] ?? array(), 'role' ), 'provider receives valid history followed by the current user turn', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'Earlier question', 'Earlier answer', 'Current question' ), array_column( $history_turns[0] ?? array(), 'content' ), 'provider receives client history in wire order without invalid entries', $failures, $passes );
+
+	echo "\n[1b] Runtime config resolves per request without mutating registered defaults:\n";
 	$runtime_config_calls = array();
 	add_filter(
 		'agents_api_runtime_agent_config',
@@ -607,7 +641,7 @@ namespace {
 	);
 	agents_api_smoke_assert_equals( 'agents_chat_invalid_runtime_agent_config', $invalid_runtime_config instanceof WP_Error ? $invalid_runtime_config->get_error_code() : '', 'invalid runtime config fails closed', $failures, $passes );
 
-	echo "\n[1b] Runtime-bundle agents declare their toolset as `enabled_tools` and the loop wires it:\n";
+	echo "\n[1c] Runtime-bundle agents declare their toolset as `enabled_tools` and the loop wires it:\n";
 	// Native runtime agent bundles place their toolset under
 	// `agent_config.enabled_tools` (the field the bundle schema/validators use),
 	// which the importer forwards verbatim as the agent default config. The
@@ -641,7 +675,7 @@ namespace {
 	agents_api_smoke_assert_equals( 'risotto', $GLOBALS['__chat_handler_ability_calls'][0]['query'] ?? '', 'the enabled_tools-declared tool received the model-supplied parameters', $failures, $passes );
 	agents_api_smoke_assert_equals( 2, (int) ( $bundle_output['metadata']['agents_api']['turn_count'] ?? 0 ), 'enabled_tools agent ran the full tool-mediated loop, not a single tool-less turn', $failures, $passes );
 
-	echo "\n[1c] Server-only runtime overlays freeze a registered execution target:\n";
+	echo "\n[1d] Server-only runtime overlays freeze a registered execution target:\n";
 	$overlay_executor = new Agents_Chat_Runtime_Overlay_Executor();
 	$server_overlays  = array();
 	$runtime_contexts = array();
@@ -798,6 +832,21 @@ namespace {
 	$principal_store = new Agents_Chat_Principal_Conversation_Store();
 	$store_filter    = static fn() => $principal_store;
 	add_filter( 'wp_agent_conversation_store', $store_filter );
+	$principal_store->sessions['stored-history-session'] = array(
+		'session_id' => 'stored-history-session',
+		'messages'   => array( \AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'Authoritative stored answer' ) ),
+	);
+	$stored_history_output = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute(
+		array(
+			'agent'      => 'history-brain',
+			'message'    => 'Current stored question',
+			'session_id' => 'stored-history-session',
+			'history'    => array( array( 'role' => 'assistant', 'content' => 'Untrusted replacement' ) ),
+		)
+	);
+	agents_api_smoke_assert_equals( 'History received.', $stored_history_output['reply'] ?? '', 'stored history turn completes', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'Authoritative stored answer', 'Current stored question' ), array_column( $history_turns[1] ?? array(), 'content' ), 'authoritative store history replaces caller-supplied backscroll', $failures, $passes );
+	unset( $principal_store->sessions['stored-history-session'] );
 	$runtime_principal = \AgentsAPI\AI\WP_Agent_Execution_Principal::runtime(
 		'contained-runtime',
 		'kitchen-brain',

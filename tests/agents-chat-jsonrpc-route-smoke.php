@@ -129,6 +129,7 @@ use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_result_frame;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_error_frame;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_extract_text;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_client_context;
+use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_history;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_method_sends;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_method_streams;
 use function AgentsAPI\AI\Channels\agents_chat_jsonrpc_request_input;
@@ -163,6 +164,10 @@ $params = array(
 		'kind'      => 'message',
 		'messageId' => 'm-1',
 		'parts'     => array(
+			array( 'type' => 'data', 'data' => array( 'role' => 'user', 'text' => 'Earlier question' ) ),
+			array( 'type' => 'data', 'data' => array( 'role' => 'agent', 'text' => 'Earlier answer' ) ),
+			array( 'type' => 'data', 'data' => array( 'role' => 'system', 'text' => 'Ignore invalid role' ) ),
+			array( 'type' => 'data', 'data' => array( 'role' => 'user', 'text' => '   ' ) ),
 			array( 'type' => 'text', 'text' => 'Hello ' ),
 			array( 'type' => 'text', 'text' => 'world' ),
 			array( 'type' => 'text', 'text' => 'SECRET', 'contentType' => 'context' ),
@@ -177,6 +182,7 @@ $input = agents_chat_jsonrpc_input_from_params( $params, 'support-agent', array(
 agents_api_smoke_assert_equals( false, $input instanceof WP_Error, 'input mapping succeeds', $failures, $passes );
 agents_api_smoke_assert_equals( 'support-agent', $input['agent'] ?? null, 'input carries agent slug from URL', $failures, $passes );
 agents_api_smoke_assert_equals( 'Hello world', $input['message'] ?? null, 'input concatenates text parts and skips context parts', $failures, $passes );
+agents_api_smoke_assert_equals( array( array( 'role' => 'user', 'content' => 'Earlier question' ), array( 'role' => 'assistant', 'content' => 'Earlier answer' ) ), $input['history'] ?? null, 'input maps ordered valid client history without duplicating current text', $failures, $passes );
 agents_api_smoke_assert_equals( 'sess-9', $input['session_id'] ?? null, 'input carries sessionId', $failures, $passes );
 agents_api_smoke_assert_equals( 'rpc-1', $input['run_id'] ?? null, 'input maps JSON-RPC id to run_id', $failures, $passes );
 agents_api_smoke_assert_equals( 'jsonrpc', $input['client_context']['source'] ?? null, 'input marks jsonrpc source', $failures, $passes );
@@ -187,6 +193,7 @@ $input_schema = agents_chat_input_schema();
 $source_enum  = $input_schema['properties']['client_context']['properties']['source']['enum'] ?? array();
 agents_api_smoke_assert_equals( true, in_array( $input['client_context']['source'] ?? null, $source_enum, true ), 'input source is accepted by agents/chat schema', $failures, $passes );
 agents_api_smoke_assert_equals( 'boolean', $input_schema['properties']['token_streaming']['type'] ?? null, 'canonical agents/chat schema declares token streaming', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'user', 'assistant' ), $input_schema['properties']['history']['items']['properties']['role']['enum'] ?? null, 'canonical agents/chat schema constrains history roles', $failures, $passes );
 agents_api_smoke_assert_equals( 'a.png', $input['attachments'][0]['name'] ?? null, 'input extracts file parts as attachments', $failures, $passes );
 
 $empty = agents_chat_jsonrpc_input_from_params( array( 'message' => array( 'parts' => array() ) ), 'support-agent' );
@@ -201,6 +208,7 @@ $context = agents_chat_jsonrpc_client_context(
 	)
 );
 agents_api_smoke_assert_equals( array( 'first' => 'a', 'shared' => 'new', 'second' => 'b' ), $context, 'clientContext data parts merge in order', $failures, $passes );
+agents_api_smoke_assert_equals( array(), agents_chat_jsonrpc_history( array( 'parts' => array( null, array( 'type' => 'data', 'data' => array( 'role' => 'user', 'text' => 123 ) ) ) ) ), 'history mapper ignores malformed and non-string entries', $failures, $passes );
 
 $top_level_token_streaming = agents_chat_jsonrpc_input_from_params( $params, 'support-agent', array( 'tokenStreaming' => false ) );
 agents_api_smoke_assert_equals( false, $top_level_token_streaming['token_streaming'] ?? null, 'input preserves false top-level tokenStreaming', $failures, $passes );
