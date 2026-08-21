@@ -251,6 +251,7 @@ require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-call.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-result.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-executor.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-ability-tool-executor.php';
+require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-default-chat-tool-executor.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-executor-registry.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-execution-core.php';
 require_once AGENTS_API_PATH . 'src/Tools/class-wp-agent-tool-source-registry.php';

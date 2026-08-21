@@ -713,6 +713,9 @@ function agents_chat_output_schema(): array {
 				'type'        => 'boolean',
 				'description' => 'Whether the agent considers this turn complete (true) or expects further work (false, e.g. tool approvals pending).',
 			),
+			'status'     => agents_chat_status_schema(),
+			'runtime_tool_pending' => agents_chat_runtime_tool_pending_schema(),
+			'run_outcome' => agents_chat_run_outcome_schema(),
 			'metadata'   => array(
 				'type'        => 'object',
 				'description' => 'Runtime metadata. The default handler exposes `agents_api.tool_observability`, a content-redacted v1 tool lifecycle contract.',
@@ -763,6 +766,68 @@ function agents_chat_output_schema(): array {
 					),
 				),
 			),
+		),
+	);
+}
+
+/**
+ * Canonical terminal or suspended chat status.
+ *
+ * @return array<string,mixed>
+ */
+function agents_chat_status_schema(): array {
+	return array(
+		'type'        => 'string',
+		'enum'        => \AgentsAPI\AI\WP_Agent_Run_Outcome::statuses(),
+		'description' => 'Canonical result status. Omitted only when a legacy handler does not report a status.',
+	);
+}
+
+/**
+ * Canonical pending external runtime-tool request.
+ *
+ * @return array<string,mixed>
+ */
+function agents_chat_runtime_tool_pending_schema(): array {
+	return array(
+		'type'        => 'object',
+		'description' => 'Present when status is runtime_tool_pending. The request is inline for stateless turns and may also be persisted by a host runtime-tool request store.',
+		'required'    => array( 'status', 'request_id', 'tool_name', 'tool_call_id', 'parameters', 'run_id', 'timeout_at', 'runtime', 'metadata' ),
+		'properties'  => array(
+			'status'       => array( 'type' => 'string', 'enum' => array( \AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING ) ),
+			'request_id'   => array( 'type' => 'string' ),
+			'tool_name'    => array( 'type' => 'string' ),
+			'tool_call_id' => array( 'type' => 'string' ),
+			'parameters'   => array( 'type' => 'object' ),
+			'run_id'       => array( 'type' => 'string' ),
+			'timeout_at'   => array( 'type' => 'string' ),
+			'runtime'      => array( 'type' => 'object' ),
+			'metadata'     => array( 'type' => 'object' ),
+		),
+	);
+}
+
+/**
+ * Canonical outcome envelope for this chat run.
+ *
+ * @return array<string,mixed>
+ */
+function agents_chat_run_outcome_schema(): array {
+	return array(
+		'type'        => 'object',
+		'description' => 'Versioned, runtime-neutral outcome envelope for the chat run.',
+		'required'    => array( 'schema', 'version', 'status', 'completed', 'stop_reason', 'retryable' ),
+		'properties'  => array(
+			'schema'         => array( 'type' => 'string', 'enum' => array( \AgentsAPI\AI\WP_Agent_Run_Outcome::SCHEMA ) ),
+			'version'        => array( 'type' => 'integer', 'enum' => array( \AgentsAPI\AI\WP_Agent_Run_Outcome::VERSION ) ),
+			'status'         => agents_chat_status_schema(),
+			'completed'      => array( 'type' => 'boolean' ),
+			'stop_reason'    => array( 'type' => 'string' ),
+			'retryable'      => array( 'type' => 'boolean' ),
+			'failure'        => array( 'type' => 'object' ),
+			'assertions'     => array( 'type' => 'object' ),
+			'provider_error' => array( 'type' => 'object' ),
+			'metadata'       => array( 'type' => 'object' ),
 		),
 	);
 }

@@ -247,6 +247,12 @@ $out_schema = agents_chat_output_schema();
 smoke_assert( array( 'session_id', 'reply' ), $out_schema['required'] ?? array(), 'output_schema_required_fields', $failures, $passes );
 smoke_assert( array( 1 ), $out_schema['properties']['metadata']['properties']['agents_api']['properties']['tool_observability']['properties']['version']['enum'] ?? array(), 'output_schema_documents_tool_observability_v1', $failures, $passes );
 smoke_assert( array( 'pending', 'succeeded', 'failed', 'rejected' ), $out_schema['properties']['metadata']['properties']['agents_api']['properties']['tool_observability']['properties']['calls']['items']['properties']['status']['enum'] ?? array(), 'output_schema_documents_tool_statuses', $failures, $passes );
+smoke_assert( AgentsAPI\AI\WP_Agent_Run_Outcome::statuses(), $out_schema['properties']['status']['enum'] ?? array(), 'output_schema_documents_canonical_statuses', $failures, $passes );
+smoke_assert( array( 'status', 'request_id', 'tool_name', 'tool_call_id', 'parameters', 'run_id', 'timeout_at', 'runtime', 'metadata' ), $out_schema['properties']['runtime_tool_pending']['required'] ?? array(), 'output_schema_requires_canonical_pending_request_fields', $failures, $passes );
+smoke_assert( array( AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING ), $out_schema['properties']['runtime_tool_pending']['properties']['status']['enum'] ?? array(), 'output_schema_limits_pending_request_status', $failures, $passes );
+smoke_assert( array( 'schema', 'version', 'status', 'completed', 'stop_reason', 'retryable' ), $out_schema['properties']['run_outcome']['required'] ?? array(), 'output_schema_requires_canonical_run_outcome_fields', $failures, $passes );
+smoke_assert( array( AgentsAPI\AI\WP_Agent_Run_Outcome::SCHEMA ), $out_schema['properties']['run_outcome']['properties']['schema']['enum'] ?? array(), 'output_schema_limits_run_outcome_schema', $failures, $passes );
+smoke_assert( array( AgentsAPI\AI\WP_Agent_Run_Outcome::VERSION ), $out_schema['properties']['run_outcome']['properties']['version']['enum'] ?? array(), 'output_schema_limits_run_outcome_version', $failures, $passes );
 
 // 9. Runtime principal input is normalized before dispatch and has a scoped permission filter.
 smoke_reset_chat_filters();
