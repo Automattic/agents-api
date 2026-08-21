@@ -382,6 +382,7 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	$input = array(
 		'agent'          => $agent,
 		'message'        => $text,
+		'history'        => agents_chat_jsonrpc_history( $message ),
 		'session_id'     => '' !== $session_id ? $session_id : null,
 		'run_id'         => '' !== $run_id ? $run_id : null,
 		'attachments'    => agents_chat_jsonrpc_attachments( $message ),
@@ -413,6 +414,34 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	}
 
 	return $input;
+}
+
+/**
+ * Map client-supplied text backscroll into canonical stateless chat history.
+ *
+ * @param array<mixed> $message JSON-RPC Message.
+ * @return array<int,array{role:string,content:string}>
+ */
+function agents_chat_jsonrpc_history( array $message ): array {
+	$parts   = is_array( $message['parts'] ?? null ) ? $message['parts'] : array();
+	$history = array();
+	$roles   = array( 'user' => 'user', 'agent' => 'assistant' );
+
+	foreach ( $parts as $part ) {
+		if ( ! is_array( $part ) || 'data' !== ( $part['type'] ?? null ) || ! is_array( $part['data'] ?? null ) ) {
+			continue;
+		}
+
+		$role    = is_string( $part['data']['role'] ?? null ) ? $part['data']['role'] : '';
+		$content = is_string( $part['data']['text'] ?? null ) ? $part['data']['text'] : '';
+		if ( ! isset( $roles[ $role ] ) || '' === trim( $content ) ) {
+			continue;
+		}
+
+		$history[] = array( 'role' => $roles[ $role ], 'content' => $content );
+	}
+
+	return $history;
 }
 
 /**

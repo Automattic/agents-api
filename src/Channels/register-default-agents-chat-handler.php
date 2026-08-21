@@ -188,6 +188,9 @@ class WP_Agent_Default_Chat_Handler {
 				}
 			}
 		}
+		if ( ! $store instanceof WP_Agent_Conversation_Store && is_array( $input['history'] ?? null ) ) {
+			$messages = self::stateless_history( $input['history'] );
+		}
 
 		if ( '' === $session_id ) {
 			$session_id = self::generate_session_id();
@@ -893,6 +896,29 @@ class WP_Agent_Default_Chat_Handler {
 		}
 
 		return vsprintf( '%s%s-%s-%s-%s-%s%s%s', str_split( bin2hex( $bytes ), 4 ) );
+	}
+
+	/**
+	 * Normalize caller history for a store-less turn.
+	 *
+	 * @param array<mixed> $history Raw caller history.
+	 * @return array<int,array<string,mixed>> Canonical text messages.
+	 */
+	private static function stateless_history( array $history ): array {
+		$messages = array();
+		foreach ( $history as $message ) {
+			if ( ! is_array( $message ) ) {
+				continue;
+			}
+			$role    = is_string( $message['role'] ?? null ) ? $message['role'] : '';
+			$content = is_string( $message['content'] ?? null ) ? $message['content'] : '';
+			if ( ! in_array( $role, array( 'user', 'assistant' ), true ) || '' === trim( $content ) ) {
+				continue;
+			}
+			$messages[] = WP_Agent_Message::text( $role, $content );
+		}
+
+		return $messages;
 	}
 }
 
