@@ -688,6 +688,51 @@ namespace {
 	$GLOBALS['__agents_api_smoke_actions']['agents_api_provider_turn_retry']             = array();
 	$GLOBALS['__agents_api_smoke_actions']['agents_api_provider_turn_retry_max_attempts'] = array();
 
+	echo "\n[3g] A transient failure is not retried after client-visible deltas were emitted:\n";
+	$stream_retry_attempts = 0;
+	$stream_retry_sleeps   = array();
+	$stream_retry_deltas   = array();
+	$stream_retry_adapter  = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter(
+		'fake-provider',
+		'fake-model',
+		'sys',
+		array(
+			'dispatch_provider' => static function ( array $payload ) use ( &$stream_retry_attempts ) {
+				++$stream_retry_attempts;
+				$payload['request']->emitDelta( array( 'type' => 'content', 'text' => 'partial' ) );
+				return new WP_Error( 'prompt_upstream_server_error', 'Service Unavailable (503)', array( 'status' => 503 ) );
+			},
+			'retry_sleeper'    => static function ( $seconds ) use ( &$stream_retry_sleeps ) {
+				$stream_retry_sleeps[] = $seconds;
+			},
+		)
+	);
+	$stream_retry_threw = false;
+	try {
+		$stream_retry_adapter->run_turn(
+			new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+				array( array( 'role' => 'user', 'content' => 'stream then fail' ) ),
+				array(),
+				array(),
+				array(),
+				array(),
+				array(),
+				'',
+				'',
+				array(),
+				static function ( array $delta ) use ( &$stream_retry_deltas ): void {
+					$stream_retry_deltas[] = $delta;
+				}
+			)
+		);
+	} catch ( \RuntimeException $error ) {
+		$stream_retry_threw = false !== strpos( $error->getMessage(), '503' );
+	}
+	agents_api_smoke_assert_equals( true, $stream_retry_threw, 'the transient failure remains visible after partial output', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, $stream_retry_attempts, 'provider dispatch is not repeated after exposing a partial response', $failures, $passes );
+	agents_api_smoke_assert_equals( array(), $stream_retry_sleeps, 'no retry backoff occurs after exposing a partial response', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'partial' ), array_column( $stream_retry_deltas, 'text' ), 'client receives the partial delta exactly once', $failures, $passes );
+
 	echo "\n[4] run_conversation() drives the loop end-to-end through the default adapter:\n";
 	$turn = 0;
 	$GLOBALS['__adapter_smoke'] = array();

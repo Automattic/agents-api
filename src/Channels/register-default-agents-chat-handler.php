@@ -81,6 +81,29 @@ class WP_Agent_Default_Chat_Handler {
 	 */
 	public static function register(): void {
 		register_chat_handler( array( self::class, 'execute' ), self::FALLBACK_PRIORITY );
+		add_filter(
+			'wp_agent_chat_stream_handler',
+			static function ( $existing, array $input ) {
+				unset( $input );
+				return null === $existing ? array( self::class, 'execute_stream' ) : $existing;
+			},
+			self::FALLBACK_PRIORITY,
+			2
+		);
+	}
+
+	/**
+	 * Execute one canonical streaming chat turn through the native runtime.
+	 *
+	 * Provider deltas are emitted only when canonical input explicitly requests
+	 * token streaming. The terminal output always matches execute().
+	 *
+	 * @param array<string,mixed> $input Canonical agents/chat input.
+	 * @param callable            $emit  Canonical provider delta sink.
+	 * @return array<string,mixed>|\WP_Error Canonical agents/chat output, or WP_Error.
+	 */
+	public static function execute_stream( array $input, callable $emit ) {
+		return self::execute_native( $input, true === ( $input['token_streaming'] ?? false ) ? $emit : null );
 	}
 
 	/**
@@ -90,6 +113,17 @@ class WP_Agent_Default_Chat_Handler {
 	 * @return array<string,mixed>|\WP_Error Canonical agents/chat output, or WP_Error.
 	 */
 	public static function execute( array $input ) {
+		return self::execute_native( $input );
+	}
+
+	/**
+	 * Execute one canonical chat turn with an optional provider delta sink.
+	 *
+	 * @param array<string,mixed> $input      Canonical agents/chat input.
+	 * @param callable|null       $delta_sink Request-scoped provider delta sink.
+	 * @return array<string,mixed>|\WP_Error Canonical agents/chat output, or WP_Error.
+	 */
+	private static function execute_native( array $input, ?callable $delta_sink = null ) {
 		$message = is_string( $input['message'] ?? null ) ? trim( $input['message'] ) : '';
 		if ( '' === $message ) {
 			return new \WP_Error( 'agents_chat_empty_message', 'Message cannot be empty.', array( 'status' => 400 ) );
@@ -213,6 +247,9 @@ class WP_Agent_Default_Chat_Handler {
 			// before a required commit, and a completion block until the commit
 			// tool runs — so the guarantee is the runtime's, not a prompt's.
 			$loop_options['tool_call_rules'] = $tool_call_rules;
+		}
+		if ( null !== $delta_sink ) {
+			$loop_options['on_provider_delta'] = $delta_sink;
 		}
 
 		$result = WP_Agent_Conversation_Loop::run_conversation(

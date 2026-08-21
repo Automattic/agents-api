@@ -45,6 +45,12 @@ class WP_Agent_Provider_Turn_Request {
 	/** @var array<string, mixed> Caller-owned metadata. */
 	private array $metadata;
 
+	/** @var callable|null Request-scoped provider delta sink. */
+	private $delta_sink;
+
+	/** Whether this provider turn has emitted at least one delta. */
+	private bool $deltas_emitted = false;
+
 	/**
 	 * @param array<mixed>         $messages          Canonical transcript messages.
 	 * @param array<mixed>         $tool_declarations Tool declarations keyed by name.
@@ -55,8 +61,9 @@ class WP_Agent_Provider_Turn_Request {
 	 * @param string               $run_id            Run identifier.
 	 * @param string               $session_id        Session identifier.
 	 * @param array<string, mixed> $metadata          Caller-owned metadata.
+	 * @param callable|null        $delta_sink        Request-scoped provider delta sink.
 	 */
-	public function __construct( array $messages, array $tool_declarations = array(), array $model = array(), array $runtime = array(), array $context = array(), array $budgets = array(), string $run_id = '', string $session_id = '', array $metadata = array() ) {
+	public function __construct( array $messages, array $tool_declarations = array(), array $model = array(), array $runtime = array(), array $context = array(), array $budgets = array(), string $run_id = '', string $session_id = '', array $metadata = array(), ?callable $delta_sink = null ) {
 		$this->messages          = WP_Agent_Message::normalize_many( $messages );
 		$this->tool_declarations = self::normalize_tool_declarations( $tool_declarations );
 		$this->model             = self::normalize_json_array( $model, 'model' );
@@ -66,6 +73,7 @@ class WP_Agent_Provider_Turn_Request {
 		$this->run_id            = $run_id;
 		$this->session_id        = $session_id;
 		$this->metadata          = self::normalize_json_array( $metadata, 'metadata' );
+		$this->delta_sink        = $delta_sink;
 	}
 
 	/** @return array<int, array<string, mixed>> Canonical transcript messages. */
@@ -111,6 +119,30 @@ class WP_Agent_Provider_Turn_Request {
 	/** @return array<string, mixed> Caller-owned metadata. */
 	public function metadata(): array {
 		return $this->metadata;
+	}
+
+	/** Whether this provider turn can emit request-scoped deltas. */
+	public function supportsStreaming(): bool {
+		return is_callable( $this->delta_sink );
+	}
+
+	/** Whether this provider turn has already emitted a delta. */
+	public function hasEmittedDeltas(): bool {
+		return $this->deltas_emitted;
+	}
+
+	/**
+	 * Emit one canonical provider delta when a sink is available.
+	 *
+	 * @param array<string, mixed> $delta Canonical provider delta.
+	 */
+	public function emitDelta( array $delta ): void {
+		if ( ! is_callable( $this->delta_sink ) ) {
+			return;
+		}
+
+		$this->deltas_emitted = true;
+		call_user_func( $this->delta_sink, self::normalize_json_array( $delta, 'delta' ) );
 	}
 
 	/**
