@@ -186,6 +186,7 @@ agents_api_smoke_assert_equals( true, $input['token_streaming'] ?? null, 'input 
 $input_schema = agents_chat_input_schema();
 $source_enum  = $input_schema['properties']['client_context']['properties']['source']['enum'] ?? array();
 agents_api_smoke_assert_equals( true, in_array( $input['client_context']['source'] ?? null, $source_enum, true ), 'input source is accepted by agents/chat schema', $failures, $passes );
+agents_api_smoke_assert_equals( 'boolean', $input_schema['properties']['token_streaming']['type'] ?? null, 'canonical agents/chat schema declares token streaming', $failures, $passes );
 agents_api_smoke_assert_equals( 'a.png', $input['attachments'][0]['name'] ?? null, 'input extracts file parts as attachments', $failures, $passes );
 
 $empty = agents_chat_jsonrpc_input_from_params( array( 'message' => array( 'parts' => array() ) ), 'support-agent' );

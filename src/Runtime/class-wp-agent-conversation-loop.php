@@ -84,6 +84,7 @@ class WP_Agent_Conversation_Loop {
 	 * - `transcript_persister` (WP_Agent_Transcript_Persister|null): Transcript persister.
 	 * - `runtime_tool_request_store` (WP_Agent_Runtime_Tool_Request_Store|null): Optional durable store for pending runtime-tool requests.
 	 * - `on_event` (callable|null): Caller-owned lifecycle event sink `fn(string $event, array $payload)`.
+	 * - `on_provider_delta` (callable|null): Request-scoped provider delta sink `fn(array $delta)`.
 	 *
 	 * @param array<int, array<string, mixed>> $messages    Initial transcript messages.
 	 * @param callable|null                    $turn_runner Caller-owned turn adapter.
@@ -1844,8 +1845,9 @@ class WP_Agent_Conversation_Loop {
 			throw new \InvalidArgumentException( 'invalid_agent_conversation_loop: provider_turn_adapter must implement WP_Agent_Provider_Turn_Adapter or be callable' );
 		}
 		$mediation_enabled = self::resolve_tool_executor( $options ) instanceof WP_Agent_Tool_Executor && ! empty( $tool_declarations );
+		$delta_sink        = is_callable( $options['on_provider_delta'] ?? null ) ? $options['on_provider_delta'] : null;
 
-		return static function ( array $messages, array $context ) use ( $adapter, $options, $tool_declarations, $run_id, $session_id, $request, $budgets, $mediation_enabled ): array {
+		return static function ( array $messages, array $context ) use ( $adapter, $options, $tool_declarations, $run_id, $session_id, $request, $budgets, $mediation_enabled, $delta_sink ): array {
 			$context          = self::normalize_assoc_array( $context );
 			$provider_request = new WP_Agent_Provider_Turn_Request(
 				$messages,
@@ -1856,7 +1858,8 @@ class WP_Agent_Conversation_Loop {
 				self::provider_turn_budget_metadata( $budgets ),
 				$run_id,
 				$session_id,
-				$request->metadata()
+				$request->metadata(),
+				$delta_sink
 			);
 
 			$raw_result = call_user_func( $adapter, $provider_request );

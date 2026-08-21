@@ -67,6 +67,7 @@ $executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
 };
 
 echo "\n[1] Provider-turn request and result contracts normalize neutral fields:\n";
+$request_deltas = array();
 $request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
 	array( array( 'role' => 'user', 'content' => 'hello' ) ),
 	$tools,
@@ -76,7 +77,10 @@ $request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
 	array( 'turns' => array( 'current' => 0, 'limit' => 3 ) ),
 	'run-123',
 	'session-456',
-	array( 'trace_id' => 'trace-789' )
+	array( 'trace_id' => 'trace-789' ),
+	static function ( array $delta ) use ( &$request_deltas ): void {
+		$request_deltas[] = $delta;
+	}
 );
 
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Message::SCHEMA, $request->messages()[0]['schema'], 'provider request messages normalize to canonical envelopes', $failures, $passes );
@@ -89,6 +93,12 @@ agents_api_smoke_assert_equals( 'fake-provider', $request->model()['provider_id'
 agents_api_smoke_assert_equals( 'fake-runtime', $request->runtime()['runtime_id'], 'provider request carries runtime metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'run-123', $request->runId(), 'provider request carries run id', $failures, $passes );
 agents_api_smoke_assert_equals( 'session-456', $request->sessionId(), 'provider request carries session id', $failures, $passes );
+agents_api_smoke_assert_equals( true, $request->supportsStreaming(), 'provider request reports an available delta sink', $failures, $passes );
+agents_api_smoke_assert_equals( false, $request->hasEmittedDeltas(), 'provider request starts without emitted deltas', $failures, $passes );
+$request->emitDelta( array( 'type' => 'content', 'text' => 'mise' ) );
+agents_api_smoke_assert_equals( array( array( 'type' => 'content', 'text' => 'mise' ) ), $request_deltas, 'provider request emits normalized deltas to its request-scoped sink', $failures, $passes );
+agents_api_smoke_assert_equals( true, $request->hasEmittedDeltas(), 'provider request records that client-visible output started', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'delta_sink', $request->to_array() ), 'provider request serialization excludes the executable delta sink', $failures, $passes );
 
 $host_tool = AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration::normalizeForConversationRequest(
 	array(
@@ -201,6 +211,7 @@ agents_api_smoke_assert_equals( 1, count( $deduped_turn['tool_calls'] ), 'fallba
 
 echo "\n[2] Conversation loop can run through a fake provider-turn adapter without product runtime coupling:\n";
 $adapter_calls = array();
+$provider_deltas = array();
 $adapter       = new class( $adapter_calls ) implements AgentsAPI\AI\WP_Agent_Provider_Turn_Adapter {
 	/** @var array<int, array<string, mixed>> Captured requests. */
 	public array $requests = array();
@@ -215,6 +226,7 @@ $adapter       = new class( $adapter_calls ) implements AgentsAPI\AI\WP_Agent_Pr
 	public function run_turn( AgentsAPI\AI\WP_Agent_Provider_Turn_Request $request ): array {
 		$this->requests[] = $request->to_array();
 		$turn             = (int) ( $request->context()['turn'] ?? 0 );
+		$request->emitDelta( array( 'type' => 'content', 'text' => 'turn-' . $turn ) );
 
 		if ( 1 === $turn ) {
 			return array(
@@ -257,10 +269,14 @@ $result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 			'model_id'     => 'fake-model',
 			'request_kind' => 'smoke',
 		),
+		'on_provider_delta'     => static function ( array $delta ) use ( &$provider_deltas ): void {
+			$provider_deltas[] = $delta;
+		},
 	)
 );
 
 agents_api_smoke_assert_equals( 2, count( $adapter->requests ), 'loop called provider adapter for tool and final turns', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'turn-1', 'turn-2' ), array_column( $provider_deltas, 'text' ), 'loop supplies the request-scoped delta sink to every provider turn', $failures, $passes );
 agents_api_smoke_assert_equals( 'fake-provider', $adapter->requests[0]['model']['provider_id'], 'provider adapter receives model metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'smoke', $adapter->requests[0]['runtime']['request_kind'], 'provider adapter receives runtime metadata', $failures, $passes );
 agents_api_smoke_assert_equals( 'run-loop-1', $adapter->requests[0]['run_id'], 'provider adapter receives run id', $failures, $passes );

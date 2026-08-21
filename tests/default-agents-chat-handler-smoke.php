@@ -479,6 +479,7 @@ namespace {
 
 	use function AgentsAPI\AI\Channels\agents_chat_dispatch;
 	use function AgentsAPI\AI\Channels\register_chat_handler;
+	use function AgentsAPI\AI\Channels\register_chat_stream_handler;
 
 	// Mark `init` as fired so the registry can be read, then register an agent
 	// directly. This mirrors a runtime-bundle import that registered an agent
@@ -839,7 +840,60 @@ namespace {
 	$no_model = AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::execute( array( 'agent' => 'no-model-brain', 'message' => 'hi' ) );
 	agents_api_smoke_assert_equals( 'agents_chat_model_required', $no_model instanceof WP_Error ? $no_model->get_error_code() : '', 'missing model is rejected', $failures, $passes );
 
-	echo "\n[4] The default handler is a fallback: an explicit consumer runtime wins:\n";
+	echo "\n[4] Default streaming threads requested provider deltas through native execution:\n";
+	$registry->register(
+		'stream-brain',
+		array(
+			'label'          => 'Stream Brain',
+			'default_config' => array( 'provider' => 'fake-provider', 'model' => 'fake-model' ),
+		)
+	);
+	$streaming_support = array();
+	add_filter(
+		'wp_agent_provider_turn_dispatch',
+		static function ( $dispatcher, $request ) use ( $make_result, &$streaming_support ) {
+			if ( ! $request instanceof \AgentsAPI\AI\WP_Agent_Provider_Turn_Request || 'stream-brain' !== ( $request->context()['agent_slug'] ?? '' ) ) {
+				return $dispatcher;
+			}
+
+			return static function ( array $payload ) use ( $request, $make_result, &$streaming_support ) {
+				unset( $payload );
+				$streaming_support[] = $request->supportsStreaming();
+				$request->emitDelta( array( 'type' => 'content', 'text' => 'All ' ) );
+				$request->emitDelta( array( 'type' => 'content', 'text' => 'set.' ) );
+				return $make_result( 'All set.', array(), array( 2, 2, 4 ) );
+			};
+		},
+		20,
+		2
+	);
+
+	$default_stream_handler = apply_filters( 'wp_agent_chat_stream_handler', null, array( 'agent' => 'stream-brain' ) );
+	agents_api_smoke_assert_equals( true, is_callable( $default_stream_handler ), 'default handler registers a fallback streaming sibling', $failures, $passes );
+	$streamed_deltas        = array();
+	$streamed_output        = call_user_func(
+		$default_stream_handler,
+		array( 'agent' => 'stream-brain', 'message' => 'stream', 'token_streaming' => true ),
+		static function ( array $delta ) use ( &$streamed_deltas ): void {
+			$streamed_deltas[] = $delta;
+		}
+	);
+	agents_api_smoke_assert_equals( array( 'All ', 'set.' ), array_column( $streamed_deltas, 'text' ), 'requested provider deltas retain emission order', $failures, $passes );
+	agents_api_smoke_assert_equals( 'All set.', $streamed_output['reply'] ?? '', 'streaming execution returns the same canonical terminal output', $failures, $passes );
+
+	$terminal_only_deltas = array();
+	$terminal_only_output = call_user_func(
+		$default_stream_handler,
+		array( 'agent' => 'stream-brain', 'message' => 'terminal only', 'token_streaming' => false ),
+		static function ( array $delta ) use ( &$terminal_only_deltas ): void {
+			$terminal_only_deltas[] = $delta;
+		}
+	);
+	agents_api_smoke_assert_equals( array( true, false ), $streaming_support, 'provider request exposes a sink only when token streaming is requested', $failures, $passes );
+	agents_api_smoke_assert_equals( array(), $terminal_only_deltas, 'token_streaming false suppresses provider deltas', $failures, $passes );
+	agents_api_smoke_assert_equals( 'All set.', $terminal_only_output['reply'] ?? '', 'terminal-only streaming still completes through native execution', $failures, $passes );
+
+	echo "\n[5] The default handlers are fallbacks: explicit consumer runtimes win:\n";
 	// A consumer registers at the default priority (10); the default sits at 1000.
 	register_chat_handler(
 		static function ( array $input ): array {
@@ -853,12 +907,17 @@ namespace {
 	$dispatched = agents_chat_dispatch( array( 'agent' => 'kitchen-brain', 'message' => 'who answers?' ) );
 	agents_api_smoke_assert_equals( 'consumer reply', $dispatched['reply'] ?? null, 'an explicit consumer handler overrides the default fallback', $failures, $passes );
 	agents_api_smoke_assert_equals( 0, count( $GLOBALS['__chat_handler_ability_calls'] ), 'the default loop did not run when a consumer handler is present', $failures, $passes );
+	$consumer_stream_handler = static fn( array $input, callable $emit ): array => array( 'reply' => 'consumer stream' );
+	register_chat_stream_handler( $consumer_stream_handler, 10 );
+	agents_api_smoke_assert_equals( $consumer_stream_handler, apply_filters( 'wp_agent_chat_stream_handler', null, array() ), 'an explicit consumer stream handler overrides the default fallback', $failures, $passes );
 
-	echo "\n[5] With no consumer registered, dispatch resolves to the default native handler:\n";
+	echo "\n[6] With no consumer registered, dispatch resolves to the default native handlers:\n";
 	if ( function_exists( 'remove_all_filters' ) ) {
 		remove_all_filters( 'wp_agent_chat_handler' );
+		remove_all_filters( 'wp_agent_chat_stream_handler' );
 	} else {
 		unset( $GLOBALS['__agents_api_smoke_actions']['wp_agent_chat_handler'] );
+		unset( $GLOBALS['__agents_api_smoke_actions']['wp_agent_chat_stream_handler'] );
 	}
 	// Re-register only the default (module load already did, but filters were just cleared).
 	AgentsAPI\AI\Channels\WP_Agent_Default_Chat_Handler::register();
@@ -868,6 +927,7 @@ namespace {
 	agents_api_smoke_assert_equals( false, $dispatched_default instanceof WP_Error, 'dispatch resolves to the default native handler with no consumer present', $failures, $passes );
 	agents_api_smoke_assert_equals( 'All set, chef.', $dispatched_default['reply'] ?? null, 'the default native handler answers through agents/chat dispatch', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__chat_handler_ability_calls'] ), 'the default native loop mediated the tool call via dispatch', $failures, $passes );
+	agents_api_smoke_assert_equals( true, is_callable( apply_filters( 'wp_agent_chat_stream_handler', null, array() ) ), 'default registration restores the native streaming sibling', $failures, $passes );
 
 	agents_api_smoke_finish( 'Agents API default agents/chat handler', $failures, $passes );
 }

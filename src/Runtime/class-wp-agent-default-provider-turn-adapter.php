@@ -276,7 +276,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			};
 		}
 
-		$result = $this->dispatch_with_retry( $dispatch, $provider_id, $model_id );
+		$result = $this->dispatch_with_retry( $dispatch, $provider_id, $model_id, array( $request, 'hasEmittedDeltas' ) );
 
 		if ( function_exists( 'is_wp_error' ) && is_wp_error( $result ) ) {
 			throw new \RuntimeException( 'wp-ai-client request failed: ' . $result->get_error_message() );
@@ -324,9 +324,10 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 *                                 GenerativeAiResult or WP_Error (or throwing).
 	 * @param string      $provider_id Resolved provider id (retry policy context + event).
 	 * @param string      $model_id    Resolved model id (retry policy context + event).
+	 * @param callable|null $has_emitted_deltas Reports whether the current attempt emitted client-visible deltas.
 	 * @return mixed The successful result, or the last non-retryable / exhausted WP_Error.
 	 */
-	private function dispatch_with_retry( callable $dispatch, string $provider_id, string $model_id ) {
+	private function dispatch_with_retry( callable $dispatch, string $provider_id, string $model_id, ?callable $has_emitted_deltas = null ) {
 		$policy       = $this->resolve_retry_policy( $provider_id, $model_id );
 		$max_attempts = $policy['max_attempts'];
 		$attempt      = 1;
@@ -359,7 +360,9 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 				}
 			}
 
-			if ( $attempt >= $max_attempts ) {
+			// Retrying after exposing a partial response would duplicate or reorder
+			// client-visible content. Surface that attempt's failure unchanged.
+			if ( ( null !== $has_emitted_deltas && true === call_user_func( $has_emitted_deltas ) ) || $attempt >= $max_attempts ) {
 				// Budget exhausted: surface the original transient failure unchanged.
 				if ( null !== $caught ) {
 					throw $caught;

@@ -467,6 +467,11 @@ function agents_chat_input_schema(): array {
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Optional client-supplied idempotency/run key. If omitted, the dispatcher provides an opaque run ID to the runtime and response.',
 			),
+			'token_streaming'       => array(
+				'type'        => 'boolean',
+				'description' => 'Whether a streaming transport should expose provider-token deltas when the selected provider dispatcher supports them.',
+				'default'     => false,
+			),
 			'principal'             => agents_chat_principal_schema(),
 			'session_owner'         => agents_chat_session_owner_schema(),
 			'attachments'           => array(
