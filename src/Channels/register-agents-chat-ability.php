@@ -730,6 +730,7 @@ function agents_chat_output_schema(): array {
 				'description' => 'Whether the agent considers this turn complete (true) or expects further work (false, e.g. tool approvals pending).',
 			),
 			'structured_output' => array(
+				'type'        => array( 'object', 'array', 'string', 'number', 'integer', 'boolean', 'null' ),
 				'description' => 'Parsed JSON value returned for a structured-output request. The key is present even when the valid value is null.',
 			),
 			'status'     => agents_chat_status_schema(),

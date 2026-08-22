@@ -418,12 +418,49 @@ namespace {
 	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( '{"items":[1,2]}', array(), array( 1, 1, 2 ) );
 	$structured_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
 		array( array( 'role' => 'user', 'content' => 'return JSON' ) ), array(), array(), array(), array(), array(), '', '', array(), null,
-		new AgentsAPI\AI\WP_Agent_Structured_Output_Request( array( 'type' => 'object', 'properties' => array( 'items' => array( 'type' => 'array' ) ) ), 'result', true )
+		new AgentsAPI\AI\WP_Agent_Structured_Output_Request( array( 'type' => 'object', 'required' => array( 'items' ), 'properties' => array( 'items' => array( 'type' => 'array' ) ) ), 'result', true )
 	);
 	$structured_result = $adapter->run_turn( $structured_request );
 	agents_api_smoke_assert_equals( 'application/json', $GLOBALS['__adapter_smoke']['output_mime_type'] ?? '', 'structured output selects JSON MIME output through the public builder API', $failures, $passes );
 	agents_api_smoke_assert_equals( 'object', $GLOBALS['__adapter_smoke']['output_schema']['type'] ?? '', 'structured output maps the requested JSON Schema through the public builder API', $failures, $passes );
-	agents_api_smoke_assert_equals( array( 1, 2 ), $structured_result['structured_output']['parsed']['items'] ?? null, 'structured output parses the provider JSON response', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 1, 2 ), $structured_result['structured_output']['parsed']->items ?? null, 'structured output parses the provider JSON response as an object', $failures, $passes );
+
+	$shape_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+		array( array( 'role' => 'user', 'content' => 'return JSON' ) ), array(), array(), array(), array(), array(), '', '', array(), null,
+		new AgentsAPI\AI\WP_Agent_Structured_Output_Request( array( 'type' => 'object' ), null, false )
+	);
+	foreach ( array( '{}' => 'object', '[]' => 'array', '{"key":"value"}' => 'object', '[1,2]' => 'array', '"text"' => 'string', '42' => 'integer', 'true' => 'boolean', 'null' => 'NULL' ) as $json => $expected_type ) {
+		$GLOBALS['__adapter_smoke']['next_result'] = $make_result( $json, array(), array( 1, 1, 2 ) );
+		$value = $adapter->run_turn( $shape_request )['structured_output']['parsed'];
+		$actual_type = $value instanceof \stdClass ? 'object' : ( is_array( $value ) ? 'array' : gettype( $value ) );
+		agents_api_smoke_assert_equals( $expected_type, $actual_type, 'structured output preserves JSON ' . $expected_type . ' shape', $failures, $passes );
+	}
+
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( '{"wrong":true}', array(), array( 1, 1, 2 ) );
+	$mismatch = $adapter->run_turn( $structured_request );
+	agents_api_smoke_assert_equals( 'structured_output_schema_mismatch', $mismatch['failure']['type'] ?? '', 'strict structured output returns a typed schema mismatch', $failures, $passes );
+	agents_api_smoke_assert_equals( false, str_contains( wp_json_encode( $mismatch ), 'wrong' ), 'strict schema mismatch does not expose raw provider output', $failures, $passes );
+
+	$permissive_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+		array( array( 'role' => 'user', 'content' => 'return JSON' ) ), array(), array(), array(), array(), array(), '', '', array(), null,
+		new AgentsAPI\AI\WP_Agent_Structured_Output_Request( array( 'type' => 'object', 'required' => array( 'required' ) ), null, false )
+	);
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( '{"wrong":true}', array(), array( 1, 1, 2 ) );
+	$permissive = $adapter->run_turn( $permissive_request );
+	agents_api_smoke_assert_equals( true, isset( $permissive['structured_output'] ), 'non-strict structured output preserves parse-only behavior', $failures, $passes );
+
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( '{bad', array(), array( 1, 1, 2 ) );
+	$invalid_json = $adapter->run_turn( $structured_request );
+	agents_api_smoke_assert_equals( 'structured_output_invalid_json', $invalid_json['failure']['type'] ?? '', 'invalid JSON returns a typed structured-output failure', $failures, $passes );
+
+	$host_payload = null;
+	$host_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', '', array( 'dispatch_provider' => static function ( array $payload ) use ( &$host_payload, $make_result ) {
+		$host_payload = $payload;
+		return $make_result( '{"items":[]}', array(), array( 1, 1, 2 ) );
+	} ) );
+	$host_result = $host_adapter->run_turn( $structured_request );
+	agents_api_smoke_assert_equals( 'json_schema', $host_payload['structured_output']['format'] ?? '', 'host dispatch payload includes normalized structured output', $failures, $passes );
+	agents_api_smoke_assert_equals( true, $host_result['structured_output']['parsed'] instanceof \stdClass, 'host dispatch result follows the shared structured parse tail', $failures, $passes );
 
 	echo "\n[1b] request timeout is configurable and honors a caller-supplied override + filter:\n";
 	$GLOBALS['__adapter_smoke']                = array();

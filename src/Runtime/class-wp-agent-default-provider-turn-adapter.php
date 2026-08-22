@@ -300,6 +300,13 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 					'provider_diagnostics' => array( 'structured_output' => array( 'status' => 'invalid_json' ) ),
 				);
 			}
+			$validation_failure = $structured_output->strict() ? $structured_output->validate( $parsed['value'] ) : null;
+			if ( null !== $validation_failure ) {
+				return array(
+					'failure' => array( 'type' => 'structured_output_schema_mismatch', 'message' => 'Provider structured output does not match the requested schema.' ),
+					'provider_diagnostics' => array( 'structured_output' => array( 'status' => 'schema_mismatch', 'code' => $validation_failure ) ),
+				);
+			}
 			$normalized['structured_output'] = array( 'parsed' => $parsed['value'], 'diagnostics' => array( 'status' => 'parsed' ) );
 		}
 		return $normalized;
@@ -724,11 +731,11 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 
 	/** @return array{valid:bool,value:mixed} */
 	private static function parse_structured_output( string $text ): array {
-		$value = json_decode( $text, true );
-		return array(
-			'valid' => JSON_ERROR_NONE === json_last_error(),
-			'value' => $value,
-		);
+		try {
+			return array( 'valid' => true, 'value' => json_decode( $text, false, 512, JSON_THROW_ON_ERROR ) );
+		} catch ( \JsonException $error ) {
+			return array( 'valid' => false, 'value' => null );
+		}
 	}
 
 	/**
