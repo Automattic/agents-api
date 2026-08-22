@@ -38,8 +38,8 @@ class WP_Agent_Conversation_Result {
 	 * `tool_execution_results` is optional because a valid no-tool response has
 	 * no tool output; when omitted it normalizes to an empty list.
 	 *
-	 * @param array<mixed> $result Raw loop result.
-	 * @return array<mixed> Normalized loop result.
+	 * @param array<string,mixed> $result Raw loop result.
+	 * @return array<string,mixed> Normalized loop result.
 	 * @throws \InvalidArgumentException When the result shape is invalid.
 	 */
 	public static function normalize( array $result ): array {
@@ -227,6 +227,14 @@ class WP_Agent_Conversation_Result {
 
 		if ( array_key_exists( 'provider_diagnostics', $result ) && ! is_array( $result['provider_diagnostics'] ) ) {
 			throw self::invalid( 'provider_diagnostics', 'must be an array when present' );
+		}
+
+		if ( array_key_exists( 'structured_output', $result ) && false === wp_json_encode( $result['structured_output'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ) {
+			throw self::invalid( 'structured_output', 'must be JSON serializable' );
+		}
+
+		if ( array_key_exists( 'structured_output_diagnostics', $result ) && ! is_array( $result['structured_output_diagnostics'] ) ) {
+			throw self::invalid( 'structured_output_diagnostics', 'must be an array when present' );
 		}
 
 		if ( array_key_exists( 'completed', $result ) && ! is_bool( $result['completed'] ) ) {

@@ -491,6 +491,16 @@ function agents_chat_input_schema(): array {
 				'description' => 'Whether a streaming transport should expose provider-token deltas when the selected provider dispatcher supports them.',
 				'default'     => false,
 			),
+			'structured_output'     => array(
+				'type'        => array( 'object', 'null' ),
+				'description' => 'Optional JSON Schema structured-output request. Structured turns run without tools or token streaming.',
+				'properties'  => array(
+					'format' => array( 'type' => 'string', 'enum' => array( 'json_schema' ) ),
+					'name'   => array( 'type' => array( 'string', 'null' ) ),
+					'schema' => array( 'type' => 'object' ),
+					'strict' => array( 'type' => 'boolean' ),
+				),
+			),
 			'principal'             => agents_chat_principal_schema(),
 			'session_owner'         => agents_chat_session_owner_schema(),
 			'attachments'           => array(
@@ -718,6 +728,10 @@ function agents_chat_output_schema(): array {
 			'completed'  => array(
 				'type'        => 'boolean',
 				'description' => 'Whether the agent considers this turn complete (true) or expects further work (false, e.g. tool approvals pending).',
+			),
+			'structured_output' => array(
+				'type'        => array( 'object', 'array', 'string', 'number', 'integer', 'boolean', 'null' ),
+				'description' => 'Parsed JSON value returned for a structured-output request. The key is present even when the valid value is null.',
 			),
 			'status'     => agents_chat_status_schema(),
 			'runtime_tool_pending' => agents_chat_runtime_tool_pending_schema(),

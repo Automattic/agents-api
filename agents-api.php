@@ -243,6 +243,8 @@ require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-outcome.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-package-run-request.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-runtime-package-run-result.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-result.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-structured-output-request.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-structured-output-capability-exception.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-chat-run-control.php';
 require_once AGENTS_API_PATH . 'src/Tasks/class-wp-agent-task-run-control.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-conversation-loop.php';

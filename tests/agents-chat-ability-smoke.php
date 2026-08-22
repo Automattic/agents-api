@@ -222,6 +222,7 @@ smoke_assert( true, agents_chat_permission( array() ), 'permission_filter_widens
 $in = agents_chat_input_schema();
 smoke_assert( array( 'agent' ), $in['required'] ?? array(), 'input_schema_required_fields', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['input_messages'] ), 'input_schema_has_canonical_input_messages', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['structured_output']['properties']['schema'] ), 'input_schema_has_structured_output', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context'] ), 'input_schema_has_client_context', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['workspace']['properties']['workspace_type'] ), 'input_schema_has_canonical_workspace', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['session_owner'] ), 'input_schema_has_session_owner', $failures, $passes );
@@ -246,6 +247,7 @@ smoke_assert( true, isset( $in['properties']['principal']['properties']['auth_so
 
 $out_schema = agents_chat_output_schema();
 smoke_assert( array( 'session_id', 'reply' ), $out_schema['required'] ?? array(), 'output_schema_required_fields', $failures, $passes );
+smoke_assert( true, array_key_exists( 'structured_output', $out_schema['properties'] ?? array() ), 'output_schema_has_additive_structured_output', $failures, $passes );
 smoke_assert( array( 1 ), $out_schema['properties']['metadata']['properties']['agents_api']['properties']['tool_observability']['properties']['version']['enum'] ?? array(), 'output_schema_documents_tool_observability_v1', $failures, $passes );
 smoke_assert( array( 'pending', 'succeeded', 'failed', 'rejected' ), $out_schema['properties']['metadata']['properties']['agents_api']['properties']['tool_observability']['properties']['calls']['items']['properties']['status']['enum'] ?? array(), 'output_schema_documents_tool_statuses', $failures, $passes );
 smoke_assert( AgentsAPI\AI\WP_Agent_Run_Outcome::statuses(), $out_schema['properties']['status']['enum'] ?? array(), 'output_schema_documents_canonical_statuses', $failures, $passes );

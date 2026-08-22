@@ -386,4 +386,54 @@ agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCO
 agents_api_smoke_assert_equals( AgentsAPI\AI\WP_Agent_Conversation_Result::OUTCOME_STOP_PROVIDER_ERROR, $failure_result['run_outcome']['stop_reason'] ?? '', 'provider failure run outcome stop reason is provider error', $failures, $passes );
 agents_api_smoke_assert_equals( 'rate_limit', $failure_result['run_outcome']['provider_error']['type'] ?? '', 'provider failure run outcome preserves provider error', $failures, $passes );
 
+echo "\n[6] Structured output normalizes and reaches the terminal result:\n";
+$structured_request = new AgentsAPI\AI\WP_Agent_Structured_Output_Request(
+	array( 'type' => 'object', 'properties' => array( 'value' => array( 'type' => 'string' ) ) ),
+	' normalized_result ',
+	true
+);
+agents_api_smoke_assert_equals( 'normalized_result', $structured_request->to_array()['name'] ?? '', 'structured-output request normalizes its optional name', $failures, $passes );
+$invalid_structured = false;
+try {
+	AgentsAPI\AI\WP_Agent_Structured_Output_Request::from_array( array( 'format' => 'text', 'schema' => array(), 'strict' => 'yes' ) );
+} catch ( \InvalidArgumentException $error ) {
+	$invalid_structured = true;
+}
+agents_api_smoke_assert_equals( true, $invalid_structured, 'structured-output request rejects malformed configuration deterministically', $failures, $passes );
+
+foreach ( array( array( 'object' => true ), array( 'first', 2 ), 'scalar', null ) as $index => $value ) {
+	$normalized_structured = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize( array( 'structured_output' => array( 'parsed' => $value ) ) );
+	agents_api_smoke_assert_equals( $value, $normalized_structured['structured_output']['parsed'], 'structured-output result preserves JSON value shape ' . $index, $failures, $passes );
+}
+$missing_parsed = false;
+try {
+	AgentsAPI\AI\WP_Agent_Provider_Turn_Result::normalize( array( 'structured_output' => array() ) );
+} catch ( \InvalidArgumentException $error ) {
+	$missing_parsed = true;
+}
+agents_api_smoke_assert_equals( true, $missing_parsed, 'structured-output result rejects a missing parsed value without conflating it with null', $failures, $passes );
+
+$structured_adapter = new class() implements AgentsAPI\AI\WP_Agent_Provider_Turn_Adapter {
+	public array $payload = array();
+	public function run_turn( AgentsAPI\AI\WP_Agent_Provider_Turn_Request $request ): array {
+		$this->payload = $request->to_array();
+		return array( 'content' => 'JSON reply', 'structured_output' => array( 'parsed' => null, 'diagnostics' => array( 'status' => 'parsed', 'raw_response' => 'private' ) ) );
+	}
+};
+$structured_loop = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'return null' ) ),
+	null,
+	array( 'provider_turn_adapter' => $structured_adapter, 'structured_output' => $structured_request )
+);
+agents_api_smoke_assert_equals( 'json_schema', $structured_adapter->payload['structured_output']['format'] ?? '', 'provider dispatch payload includes the normalized structured-output contract', $failures, $passes );
+agents_api_smoke_assert_equals( true, array_key_exists( 'structured_output', $structured_loop ) && null === $structured_loop['structured_output'], 'terminal loop result preserves a valid null structured value', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'status' => 'parsed' ), $structured_loop['structured_output_diagnostics'] ?? null, 'terminal result strips raw structured-output diagnostics', $failures, $passes );
+$incompatible_structured = false;
+try {
+	AgentsAPI\AI\WP_Agent_Conversation_Loop::run( array( array( 'role' => 'user', 'content' => 'no' ) ), null, array( 'provider_turn_adapter' => $structured_adapter, 'structured_output' => $structured_request, 'tool_declarations' => $tools, 'tool_executor' => $executor ) );
+} catch ( \InvalidArgumentException $error ) {
+	$incompatible_structured = true;
+}
+agents_api_smoke_assert_equals( true, $incompatible_structured, 'structured output fails closed when tools are configured', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API provider-turn adapter', $failures, $passes );

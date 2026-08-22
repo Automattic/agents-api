@@ -266,13 +266,14 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 		$function_declarations = self::function_declarations( $request->toolDeclarations() );
 
 		$dispatcher = $this->resolve_dispatch_provider( $request, $provider_id, $model_id );
+		$structured_output = $request->structuredOutput();
 		if ( null !== $dispatcher ) {
 			$dispatch = function () use ( $dispatcher, $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations ) {
 				return $this->dispatch_via_provider( $dispatcher, $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations );
 			};
 		} else {
-			$dispatch = function () use ( $provider_id, $model_id, $system_prompt, $prompt_context, $function_declarations ) {
-				return $this->dispatch_via_bare_builder( $provider_id, $model_id, $system_prompt, $prompt_context, $function_declarations );
+			$dispatch = function () use ( $provider_id, $model_id, $system_prompt, $prompt_context, $function_declarations, $structured_output ) {
+				return $this->dispatch_via_bare_builder( $provider_id, $model_id, $system_prompt, $prompt_context, $function_declarations, $structured_output );
 			};
 		}
 
@@ -282,7 +283,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			throw new \RuntimeException( 'wp-ai-client request failed: ' . $result->get_error_message() );
 		}
 
-		return array(
+		$normalized = array(
 			'content'          => WP_Agent_Provider_Turn_Result::result_text( $result ),
 			'tool_calls'       => WP_Agent_Provider_Turn_Result::extract_tool_calls( $result ),
 			'usage'            => WP_Agent_Provider_Turn_Result::result_usage( $result ),
@@ -291,6 +292,24 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 				'model_id'    => $model_id,
 			),
 		);
+		if ( null !== $structured_output ) {
+			$parsed = self::parse_structured_output( WP_Agent_Provider_Turn_Result::result_text( $result ) );
+			if ( ! $parsed['valid'] ) {
+				return array(
+					'failure' => array( 'type' => 'structured_output_invalid_json', 'message' => 'Provider returned invalid JSON for the requested structured output.' ),
+					'provider_diagnostics' => array( 'structured_output' => array( 'status' => 'invalid_json' ) ),
+				);
+			}
+			$validation_failure = $structured_output->strict() ? $structured_output->validate( $parsed['value'] ) : null;
+			if ( null !== $validation_failure ) {
+				return array(
+					'failure' => array( 'type' => 'structured_output_schema_mismatch', 'message' => 'Provider structured output does not match the requested schema.' ),
+					'provider_diagnostics' => array( 'structured_output' => array( 'status' => 'schema_mismatch', 'code' => $validation_failure ) ),
+				);
+			}
+			$normalized['structured_output'] = array( 'parsed' => $parsed['value'], 'diagnostics' => array( 'status' => 'parsed' ) );
+		}
+		return $normalized;
 	}
 
 	/**
@@ -639,7 +658,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 * @param array<int,object>                                               $function_declarations Mapped function declarations.
 	 * @return mixed wp-ai-client GenerativeAiResult or WP_Error.
 	 */
-	private function dispatch_via_bare_builder( string $provider_id, string $model_id, string $system_prompt, array $prompt_context, array $function_declarations ) {
+	private function dispatch_via_bare_builder( string $provider_id, string $model_id, string $system_prompt, array $prompt_context, array $function_declarations, ?WP_Agent_Structured_Output_Request $structured_output = null ) {
 		if ( ! function_exists( 'wp_ai_client_prompt' ) ) {
 			throw new \RuntimeException( 'wp-ai-client is unavailable: wp_ai_client_prompt() is not defined.' );
 		}
@@ -695,9 +714,28 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			$builder = $builder->using_function_declarations( ...$function_declarations );
 		}
 
+		if ( null !== $structured_output ) {
+			if ( ! is_callable( array( $builder, 'as_output_mime_type' ) ) || ! is_callable( array( $builder, 'as_output_schema' ) ) ) {
+				throw new WP_Agent_Structured_Output_Capability_Exception( 'The installed wp-ai-client does not support JSON Schema output. Upgrade wp-ai-client or provide a host provider-turn dispatcher.' );
+			}
+			// The public wp-ai-client builder is fluent; keep the original typed builder
+			// reference so its magic proxy remains compatible across client versions.
+			$builder->as_output_mime_type( 'application/json' );
+			$builder->as_output_schema( $structured_output->schema() );
+		}
+
 		$builder = $this->apply_request_timeout( $builder );
 
 		return $builder->generate_text_result();
+	}
+
+	/** @return array{valid:bool,value:mixed} */
+	private static function parse_structured_output( string $text ): array {
+		try {
+			return array( 'valid' => true, 'value' => json_decode( $text, false, 512, JSON_THROW_ON_ERROR ) );
+		} catch ( \JsonException $error ) {
+			return array( 'valid' => false, 'value' => null );
+		}
 	}
 
 	/**
@@ -899,6 +937,9 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			'options'               => $this->options,
 			'request'               => $request,
 		);
+		if ( null !== $request->structuredOutput() ) {
+			$payload['structured_output'] = $request->structuredOutput()->to_array();
+		}
 
 		return call_user_func( $dispatcher, $payload );
 	}

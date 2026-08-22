@@ -99,6 +99,14 @@ class WP_Agent_Conversation_Loop {
 		$tool_executor         = self::resolve_tool_executor( $options );
 		$rejected_declarations = array();
 		$tool_declarations     = self::resolve_tool_declarations( $options, $rejected_declarations );
+		if ( array_key_exists( 'structured_output', $options ) && null !== $options['structured_output'] ) {
+			if ( ! $options['structured_output'] instanceof WP_Agent_Structured_Output_Request ) {
+				WP_Agent_Structured_Output_Request::from_array( $options['structured_output'] );
+			}
+			if ( ! empty( $tool_declarations ) || is_callable( $options['on_provider_delta'] ?? null ) ) {
+				throw new \InvalidArgumentException( 'invalid_agent_structured_output_request: structured output requires a no-tools, non-streaming turn' );
+			}
+		}
 		$should_continue       = self::resolve_should_continue( $options, $tool_executor, $tool_declarations );
 		$completion_policy     = self::resolve_completion_policy( $options );
 		$transcript_persister  = self::resolve_transcript_persister( $options );
@@ -169,6 +177,9 @@ class WP_Agent_Conversation_Loop {
 		$result_metadata      = array();
 		$request_metadata     = array();
 		$provider_diagnostics = array();
+		$structured_output     = null;
+		$structured_output_set = false;
+		$structured_diagnostics = array();
 
 		if ( null !== $transcript_lock && '' !== $lock_session_id ) {
 			$lock_token = $transcript_lock->acquire_session_lock( $lock_session_id, $lock_ttl );
@@ -320,6 +331,11 @@ class WP_Agent_Conversation_Loop {
 				if ( isset( $result['metadata'] ) && is_array( $result['metadata'] ) ) {
 					$result_metadata = array_merge( $result_metadata, self::normalize_assoc_array( $result['metadata'] ) );
 				}
+				if ( isset( $result['structured_output'] ) && is_array( $result['structured_output'] ) && array_key_exists( 'parsed', $result['structured_output'] ) ) {
+					$structured_output     = $result['structured_output']['parsed'];
+					$structured_output_set = true;
+					$structured_diagnostics = is_array( $result['structured_output']['diagnostics'] ?? null ) ? self::structured_output_diagnostics( $result['structured_output']['diagnostics'] ) : array();
+				}
 
 				// When mediation is enabled, the turn runner returns tool_calls
 				// and the loop handles execution. Otherwise, the caller-managed path applies.
@@ -405,7 +421,7 @@ class WP_Agent_Conversation_Loop {
 					}
 				} else {
 					// Caller-managed path: turn runner handles everything internally.
-					$result       = self::normalize_conversation_result( $result );
+					$result       = self::normalize_conversation_result( self::normalize_assoc_array( $result ) );
 					$messages     = self::normalize_messages( is_array( $result['messages'] ?? null ) ? $result['messages'] : array() );
 					$tool_results = array_merge( $tool_results, self::normalize_array_list( $result['tool_execution_results'] ) );
 					if ( isset( $result['tool_audit_events'] ) && is_array( $result['tool_audit_events'] ) ) {
@@ -506,8 +522,12 @@ class WP_Agent_Conversation_Loop {
 				'usage'                  => $total_usage,
 				'request_metadata'       => $request_metadata,
 				'provider_diagnostics'   => $provider_diagnostics,
+				'structured_output_diagnostics' => $structured_diagnostics,
 				'completed'              => true,
 			);
+			if ( $structured_output_set ) {
+				$final_result_data['structured_output'] = $structured_output;
+			}
 
 			if ( null !== $exceeded_budget ) {
 				$final_result_data['status']    = 'budget_exceeded';
@@ -1849,6 +1869,13 @@ class WP_Agent_Conversation_Loop {
 
 		return static function ( array $messages, array $context ) use ( $adapter, $options, $tool_declarations, $run_id, $session_id, $request, $budgets, $mediation_enabled, $delta_sink ): array {
 			$context          = self::normalize_assoc_array( $context );
+			$structured_output = null;
+			if ( array_key_exists( 'structured_output', $options ) && null !== $options['structured_output'] ) {
+				$structured_output = $options['structured_output'] instanceof WP_Agent_Structured_Output_Request ? $options['structured_output'] : WP_Agent_Structured_Output_Request::from_array( $options['structured_output'] );
+				if ( ! empty( $tool_declarations ) || null !== $delta_sink ) {
+					throw new \InvalidArgumentException( 'invalid_agent_structured_output_request: structured output requires a no-tools, non-streaming turn' );
+				}
+			}
 			$provider_request = new WP_Agent_Provider_Turn_Request(
 				$messages,
 				$tool_declarations,
@@ -1859,7 +1886,8 @@ class WP_Agent_Conversation_Loop {
 				$run_id,
 				$session_id,
 				$request->metadata(),
-				$delta_sink
+				$delta_sink,
+				$structured_output
 			);
 
 			$raw_result = call_user_func( $adapter, $provider_request );
@@ -2807,10 +2835,25 @@ class WP_Agent_Conversation_Loop {
 	}
 
 	/**
-	 * Normalize a conversation result while preserving the public return shape.
+	 * Project structured-output diagnostics without exposing provider response data.
 	 *
-	 * @param array<mixed> $result Raw conversation result.
-	 * @return array<string, mixed> Normalized conversation result.
+	 * @param array<mixed> $diagnostics Provider or parser diagnostics.
+	 * @return array<string,mixed>
+	 */
+	private static function structured_output_diagnostics( array $diagnostics ): array {
+		$diagnostics = self::normalize_assoc_array( $diagnostics );
+		$public      = array();
+		foreach ( array( 'status', 'code', 'parser', 'valid' ) as $key ) {
+			if ( array_key_exists( $key, $diagnostics ) && ( is_string( $diagnostics[ $key ] ) || is_bool( $diagnostics[ $key ] ) || is_int( $diagnostics[ $key ] ) ) ) {
+				$public[ $key ] = $diagnostics[ $key ];
+			}
+		}
+		return $public;
+	}
+
+	/**
+	 * @param array<string,mixed> $result Raw conversation result.
+	 * @return array<string,mixed> Normalized conversation result.
 	 */
 	private static function normalize_conversation_result( array $result ): array {
 		return self::normalize_assoc_array( WP_Agent_Conversation_Result::normalize( $result ) );
