@@ -1194,10 +1194,29 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 
 		$declarations = array();
 		foreach ( $tool_declarations as $name => $tool ) {
-			$tool_name = is_string( $tool['name'] ?? null ) && '' !== $tool['name'] ? $tool['name'] : (string) $name;
-			if ( '' === $tool_name ) {
+			$canonical_name = is_string( $tool['name'] ?? null ) && '' !== $tool['name'] ? $tool['name'] : (string) $name;
+			if ( '' === $canonical_name ) {
 				continue;
 			}
+
+			/*
+			 * Send the provider-safe alias, not the canonical name.
+			 *
+			 * Canonical tool names are namespaced (`namespace/tool`), and provider
+			 * tool-name validation rejects the slash — the same constraint #320
+			 * addressed for client runtime tool declarations. Host tools derived
+			 * from abilities cannot avoid it: the Abilities API requires a
+			 * namespaced name, so every ability-backed declaration carries one.
+			 *
+			 * `normalizeForConversationRequest()` already records the alias on any
+			 * declaration that needs one, and WP_Agent_Tool_Execution_Core maps the
+			 * provider's emitted name back through
+			 * `canonicalNameForProviderToolName()`, so mediation still resolves the
+			 * canonical declaration.
+			 */
+			$tool_name = is_string( $tool['provider_safe_name'] ?? null ) && '' !== $tool['provider_safe_name']
+				? $tool['provider_safe_name']
+				: $canonical_name;
 
 			$description = is_string( $tool['description'] ?? null ) ? $tool['description'] : '';
 			$parameters  = is_array( $tool['parameters'] ?? null ) ? $tool['parameters'] : array();
