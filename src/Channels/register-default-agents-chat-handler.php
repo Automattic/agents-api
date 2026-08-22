@@ -41,6 +41,7 @@ use AgentsAPI\AI\WP_Agent_Conversation_Loop;
 use AgentsAPI\AI\WP_Agent_Execution_Principal;
 use AgentsAPI\AI\WP_Agent_Message;
 use AgentsAPI\AI\WP_Agent_Runtime_Profile;
+use AgentsAPI\AI\WP_Agent_Tool_Pair_Validator;
 use AgentsAPI\AI\Tools\WP_Agent_Ability_Tool_Executor;
 use AgentsAPI\AI\Tools\WP_Agent_Default_Chat_Tool_Executor;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration;
@@ -125,9 +126,9 @@ class WP_Agent_Default_Chat_Handler {
 	 * @return array<string,mixed>|\WP_Error Canonical agents/chat output, or WP_Error.
 	 */
 	private static function execute_native( array $input, ?callable $delta_sink = null ) {
-		$message = is_string( $input['message'] ?? null ) ? trim( $input['message'] ) : '';
-		if ( '' === $message ) {
-			return new \WP_Error( 'agents_chat_empty_message', 'Message cannot be empty.', array( 'status' => 400 ) );
+		$input_messages = self::input_messages( $input );
+		if ( is_wp_error( $input_messages ) ) {
+			return $input_messages;
 		}
 
 		$agent_slug = is_string( $input['agent'] ?? null ) ? trim( $input['agent'] ) : '';
@@ -230,7 +231,7 @@ class WP_Agent_Default_Chat_Handler {
 			)
 		);
 
-		$messages[] = WP_Agent_Message::text( 'user', $message );
+		$messages   = array_merge( $messages, $input_messages );
 		$messages   = WP_Agent_Message::normalize_many( $messages );
 
 		$loop_options = array(
@@ -291,6 +292,43 @@ class WP_Agent_Default_Chat_Handler {
 		}
 
 		return self::to_canonical_output( $session_id, $result, $runtime_profile );
+	}
+
+	/**
+	 * Resolve canonical inbound messages while preserving the text shorthand.
+	 *
+	 * @param array<string,mixed> $input Canonical chat input.
+	 * @return array<int,array<string,mixed>>|\WP_Error
+	 */
+	private static function input_messages( array $input ) {
+		$messages = array();
+		$message  = is_string( $input['message'] ?? null ) ? trim( $input['message'] ) : '';
+		if ( '' !== $message ) {
+			$messages[] = WP_Agent_Message::text( 'user', $message );
+		}
+
+		if ( is_array( $input['input_messages'] ?? null ) && array() !== $input['input_messages'] ) {
+			try {
+				$typed_messages = WP_Agent_Message::normalize_many( array_values( $input['input_messages'] ) );
+			} catch ( \InvalidArgumentException $error ) {
+				return new \WP_Error( 'agents_chat_invalid_input_messages', $error->getMessage(), array( 'status' => 400 ) );
+			}
+			foreach ( $typed_messages as $typed_message ) {
+				if ( ! in_array( $typed_message['type'], array( WP_Agent_Message::TYPE_TOOL_CALL, WP_Agent_Message::TYPE_TOOL_RESULT ), true ) ) {
+					return new \WP_Error( 'agents_chat_invalid_input_message_type', 'Canonical input_messages may contain only tool call/result continuations.', array( 'status' => 400 ) );
+				}
+			}
+			if ( ! WP_Agent_Tool_Pair_Validator::is_paired( $typed_messages ) ) {
+				return new \WP_Error( 'agents_chat_unpaired_input_messages', 'Canonical tool call/result input_messages must be paired.', array( 'status' => 400 ) );
+			}
+			$messages = array_merge( $messages, $typed_messages );
+		}
+
+		if ( array() === $messages ) {
+			return new \WP_Error( 'agents_chat_empty_message', 'Message or input_messages must contain at least one message.', array( 'status' => 400 ) );
+		}
+
+		return $messages;
 	}
 
 	/**

@@ -440,7 +440,7 @@ function agents_chat_principal_from_input( array $input ) {
 function agents_chat_input_schema(): array {
 	return array(
 		'type'       => 'object',
-		'required'   => array( 'agent', 'message' ),
+		'required'   => array( 'agent' ),
 		'properties' => array(
 			'workspace'             => agents_chat_workspace_schema(),
 			'workspace_id'          => array(
@@ -457,7 +457,13 @@ function agents_chat_input_schema(): array {
 			),
 			'message'               => array(
 				'type'        => 'string',
-				'description' => 'User-side text for the agent to respond to.',
+				'description' => 'User-side text shorthand for the agent to respond to. Required when input_messages is empty.',
+			),
+			'input_messages'        => array(
+				'type'        => 'array',
+				'description' => 'Canonical inbound message envelopes. Used for typed continuations such as paired client tool call/results when no new user text exists.',
+				'default'     => array(),
+				'items'       => array( 'type' => 'object' ),
 			),
 			'history'               => array(
 				'type'        => 'array',
