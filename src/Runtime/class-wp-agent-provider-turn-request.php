@@ -48,6 +48,9 @@ class WP_Agent_Provider_Turn_Request {
 	/** @var callable|null Request-scoped provider delta sink. */
 	private $delta_sink;
 
+	/** @var WP_Agent_Structured_Output_Request|null Requested structured output. */
+	private ?WP_Agent_Structured_Output_Request $structured_output;
+
 	/** Whether this provider turn has emitted at least one delta. */
 	private bool $deltas_emitted = false;
 
@@ -63,7 +66,7 @@ class WP_Agent_Provider_Turn_Request {
 	 * @param array<string, mixed> $metadata          Caller-owned metadata.
 	 * @param callable|null        $delta_sink        Request-scoped provider delta sink.
 	 */
-	public function __construct( array $messages, array $tool_declarations = array(), array $model = array(), array $runtime = array(), array $context = array(), array $budgets = array(), string $run_id = '', string $session_id = '', array $metadata = array(), ?callable $delta_sink = null ) {
+	public function __construct( array $messages, array $tool_declarations = array(), array $model = array(), array $runtime = array(), array $context = array(), array $budgets = array(), string $run_id = '', string $session_id = '', array $metadata = array(), ?callable $delta_sink = null, ?WP_Agent_Structured_Output_Request $structured_output = null ) {
 		$this->messages          = WP_Agent_Message::normalize_many( $messages );
 		$this->tool_declarations = self::normalize_tool_declarations( $tool_declarations );
 		$this->model             = self::normalize_json_array( $model, 'model' );
@@ -74,6 +77,7 @@ class WP_Agent_Provider_Turn_Request {
 		$this->session_id        = $session_id;
 		$this->metadata          = self::normalize_json_array( $metadata, 'metadata' );
 		$this->delta_sink        = $delta_sink;
+		$this->structured_output = $structured_output;
 	}
 
 	/** @return array<int, array<string, mixed>> Canonical transcript messages. */
@@ -121,6 +125,11 @@ class WP_Agent_Provider_Turn_Request {
 		return $this->metadata;
 	}
 
+	/** @return WP_Agent_Structured_Output_Request|null */
+	public function structuredOutput(): ?WP_Agent_Structured_Output_Request {
+		return $this->structured_output;
+	}
+
 	/** Whether this provider turn can emit request-scoped deltas. */
 	public function supportsStreaming(): bool {
 		return is_callable( $this->delta_sink );
@@ -151,7 +160,7 @@ class WP_Agent_Provider_Turn_Request {
 	 * @return array<string, mixed>
 	 */
 	public function to_array(): array {
-		return array(
+		$result = array(
 			'messages'          => $this->messages,
 			'tool_declarations' => $this->tool_declarations,
 			'model'             => $this->model,
@@ -162,6 +171,10 @@ class WP_Agent_Provider_Turn_Request {
 			'session_id'        => $this->session_id,
 			'metadata'          => $this->metadata,
 		);
+		if ( null !== $this->structured_output ) {
+			$result['structured_output'] = $this->structured_output->to_array();
+		}
+		return $result;
 	}
 
 	/**

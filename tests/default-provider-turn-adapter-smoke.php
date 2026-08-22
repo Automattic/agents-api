@@ -287,6 +287,14 @@ namespace {
 			$GLOBALS['__adapter_smoke']['declarations'] = $declarations;
 			return $this;
 		}
+		public function as_output_mime_type( string $mime_type ): self {
+			$GLOBALS['__adapter_smoke']['output_mime_type'] = $mime_type;
+			return $this;
+		}
+		public function as_output_schema( array $schema ): self {
+			$GLOBALS['__adapter_smoke']['output_schema'] = $schema;
+			return $this;
+		}
 		public function using_request_options( \WordPress\AiClient\Providers\Http\DTO\RequestOptions $options ): self {
 			$GLOBALS['__adapter_smoke']['request_timeout'] = $options->getTimeout();
 			return $this;
@@ -404,6 +412,18 @@ namespace {
 	agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $model_parameters['properties'] ?? array() ), 'function declaration excludes authoritative parameters from model input', $failures, $passes );
 	agents_api_smoke_assert_equals( array( 'query' ), $model_parameters['required'] ?? array(), 'function declaration excludes authoritative parameters from model requirements', $failures, $passes );
 	agents_api_smoke_assert_equals( 600.0, $GLOBALS['__adapter_smoke']['request_timeout'] ?? null, 'run_turn applies the raised 600s agentic per-request timeout to the builder by default', $failures, $passes );
+
+	echo "\n[1a] Structured output maps through the installed public wp-ai-client APIs:\n";
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( '{"items":[1,2]}', array(), array( 1, 1, 2 ) );
+	$structured_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+		array( array( 'role' => 'user', 'content' => 'return JSON' ) ), array(), array(), array(), array(), array(), '', '', array(), null,
+		new AgentsAPI\AI\WP_Agent_Structured_Output_Request( array( 'type' => 'object', 'properties' => array( 'items' => array( 'type' => 'array' ) ) ), 'result', true )
+	);
+	$structured_result = $adapter->run_turn( $structured_request );
+	agents_api_smoke_assert_equals( 'application/json', $GLOBALS['__adapter_smoke']['output_mime_type'] ?? '', 'structured output selects JSON MIME output through the public builder API', $failures, $passes );
+	agents_api_smoke_assert_equals( 'object', $GLOBALS['__adapter_smoke']['output_schema']['type'] ?? '', 'structured output maps the requested JSON Schema through the public builder API', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 1, 2 ), $structured_result['structured_output']['parsed']['items'] ?? null, 'structured output parses the provider JSON response', $failures, $passes );
 
 	echo "\n[1b] request timeout is configurable and honors a caller-supplied override + filter:\n";
 	$GLOBALS['__adapter_smoke']                = array();

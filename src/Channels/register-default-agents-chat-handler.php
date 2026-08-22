@@ -174,6 +174,14 @@ class WP_Agent_Default_Chat_Handler {
 		$system_prompt   = self::resolve_system_prompt( $config );
 		$max_turns       = self::resolve_max_turns( $input, $config );
 		$tool_call_rules = self::resolve_tool_call_rules( $config );
+		$structured_output = $input['structured_output'] ?? $config['structured_output'] ?? null;
+		if ( null !== $structured_output ) {
+			try {
+				$structured_output = $structured_output instanceof \AgentsAPI\AI\WP_Agent_Structured_Output_Request ? $structured_output : \AgentsAPI\AI\WP_Agent_Structured_Output_Request::from_array( $structured_output );
+			} catch ( \InvalidArgumentException $error ) {
+				return new \WP_Error( 'agents_chat_invalid_structured_output', $error->getMessage(), array( 'status' => 400 ) );
+			}
+		}
 
 		$store      = WP_Agent_Conversation_Sessions::get_store( $input );
 		$session_id = is_string( $input['session_id'] ?? null ) ? trim( $input['session_id'] ) : '';
@@ -230,6 +238,9 @@ class WP_Agent_Default_Chat_Handler {
 				'runtime_tools' => $trusted_runtime_tools,
 			)
 		);
+		if ( null !== $structured_output && ( ! empty( $tool_declarations ) || null !== $delta_sink ) ) {
+			return new \WP_Error( 'agents_chat_structured_output_incompatible', 'Structured output requires a no-tools, non-streaming turn.', array( 'status' => 400 ) );
+		}
 
 		$messages   = array_merge( $messages, $input_messages );
 		$messages   = WP_Agent_Message::normalize_many( $messages );
@@ -250,6 +261,9 @@ class WP_Agent_Default_Chat_Handler {
 				'runtime_profile'        => $runtime_context['runtime_profile'],
 			),
 		);
+		if ( null !== $structured_output ) {
+			$loop_options['structured_output'] = $structured_output;
+		}
 		if ( ! empty( $tool_declarations ) ) {
 			// Default executor: dispatch tool calls through registered abilities.
 			// The loop also consults the #377 per-target executor registry
@@ -857,6 +871,12 @@ class WP_Agent_Default_Chat_Handler {
 		}
 		if ( is_array( $result['run_outcome'] ?? null ) ) {
 			$output['run_outcome'] = $result['run_outcome'];
+		}
+		if ( array_key_exists( 'structured_output', $result ) ) {
+			$output['structured_output'] = $result['structured_output'];
+			if ( ! empty( $result['structured_output_diagnostics'] ) && is_array( $result['structured_output_diagnostics'] ) ) {
+				$output['metadata']['agents_api']['structured_output'] = $result['structured_output_diagnostics'];
+			}
 		}
 
 		return $output;
