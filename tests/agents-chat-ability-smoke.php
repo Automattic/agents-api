@@ -220,7 +220,8 @@ smoke_assert( true, agents_chat_permission( array() ), 'permission_filter_widens
 
 // 8. Schemas exist with the expected required fields.
 $in = agents_chat_input_schema();
-smoke_assert( array( 'agent', 'message' ), $in['required'] ?? array(), 'input_schema_required_fields', $failures, $passes );
+smoke_assert( array( 'agent' ), $in['required'] ?? array(), 'input_schema_required_fields', $failures, $passes );
+smoke_assert( true, isset( $in['properties']['input_messages'] ), 'input_schema_has_canonical_input_messages', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['client_context'] ), 'input_schema_has_client_context', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['workspace']['properties']['workspace_type'] ), 'input_schema_has_canonical_workspace', $failures, $passes );
 smoke_assert( true, isset( $in['properties']['session_owner'] ), 'input_schema_has_session_owner', $failures, $passes );

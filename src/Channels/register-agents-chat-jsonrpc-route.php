@@ -359,9 +359,13 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	}
 
 	$message = isset( $params['message'] ) && is_array( $params['message'] ) ? $params['message'] : array();
-	$text    = agents_chat_jsonrpc_extract_text( $message );
-	if ( '' === trim( $text ) ) {
-		return new \WP_Error( 'agents_chat_jsonrpc_invalid_params', 'params.message must contain non-empty text.' );
+	$text           = agents_chat_jsonrpc_extract_text( $message );
+	$input_messages = agents_chat_jsonrpc_input_messages( $message );
+	if ( is_wp_error( $input_messages ) ) {
+		return $input_messages;
+	}
+	if ( '' === trim( $text ) && array() === $input_messages ) {
+		return new \WP_Error( 'agents_chat_jsonrpc_invalid_params', 'params.message must contain non-empty text or paired tool call/results.' );
 	}
 
 	$session_id = \AgentsAPI\AI\agents_api_scalar_to_string( $params['sessionId'] ?? null );
@@ -388,6 +392,9 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 		'attachments'    => agents_chat_jsonrpc_attachments( $message ),
 		'client_context' => $client_context,
 	);
+	if ( array() !== $input_messages ) {
+		$input['input_messages'] = $input_messages;
+	}
 
 	if ( array_key_exists( 'tokenStreaming', $body ) ) {
 		$input['token_streaming'] = (bool) $body['tokenStreaming'];
@@ -414,6 +421,66 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	}
 
 	return $input;
+}
+
+/**
+ * Map paired A2A tool call/result data parts to canonical inbound messages.
+ *
+ * @param array<mixed> $message JSON-RPC Message.
+ * @return array<int,array<string,mixed>>|\WP_Error
+ */
+function agents_chat_jsonrpc_input_messages( array $message ) {
+	$parts   = is_array( $message['parts'] ?? null ) ? $message['parts'] : array();
+	$calls   = array();
+	$results = array();
+	foreach ( $parts as $part ) {
+		$data = is_array( $part ) && 'data' === ( $part['type'] ?? null ) && is_array( $part['data'] ?? null ) ? $part['data'] : array();
+		$id   = \AgentsAPI\AI\agents_api_scalar_to_string( $data['toolCallId'] ?? null );
+		if ( '' === $id ) {
+			continue;
+		}
+		if ( array_key_exists( 'result', $data ) ) {
+			if ( isset( $results[ $id ] ) ) {
+				return new \WP_Error( 'agents_chat_jsonrpc_duplicate_tool_result', 'Inbound tool results must have unique toolCallId values.', array( 'status' => 400 ) );
+			}
+			$results[ $id ] = $data;
+		} else {
+			if ( isset( $calls[ $id ] ) ) {
+				return new \WP_Error( 'agents_chat_jsonrpc_duplicate_tool_call', 'Inbound tool calls must have unique toolCallId values.', array( 'status' => 400 ) );
+			}
+			$calls[ $id ] = $data;
+		}
+	}
+
+	if ( array() === $calls && array() === $results ) {
+		return array();
+	}
+	if ( array_diff_key( $calls, $results ) || array_diff_key( $results, $calls ) ) {
+		return new \WP_Error( 'agents_chat_jsonrpc_tool_call_mismatch', 'Every inbound tool call must have one matching result.', array( 'status' => 400 ) );
+	}
+
+	$messages = array();
+	foreach ( $calls as $id => $call ) {
+		$tool_name  = \AgentsAPI\AI\agents_api_scalar_to_string( $call['toolId'] ?? null );
+		$parameters = is_array( $call['arguments'] ?? null ) ? $call['arguments'] : array();
+		if ( '' === $tool_name ) {
+			return new \WP_Error( 'agents_chat_jsonrpc_invalid_tool_call', 'Inbound tool calls require toolId.', array( 'status' => 400 ) );
+		}
+		$result_tool_name = \AgentsAPI\AI\agents_api_scalar_to_string( $results[ $id ]['toolId'] ?? null );
+		if ( '' !== $result_tool_name && $result_tool_name !== $tool_name ) {
+			return new \WP_Error( 'agents_chat_jsonrpc_tool_name_mismatch', 'Inbound tool call and result toolId values must match.', array( 'status' => 400 ) );
+		}
+		$messages[] = \AgentsAPI\AI\WP_Agent_Message::toolCall( '', $tool_name, $parameters, 0, array( 'tool_call_id' => $id ) );
+		$result_json = wp_json_encode( $results[ $id ]['result'] );
+		$messages[]  = \AgentsAPI\AI\WP_Agent_Message::toolResult(
+			false === $result_json ? '' : $result_json,
+			$tool_name,
+			array( 'result' => $results[ $id ]['result'] ),
+			array( 'tool_call_id' => $id )
+		);
+	}
+
+	return $messages;
 }
 
 /**
