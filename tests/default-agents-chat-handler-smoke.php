@@ -880,7 +880,7 @@ namespace {
 	);
 	$client_declaration_names = array_map( static fn( $declaration ): string => $declaration->name, $GLOBALS['__adapter_smoke']['declarations'] ?? array() );
 	$pending_client_tool      = $client_output['runtime_tool_pending'] ?? array();
-	agents_api_smoke_assert_equals( true, in_array( 'client/notify', $client_declaration_names, true ), 'the model receives the trusted client declaration', $failures, $passes );
+	agents_api_smoke_assert_equals( true, in_array( 'client__notify', $client_declaration_names, true ), 'the model receives the provider-safe client declaration alias', $failures, $passes );
 	agents_api_smoke_assert_equals( false, array_key_exists( 'runtime_tool_declarations', $client_overlay_contexts[0]['client_context'] ?? array() ), 'runtime declaration fields remain stripped before the trusted filter', $failures, $passes );
 	agents_api_smoke_assert_equals( false, $client_output['completed'] ?? true, 'a client tool call leaves the chat turn incomplete', $failures, $passes );
 	agents_api_smoke_assert_equals( 'runtime_tool_pending', $client_output['status'] ?? '', 'a client tool call returns the canonical pending status', $failures, $passes );
