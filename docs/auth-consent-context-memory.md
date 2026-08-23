@@ -60,7 +60,7 @@ Missing headers produce a top-of-chain context. Malformed headers throw `Invalid
 
 ## Execution principals and workspace scope
 
-`AgentsAPI\AI\WP_Agent_Execution_Principal` represents one runtime actor: acting user id, effective agent id/slug, auth source, request context, optional token id, workspace id, client id, capability ceiling, caller context, non-user audience id/claims, optional transcript owner, and JSON-friendly metadata.
+`AgentsAPI\AI\WP_Agent_Execution_Principal` represents one runtime execution: acting user id, effective agent id/slug, auth source, request context, optional token id, workspace id, client id, capability ceiling, caller context, non-user audience id/claims, optional transcript owner, optional current-turn actor, and JSON-friendly metadata.
 
 Generic principal fields:
 
@@ -74,13 +74,20 @@ Generic principal fields:
 | `client_id` | Host/client surface identifier, such as a frontend, bridge, runtime, or API client. |
 | `audience_id` / `audience_claims` | Host-resolved non-user audience context. Claims are private runtime/audit data, not a display contract. |
 | `owner_type` / `owner_key` | Optional transcript/session owner. Non-user principals must use opaque host-owned owner keys; audience access alone is not a transcript owner. |
+| `actor_type` / `actor_key` | Optional opaque current-turn actor supplied explicitly by a trusted channel integration. Both fields are required together. This identifies the authenticated speaker responsible for this turn and is distinct from the conversation owner, task owner, approver, and audience. |
 | `capability_ceiling` | Optional ceiling intersected by authorization policy with WordPress capabilities. |
 | `caller_context` | Cross-agent/cross-host chain context for delegation and loop prevention. |
 | `request_metadata` / `binding` | Private host audit/runtime data. These fields are not safe citation or frontend metadata. |
 
-Permission-aware tools and retrieval surfaces should attach only safe principal metadata to user-visible citations, diagnostics, or frontend result objects. `to_safe_metadata()` returns the generic safe shape: schema version, effective agent, auth source, request context, acting user id, workspace id, client id, audience id, owner type, and boolean flags for conversation-owner/capability/caller-context presence. It intentionally omits token ids, owner keys, request metadata, audience claims, capability details, and cryptographic binding claims.
+Permission-aware tools and retrieval surfaces should attach only safe principal metadata to user-visible citations, diagnostics, or frontend result objects. `to_safe_metadata()` returns the generic safe shape: schema version, effective agent, auth source, request context, acting user id, workspace id, client id, audience id, owner type, actor presence/type, and boolean flags for conversation-owner/capability/caller-context presence. It intentionally omits token ids, owner keys, actor keys, request metadata, audience claims, capability details, and cryptographic binding claims.
 
 Hosts that need richer audit trails should persist the full `to_array()` shape in private storage they control. Frontend clients, citations, and source diagnostics should use the safe metadata shape plus result-level status fields instead of receiving raw credentials, tokens, opaque session ids, or authorization internals.
+
+## External turn actors
+
+Trusted channel integrations may provide `actor_type` and `actor_key` in the canonical `principal` object passed to `agents/chat`. The pair is immutable for that execution and is preserved through the canonical chat principal, conversation request/context, and safe run-control audit metadata. For a WordPress-user principal without an explicit pair, `turn_actor()` derives `array( 'type' => 'user', 'key' => (string) $acting_user_id )` for compatibility.
+
+The integration must authenticate the external speaker before constructing the principal and use an opaque host-owned key. Display names, message text, model-supplied identity, ambient request keys, and audience membership are not actor proof and Agents API does not infer an actor from them. The substrate does not resolve account links, credentials, private memory, consent, or approvals from this pair. An actor neither owns the conversation nor grants WordPress capabilities, audience access, task/run control, or any other authority; hosts that need person-scoped authorization or credentials must implement that policy explicitly outside this value object.
 
 Client context is caller-owned runtime context carried on conversation requests and frontend channel payloads. It may describe selected UI state, host context, explicit routing hints, or opaque client metadata, but Agents API does not infer tool arguments from it. Tool declarations must opt in with `client_context_bindings`, either as `array( 'parameter_name' )` or `array( 'parameter_name' => 'context_key' )`. Sensitive ambient keys such as `api_key`, `token`, `authorization`, `cookie`, `nonce`, or `password` must be passed only through explicit bindings/defaults and host-owned authorization policy; matching key names alone never satisfies required parameters.
 

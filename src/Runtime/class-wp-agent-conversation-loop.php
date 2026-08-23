@@ -145,7 +145,11 @@ class WP_Agent_Conversation_Loop {
 		$messages = self::normalize_messages( $messages );
 		if ( '' !== $run_id && '' !== $lock_session_id ) {
 			$conversation_store = ( $context['conversation_store'] ?? null ) instanceof \AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store ? $context['conversation_store'] : null;
-			$started            = WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, array( 'source' => 'conversation_loop', '_claim_token' => WP_Agent_Run_Control::string_value( $context['_agents_run_claim_token'] ?? '' ) ), $run_workspace, $run_owner, $conversation_store );
+			$run_metadata       = array( 'source' => 'conversation_loop', '_claim_token' => WP_Agent_Run_Control::string_value( $context['_agents_run_claim_token'] ?? '' ) );
+			if ( $principal instanceof WP_Agent_Execution_Principal ) {
+				$run_metadata['principal'] = $principal->to_safe_metadata();
+			}
+			$started            = WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, $run_metadata, $run_workspace, $run_owner, $conversation_store );
 			if ( is_wp_error( $started ) ) {
 				self::emit_event( $on_event, 'failed', array( 'error' => $started->get_error_message() ) );
 				return self::run_control_failure_result( $messages, $started );
