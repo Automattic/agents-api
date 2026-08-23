@@ -206,7 +206,7 @@ function agents_chat_dispatch( array $input ) {
  *                                            claim token are injected before `$run` executes.
  * @param callable(array<mixed>):mixed $run   Runtime callable. Receives the claimed input and
  *                                            returns canonical output array or WP_Error.
- * @param array{workspace:?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope,owner:?array{type:string,key:string},conversation_store:?\AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store}|null $run_context
+	 * @param array{workspace:?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope,owner:?array{type:string,key:string},principal:?WP_Agent_Execution_Principal,conversation_store:?\AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store}|null $run_context
  *                                            Pre-resolved context when the caller must validate before handler selection.
  * @return array<string,mixed>|\WP_Error Canonical output, or WP_Error when the run cannot be claimed
  *                                       (e.g. a replayed run_id) or the runtime fails.
@@ -228,9 +228,13 @@ function agents_chat_run_claimed( array $input, callable $run, ?array $run_conte
 
 	$session_id = agents_chat_optional_string( $input['session_id'] ?? null );
 	$agent      = agents_chat_optional_string( $input['agent'] ?? null ) ?? '';
+	$metadata   = array( 'agent' => $agent );
+	if ( $run_context['principal'] instanceof WP_Agent_Execution_Principal ) {
+		$metadata['principal'] = $run_context['principal']->to_safe_metadata();
+	}
 	if ( null !== $session_id ) {
 		try {
-			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $session_id, array( 'agent' => $agent, '_claim_token' => $run_claim_token ), $run_context['workspace'], $run_context['owner'], $run_context['conversation_store'] );
+			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $session_id, $metadata + array( '_claim_token' => $run_claim_token ), $run_context['workspace'], $run_context['owner'], $run_context['conversation_store'] );
 		} catch ( \RuntimeException $error ) {
 			return new \WP_Error( 'agents_chat_run_workspace_unsupported', $error->getMessage() );
 		}
@@ -239,7 +243,7 @@ function agents_chat_run_claimed( array $input, callable $run, ?array $run_conte
 			return $started;
 		}
 	} else {
-		$pending = WP_Agent_Chat_Run_Control::claim_pending_run( $run_id, $run_claim_token, $run_context['workspace'], $run_context['owner'] );
+		$pending = WP_Agent_Chat_Run_Control::claim_pending_run( $run_id, $run_claim_token, $run_context['workspace'], $run_context['owner'], $metadata );
 		if ( is_wp_error( $pending ) ) {
 			do_action( 'agents_chat_dispatch_failed', $pending->get_error_code(), $input );
 			return $pending;
@@ -283,7 +287,7 @@ function agents_chat_run_claimed( array $input, callable $run, ?array $run_conte
 	$resolved_session_id = agents_chat_optional_string( $result['session_id'] ?? null ) ?? $session_id;
 	if ( null !== $resolved_session_id ) {
 		if ( null === $session_id ) {
-			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $resolved_session_id, array( 'agent' => $agent, '_claim_token' => $run_claim_token ), $run_context['workspace'], $run_context['owner'], $run_context['conversation_store'] );
+			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $resolved_session_id, $metadata + array( '_claim_token' => $run_claim_token ), $run_context['workspace'], $run_context['owner'], $run_context['conversation_store'] );
 			if ( is_wp_error( $started ) ) {
 				WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_context['workspace'] );
 				do_action( 'agents_chat_dispatch_failed', $started->get_error_code(), $input );
@@ -650,6 +654,8 @@ function agents_chat_principal_schema(): array {
 			'audience_claims'    => array( 'type' => 'object' ),
 			'owner_type'         => array( 'type' => array( 'string', 'null' ) ),
 			'owner_key'          => array( 'type' => array( 'string', 'null' ) ),
+			'actor_type'         => array( 'type' => array( 'string', 'null' ), 'description' => 'Optional opaque current-turn actor type supplied by a trusted channel integration. It is distinct from conversation ownership and audience.' ),
+			'actor_key'          => array( 'type' => array( 'string', 'null' ), 'description' => 'Optional opaque current-turn actor key. Must be supplied with actor_type; Agents API does not expose it in safe metadata.' ),
 			'binding'            => array( 'type' => array( 'object', 'null' ) ),
 		),
 	);
