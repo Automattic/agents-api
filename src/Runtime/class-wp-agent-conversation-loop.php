@@ -1364,12 +1364,24 @@ class WP_Agent_Conversation_Loop {
 				$runtime
 			);
 		} elseif ( 'pending' === $action ) {
-			$runtime      = self::associative_array_or_null( $decision['runtime'] ?? null ) ?? array();
-			$metadata     = self::associative_array_or_null( $decision['metadata'] ?? null ) ?? array();
-			$tool_call_id = is_string( $context['tool_call_id'] ?? null ) ? $context['tool_call_id'] : '';
-			$parameters   = is_array( $context['parameters'] ?? null ) ? $context['parameters'] : array();
-			$turn_context = self::normalize_assoc_array( $context['turn_context'] ?? array() );
-			$request      = self::associative_array_or_null( $decision['runtime_tool_request'] ?? ( $decision['request'] ?? ( $decision['result'] ?? null ) ) ) ?? array();
+			$normalized_result = self::associative_array_or_null( $decision['result'] ?? null );
+			$is_normalized     = isset( $normalized_result['runtime_tool_request'] ) && is_array( $normalized_result['runtime_tool_request'] );
+			$runtime           = self::associative_array_or_null( $decision['runtime'] ?? ( $is_normalized ? ( $normalized_result['runtime'] ?? null ) : null ) ) ?? array();
+			$metadata          = self::associative_array_or_null( $decision['metadata'] ?? ( $is_normalized ? ( $normalized_result['metadata'] ?? null ) : null ) ) ?? array();
+			$pending_error     = $decision['error'] ?? ( $is_normalized ? ( $normalized_result['error'] ?? null ) : null );
+			$tool_call_id      = is_string( $context['tool_call_id'] ?? null ) ? $context['tool_call_id'] : '';
+			$parameters        = is_array( $context['parameters'] ?? null ) ? $context['parameters'] : array();
+			$turn_context      = self::normalize_assoc_array( $context['turn_context'] ?? array() );
+			if ( isset( $decision['runtime_tool_request'] ) ) {
+				$request = $decision['runtime_tool_request'];
+			} elseif ( isset( $decision['request'] ) ) {
+				$request = $decision['request'];
+			} elseif ( $is_normalized ) {
+				$request = $normalized_result['runtime_tool_request'];
+			} else {
+				$request = $decision['result'] ?? null;
+			}
+			$request = self::associative_array_or_null( $request ) ?? array();
 
 			try {
 				$request = WP_Agent_Runtime_Tool_Request::normalize( array_merge(
@@ -1394,7 +1406,7 @@ class WP_Agent_Conversation_Loop {
 				'success'              => false,
 				'tool_name'            => $tool_name,
 				'status'               => WP_Agent_Runtime_Tool_Request::STATUS_PENDING,
-				'error'                => is_string( $decision['error'] ?? null ) && '' !== trim( $decision['error'] ) ? trim( $decision['error'] ) : 'Waiting for external runtime tool result.',
+				'error'                => is_string( $pending_error ) && '' !== trim( $pending_error ) ? trim( $pending_error ) : 'Waiting for external runtime tool result.',
 				'metadata'             => $metadata,
 				'runtime'              => $runtime,
 				'runtime_tool_request' => $request,
