@@ -26,6 +26,7 @@ interface WP_Agent_Atomic_Workspace_Run_Control_Store extends WP_Agent_Atomic_Ru
 	/**
 	 * @param callable(array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}):array{state:array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>},result:mixed} $mutation State mutation.
 	 * @return mixed Mutation result.
+	 * @throws WP_Agent_Run_Control_Store_Exception When storage is temporarily unavailable.
 	 */
 	public function mutate_workspace_state( string $store_key, WP_Agent_Workspace_Scope $workspace, callable $mutation ): mixed;
 }

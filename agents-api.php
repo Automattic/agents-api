@@ -63,6 +63,9 @@ if ( defined( 'AGENTS_API_LOADED' ) ) {
 			if ( ! in_array( $token[0], array( T_CLASS, T_INTERFACE, T_TRAIT ), true ) ) {
 				continue;
 			}
+			if ( T_CLASS === $token[0] && T_DOUBLE_COLON === ( $tokens[ $index - 1 ][0] ?? null ) ) {
+				continue;
+			}
 
 			for ( ++$index; $index < $count; ++$index ) {
 				$symbol_token = $tokens[ $index ];
@@ -234,6 +237,8 @@ require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-run-control-store
 require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-workspace-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-atomic-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-atomic-workspace-run-control-store.php';
+require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-exclusive-run-control-store.php';
+require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-control-store-exception.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-option-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-control.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-result-envelope.php';
