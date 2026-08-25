@@ -14,6 +14,9 @@ defined( 'ABSPATH' ) || exit;
 if ( ! interface_exists( WP_Agent_Atomic_Workspace_Run_Control_Store::class ) ) {
 	require_once __DIR__ . '/interface-wp-agent-atomic-workspace-run-control-store.php';
 }
+if ( ! interface_exists( WP_Agent_Exclusive_Run_Control_Store::class ) ) {
+	require_once __DIR__ . '/interface-wp-agent-exclusive-run-control-store.php';
+}
 if ( ! class_exists( __NAMESPACE__ . '\\WP_Agent_Run_Control_Store_Exception', false ) ) {
 	require_once __DIR__ . '/class-wp-agent-run-control-store-exception.php';
 }
@@ -21,13 +24,15 @@ if ( ! class_exists( __NAMESPACE__ . '\\WP_Agent_Run_Control_Store_Exception', f
 /**
  * Persists run-control state in WordPress options.
  */
-class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run_Control_Store {
+class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run_Control_Store, WP_Agent_Exclusive_Run_Control_Store {
 
 	private const LOCK_PREFIX       = '_agents_api_run_lock_';
 	private const LOCK_WAIT_SECONDS = 5.0;
 	private const LOCK_TTL_SECONDS  = 15.0;
 
 	private ?\wpdb $database;
+	/** @var array<string,true> */
+	private array $active_claims = array();
 
 	public function __construct( ?\wpdb $database = null ) {
 		$this->database = $database;
@@ -67,8 +72,10 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run
 		}
 		$db      = $this->wordpress_database();
 		$updated = $this->write_wordpress_option( $db, static fn() => update_option( $store_key, $state, false ) );
-		if ( ! $updated && $state !== $this->read_wordpress_option( $db, static fn() => get_option( $store_key, array() ) ) ) {
-			throw new WP_Agent_Run_Control_Store_Exception( 'Run-control state write failed.' );
+		if ( ! $updated && null !== $db ) {
+			// False also represents unchanged values and intentional filter vetoes.
+			// The direct read verifies DB availability without consulting API caches.
+			$this->read_option_state( $db, $db->options, $store_key );
 		}
 	}
 
@@ -143,8 +150,46 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run
 		$option_key = $this->workspace_option_key( $store_key, $workspace );
 		$db         = $this->wordpress_database();
 		$updated    = $this->write_wordpress_option( $db, static fn() => update_site_option( $option_key, $state ) );
-		if ( ! $updated && $state !== $this->read_wordpress_option( $db, static fn() => get_site_option( $option_key, array() ) ) ) {
-			throw new WP_Agent_Run_Control_Store_Exception( 'Workspace run-control state write failed.' );
+		if ( ! $updated && null !== $db ) {
+			$this->read_workspace_state( $db, $option_key );
+		}
+	}
+
+	public function execute_claimed( string $claim_key, callable $callback ): bool {
+		$db        = $this->database();
+		$lock_name = 'agents-api:' . substr( hash( 'sha256', $claim_key ), 0, 53 );
+		if ( isset( $this->active_claims[ $lock_name ] ) ) {
+			return false;
+		}
+
+		$acquired = $this->get_var( $db, $db->prepare( 'SELECT GET_LOCK(%s, 0)', $lock_name ) );
+		if ( 0 === $acquired || '0' === $acquired ) {
+			return false;
+		}
+		if ( 1 !== $acquired && '1' !== $acquired ) {
+			throw new WP_Agent_Run_Control_Store_Exception( 'Run-control claim acquisition failed.' );
+		}
+
+		$this->active_claims[ $lock_name ] = true;
+		$primary_error = null;
+		try {
+			$callback();
+			return true;
+		} catch ( \Throwable $error ) {
+			$primary_error = $error;
+			throw $error;
+		} finally {
+			unset( $this->active_claims[ $lock_name ] );
+			try {
+				$released = $this->get_var( $db, $db->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
+				if ( 1 !== $released && '1' !== $released ) {
+					throw new WP_Agent_Run_Control_Store_Exception( 'Run-control claim release failed.' );
+				}
+			} catch ( \Throwable $release_error ) {
+				if ( null === $primary_error ) {
+					throw $release_error;
+				}
+			}
 		}
 	}
 
@@ -478,10 +523,19 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run
 	}
 
 	private function read_wordpress_option( ?\wpdb $db, callable $read ): mixed {
+		global $wpdb;
+		$previous_database = $wpdb ?? null;
 		if ( null !== $db ) {
 			$db->last_error = '';
+			$wpdb = $db;
 		}
-		$value = $read();
+		try {
+			$value = $read();
+		} finally {
+			if ( null !== $db ) {
+				$wpdb = $previous_database;
+			}
+		}
 		if ( $this->database_has_error( $db ) ) {
 			throw new WP_Agent_Run_Control_Store_Exception( 'Run-control state read failed.' );
 		}
@@ -489,10 +543,19 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run
 	}
 
 	private function write_wordpress_option( ?\wpdb $db, callable $write ): bool {
+		global $wpdb;
+		$previous_database = $wpdb ?? null;
 		if ( null !== $db ) {
 			$db->last_error = '';
+			$wpdb = $db;
 		}
-		$written = $write();
+		try {
+			$written = $write();
+		} finally {
+			if ( null !== $db ) {
+				$wpdb = $previous_database;
+			}
+		}
 		if ( $this->database_has_error( $db ) ) {
 			throw new WP_Agent_Run_Control_Store_Exception( 'Run-control state write failed.' );
 		}

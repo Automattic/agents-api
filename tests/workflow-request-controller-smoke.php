@@ -12,6 +12,7 @@ if ( ! function_exists( 'is_wp_error' ) ) { function is_wp_error( $value ): bool
 
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-run-control-store.php';
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-atomic-run-control-store.php';
+require_once __DIR__ . '/../src/Runtime/interface-wp-agent-exclusive-run-control-store.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control-store-exception.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
@@ -36,6 +37,7 @@ if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
 }
 
 use AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store;
+use AgentsAPI\AI\WP_Agent_Exclusive_Run_Control_Store;
 use AgentsAPI\AI\WP_Agent_Run_Control;
 use AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Request_Controller;
@@ -45,11 +47,13 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Runner;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec;
 
-class Controller_Memory_Store implements WP_Agent_Atomic_Run_Control_Store {
+class Controller_Memory_Store implements WP_Agent_Atomic_Run_Control_Store, WP_Agent_Exclusive_Run_Control_Store {
 	public array $states = array();
+	private array $claims = array();
 	public function get_state( string $key ): array { return $this->states[ $key ] ?? array( 'runs' => array(), 'queues' => array(), 'events' => array() ); }
 	public function save_state( string $key, array $state ): void { $this->states[ $key ] = $state; }
 	public function mutate_state( string $key, callable $mutation ): mixed { $out = $mutation( $this->get_state( $key ) ); $this->save_state( $key, $out['state'] ); return $out['result']; }
+	public function execute_claimed( string $key, callable $callback ): bool { if ( isset( $this->claims[ $key ] ) ) { return false; } $this->claims[ $key ] = true; try { $callback(); return true; } finally { unset( $this->claims[ $key ] ); } }
 }
 final class Controller_Failing_Store extends Controller_Memory_Store {
 	private string $failure = '';
@@ -198,11 +202,22 @@ $terminal_runner->after_run = static function () use ( $terminal_store ): void {
 $claim_error = $terminal_controller->start( 'claim-uncertain', $spec, array( 'status' => 'succeeded' ) );
 $terminal_runner->after_run = null;
 controller_assert( $claim_error instanceof WP_Error && 'deliver_terminal' === ( $claim_error->get_error_data()['phase'] ?? '' ), 'uncertain delivery-claim commit returns a retryable public error' );
-$terminal_controller->reconnect( 'claim-uncertain' );
-controller_assert( array() === $terminal_deliveries, 'retry does not duplicate an unexpired uncertain delivery claim' );
-$clock += 61;
 $claim_retry = $terminal_controller->reconnect( 'claim-uncertain' );
-controller_assert( $claim_retry['terminal'] && array( 'claim-uncertain' ) === $terminal_deliveries && 'delivered' === ( $terminal_controller->get( 'claim-uncertain' )['disposition'] ?? '' ), 'expired delivery claim is reclaimed and token-fenced to completion' );
+controller_assert( $claim_retry['terminal'] && array( 'claim-uncertain' ) === $terminal_deliveries && 'delivered' === ( $terminal_controller->get( 'claim-uncertain' )['disposition'] ?? '' ), 'delivery resumes after an interrupted worker releases its process-lifetime claim' );
+
+$terminal_deliveries = array(); $nested_delivery = null;
+$slow_controller = null;
+$slow_controller = new WP_Agent_Workflow_Request_Controller( $terminal_runner, $terminal_recorder, $terminal_awaiter, 'controller-slow-terminal', static function ( $id ) use ( &$terminal_deliveries, &$nested_delivery, &$slow_controller, &$clock ) { $terminal_deliveries[] = $id; $clock += 600; $nested_delivery = $slow_controller->reconnect( $id ); }, null, static function () use ( &$clock ): int { return $clock; } );
+$slow_result = $slow_controller->start( 'slow-callback', $spec, array( 'status' => 'succeeded' ) );
+controller_assert( $slow_result['terminal'] && is_array( $nested_delivery ) && array( 'slow-callback' ) === $terminal_deliveries, 'slow live terminal callback is not reclaimed after an arbitrary elapsed interval' );
+
+$legacy_state = $terminal_store->get_state( 'controller-slow-terminal' );
+$legacy_state['runs']['slow-callback']['disposition'] = 'delivering';
+$legacy_state['runs']['slow-callback']['delivery_expires_at'] = 1;
+$terminal_store->save_state( 'controller-slow-terminal', $legacy_state );
+$terminal_deliveries = array();
+$slow_controller->reconnect( 'slow-callback' );
+controller_assert( array() === $terminal_deliveries && 'delivering' === ( $slow_controller->get( 'slow-callback' )['disposition'] ?? '' ), 'pre-upgrade delivering records are not replayed without proof that the old worker died' );
 
 $stale_store = new Controller_Memory_Store();
 WP_Agent_Run_Control::set_store( $stale_store );
@@ -214,7 +229,7 @@ $stale_runner->after_run = static function () use ( $stale_store ): void {
 	$stale_store->save_state( 'controller-stale-terminal', $state );
 };
 $stale_result = $stale_controller->start( 'stale-worker', $spec, array( 'status' => 'succeeded' ) );
-controller_assert( ! $stale_result['terminal'] && 'replacement-worker' === ( $stale_controller->get( 'stale-worker' )['lease']['token'] ?? '' ) && array() === $stale_deliveries, 'expired worker cannot terminalize or deliver after another worker reclaims its lease' );
+controller_assert( ! $stale_result['terminal'] && $stale_result['busy'] && 'replacement-worker' === ( $stale_controller->get( 'stale-worker' )['lease']['token'] ?? '' ) && array() === $stale_deliveries, 'stale worker rejection reports the active replacement owner as busy' );
 
 $release_store = new Controller_Failing_Store();
 WP_Agent_Run_Control::set_store( $release_store );

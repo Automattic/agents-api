@@ -237,6 +237,7 @@ require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-run-control-store
 require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-workspace-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-atomic-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-atomic-workspace-run-control-store.php';
+require_once AGENTS_API_PATH . 'src/Runtime/interface-wp-agent-exclusive-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-control-store-exception.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-option-run-control-store.php';
 require_once AGENTS_API_PATH . 'src/Runtime/class-wp-agent-run-control.php';

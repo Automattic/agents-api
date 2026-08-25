@@ -7,6 +7,7 @@
 
 namespace AgentsAPI\AI\Workflows;
 
+use AgentsAPI\AI\WP_Agent_Exclusive_Run_Control_Store;
 use AgentsAPI\AI\WP_Agent_Run_Control;
 use AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception;
 
@@ -24,7 +25,7 @@ final class WP_Agent_Workflow_Request_Controller {
 	public const SCHEMA = 'agents-api/workflow-request-controller/v1';
 	private const DEFAULT_ADVANCE_TIME_LIMIT_MS = 5000;
 	private const DEFAULT_ADVANCE_ACTION_LIMIT = 25;
-	private const TERMINAL_DELIVERY_LEASE_SECONDS = 60;
+	private const TERMINAL_DELIVERY_CLAIM_VERSION = 2;
 	private const MAX_TERMINAL_EVIDENCE_BYTES = 65536;
 
 	/** @var callable|null */
@@ -262,7 +263,9 @@ final class WP_Agent_Workflow_Request_Controller {
 					$phase = 'read_terminal';
 					$entry = $this->get( $operation_id ) ?? $entry;
 				}
-				return $this->response( $operation_id, $entry, false );
+				$stored_lease = $this->array_value( $entry['lease'] ?? array() );
+				$rejected     = $lease !== $this->string_value( $stored_lease['token'] ?? '' ) && $this->lease_is_active( $entry );
+				return $this->response( $operation_id, $entry, $rejected );
 			} catch ( \Throwable $error ) {
 				$primary_error = $error;
 				throw $error;
@@ -339,52 +342,80 @@ final class WP_Agent_Workflow_Request_Controller {
 
 	/** @param array<string,mixed> $entry */
 	private function deliver_terminal_once( string $operation_id, array $entry, WP_Agent_Workflow_Run_Result $result ): void {
-		$token   = bin2hex( random_bytes( 12 ) );
-		$claimed = WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $token ) {
-			$stored = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
-			$disposition = $this->string_value( $stored['disposition'] ?? '' );
-			$reclaimable = 'delivering' === $disposition && $this->int_value( $stored['delivery_expires_at'] ?? 0 ) <= $this->int_value( ( $this->clock )() );
-			if ( ! in_array( $disposition, array( 'pending', 'callback_failed' ), true ) && ! $reclaimable ) {
-				return array( 'state' => $state, 'result' => false );
-			}
-			$stored['disposition']        = 'delivering';
-			$stored['delivery_token']     = $token;
-			$stored['delivery_expires_at'] = $this->int_value( ( $this->clock )() ) + self::TERMINAL_DELIVERY_LEASE_SECONDS;
-			$stored['terminal_cleanup']   = true;
-			$stored['lease']              = array();
-			$state['runs'][ $operation_id ] = $stored;
-			return array( 'state' => $state, 'result' => $token );
-		} );
-		if ( $token !== $claimed ) {
+		if ( null === $this->terminal_action && null === $this->terminal_cleanup ) {
+			WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id ) {
+				$stored = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
+				if ( in_array( $stored['disposition'] ?? '', array( 'pending', 'callback_failed' ), true ) ) {
+					$stored['disposition']            = 'delivered';
+					$stored['terminal_cleanup']       = true;
+					$stored['lease']                  = array();
+					$state['runs'][ $operation_id ]   = $stored;
+				}
+				return array( 'state' => $state, 'result' => null );
+			} );
 			return;
 		}
-		$delivered = true;
-		try {
-			if ( null !== $this->terminal_action ) {
-				call_user_func( $this->terminal_action, $operation_id, $result, $entry );
+
+		$store = WP_Agent_Run_Control::store();
+		if ( ! $store instanceof WP_Agent_Exclusive_Run_Control_Store ) {
+			throw new \RuntimeException( 'Terminal callbacks require a run-control store with exclusive claim support.' );
+		}
+		$disposition = $this->string_value( $entry['disposition'] ?? '' );
+		if ( 'delivering' === $disposition && self::TERMINAL_DELIVERY_CLAIM_VERSION !== $this->int_value( $entry['delivery_claim_version'] ?? 0 ) ) {
+			// A pre-upgrade worker may still be executing, and its fixed lease cannot
+			// prove process death. Avoid an unsafe automatic replay.
+			return;
+		}
+
+		$store->execute_claimed( $this->store_key . "\0terminal\0" . $operation_id, function () use ( $operation_id, $entry, $result ): void {
+			$token   = bin2hex( random_bytes( 12 ) );
+			$claimed = WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $token ) {
+				$stored      = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
+				$disposition = $this->string_value( $stored['disposition'] ?? '' );
+				$recoverable = 'delivering' === $disposition && self::TERMINAL_DELIVERY_CLAIM_VERSION === $this->int_value( $stored['delivery_claim_version'] ?? 0 );
+				if ( ! in_array( $disposition, array( 'pending', 'callback_failed' ), true ) && ! $recoverable ) {
+					return array( 'state' => $state, 'result' => false );
+				}
+				$stored['disposition']            = 'delivering';
+				$stored['delivery_token']         = $token;
+				$stored['delivery_claim_version'] = self::TERMINAL_DELIVERY_CLAIM_VERSION;
+				$stored['terminal_cleanup']       = true;
+				$stored['lease']                  = array();
+				$state['runs'][ $operation_id ]   = $stored;
+				return array( 'state' => $state, 'result' => $token );
+			} );
+			if ( $token !== $claimed ) {
+				return;
 			}
-		} catch ( \Throwable $error ) {
-			$delivered = false;
-			unset( $error );
-		} finally {
-			// Callback consumers must tolerate retry after an interrupted delivery.
-			if ( null !== $this->terminal_cleanup ) {
-				try {
-					call_user_func( $this->terminal_cleanup, $operation_id, $result, $entry );
-				} catch ( \Throwable $error ) {
-					$delivered = false;
-					unset( $error );
+
+			$delivered = true;
+			try {
+				if ( null !== $this->terminal_action ) {
+					call_user_func( $this->terminal_action, $operation_id, $result, $entry );
+				}
+			} catch ( \Throwable $error ) {
+				$delivered = false;
+				unset( $error );
+			} finally {
+				// Callback consumers must tolerate retry after an interrupted delivery.
+				if ( null !== $this->terminal_cleanup ) {
+					try {
+						call_user_func( $this->terminal_cleanup, $operation_id, $result, $entry );
+					} catch ( \Throwable $error ) {
+						$delivered = false;
+						unset( $error );
+					}
 				}
 			}
-		}
-		WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $delivered, $token ) {
-			$stored = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
-			if ( 'delivering' === ( $stored['disposition'] ?? '' ) && $token === ( $stored['delivery_token'] ?? '' ) ) {
-				$stored['disposition'] = $delivered ? 'delivered' : 'callback_failed';
-				unset( $stored['delivery_token'], $stored['delivery_expires_at'] );
-				$state['runs'][ $operation_id ] = $stored;
-			}
-			return array( 'state' => $state, 'result' => null );
+			WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $delivered, $token ) {
+				$stored = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
+				if ( 'delivering' === ( $stored['disposition'] ?? '' ) && $token === ( $stored['delivery_token'] ?? '' ) ) {
+					$stored['disposition'] = $delivered ? 'delivered' : 'callback_failed';
+					unset( $stored['delivery_token'], $stored['delivery_claim_version'] );
+					$state['runs'][ $operation_id ] = $stored;
+				}
+				return array( 'state' => $state, 'result' => null );
+			} );
 		} );
 	}
 

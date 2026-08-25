@@ -13,6 +13,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $rows = array();
 		/** @var array<string,mixed> */
 		public array $api_options = array();
+		public bool $veto_option_write = false;
+		public bool $veto_site_option_write = false;
+		/** @var array<string,true> */
+		public array $claims = array();
 		private string $fault = '';
 		/** @var array<string,array{query:string,args:array<int,mixed>}> */
 		private array $prepared = array();
@@ -53,9 +57,12 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 		public function get_var( string $query ): mixed {
 			$prepared = $this->prepared[ $query ]; $sql = $prepared['query']; $args = $prepared['args'];
+			if ( str_starts_with( $sql, 'SELECT GET_LOCK' ) ) { if ( false === $this->result( 'claim_acquire', 1 ) ) { return null; } $key = (string) $args[0]; if ( isset( $this->claims[ $key ] ) ) { return 0; } $this->claims[ $key ] = true; return 1; }
+			if ( str_starts_with( $sql, 'SELECT RELEASE_LOCK' ) ) { if ( false === $this->result( 'claim_release', 1 ) ) { return null; } unset( $this->claims[ (string) $args[0] ] ); return 1; }
 			$operation = str_contains( $sql, 'option_value' ) && str_starts_with( (string) $args[1], '_agents_api_run_lock_' ) ? 'lock_read' : 'state_read';
 			if ( false === $this->result( $operation, 1 ) ) { return null; }
-			return $this->rows[ (string) $args[1] ] ?? null;
+			$key = str_contains( $sql, 'meta_value' ) ? (string) $args[2] : (string) $args[1];
+			return $this->rows[ $key ] ?? null;
 		}
 		public function suppress_errors( bool $suppress ): bool { unset( $suppress ); return false; }
 		public function get_blog_prefix( int $blog_id = 1 ): string { unset( $blog_id ); return 'wp_'; }
@@ -68,32 +75,37 @@ if ( ! class_exists( 'wpdb' ) ) {
 	}
 }
 
-$GLOBALS['option_store_db'] = null;
 function get_option( string $key, mixed $default = false ): mixed {
-	$db = $GLOBALS['option_store_db'];
+	global $wpdb; $db = $wpdb;
 	if ( false === $db->api_result( 'option_read', true ) ) { return $default; }
 	return $db->api_options[ $key ] ?? $default;
 }
 function update_option( string $key, mixed $value, mixed $autoload = null ): bool {
-	unset( $autoload ); $db = $GLOBALS['option_store_db'];
+	global $wpdb; unset( $autoload ); $db = $wpdb;
 	if ( false === $db->api_result( 'option_write', true ) ) { return false; }
+	if ( $db->veto_option_write ) { return false; }
 	if ( array_key_exists( $key, $db->api_options ) && $value === $db->api_options[ $key ] ) { return false; }
-	$db->api_options[ $key ] = $value; return true;
+	$db->api_options[ $key ] = $value; $db->rows[ $key ] = serialize( $value ); return true;
 }
+function get_site_option( string $key, mixed $default = false ): mixed { return get_option( $key, $default ); }
+function update_site_option( string $key, mixed $value ): bool { global $wpdb; if ( $wpdb->veto_site_option_write ) { return false; } return update_option( $key, $value ); }
 
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-run-control-store.php';
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-workspace-run-control-store.php';
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-atomic-run-control-store.php';
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-atomic-workspace-run-control-store.php';
+require_once __DIR__ . '/../src/Runtime/interface-wp-agent-exclusive-run-control-store.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control-store-exception.php';
+require_once __DIR__ . '/../src/Workspace/class-wp-agent-workspace-scope.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-option-run-control-store.php';
 
 use AgentsAPI\AI\WP_Agent_Option_Run_Control_Store;
 use AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception;
+use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 
 $fails = array(); $passes = 0;
 function option_store_assert( bool $ok, string $name ): void { global $fails, $passes; if ( $ok ) { ++$passes; echo "  PASS $name\n"; } else { $fails[] = $name; echo "  FAIL $name\n"; } }
-function option_store_fixture(): array { $db = new wpdb(); $GLOBALS['option_store_db'] = $db; return array( $db, new WP_Agent_Option_Run_Control_Store( $db ) ); }
+function option_store_fixture(): array { $db = new wpdb(); $GLOBALS['wpdb'] = $db; return array( $db, new WP_Agent_Option_Run_Control_Store( $db ) ); }
 function option_store_mutation( array $state ): array { $state['runs']['operation'] = array( 'run_id' => 'deterministic-run' ); return array( 'state' => $state, 'result' => 'stored' ); }
 
 echo "run-control-option-store-failures-smoke\n";
@@ -111,6 +123,24 @@ $state = array( 'runs' => array(), 'queues' => array(), 'events' => array() );
 $store->save_state( 'unchanged', $state ); $store->save_state( 'unchanged', $state );
 option_store_assert( $state === $store->get_state( 'unchanged' ), 'unchanged update_option false is preserved as a successful no-op' );
 
+list( $db, $store ) = option_store_fixture();
+$db->veto_option_write = true;
+$store->save_state( 'vetoed', $state );
+option_store_assert( array() === $db->api_options, 'intentional update_option veto is not classified as a temporary database outage' );
+
+list( $db, $store ) = option_store_fixture();
+$db->veto_site_option_write = true;
+$store->save_workspace_state( 'vetoed', WP_Agent_Workspace_Scope::from_parts( 'site', '1' ), $state );
+option_store_assert( array() === $db->api_options, 'intentional update_site_option veto is not classified as a temporary database outage' );
+
+$injected = new wpdb(); $global = new wpdb();
+$injected->api_options['authority'] = array( 'runs' => array( 'injected' => array( 'run_id' => 'injected' ) ), 'queues' => array(), 'events' => array() );
+$global->api_options['authority'] = array( 'runs' => array( 'global' => array( 'run_id' => 'global' ) ), 'queues' => array(), 'events' => array() );
+$global->last_error = 'Unrelated connection error.'; $GLOBALS['wpdb'] = $global;
+$authority_store = new WP_Agent_Option_Run_Control_Store( $injected );
+$authority_state = $authority_store->get_state( 'authority' );
+option_store_assert( isset( $authority_state['runs']['injected'] ) && ! isset( $authority_state['runs']['global'] ) && $global === $GLOBALS['wpdb'], 'injected connection is the coherent option API and error authority' );
+
 foreach ( array( 'lock_insert', 'state_read', 'start', 'state_write', 'commit', 'lock_release' ) as $operation ) {
 	list( $db, $store ) = option_store_fixture(); $db->fail_next( $operation );
 	try { $store->mutate_state( 'atomic-state', 'option_store_mutation' ); $typed = false; } catch ( WP_Agent_Run_Control_Store_Exception $error ) { $typed = true; }
@@ -125,6 +155,18 @@ try {
 	$primary_preserved = 'Primary mutation bug.' === $error->getMessage();
 }
 option_store_assert( $primary_preserved, 'lock release failure does not replace an in-flight programmer exception' );
+
+list( $db, $store ) = option_store_fixture();
+$nested_claimed = true;
+$claimed = $store->execute_claimed( 'terminal-operation', static function () use ( $store, &$nested_claimed ): void { $nested_claimed = $store->execute_claimed( 'terminal-operation', static function (): void {} ); } );
+$recovered_claim = $store->execute_claimed( 'terminal-operation', static function (): void {} );
+option_store_assert( $claimed && ! $nested_claimed && $recovered_claim, 'connection-lifetime claim rejects live overlap and is recoverable after release' );
+
+foreach ( array( 'claim_acquire', 'claim_release' ) as $operation ) {
+	list( $db, $store ) = option_store_fixture(); $db->fail_next( $operation );
+	try { $store->execute_claimed( 'failed-claim', static function (): void {} ); $typed = false; } catch ( WP_Agent_Run_Control_Store_Exception $error ) { $typed = true; }
+	option_store_assert( $typed, "{$operation} failure uses the retryable store exception" );
+}
 
 list( $db, $store ) = option_store_fixture();
 $stored = $store->mutate_state( 'normalized-state', static function ( array $state ): array { $state['runs']['operation'] = array( 'run_id' => 'deterministic-run' ); $state['idempotency'] = array( 'operation' => 'other-run' ); return array( 'state' => $state, 'result' => null ); } );
