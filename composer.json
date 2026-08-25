@@ -19,8 +19,7 @@
       "agents-api.php"
     ],
     "classmap": [
-      "src/Registry/class-wp-agent.php",
-      "src/Packages/"
+      "src/"
     ]
   },
   "suggest": {
