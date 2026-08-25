@@ -9,11 +9,22 @@
 
 echo "agents-api-composer-autoload-smoke\n";
 
-require dirname( __DIR__ ) . '/vendor/autoload.php';
+$loader = require dirname( __DIR__ ) . '/vendor/autoload.php';
 
 if ( defined( 'AGENTS_API_LOADED' ) ) {
 	fwrite( STDERR, "FAIL: Composer autoload initialized Agents API outside WordPress.\n" );
 	exit( 1 );
 }
 
-echo "PASS: Composer autoload returns without WordPress.\n";
+$package_file = $loader->findFile( 'WP_Agent_Package' );
+if ( ! is_string( $package_file ) || ! str_ends_with( str_replace( '\\', '/', $package_file ), '/src/Packages/class-wp-agent-package.php' ) ) {
+	fwrite( STDERR, "FAIL: Composer classmap does not expose WP_Agent_Package.\n" );
+	exit( 1 );
+}
+
+if ( class_exists( 'WP_Agent_Package', false ) ) {
+	fwrite( STDERR, "FAIL: Composer autoload eagerly loaded WP_Agent_Package outside WordPress.\n" );
+	exit( 1 );
+}
+
+echo "PASS: Composer autoload returns without WordPress and exposes package classmaps lazily.\n";
