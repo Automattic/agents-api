@@ -63,6 +63,9 @@ if ( defined( 'AGENTS_API_LOADED' ) ) {
 			if ( ! in_array( $token[0], array( T_CLASS, T_INTERFACE, T_TRAIT ), true ) ) {
 				continue;
 			}
+			if ( T_CLASS === $token[0] && T_DOUBLE_COLON === ( $tokens[ $index - 1 ][0] ?? null ) ) {
+				continue;
+			}
 
 			for ( ++$index; $index < $count; ++$index ) {
 				$symbol_token = $tokens[ $index ];

@@ -24,6 +24,7 @@ final class WP_Agent_Workflow_Request_Controller {
 	public const SCHEMA = 'agents-api/workflow-request-controller/v1';
 	private const DEFAULT_ADVANCE_TIME_LIMIT_MS = 5000;
 	private const DEFAULT_ADVANCE_ACTION_LIMIT = 25;
+	private const TERMINAL_DELIVERY_LEASE_SECONDS = 60;
 	private const MAX_TERMINAL_EVIDENCE_BYTES = 65536;
 
 	/** @var callable|null */
@@ -165,13 +166,6 @@ final class WP_Agent_Workflow_Request_Controller {
 					return array( 'state' => $state, 'result' => null );
 				}
 				$run_id = 'workflow_request_' . substr( hash( 'sha256', $this->store_key . "\0" . $operation_id ), 0, 32 );
-				// The idempotency mapping and authoritative run identity share this atomic write.
-				$idempotency = array();
-				foreach ( $this->array_value( $state['idempotency'] ?? array() ) as $key => $value ) {
-					$idempotency[ $key ] = $this->string_value( $value );
-				}
-				$idempotency[ $operation_id ] = $run_id;
-				$state['idempotency'] = $idempotency;
 				$state['runs'][ $operation_id ] = array(
 					'run_id'      => $run_id,
 					'spec'        => $spec->to_array(),
@@ -210,9 +204,26 @@ final class WP_Agent_Workflow_Request_Controller {
 			if ( null === $lease ) {
 				$phase = 'read_status';
 				$entry = $this->get( $operation_id );
-				return null === $entry ? new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' ) : $this->response( $operation_id, $entry, true );
+				if ( null === $entry ) {
+					return new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' );
+				}
+				if ( ! empty( $entry['terminal'] ) ) {
+					$result = $this->recorder->find( $this->string_value( $entry['run_id'] ?? '' ) );
+					if ( null !== $result ) {
+						if ( 'delivered' !== ( $entry['disposition'] ?? '' ) ) {
+							$this->cleanup_operation_actions( $result->get_run_id() );
+						}
+						$phase = 'deliver_terminal';
+						$this->deliver_terminal_once( $operation_id, $entry, $result );
+						$phase = 'read_terminal';
+						$entry = $this->get( $operation_id ) ?? $entry;
+					}
+					return $this->response( $operation_id, $entry, false );
+				}
+				return $this->response( $operation_id, $entry, true );
 			}
 
+			$primary_error = null;
 			try {
 				$phase = 'read_operation';
 				$entry = $this->get( $operation_id );
@@ -243,7 +254,7 @@ final class WP_Agent_Workflow_Request_Controller {
 				}
 
 				$phase = 'record_terminal';
-				$entry = $this->record_terminal( $operation_id, $result );
+				$entry = $this->record_terminal( $operation_id, $result, $lease );
 				if ( ! empty( $entry['terminal'] ) ) {
 					$this->cleanup_operation_actions( $result->get_run_id() );
 					$phase = 'deliver_terminal';
@@ -252,10 +263,19 @@ final class WP_Agent_Workflow_Request_Controller {
 					$entry = $this->get( $operation_id ) ?? $entry;
 				}
 				return $this->response( $operation_id, $entry, false );
+			} catch ( \Throwable $error ) {
+				$primary_error = $error;
+				throw $error;
 			} finally {
 				$active_phase = $phase;
 				$phase        = 'release_lease';
-				$this->release_lease( $operation_id, $lease );
+				try {
+					$this->release_lease( $operation_id, $lease );
+				} catch ( \Throwable $release_error ) {
+					if ( null === $primary_error ) {
+						throw $release_error;
+					}
+				}
 				$phase = $active_phase;
 			}
 		} catch ( WP_Agent_Run_Control_Store_Exception $error ) {
@@ -298,9 +318,12 @@ final class WP_Agent_Workflow_Request_Controller {
 	}
 
 	/** @return array<string,mixed> */
-	private function record_terminal( string $operation_id, WP_Agent_Workflow_Run_Result $result ): array {
-		$stored = WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $result ) {
+	private function record_terminal( string $operation_id, WP_Agent_Workflow_Run_Result $result, ?string $lease_token = null ): array {
+		$stored = WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $result, $lease_token ) {
 			$entry = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
+			if ( null !== $lease_token && $lease_token !== $this->string_value( $this->array_value( $entry['lease'] ?? array() )['token'] ?? '' ) ) {
+				return array( 'state' => $state, 'result' => $entry );
+			}
 			if ( $this->is_terminal( $result ) && empty( $entry['terminal'] ) ) {
 				$entry['terminal']        = true;
 				$entry['terminal_status'] = $result->get_status();
@@ -316,18 +339,23 @@ final class WP_Agent_Workflow_Request_Controller {
 
 	/** @param array<string,mixed> $entry */
 	private function deliver_terminal_once( string $operation_id, array $entry, WP_Agent_Workflow_Run_Result $result ): void {
-		$claimed = WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id ) {
+		$token   = bin2hex( random_bytes( 12 ) );
+		$claimed = WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $token ) {
 			$stored = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
-			if ( ! in_array( $stored['disposition'] ?? '', array( 'pending', 'callback_failed' ), true ) ) {
+			$disposition = $this->string_value( $stored['disposition'] ?? '' );
+			$reclaimable = 'delivering' === $disposition && $this->int_value( $stored['delivery_expires_at'] ?? 0 ) <= $this->int_value( ( $this->clock )() );
+			if ( ! in_array( $disposition, array( 'pending', 'callback_failed' ), true ) && ! $reclaimable ) {
 				return array( 'state' => $state, 'result' => false );
 			}
-			$stored['disposition']       = 'delivering';
-			$stored['terminal_cleanup']  = true;
-			$stored['lease']             = array();
+			$stored['disposition']        = 'delivering';
+			$stored['delivery_token']     = $token;
+			$stored['delivery_expires_at'] = $this->int_value( ( $this->clock )() ) + self::TERMINAL_DELIVERY_LEASE_SECONDS;
+			$stored['terminal_cleanup']   = true;
+			$stored['lease']              = array();
 			$state['runs'][ $operation_id ] = $stored;
-			return array( 'state' => $state, 'result' => true );
+			return array( 'state' => $state, 'result' => $token );
 		} );
-		if ( true !== $claimed ) {
+		if ( $token !== $claimed ) {
 			return;
 		}
 		$delivered = true;
@@ -349,10 +377,11 @@ final class WP_Agent_Workflow_Request_Controller {
 				}
 			}
 		}
-		WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $delivered ) {
+		WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $delivered, $token ) {
 			$stored = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
-			if ( 'delivering' === ( $stored['disposition'] ?? '' ) ) {
+			if ( 'delivering' === ( $stored['disposition'] ?? '' ) && $token === ( $stored['delivery_token'] ?? '' ) ) {
 				$stored['disposition'] = $delivered ? 'delivered' : 'callback_failed';
+				unset( $stored['delivery_token'], $stored['delivery_expires_at'] );
 				$state['runs'][ $operation_id ] = $stored;
 			}
 			return array( 'state' => $state, 'result' => null );
