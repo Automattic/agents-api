@@ -3,12 +3,16 @@
 defined( 'ABSPATH' ) || define( 'ABSPATH', __DIR__ . '/' );
 
 if ( ! class_exists( 'WP_Error' ) ) {
-	class WP_Error { public function __construct( public string $code = '', public string $message = '' ) {} }
+	class WP_Error {
+		public function __construct( public string $code = '', public string $message = '', public mixed $data = array() ) {}
+		public function get_error_data(): mixed { return $this->data; }
+	}
 }
 if ( ! function_exists( 'is_wp_error' ) ) { function is_wp_error( $value ): bool { return $value instanceof WP_Error; } }
 
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-run-control-store.php';
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-atomic-run-control-store.php';
+require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control-store-exception.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
@@ -33,6 +37,7 @@ if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
 
 use AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store;
 use AgentsAPI\AI\WP_Agent_Run_Control;
+use AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Request_Controller;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Awaiter;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
@@ -40,11 +45,26 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Runner;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec;
 
-final class Controller_Memory_Store implements WP_Agent_Atomic_Run_Control_Store {
+class Controller_Memory_Store implements WP_Agent_Atomic_Run_Control_Store {
 	public array $states = array();
 	public function get_state( string $key ): array { return $this->states[ $key ] ?? array( 'runs' => array(), 'queues' => array(), 'events' => array() ); }
 	public function save_state( string $key, array $state ): void { $this->states[ $key ] = $state; }
 	public function mutate_state( string $key, callable $mutation ): mixed { $out = $mutation( $this->get_state( $key ) ); $this->save_state( $key, $out['state'] ); return $out['result']; }
+}
+final class Controller_Failing_Store extends Controller_Memory_Store {
+	private string $failure = '';
+	private bool $after_commit = false;
+	public function fail_next( string $failure = 'storage', bool $after_commit = false ): void { $this->failure = $failure; $this->after_commit = $after_commit; }
+	public function get_state( string $key ): array { if ( '' !== $this->failure ) { $this->fail(); } return parent::get_state( $key ); }
+	public function mutate_state( string $key, callable $mutation ): mixed {
+		$failure = $this->failure; $after_commit = $this->after_commit; $this->failure = ''; $this->after_commit = false;
+		if ( '' === $failure ) { return parent::mutate_state( $key, $mutation ); }
+		if ( ! $after_commit ) { $this->throw_failure( $failure ); }
+		$result = parent::mutate_state( $key, $mutation );
+		$this->throw_failure( $failure );
+	}
+	private function fail(): never { $failure = $this->failure; $this->failure = ''; $this->after_commit = false; $this->throw_failure( $failure ); }
+	private function throw_failure( string $failure ): never { if ( 'programmer' === $failure ) { throw new RuntimeException( 'Injected programmer failure.' ); } throw new WP_Agent_Run_Control_Store_Exception( 'Injected secret storage detail.' ); }
 }
 final class Controller_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	public array $runs = array();
@@ -116,5 +136,41 @@ controller_assert( false === $reclaimed['busy'], 'expired worker lane is reclaim
 $cancelled_operation = $controller->cancel( 'two' );
 controller_assert( true === $cancelled_operation['terminal'] && 'cancelled' === $cancelled_operation['status'], 'public cancel atomically records a terminal disposition' );
 controller_assert( isset( WP_Agent_Run_Control::state( 'controller-test' )['idempotency']['two'] ), 'idempotency key and authoritative run identity are persisted together' );
+
+$failure_store = new Controller_Failing_Store();
+WP_Agent_Run_Control::set_store( $failure_store );
+$failure_recorder = new Controller_Recorder(); $failure_runner = new Controller_Runner( $failure_recorder ); $failure_awaiter = new Controller_Awaiter( $failure_recorder );
+$failure_controller = new WP_Agent_Workflow_Request_Controller( $failure_runner, $failure_recorder, $failure_awaiter, 'controller-failures' );
+
+$failure_store->fail_next( 'storage', true );
+$contended_start = $failure_controller->start( 'retry-start', $spec );
+$start_data = $contended_start instanceof WP_Error ? $contended_start->get_error_data() : array();
+controller_assert( $contended_start instanceof WP_Error && 'agents_workflow_run_control_unavailable' === $contended_start->code, 'post-commit start storage failure returns the typed public error' );
+controller_assert( array( 'start', 'reserve', true, 503 ) === array( $start_data['operation'] ?? '', $start_data['phase'] ?? '', $start_data['retryable'] ?? false, $start_data['status'] ?? 0 ), 'start error carries retryable operation and phase evidence' );
+controller_assert( ! str_contains( $contended_start->message, 'secret' ), 'storage error does not expose store details' );
+$retried_start = $failure_controller->start( 'retry-start', $spec );
+controller_assert( 1 === $failure_runner->starts && isset( $retried_start['run_id'] ), 'retry after uncertain reservation commit starts exactly one durable run' );
+
+$failure_store->fail_next();
+$reconnect_error = $failure_controller->reconnect( 'retry-start' );
+$reconnect_data = $reconnect_error instanceof WP_Error ? $reconnect_error->get_error_data() : array();
+controller_assert( array( 'reconnect', 'claim_lease' ) === array( $reconnect_data['operation'] ?? '', $reconnect_data['phase'] ?? '' ), 'reconnect normalizes lease contention with operation evidence' );
+$failure_store->fail_next();
+$status_error = $failure_controller->get_status( 'retry-start' );
+$status_data = $status_error instanceof WP_Error ? $status_error->get_error_data() : array();
+controller_assert( array( 'get_status', 'read' ) === array( $status_data['operation'] ?? '', $status_data['phase'] ?? '' ), 'status normalizes temporary read failure with operation evidence' );
+$failure_store->fail_next();
+$cancel_error = $failure_controller->cancel( 'retry-start' );
+$cancel_data = $cancel_error instanceof WP_Error ? $cancel_error->get_error_data() : array();
+controller_assert( array( 'cancel', 'read' ) === array( $cancel_data['operation'] ?? '', $cancel_data['phase'] ?? '' ), 'cancel normalizes temporary read failure with operation evidence' );
+$failure_store->fail_next();
+$advance_error = $failure_controller->advance( 'retry-start' );
+$advance_data = $advance_error instanceof WP_Error ? $advance_error->get_error_data() : array();
+controller_assert( array( 'advance', 'claim_lease' ) === array( $advance_data['operation'] ?? '', $advance_data['phase'] ?? '' ), 'advance normalizes lease contention with operation evidence' );
+
+$failure_store->fail_next( 'programmer' );
+$programmer_error_visible = false;
+try { $failure_controller->advance( 'retry-start' ); } catch ( RuntimeException $error ) { $programmer_error_visible = 'Injected programmer failure.' === $error->getMessage(); }
+controller_assert( $programmer_error_visible, 'unexpected programmer errors are not normalized' );
 echo "Passed: $passes, Failed: " . count( $fails ) . "\n";
 exit( empty( $fails ) ? 0 : 1 );

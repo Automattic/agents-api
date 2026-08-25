@@ -19,6 +19,7 @@ interface WP_Agent_Run_Control_Store {
 	 *
 	 * @param string $store_key Store key.
 	 * @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}
+	 * @throws WP_Agent_Run_Control_Store_Exception When storage is temporarily unavailable.
 	 */
 	public function get_state( string $store_key ): array;
 
@@ -27,6 +28,7 @@ interface WP_Agent_Run_Control_Store {
 	 *
 	 * @param string $store_key Store key.
 	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state State envelope.
+	 * @throws WP_Agent_Run_Control_Store_Exception When storage is temporarily unavailable.
 	 */
 	public function save_state( string $store_key, array $state ): void;
 }

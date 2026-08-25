@@ -14,6 +14,9 @@ defined( 'ABSPATH' ) || exit;
 if ( ! interface_exists( WP_Agent_Atomic_Workspace_Run_Control_Store::class ) ) {
 	require_once __DIR__ . '/interface-wp-agent-atomic-workspace-run-control-store.php';
 }
+if ( ! class_exists( __NAMESPACE__ . '\\WP_Agent_Run_Control_Store_Exception', false ) ) {
+	require_once __DIR__ . '/class-wp-agent-run-control-store-exception.php';
+}
 
 /**
  * Persists run-control state in WordPress options.
@@ -205,7 +208,7 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run
 			usleep( 50000 );
 		} while ( microtime( true ) < $deadline );
 
-		throw new \RuntimeException( 'Atomic run-control lock acquisition timed out.' );
+		throw new WP_Agent_Run_Control_Store_Exception( 'Atomic run-control lock acquisition timed out.' );
 	}
 
 	private function release_lock( \wpdb $db, string $table, string $lock_key, string $lock_value ): void {
@@ -226,12 +229,12 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run
 		try {
 			$current = $this->get_var( $db, $db->prepare( 'SELECT option_value FROM %i WHERE option_name = %s FOR UPDATE', $table, $lock_key ) );
 			if ( ! is_string( $current ) || ! hash_equals( $lock_value, $current ) ) {
-				throw new \RuntimeException( 'Atomic run-control lock ownership was lost before state write.' );
+				throw new WP_Agent_Run_Control_Store_Exception( 'Atomic run-control lock ownership was lost before state write.' );
 			}
 			$refreshed = $this->lock_value( $decoded['token'] );
 			$updated   = $this->query( $db, $db->prepare( "UPDATE %i SET option_value = %s, autoload = 'no' WHERE option_name = %s AND option_value = %s", $table, $refreshed, $lock_key, $lock_value ) );
 			if ( 1 !== $updated ) {
-				throw new \RuntimeException( 'Atomic run-control lock ownership was lost before state write.' );
+				throw new WP_Agent_Run_Control_Store_Exception( 'Atomic run-control lock ownership was lost before state write.' );
 			}
 			$write();
 			if ( false === $this->query( $db, 'COMMIT' ) ) {

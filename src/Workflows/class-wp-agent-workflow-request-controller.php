@@ -8,6 +8,7 @@
 namespace AgentsAPI\AI\Workflows;
 
 use AgentsAPI\AI\WP_Agent_Run_Control;
+use AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -61,8 +62,13 @@ final class WP_Agent_Workflow_Request_Controller {
 			return new \WP_Error( 'agents_workflow_operation_required', 'operation_id must be a non-empty string.' );
 		}
 
-		$this->reserve( $operation_id, $spec, $inputs, $options );
-		return $this->advance( $operation_id, $options );
+		try {
+			$this->reserve( $operation_id, $spec, $inputs, $options );
+		} catch ( WP_Agent_Run_Control_Store_Exception $error ) {
+			unset( $error );
+			return $this->storage_unavailable( 'start', 'reserve' );
+		}
+		return $this->advance_operation( $operation_id, $options, 'start' );
 	}
 
 	/**
@@ -73,7 +79,7 @@ final class WP_Agent_Workflow_Request_Controller {
 	 * @return array<string,mixed>|\WP_Error
 	 */
 	public function reconnect( string $operation_id, array $options = array() ): array|\WP_Error {
-		return $this->advance( trim( $operation_id ), $options );
+		return $this->advance_operation( trim( $operation_id ), $options, 'reconnect' );
 	}
 
 	/**
@@ -83,7 +89,12 @@ final class WP_Agent_Workflow_Request_Controller {
 	 */
 	public function get_status( string $operation_id ): array|\WP_Error {
 		$operation_id = trim( $operation_id );
-		$entry        = $this->get( $operation_id );
+		try {
+			$entry = $this->get( $operation_id );
+		} catch ( WP_Agent_Run_Control_Store_Exception $error ) {
+			unset( $error );
+			return $this->storage_unavailable( 'get_status', 'read' );
+		}
 		if ( null === $entry ) {
 			return new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' );
 		}
@@ -98,29 +109,41 @@ final class WP_Agent_Workflow_Request_Controller {
 	 */
 	public function cancel( string $operation_id ): array|\WP_Error {
 		$operation_id = trim( $operation_id );
-		$entry        = $this->get( $operation_id );
-		if ( '' === $operation_id || null === $entry ) {
-			return new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' );
-		}
+		$phase        = 'read';
+		try {
+			$entry = $this->get( $operation_id );
+			if ( '' === $operation_id || null === $entry ) {
+				return new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' );
+			}
 
-		$run_id = $this->string_value( $entry['run_id'] ?? '' );
-		WP_Agent_Run_Control::request_cancel( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, $run_id );
-		$result = $this->recorder->find( $run_id );
-		if ( null !== $result && ! $this->is_terminal( $result ) ) {
-			$result = $result->with( array(
-				'status'   => WP_Agent_Workflow_Run_Result::STATUS_CANCELLED,
-				'error'    => array( 'code' => 'cancel_requested', 'message' => 'Workflow operation cancellation was requested.' ),
-				'ended_at' => $this->int_value( ( $this->clock )() ),
-			) );
-			$this->recorder->update( $result );
+			$run_id = $this->string_value( $entry['run_id'] ?? '' );
+			$phase  = 'request_cancel';
+			WP_Agent_Run_Control::request_cancel( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, $run_id );
+			$result = $this->recorder->find( $run_id );
+			if ( null !== $result && ! $this->is_terminal( $result ) ) {
+				$result = $result->with( array(
+					'status'   => WP_Agent_Workflow_Run_Result::STATUS_CANCELLED,
+					'error'    => array( 'code' => 'cancel_requested', 'message' => 'Workflow operation cancellation was requested.' ),
+					'ended_at' => $this->int_value( ( $this->clock )() ),
+				) );
+				$this->recorder->update( $result );
+			}
+			if ( null === $result ) {
+				$phase = 'read_status';
+				$entry = $this->get( $operation_id );
+				return null === $entry ? new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' ) : $this->response( $operation_id, $entry, $this->lease_is_active( $entry ) );
+			}
+			$phase = 'record_terminal';
+			$entry = $this->record_terminal( $operation_id, $result );
+			$this->cleanup_operation_actions( $run_id );
+			$phase = 'deliver_terminal';
+			$this->deliver_terminal_once( $operation_id, $entry, $result );
+			$phase = 'read_terminal';
+			return $this->response( $operation_id, $this->get( $operation_id ) ?? $entry, false );
+		} catch ( WP_Agent_Run_Control_Store_Exception $error ) {
+			unset( $error );
+			return $this->storage_unavailable( 'cancel', $phase );
 		}
-		if ( null === $result ) {
-			return $this->get_status( $operation_id );
-		}
-		$entry = $this->record_terminal( $operation_id, $result );
-		$this->cleanup_operation_actions( $run_id );
-		$this->deliver_terminal_once( $operation_id, $entry, $result );
-		return $this->response( $operation_id, $this->get( $operation_id ) ?? $entry, false );
 	}
 
 	/** @return array<string,mixed>|null */
@@ -168,51 +191,76 @@ final class WP_Agent_Workflow_Request_Controller {
 	 * @return array<string,mixed>|\WP_Error
 	 */
 	public function advance( string $operation_id, array $options = array() ): array|\WP_Error {
+		return $this->advance_operation( $operation_id, $options, 'advance' );
+	}
+
+	/**
+	 * @param array<string,mixed> $options
+	 * @return array<string,mixed>|\WP_Error
+	 */
+	private function advance_operation( string $operation_id, array $options, string $operation ): array|\WP_Error {
 		if ( '' === $operation_id ) {
 			return new \WP_Error( 'agents_workflow_operation_required', 'operation_id must be a non-empty string.' );
 		}
-		$await_options = $this->bounded_await_options( $options );
-		$lease_seconds = max( $this->int_value( $options['lease_seconds'] ?? 0 ), (int) ceil( $this->int_value( $await_options['time_limit_ms'] ) / 1000 ) + 2, 1 );
-		$lease = $this->claim_lease( $operation_id, $lease_seconds, $this->string_value( $options['worker_id'] ?? '' ) );
-		if ( null === $lease ) {
-			$entry = $this->get( $operation_id );
-			return null === $entry ? new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' ) : $this->response( $operation_id, $entry, true );
-		}
-
+		$phase = 'claim_lease';
 		try {
-			$entry = $this->get( $operation_id );
-			if ( null === $entry ) {
-				return new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' );
-			}
-			$result = $this->recorder->find( $this->string_value( $entry['run_id'] ?? '' ) );
-			if ( null === $result ) {
-				$spec = WP_Agent_Workflow_Spec::from_array( is_array( $entry['spec'] ?? null ) ? $entry['spec'] : array() );
-				if ( is_wp_error( $spec ) ) {
-					return $spec;
-				}
-				$run_options           = is_array( $entry['options'] ?? null ) ? $entry['options'] : array();
-				$run_options['run_id'] = $this->string_value( $entry['run_id'] ?? '' );
-				$result                = $this->runner->run( $spec, is_array( $entry['inputs'] ?? null ) ? $entry['inputs'] : array(), $run_options );
+			$await_options = $this->bounded_await_options( $options );
+			$lease_seconds = max( $this->int_value( $options['lease_seconds'] ?? 0 ), (int) ceil( $this->int_value( $await_options['time_limit_ms'] ) / 1000 ) + 2, 1 );
+			$lease = $this->claim_lease( $operation_id, $lease_seconds, $this->string_value( $options['worker_id'] ?? '' ) );
+			if ( null === $lease ) {
+				$phase = 'read_status';
+				$entry = $this->get( $operation_id );
+				return null === $entry ? new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' ) : $this->response( $operation_id, $entry, true );
 			}
 
-			if ( $result->is_suspended() ) {
-				$this->renew_lease( $operation_id, $lease, $lease_seconds );
-				$awaited = $this->awaiter->await( $result->get_run_id(), $this->recorder, $await_options );
-				if ( is_wp_error( $awaited ) ) {
-					return $awaited;
+			try {
+				$phase = 'read_operation';
+				$entry = $this->get( $operation_id );
+				if ( null === $entry ) {
+					return new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' );
 				}
-				$result = $this->recorder->find( $result->get_run_id() ) ?? $result;
-			}
+				$result = $this->recorder->find( $this->string_value( $entry['run_id'] ?? '' ) );
+				if ( null === $result ) {
+					$spec = WP_Agent_Workflow_Spec::from_array( is_array( $entry['spec'] ?? null ) ? $entry['spec'] : array() );
+					if ( is_wp_error( $spec ) ) {
+						return $spec;
+					}
+					$run_options           = is_array( $entry['options'] ?? null ) ? $entry['options'] : array();
+					$run_options['run_id'] = $this->string_value( $entry['run_id'] ?? '' );
+					$phase                  = 'run';
+					$result                 = $this->runner->run( $spec, is_array( $entry['inputs'] ?? null ) ? $entry['inputs'] : array(), $run_options );
+				}
 
-			$entry = $this->record_terminal( $operation_id, $result );
-			if ( ! empty( $entry['terminal'] ) ) {
-				$this->cleanup_operation_actions( $result->get_run_id() );
-				$this->deliver_terminal_once( $operation_id, $entry, $result );
-				$entry = $this->get( $operation_id ) ?? $entry;
+				if ( $result->is_suspended() ) {
+					$phase = 'renew_lease';
+					$this->renew_lease( $operation_id, $lease, $lease_seconds );
+					$phase   = 'await';
+					$awaited = $this->awaiter->await( $result->get_run_id(), $this->recorder, $await_options );
+					if ( is_wp_error( $awaited ) ) {
+						return $awaited;
+					}
+					$result = $this->recorder->find( $result->get_run_id() ) ?? $result;
+				}
+
+				$phase = 'record_terminal';
+				$entry = $this->record_terminal( $operation_id, $result );
+				if ( ! empty( $entry['terminal'] ) ) {
+					$this->cleanup_operation_actions( $result->get_run_id() );
+					$phase = 'deliver_terminal';
+					$this->deliver_terminal_once( $operation_id, $entry, $result );
+					$phase = 'read_terminal';
+					$entry = $this->get( $operation_id ) ?? $entry;
+				}
+				return $this->response( $operation_id, $entry, false );
+			} finally {
+				$active_phase = $phase;
+				$phase        = 'release_lease';
+				$this->release_lease( $operation_id, $lease );
+				$phase = $active_phase;
 			}
-			return $this->response( $operation_id, $entry, false );
-		} finally {
-			$this->release_lease( $operation_id, $lease );
+		} catch ( WP_Agent_Run_Control_Store_Exception $error ) {
+			unset( $error );
+			return $this->storage_unavailable( $operation, $phase );
 		}
 	}
 
@@ -348,6 +396,19 @@ final class WP_Agent_Workflow_Request_Controller {
 			'busy'          => $busy,
 			'status'        => $terminal ? $this->string_value( $entry['terminal_status'] ?? '' ) : 'running',
 			'result'        => $terminal ? ( $entry['result'] ?? null ) : null,
+		);
+	}
+
+	private function storage_unavailable( string $operation, string $phase ): \WP_Error {
+		return new \WP_Error(
+			'agents_workflow_run_control_unavailable',
+			'Workflow run-control storage is temporarily unavailable. Retry the operation.',
+			array(
+				'status'    => 503,
+				'retryable' => true,
+				'operation' => $operation,
+				'phase'     => $phase,
+			)
 		);
 	}
 
