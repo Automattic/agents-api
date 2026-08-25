@@ -17,6 +17,10 @@
   "autoload": {
     "files": [
       "agents-api.php"
+    ],
+    "classmap": [
+      "src/Registry/class-wp-agent.php",
+      "src/Packages/"
     ]
   },
   "suggest": {
@@ -24,8 +28,10 @@
   },
   "scripts": {
     "phpstan": "phpstan analyse --no-progress --memory-limit=2G",
+    "phpstan-consumer": "phpstan analyse --no-progress --memory-limit=1G -c tests/fixtures/phpstan-consumer.neon",
     "smoke": [
       "php tests/composer-autoload-smoke.php",
+      "@phpstan-consumer",
       "php tests/bootstrap-version-skew-smoke.php",
       "php tests/bootstrap-smoke.php",
       "php tests/message-envelope-smoke.php",
