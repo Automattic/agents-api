@@ -970,17 +970,23 @@ class WP_Agent_Workflow_Runner {
 	}
 
 	/**
-	 * Build the dispatch plan for the roles shape: one branch descriptor per
-	 * sibling role, the collect plan (with its OPTIONAL aggregator branch), and
-	 * the shared immutable context. Mirrors the sync `run_parallel_roles()`
-	 * validation so the async path rejects the same malformed specs.
+	 * Validate the roles-shape parallel spec ONCE for both the sync loop and the
+	 * async dispatch-plan builder so the two paths can never drift on which specs
+	 * they accept. Enforces the three shared rules: every branch entry is an
+	 * array (`workflow_parallel_branch_invalid`), at least one branch
+	 * (`workflow_parallel_branches_empty`), and at most one aggregator
+	 * (`workflow_parallel_aggregator_invalid`). Splits the branches into the
+	 * sibling set and the OPTIONAL aggregator (zero aggregators is valid —
+	 * scatter-collect-return; one runs after the siblings over their collected
+	 * outputs). Returns the split, or a WP_Error with the shared code on an
+	 * invalid spec.
 	 *
 	 * @since 0.5.0
 	 *
 	 * @param array<mixed> $step Resolved parallel step.
-	 * @return array{branches:array<int,array<string,mixed>>,shared_context:array<string,mixed>,aggregate:array<string,mixed>}|\WP_Error
+	 * @return array{sibling_branches:list<array<mixed>>,aggregator:array<mixed>|null}|\WP_Error
 	 */
-	private static function build_roles_dispatch_plan( array $step ) {
+	private static function validate_parallel_roles_spec( array $step ) {
 		$branch_specs = array();
 		foreach ( (array) $step['branches'] as $branch_spec ) {
 			if ( ! is_array( $branch_spec ) ) {
@@ -999,9 +1005,6 @@ class WP_Agent_Workflow_Runner {
 			);
 		}
 
-		// At most one branch may be the aggregator. Zero aggregators is valid
-		// (scatter-collect-return); one aggregator runs after the siblings over
-		// their collected outputs.
 		$aggregator       = null;
 		$aggregator_roles = array();
 		$sibling_branches = array();
@@ -1022,6 +1025,68 @@ class WP_Agent_Workflow_Runner {
 				)
 			);
 		}
+
+		return array(
+			'sibling_branches' => $sibling_branches,
+			'aggregator'       => $aggregator,
+		);
+	}
+
+	/**
+	 * Validate the map-shape parallel spec ONCE for both the sync loop and the
+	 * async dispatch-plan builder so the two paths can never drift on which specs
+	 * they accept. Enforces the two shared rules: `items` resolves to an array
+	 * (`workflow_parallel_items_invalid`) and a non-empty nested `steps` list
+	 * (`workflow_parallel_steps_invalid`). Returns the resolved items + steps, or
+	 * a WP_Error with the shared code on an invalid spec.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param array<mixed> $step Resolved parallel step.
+	 * @return array{items:array<mixed>,steps:array<mixed>}|\WP_Error
+	 */
+	private static function validate_parallel_map_spec( array $step ) {
+		$items = $step['items'] ?? array();
+		if ( ! is_array( $items ) ) {
+			return new \WP_Error(
+				'workflow_parallel_items_invalid',
+				'parallel-map step `items` must resolve to an array.'
+			);
+		}
+
+		$steps = $step['steps'] ?? array();
+		if ( empty( $steps ) || ! is_array( $steps ) ) {
+			return new \WP_Error(
+				'workflow_parallel_steps_invalid',
+				'parallel-map step must include a non-empty nested `steps` list.'
+			);
+		}
+
+		return array(
+			'items' => $items,
+			'steps' => $steps,
+		);
+	}
+
+	/**
+	 * Build the dispatch plan for the roles shape: one branch descriptor per
+	 * sibling role, the collect plan (with its OPTIONAL aggregator branch), and
+	 * the shared immutable context. Routes through the shared
+	 * `validate_parallel_roles_spec()` so the async path rejects EXACTLY the same
+	 * malformed specs as the sync loop.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param array<mixed> $step Resolved parallel step.
+	 * @return array{branches:array<int,array<string,mixed>>,shared_context:array<string,mixed>,aggregate:array<string,mixed>}|\WP_Error
+	 */
+	private static function build_roles_dispatch_plan( array $step ) {
+		$spec = self::validate_parallel_roles_spec( $step );
+		if ( is_wp_error( $spec ) ) {
+			return $spec;
+		}
+		$sibling_branches = $spec['sibling_branches'];
+		$aggregator       = $spec['aggregator'];
 
 		$shared_context = is_array( $step['context'] ?? null ) ? self::string_keyed_array( $step['context'] ) : array();
 
@@ -1061,21 +1126,12 @@ class WP_Agent_Workflow_Runner {
 	 * @return array{branches:array<int,array<string,mixed>>,shared_context:array<string,mixed>,aggregate:array<string,mixed>}|\WP_Error
 	 */
 	private static function build_map_dispatch_plan( array $step ) {
-		$items = $step['items'] ?? array();
-		if ( ! is_array( $items ) ) {
-			return new \WP_Error(
-				'workflow_parallel_items_invalid',
-				'parallel-map step `items` must resolve to an array.'
-			);
+		$spec = self::validate_parallel_map_spec( $step );
+		if ( is_wp_error( $spec ) ) {
+			return $spec;
 		}
-
-		$steps = $step['steps'] ?? array();
-		if ( empty( $steps ) || ! is_array( $steps ) ) {
-			return new \WP_Error(
-				'workflow_parallel_steps_invalid',
-				'parallel-map step must include a non-empty nested `steps` list.'
-			);
-		}
+		$items = $spec['items'];
+		$steps = $spec['steps'];
 
 		$as_value          = self::string_value( $step['as'] ?? null );
 		$index_as_value    = self::string_value( $step['index_as'] ?? null );
@@ -1236,21 +1292,12 @@ class WP_Agent_Workflow_Runner {
 	 * @return array<mixed>|WP_Error
 	 */
 	private static function run_parallel_map( array $step, array $context, array $handlers ) {
-		$items = $step['items'] ?? array();
-		if ( ! is_array( $items ) ) {
-			return new \WP_Error(
-				'workflow_parallel_items_invalid',
-				'parallel-map step `items` must resolve to an array.'
-			);
+		$spec = self::validate_parallel_map_spec( $step );
+		if ( is_wp_error( $spec ) ) {
+			return $spec;
 		}
-
-		$steps = $step['steps'] ?? array();
-		if ( empty( $steps ) || ! is_array( $steps ) ) {
-			return new \WP_Error(
-				'workflow_parallel_steps_invalid',
-				'parallel-map step must include a non-empty nested `steps` list.'
-			);
-		}
+		$items = $spec['items'];
+		$steps = $spec['steps'];
 
 		$as_value          = self::string_value( $step['as'] ?? null );
 		$index_as_value    = self::string_value( $step['index_as'] ?? null );
@@ -1308,40 +1355,12 @@ class WP_Agent_Workflow_Runner {
 	 * @return array<mixed>|WP_Error
 	 */
 	private static function run_parallel_roles( array $step, array $context, array $handlers ) {
-		$branch_specs = array();
-		foreach ( (array) $step['branches'] as $branch_spec ) {
-			if ( ! is_array( $branch_spec ) ) {
-				return new \WP_Error(
-					'workflow_parallel_branch_invalid',
-					'parallel branch entries must be arrays.'
-				);
-			}
-			$branch_specs[] = $branch_spec;
+		$spec = self::validate_parallel_roles_spec( $step );
+		if ( is_wp_error( $spec ) ) {
+			return $spec;
 		}
-
-		if ( empty( $branch_specs ) ) {
-			return new \WP_Error(
-				'workflow_parallel_branches_empty',
-				'parallel-roles step must declare a non-empty `branches` list.'
-			);
-		}
-
-		// At most one branch may be the aggregator (optional).
-		$aggregator_roles = array();
-		foreach ( $branch_specs as $branch_spec ) {
-			if ( ! empty( $branch_spec['is_aggregator'] ) ) {
-				$aggregator_roles[] = self::string_value( $branch_spec['role'] ?? '' );
-			}
-		}
-		if ( count( $aggregator_roles ) > 1 ) {
-			return new \WP_Error(
-				'workflow_parallel_aggregator_invalid',
-				sprintf(
-					'parallel-roles step may declare at most one aggregator branch (`is_aggregator` true); found %d.',
-					count( $aggregator_roles )
-				)
-			);
-		}
+		$sibling_branches = $spec['sibling_branches'];
+		$aggregator       = $spec['aggregator'];
 
 		// Shared immutable context: deep-copied per branch so a branch cannot
 		// mutate it for its siblings or an aggregator. Arrays are copied by
@@ -1351,16 +1370,10 @@ class WP_Agent_Workflow_Runner {
 
 		$branch_outputs = array();
 		$branch_records = array();
-		$aggregator     = null;
 
 		// Scatter: every non-aggregator branch, each against its own snapshot of
 		// the shared context.
-		foreach ( $branch_specs as $branch_spec ) {
-			if ( ! empty( $branch_spec['is_aggregator'] ) ) {
-				$aggregator = $branch_spec;
-				continue;
-			}
-
+		foreach ( $sibling_branches as $branch_spec ) {
 			$run = self::run_role_branch( $branch_spec, $shared_context, array(), $context, $executor, $handlers );
 			if ( is_wp_error( $run ) ) {
 				return $run;
