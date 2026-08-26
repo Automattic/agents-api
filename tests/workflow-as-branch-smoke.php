@@ -752,6 +752,25 @@ function as_smoke_failing_spec(): WP_Agent_Workflow_Spec {
 	);
 }
 
+function as_smoke_single_branch_spec( string $label ): WP_Agent_Workflow_Spec {
+	return WP_Agent_Workflow_Spec::from_array(
+		array(
+			'id'    => 'demo/as-single-' . $label,
+			'steps' => array(
+				array(
+					'id'    => 'scatter',
+					'type'  => 'parallel',
+					'as'    => 'item',
+					'items' => array( array( 'label' => $label ) ),
+					'steps' => array(
+						array( 'id' => 'work', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => $label ) ),
+					),
+				),
+			),
+		)
+	);
+}
+
 AS_Shim::reset();
 $recorder4 = new AS_Smoke_Recorder();
 remove_all_filters( 'wp_agent_workflow_run_recorder' );
@@ -968,6 +987,139 @@ $terminal8 = $recorder8->find( 'as-recovery-terminal' );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $terminal8->get_status(), 'failed-action recovery: run fails terminal when no continuation can be established', $failures, $passes );
 smoke_assert( 'workflow_branch_reconcile_recovery_failed', $terminal8->get_error()['code'] ?? '', 'failed-action recovery: terminal failure uses stable recovery code', $failures, $passes );
 smoke_assert( $effect_before8 + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'failed-action recovery: terminal fallback does not repeat branch effects', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+
+// #535 payloads carry an admission token but predate explicit backend provenance.
+// They continue reconciliation synchronously without guessing receipt ownership.
+AS_Shim::reset();
+$GLOBALS['__options'] = array();
+$recorder9 = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder9 ) { return $recorder9; } );
+( new WP_Agent_Workflow_Runner( $recorder9 ) )->run( as_smoke_single_branch_spec( 'transition' ), array(), array( 'run_id' => 'as-transition' ) );
+$branches9 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+foreach ( AS_Shim::$queue as $index => $queued9 ) {
+	if ( $queued9['id'] === $branches9[0]['id'] ) {
+		unset( AS_Shim::$queue[ $index ]['args'][0]['store_backend'] );
+	}
+}
+$transition_attempts9 = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function ( $override, string $run_id, callable $critical ) use ( &$transition_attempts9 ) {
+		unset( $override );
+		if ( 'as-transition' === $run_id && 0 === $transition_attempts9++ ) {
+			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+		}
+		return $critical();
+	},
+	10,
+	3
+);
+$transition_effect_before9 = (int) ( $GLOBALS['__role_worker_effects']['transition'] ?? 0 );
+AS_Shim::fire( $branches9[0]['id'] );
+$resumes9 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
+AS_Shim::fire( $resumes9[0]['id'] );
+$transition_final9 = $recorder9->find( 'as-transition' );
+smoke_assert( true, isset( $branches9[0]['args'][0]['admission_token'] ), '#535 transition: payload retains admission token', $failures, $passes );
+smoke_assert( 0, count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK ) ), '#535 transition: contention uses no backend-dependent receipt action', $failures, $passes );
+smoke_assert( $transition_effect_before9 + 1, (int) ( $GLOBALS['__role_worker_effects']['transition'] ?? 0 ), '#535 transition: branch effects execute exactly once', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $transition_final9->get_status(), '#535 transition: bounded synchronous continuation reaches terminal success', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+
+AS_Shim::reset();
+$GLOBALS['__options'] = array();
+$recorder10 = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder10 ) { return $recorder10; } );
+( new WP_Agent_Workflow_Runner( $recorder10 ) )->run( as_smoke_single_branch_spec( 'transition-fail' ), array(), array( 'run_id' => 'as-transition-fail' ) );
+$branches10 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+foreach ( AS_Shim::$queue as $index => $queued10 ) {
+	if ( $queued10['id'] === $branches10[0]['id'] ) {
+		unset( AS_Shim::$queue[ $index ]['args'][0]['store_backend'] );
+	}
+}
+add_filter( 'wp_agent_workflow_reconcile_lock', static function () { return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' ); }, 10, 3 );
+$transition_effect_before10 = (int) ( $GLOBALS['__role_worker_effects']['transition-fail'] ?? 0 );
+AS_Shim::fire( $branches10[0]['id'] );
+$transition_final10 = $recorder10->find( 'as-transition-fail' );
+smoke_assert( $transition_effect_before10 + 1, (int) ( $GLOBALS['__role_worker_effects']['transition-fail'] ?? 0 ), '#535 transition failure: bounded attempts do not repeat effects', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $transition_final10->get_status(), '#535 transition failure: exhausted continuation reaches terminal failure', $failures, $passes );
+smoke_assert( 'workflow_branch_reconcile_recovery_failed', $transition_final10->get_error()['code'] ?? '', '#535 transition failure: stable terminal recovery code', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+
+// A custom receipt ref may differ from its descriptor ref. The failed-action
+// lifecycle recovers it through the dedicated descriptor-identity locator.
+AS_Shim::reset();
+$GLOBALS['__options'] = array();
+$GLOBALS['__distinct_descriptors'] = array();
+$GLOBALS['__distinct_receipts'] = array();
+$GLOBALS['__distinct_locators'] = array();
+$GLOBALS['__distinct_descriptor_writes'] = 0;
+add_filter(
+	'wp_agent_workflow_branch_store_put',
+	static function ( $ref, string $run_id, string $handle_id, array $descriptor ) {
+		unset( $ref, $run_id );
+		++$GLOBALS['__distinct_descriptor_writes'];
+		$descriptor_ref = 'custom-descriptor:' . $handle_id;
+		$GLOBALS['__distinct_descriptors'][ $descriptor_ref ] = $descriptor;
+		return $descriptor_ref;
+	},
+	10,
+	4
+);
+add_filter( 'wp_agent_workflow_branch_store_get', static function ( $descriptor, string $store_ref ) { unset( $descriptor ); return $GLOBALS['__distinct_descriptors'][ $store_ref ] ?? null; }, 10, 3 );
+add_filter(
+	'wp_agent_workflow_branch_receipt_put',
+	static function ( $receipt_ref, string $store_ref, string $run_id, string $handle_id, array $receipt ) {
+		unset( $receipt_ref, $run_id );
+		$distinct_ref = 'custom-receipt:' . $handle_id;
+		$GLOBALS['__distinct_receipts'][ $distinct_ref ] = $receipt;
+		$GLOBALS['__distinct_locators'][ $store_ref ] = $distinct_ref;
+		return $distinct_ref;
+	},
+	10,
+	5
+);
+add_filter( 'wp_agent_workflow_branch_receipt_get', static function ( $receipt, string $receipt_ref ) { unset( $receipt ); return $GLOBALS['__distinct_receipts'][ $receipt_ref ] ?? null; }, 10, 3 );
+add_filter( 'wp_agent_workflow_branch_receipt_locate', static function ( string $receipt_ref, string $store_ref ): string { unset( $receipt_ref ); return $GLOBALS['__distinct_locators'][ $store_ref ] ?? ''; }, 10, 5 );
+add_filter( 'wp_agent_workflow_branch_receipt_delete', static function ( bool $handled, string $receipt_ref ): bool { unset( $handled ); unset( $GLOBALS['__distinct_receipts'][ $receipt_ref ] ); return true; }, 10, 5 );
+add_filter( 'wp_agent_workflow_branch_store_forget', static function (): bool { $GLOBALS['__distinct_descriptors'] = array(); $GLOBALS['__distinct_receipts'] = array(); $GLOBALS['__distinct_locators'] = array(); return true; }, 10, 2 );
+$recorder11 = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder11 ) { return $recorder11; } );
+( new WP_Agent_Workflow_Runner( $recorder11 ) )->run( as_smoke_single_branch_spec( 'distinct' ), array(), array( 'run_id' => 'as-distinct' ) );
+$branches11 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+$distinct_attempts11 = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function ( $override, string $run_id, callable $critical ) use ( &$distinct_attempts11 ) {
+		unset( $override );
+		if ( 'as-distinct' === $run_id && 0 === $distinct_attempts11++ ) {
+			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+		}
+		return $critical();
+	},
+	10,
+	3
+);
+$distinct_effect_before11 = (int) ( $GLOBALS['__role_worker_effects']['distinct'] ?? 0 );
+AS_Shim::$reject_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK;
+AS_Shim::fire_with_failure_lifecycle( $branches11[0]['id'] );
+AS_Shim::$reject_hook = '';
+$resumes11 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
+AS_Shim::fire( $resumes11[0]['id'] );
+$distinct_final11 = $recorder11->find( 'as-distinct' );
+smoke_assert( 1, $GLOBALS['__distinct_descriptor_writes'], 'distinct custom receipt: recovery never writes through descriptor contract', $failures, $passes );
+smoke_assert( $distinct_effect_before11 + 1, (int) ( $GLOBALS['__role_worker_effects']['distinct'] ?? 0 ), 'distinct custom receipt: failed-action recovery preserves exactly-one effects', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $distinct_final11->get_status(), 'distinct custom receipt: locator recovers distinct ref to terminal success', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_branch_store_put' );
+remove_all_filters( 'wp_agent_workflow_branch_store_get' );
+remove_all_filters( 'wp_agent_workflow_branch_receipt_put' );
+remove_all_filters( 'wp_agent_workflow_branch_receipt_get' );
+remove_all_filters( 'wp_agent_workflow_branch_receipt_locate' );
+remove_all_filters( 'wp_agent_workflow_branch_receipt_delete' );
+remove_all_filters( 'wp_agent_workflow_branch_store_forget' );
 remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";

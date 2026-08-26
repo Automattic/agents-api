@@ -58,6 +58,7 @@ final class WP_Agent_Workflow_Branch_Store {
 	public const BACKEND_BUILTIN = 'builtin';
 	public const BACKEND_CUSTOM  = 'custom';
 	public const BACKEND_LEGACY  = 'legacy';
+	public const BACKEND_TRANSITION = 'transition';
 
 	/**
 	 * Option-name prefix for a per-branch descriptor row. The run id and handle
@@ -392,6 +393,33 @@ final class WP_Agent_Workflow_Branch_Store {
 			'branch_result' => self::string_keyed_array( $receipt['branch_result'] ),
 			'continuation'  => is_array( $receipt['continuation'] ?? null ) ? self::string_keyed_array( $receipt['continuation'] ) : array(),
 		);
+	}
+
+	/**
+	 * Resolve a receipt ref from explicit backend ownership and descriptor identity.
+	 *
+	 * @return string Empty when no receipt is discoverable.
+	 */
+	public static function locate_reconcile_receipt( string $store_ref, string $run_id, string $handle_id, string $context_ref, string $backend ): string {
+		if ( self::BACKEND_BUILTIN === $backend ) {
+			return $store_ref;
+		}
+		if ( self::BACKEND_CUSTOM !== $backend || ! function_exists( 'apply_filters' ) ) {
+			return '';
+		}
+		/**
+		 * Locate a custom reconcile receipt by its owning descriptor identity.
+		 *
+		 * @since 0.7.0
+		 *
+		 * @param string $receipt_ref No locator by default.
+		 * @param string $store_ref   Descriptor ref.
+		 * @param string $run_id      Run id.
+		 * @param string $handle_id   Handle id.
+		 * @param string $context_ref Shared-context ref.
+		 */
+		$receipt_ref = apply_filters( 'wp_agent_workflow_branch_receipt_locate', '', $store_ref, $run_id, $handle_id, $context_ref );
+		return $receipt_ref;
 	}
 
 	/**

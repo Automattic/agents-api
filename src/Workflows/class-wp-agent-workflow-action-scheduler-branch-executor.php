@@ -811,7 +811,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$run_id          = self::string_value( $payload['run_id'] ?? '' );
 		$handle_id       = self::string_value( $payload['handle_id'] ?? '' );
 		$store_ref       = self::string_value( $payload['store_ref'] ?? '' );
-		$store_backend   = self::string_value( $payload['store_backend'] ?? WP_Agent_Workflow_Branch_Store::BACKEND_LEGACY );
+		$store_backend   = self::payload_store_backend( $payload );
 		$context_ref     = self::string_value( $payload['context_ref'] ?? '' );
 		$admission_token = self::string_value( $payload['admission_token'] ?? '' );
 
@@ -837,9 +837,10 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		// reconcile receipt before its retry enqueue failed. Resume from that receipt
 		// before reading the descriptor so retrying the branch action cannot repeat
 		// external effects.
-		$receipt = '' !== $store_ref ? WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $store_ref, $context_ref, $store_backend ) : null;
+		$receipt_ref = WP_Agent_Workflow_Branch_Store::locate_reconcile_receipt( $store_ref, $run_id, $handle_id, $context_ref, $store_backend );
+		$receipt     = '' !== $receipt_ref ? WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $receipt_ref, $context_ref, $store_backend ) : null;
 		if ( null !== $receipt ) {
-			self::reconcile_branch_result( $run_id, $handle_id, $store_ref, $context_ref, $store_backend, $receipt['branch_result'], $receipt['continuation'], true );
+			self::reconcile_branch_result( $run_id, $handle_id, $receipt_ref, $context_ref, $store_backend, $receipt['branch_result'], $receipt['continuation'], true );
 			return;
 		}
 
@@ -890,7 +891,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$run_id        = self::string_value( $payload['run_id'] ?? '' );
 		$handle_id     = self::string_value( $payload['handle_id'] ?? '' );
 		$store_ref     = self::string_value( $payload['store_ref'] ?? '' );
-		$store_backend = self::string_value( $payload['store_backend'] ?? WP_Agent_Workflow_Branch_Store::BACKEND_LEGACY );
+		$store_backend = self::payload_store_backend( $payload );
 		$context_ref   = self::string_value( $payload['context_ref'] ?? '' );
 
 		self::reconcile_branch_result( $run_id, $handle_id, $store_ref, $context_ref, $store_backend, $branch_result, array(), false );
@@ -909,7 +910,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$run_id        = self::string_value( $payload['run_id'] ?? '' );
 		$handle_id     = self::string_value( $payload['handle_id'] ?? '' );
 		$result_ref    = self::string_value( $payload['result_ref'] ?? '' );
-		$store_backend = self::string_value( $payload['store_backend'] ?? WP_Agent_Workflow_Branch_Store::BACKEND_LEGACY );
+		$store_backend = self::payload_store_backend( $payload );
 		$context_ref   = self::string_value( $payload['context_ref'] ?? '' );
 		if ( '' === $run_id || '' === $handle_id || '' === $result_ref ) {
 			return false;
@@ -978,6 +979,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$next_continuation = is_array( $error_data ) && is_array( $error_data['reconcile_continuation'] ?? null )
 			? self::string_keyed_array( $error_data['reconcile_continuation'] )
 			: $continuation;
+		if ( WP_Agent_Workflow_Branch_Store::BACKEND_TRANSITION === $store_backend ) {
+			return self::continue_transitional_reconcile( $run_id, $handle_id, $branch_result, $next_continuation );
+		}
 		$next_ref = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $run_id, $handle_id, $result_ref, $context_ref, $store_backend, $branch_result, $next_continuation );
 		if ( is_wp_error( $next_ref ) ) {
 			throw new \RuntimeException( $next_ref->get_error_message() );
@@ -1028,8 +1032,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$handle_id     = self::string_value( $payload['handle_id'] ?? '' );
 		$result_ref    = self::string_value( $payload['store_ref'] ?? '' );
 		$context_ref   = self::string_value( $payload['context_ref'] ?? '' );
-		$store_backend = self::string_value( $payload['store_backend'] ?? WP_Agent_Workflow_Branch_Store::BACKEND_LEGACY );
-		$receipt       = WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $result_ref, $context_ref, $store_backend );
+		$store_backend = self::payload_store_backend( $payload );
+		$receipt_ref   = WP_Agent_Workflow_Branch_Store::locate_reconcile_receipt( $result_ref, $run_id, $handle_id, $context_ref, $store_backend );
+		$receipt       = '' !== $receipt_ref ? WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $receipt_ref, $context_ref, $store_backend ) : null;
 		if ( '' === $run_id || '' === $handle_id ) {
 			return;
 		}
@@ -1044,7 +1049,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$retry_payload = array(
 			'run_id'        => $run_id,
 			'handle_id'     => $handle_id,
-			'result_ref'    => $result_ref,
+			'result_ref'    => $receipt_ref,
 			'context_ref'   => $context_ref,
 			'store_backend' => $store_backend,
 		);
@@ -1087,6 +1092,52 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$recorder->update( $terminal );
 		\AgentsAPI\AI\WP_Agent_Run_Control::finish_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, $run_id, \AgentsAPI\AI\WP_Agent_Run_Control::STATUS_FAILED );
 		WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
+	}
+
+	/**
+	 * Continue a #535-era token-bearing payload without guessing its backend.
+	 *
+	 * @param array<string,mixed> $branch_result Terminal BranchResult.
+	 * @param array<string,mixed> $continuation  Opaque reconcile continuation.
+	 */
+	private static function continue_transitional_reconcile( string $run_id, string $handle_id, array $branch_result, array $continuation ): bool {
+		for ( $attempt = 0; $attempt < 3; ++$attempt ) {
+			$result = apply_filters( 'wp_agent_workflow_reconcile_retry', null, $run_id, $handle_id, $branch_result, $continuation );
+			if ( null === $result ) {
+				$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
+			}
+			if ( ! is_wp_error( $result ) ) {
+				if ( is_object( $result ) && method_exists( $result, 'is_suspended' ) && ! $result->is_suspended() ) {
+					WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
+				}
+				return true;
+			}
+			if ( 'agents_reconcile_lock_unavailable' !== $result->get_error_code() ) {
+				self::fail_reconcile_recovery( $run_id, $handle_id, $result->get_error_message() );
+				return true;
+			}
+			$error_data = $result->get_error_data();
+			if ( is_array( $error_data ) && is_array( $error_data['reconcile_continuation'] ?? null ) ) {
+				$continuation = self::string_keyed_array( $error_data['reconcile_continuation'] );
+			}
+		}
+
+		self::fail_reconcile_recovery( $run_id, $handle_id, 'Transitional reconcile contention exceeded its bounded retry budget.' );
+		return true;
+	}
+
+	/**
+	 * Resolve explicit payload provenance, including the #535 transition shape.
+	 *
+	 * @param array<mixed> $payload Branch action payload.
+	 */
+	private static function payload_store_backend( array $payload ): string {
+		if ( array_key_exists( 'store_backend', $payload ) ) {
+			return self::string_value( $payload['store_backend'] );
+		}
+		return array_key_exists( 'admission_token', $payload )
+			? WP_Agent_Workflow_Branch_Store::BACKEND_TRANSITION
+			: WP_Agent_Workflow_Branch_Store::BACKEND_LEGACY;
 	}
 
 	/** Whether the authoritative run already recorded this branch completion. */
