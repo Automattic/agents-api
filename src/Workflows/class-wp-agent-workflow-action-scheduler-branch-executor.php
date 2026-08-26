@@ -979,8 +979,8 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$next_continuation = is_array( $error_data ) && is_array( $error_data['reconcile_continuation'] ?? null )
 			? self::string_keyed_array( $error_data['reconcile_continuation'] )
 			: $continuation;
-		if ( WP_Agent_Workflow_Branch_Store::BACKEND_TRANSITION === $store_backend ) {
-			return self::continue_transitional_reconcile( $run_id, $handle_id, $branch_result, $next_continuation );
+		if ( in_array( $store_backend, array( WP_Agent_Workflow_Branch_Store::BACKEND_TRANSITION, WP_Agent_Workflow_Branch_Store::BACKEND_LEGACY ), true ) ) {
+			return self::continue_compatibility_reconcile( $run_id, $handle_id, $branch_result, $next_continuation );
 		}
 		$next_ref = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $run_id, $handle_id, $result_ref, $context_ref, $store_backend, $branch_result, $next_continuation );
 		if ( is_wp_error( $next_ref ) ) {
@@ -1023,17 +1023,20 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			unset( $error );
 			return;
 		}
-		if ( self::BRANCH_HOOK !== $action->get_hook() ) {
+		$failed_hook = $action->get_hook();
+		if ( self::BRANCH_HOOK !== $failed_hook && self::RECONCILE_HOOK !== $failed_hook ) {
 			return;
 		}
 		$args          = $action->get_args();
 		$payload       = is_array( $args[0] ?? null ) ? $args[0] : array();
 		$run_id        = self::string_value( $payload['run_id'] ?? '' );
 		$handle_id     = self::string_value( $payload['handle_id'] ?? '' );
-		$result_ref    = self::string_value( $payload['store_ref'] ?? '' );
+		$result_ref    = self::string_value( self::RECONCILE_HOOK === $failed_hook ? ( $payload['result_ref'] ?? '' ) : ( $payload['store_ref'] ?? '' ) );
 		$context_ref   = self::string_value( $payload['context_ref'] ?? '' );
 		$store_backend = self::payload_store_backend( $payload );
-		$receipt_ref   = WP_Agent_Workflow_Branch_Store::locate_reconcile_receipt( $result_ref, $run_id, $handle_id, $context_ref, $store_backend );
+		$receipt_ref   = self::RECONCILE_HOOK === $failed_hook
+			? $result_ref
+			: WP_Agent_Workflow_Branch_Store::locate_reconcile_receipt( $result_ref, $run_id, $handle_id, $context_ref, $store_backend );
 		$receipt       = '' !== $receipt_ref ? WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $receipt_ref, $context_ref, $store_backend ) : null;
 		if ( '' === $run_id || '' === $handle_id ) {
 			return;
@@ -1091,16 +1094,17 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		);
 		$recorder->update( $terminal );
 		\AgentsAPI\AI\WP_Agent_Run_Control::finish_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, $run_id, \AgentsAPI\AI\WP_Agent_Run_Control::STATUS_FAILED );
+		do_action( 'wp_agent_workflow_run_completed', $terminal, $run_id );
 		WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
 	}
 
 	/**
-	 * Continue a #535-era token-bearing payload without guessing its backend.
+	 * Continue a pre-provenance payload without guessing its backend.
 	 *
 	 * @param array<string,mixed> $branch_result Terminal BranchResult.
 	 * @param array<string,mixed> $continuation  Opaque reconcile continuation.
 	 */
-	private static function continue_transitional_reconcile( string $run_id, string $handle_id, array $branch_result, array $continuation ): bool {
+	private static function continue_compatibility_reconcile( string $run_id, string $handle_id, array $branch_result, array $continuation ): bool {
 		for ( $attempt = 0; $attempt < 3; ++$attempt ) {
 			$result = apply_filters( 'wp_agent_workflow_reconcile_retry', null, $run_id, $handle_id, $branch_result, $continuation );
 			if ( null === $result ) {
@@ -1122,7 +1126,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			}
 		}
 
-		self::fail_reconcile_recovery( $run_id, $handle_id, 'Transitional reconcile contention exceeded its bounded retry budget.' );
+		self::fail_reconcile_recovery( $run_id, $handle_id, 'Compatibility reconcile contention exceeded its bounded retry budget.' );
 		return true;
 	}
 

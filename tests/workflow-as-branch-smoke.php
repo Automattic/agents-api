@@ -980,6 +980,23 @@ add_filter(
 	3
 );
 $effect_before8 = (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 );
+$completion_events8 = array();
+$forget_calls8 = 0;
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( $result, string $run_id ) use ( &$completion_events8 ): void {
+		$completion_events8[] = array( 'result' => $result, 'run_id' => $run_id );
+	},
+	10,
+	2
+);
+add_filter(
+	'wp_agent_workflow_branch_store_forget',
+	static function ( bool $handled ) use ( &$forget_calls8 ): bool {
+		++$forget_calls8;
+		return $handled;
+	}
+);
 AS_Shim::$reject_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK;
 AS_Shim::fire_with_failure_lifecycle( $branches8[0]['id'] );
 AS_Shim::$reject_hook = '';
@@ -987,6 +1004,44 @@ $terminal8 = $recorder8->find( 'as-recovery-terminal' );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $terminal8->get_status(), 'failed-action recovery: run fails terminal when no continuation can be established', $failures, $passes );
 smoke_assert( 'workflow_branch_reconcile_recovery_failed', $terminal8->get_error()['code'] ?? '', 'failed-action recovery: terminal failure uses stable recovery code', $failures, $passes );
 smoke_assert( $effect_before8 + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'failed-action recovery: terminal fallback does not repeat branch effects', $failures, $passes );
+smoke_assert( 1, count( $completion_events8 ), 'failed-action recovery: forced terminal path fires completion funnel exactly once', $failures, $passes );
+smoke_assert( 'as-recovery-terminal', $completion_events8[0]['run_id'] ?? '', 'failed-action recovery: completion observer receives run id', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, isset( $completion_events8[0]['result'] ) ? $completion_events8[0]['result']->get_status() : '', 'failed-action recovery: completion observer receives terminal result', $failures, $passes );
+smoke_assert( 1, $forget_calls8, 'failed-action recovery: run-scoped branch cleanup executes exactly once', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+remove_all_filters( 'wp_agent_workflow_run_completed' );
+remove_all_filters( 'wp_agent_workflow_branch_store_forget' );
+
+// A RECONCILE_HOOK action can itself fail while handing off another contended
+// attempt. Its failed-action lifecycle must recover the receipt directly.
+AS_Shim::reset();
+$GLOBALS['__options'] = array();
+$recorder_reconcile_failure = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder_reconcile_failure ) { return $recorder_reconcile_failure; } );
+( new WP_Agent_Workflow_Runner( $recorder_reconcile_failure ) )->run( as_smoke_roles_spec(), array(), array( 'run_id' => 'as-reconcile-action-fail' ) );
+$reconcile_failure_branches = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+$reconcile_failure_attempts = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function ( $override, string $run_id, callable $critical ) use ( &$reconcile_failure_attempts ) {
+		unset( $override );
+		if ( 'as-reconcile-action-fail' === $run_id && $reconcile_failure_attempts++ < 2 ) {
+			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+		}
+		return $critical();
+	},
+	10,
+	3
+);
+$reconcile_failure_effect_before = (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 );
+AS_Shim::fire( $reconcile_failure_branches[0]['id'] );
+$failed_reconcile_actions = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK );
+AS_Shim::$reject_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK;
+AS_Shim::fire_with_failure_lifecycle( $failed_reconcile_actions[0]['id'] );
+AS_Shim::$reject_hook = '';
+smoke_assert( $reconcile_failure_effect_before + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'failed reconcile action: recovery does not repeat branch effects', $failures, $passes );
+smoke_assert( 1, count( $recorder_reconcile_failure->find( 'as-reconcile-action-fail' )->get_suspension()['completed'] ?? array() ), 'failed reconcile action: failed-action lifecycle recovers durable receipt', $failures, $passes );
 remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
 
 // #535 payloads carry an admission token but predate explicit backend provenance.
@@ -1047,6 +1102,56 @@ smoke_assert( $transition_effect_before10 + 1, (int) ( $GLOBALS['__role_worker_e
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $transition_final10->get_status(), '#535 transition failure: exhausted continuation reaches terminal failure', $failures, $passes );
 smoke_assert( 'workflow_branch_reconcile_recovery_failed', $transition_final10->get_error()['code'] ?? '', '#535 transition failure: stable terminal recovery code', $failures, $passes );
 remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+
+// Pre-#535 payloads have neither admission_token nor store_backend. They use the
+// same bounded no-reexecution continuation and still reach the completion funnel.
+AS_Shim::reset();
+$GLOBALS['__options'] = array();
+$recorder_tokenless = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder_tokenless ) { return $recorder_tokenless; } );
+( new WP_Agent_Workflow_Runner( $recorder_tokenless ) )->run( as_smoke_single_branch_spec( 'tokenless' ), array(), array( 'run_id' => 'as-tokenless' ) );
+$tokenless_branches = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+foreach ( AS_Shim::$queue as $index => $queued_tokenless ) {
+	if ( $queued_tokenless['id'] === $tokenless_branches[0]['id'] ) {
+		unset( AS_Shim::$queue[ $index ]['args'][0]['store_backend'], AS_Shim::$queue[ $index ]['args'][0]['admission_token'] );
+	}
+}
+$tokenless_attempts = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function ( $override, string $run_id, callable $critical ) use ( &$tokenless_attempts ) {
+		unset( $override );
+		if ( 'as-tokenless' === $run_id && 0 === $tokenless_attempts++ ) {
+			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+		}
+		return $critical();
+	},
+	10,
+	3
+);
+$tokenless_completions = 0;
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( $result, string $run_id ) use ( &$tokenless_completions ): void {
+		unset( $result );
+		if ( 'as-tokenless' === $run_id ) {
+			++$tokenless_completions;
+		}
+	},
+	10,
+	2
+);
+$tokenless_effect_before = (int) ( $GLOBALS['__role_worker_effects']['tokenless'] ?? 0 );
+AS_Shim::fire( $tokenless_branches[0]['id'] );
+$tokenless_resumes = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
+AS_Shim::fire( $tokenless_resumes[0]['id'] );
+$tokenless_final = $recorder_tokenless->find( 'as-tokenless' );
+smoke_assert( $tokenless_effect_before + 1, (int) ( $GLOBALS['__role_worker_effects']['tokenless'] ?? 0 ), 'tokenless compatibility: contention does not repeat branch effects', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $tokenless_final->get_status(), 'tokenless compatibility: bounded continuation reaches terminal success', $failures, $passes );
+smoke_assert( 1, $tokenless_completions, 'tokenless compatibility: completion funnel fires exactly once', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+remove_all_filters( 'wp_agent_workflow_run_completed' );
 
 // A custom receipt ref may differ from its descriptor ref. The failed-action
 // lifecycle recovers it through the dedicated descriptor-identity locator.
