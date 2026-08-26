@@ -86,6 +86,11 @@ final class WP_Agent_Workflow_Branch_Store {
 	private const INDEX_PREFIX = 'agents_wf_branch_index_';
 
 	/**
+	 * Option-name prefix for dispatch admission fences.
+	 */
+	private const ADMISSION_PREFIX = 'agents_wf_branch_admission_';
+
+	/**
 	 * Payload time-to-live (seconds). After this a row belonging to a run that
 	 * never resolved is treated as expired and returns nothing on read. Generous
 	 * (2 hours) so a slow-but-live fanout is never evicted mid-flight, yet
@@ -94,6 +99,84 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @since 0.5.0
 	 */
 	private const TTL_SECONDS = 7200;
+
+	/**
+	 * Begin a fenced fan-out admission generation.
+	 *
+	 * Branch callbacks may be claimed while their siblings are still being
+	 * enqueued, so they must not begin effects until this generation is admitted.
+	 *
+	 * @param string $run_id Run being admitted.
+	 * @return string Opaque admission token, or an empty string on persistence failure.
+	 */
+	public static function begin_admission( string $run_id ): string {
+		if ( '' === $run_id || ! function_exists( 'delete_option' ) ) {
+			return '';
+		}
+
+		$ref   = self::ADMISSION_PREFIX . md5( $run_id );
+		$token = $ref . ':' . md5( uniqid( $run_id . ':', true ) );
+		self::write_row(
+			$ref,
+			array(
+				'run_id'  => $run_id,
+				'token'   => $token,
+				'status'  => 'pending',
+				'expires' => time() + self::TTL_SECONDS,
+			)
+		);
+
+		if ( 'pending' === self::admission_status( $token ) ) {
+			return $token;
+		}
+
+		delete_option( $ref );
+		return '';
+	}
+
+	/**
+	 * Open an admission fence after every sibling is durably enqueued.
+	 */
+	public static function admit( string $token ): bool {
+		$ref = self::admission_ref( $token );
+		$row = '' !== $ref ? self::read_row( $ref ) : null;
+		if ( null === $row || ! hash_equals( $token, is_string( $row['token'] ?? null ) ? $row['token'] : '' ) || 'pending' !== ( $row['status'] ?? '' ) ) {
+			return false;
+		}
+
+		$row['status'] = 'admitted';
+		self::write_row( $ref, $row );
+		return 'admitted' === self::admission_status( $token );
+	}
+
+	/**
+	 * Close an admission fence before compensating a partial enqueue.
+	 */
+	public static function reject_admission( string $token ): void {
+		$ref = self::admission_ref( $token );
+		$row = '' !== $ref ? self::read_row( $ref ) : null;
+		if ( null === $row || ! hash_equals( $token, is_string( $row['token'] ?? null ) ? $row['token'] : '' ) ) {
+			return;
+		}
+
+		$row['status'] = 'rejected';
+		self::write_row( $ref, $row );
+	}
+
+	/**
+	 * Read an admission generation's state. A missing or expired fence is closed.
+	 *
+	 * @return string pending, admitted, or rejected.
+	 */
+	public static function admission_status( string $token ): string {
+		$ref    = self::admission_ref( $token );
+		$row    = '' !== $ref ? self::read_row( $ref ) : null;
+		if ( null === $row || ! hash_equals( $token, is_string( $row['token'] ?? null ) ? $row['token'] : '' ) ) {
+			return 'rejected';
+		}
+		$status = is_string( $row['status'] ?? null ) ? $row['status'] : '';
+		return in_array( $status, array( 'pending', 'admitted' ), true ) ? $status : 'rejected';
+	}
 
 	/**
 	 * Persist one branch descriptor under a per-(run_id, handle_id) key and
@@ -348,6 +431,11 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @return void
 	 */
 	public static function forget_run( string $run_id ): void {
+		// Admission has a deterministic per-run ref, so its cleanup never depends
+		// on the mutable branch index or a consumer-owned payload store.
+		if ( function_exists( 'delete_option' ) ) {
+			delete_option( self::ADMISSION_PREFIX . md5( $run_id ) );
+		}
 		if ( self::filtered_forget_run( $run_id ) ) {
 			return;
 		}
@@ -365,6 +453,15 @@ final class WP_Agent_Workflow_Branch_Store {
 		}
 		delete_option( self::INDEX_PREFIX . md5( $run_id ) );
 		delete_option( self::CONTEXT_PREFIX . md5( $run_id ) );
+	}
+
+	/**
+	 * Resolve the deterministic option ref embedded in an admission token.
+	 */
+	private static function admission_ref( string $token ): string {
+		$separator = strrpos( $token, ':' );
+		$ref       = false !== $separator ? substr( $token, 0, $separator ) : '';
+		return str_starts_with( $ref, self::ADMISSION_PREFIX ) ? $ref : '';
 	}
 
 	/**
