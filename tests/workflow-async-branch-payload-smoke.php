@@ -64,7 +64,7 @@ if ( ! class_exists( 'WP_Ability' ) ) {
 $GLOBALS['__filters']   = array();
 $GLOBALS['__abilities'] = array();
 $GLOBALS['__options']   = array();
-$GLOBALS['__get_option_after_read'] = null;
+$GLOBALS['__update_option_before_write'] = null;
 
 if ( ! function_exists( 'add_filter' ) ) {
 	function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
@@ -122,11 +122,7 @@ if ( ! function_exists( 'current_user_can' ) ) {
 }
 if ( ! function_exists( 'get_option' ) ) {
 	function get_option( string $option, $default = false ) {
-		$value = array_key_exists( $option, $GLOBALS['__options'] ) ? $GLOBALS['__options'][ $option ] : $default;
-		if ( is_callable( $GLOBALS['__get_option_after_read'] ) ) {
-			call_user_func( $GLOBALS['__get_option_after_read'], $option );
-		}
-		return $value;
+		return array_key_exists( $option, $GLOBALS['__options'] ) ? $GLOBALS['__options'][ $option ] : $default;
 	}
 }
 if ( ! function_exists( 'add_option' ) ) {
@@ -142,6 +138,9 @@ if ( ! function_exists( 'add_option' ) ) {
 if ( ! function_exists( 'update_option' ) ) {
 	function update_option( string $option, $value, $autoload = null ): bool {
 		unset( $autoload );
+		if ( is_callable( $GLOBALS['__update_option_before_write'] ) ) {
+			call_user_func( $GLOBALS['__update_option_before_write'], $option, $value );
+		}
 		$GLOBALS['__options'][ $option ] = $value;
 		return true;
 	}
@@ -585,26 +584,39 @@ $cleanup_leftover = array_filter(
 );
 smoke_assert( array(), array_values( $cleanup_leftover ), 'concurrent cleanup: stale shared index cannot orphan terminal result rows', $failures, $passes );
 
-// Terminal run cleanup can interleave after receipt cleanup reads a descriptor.
-// The per-receipt path must never write that stale row back and resurrect it.
+// Terminal cleanup can win immediately before a contended branch persists its
+// receipt. The stale writer may create a receipt-only row afterward, but a
+// terminal retry must discover it without effects and clean it deterministically.
 $GLOBALS['__options'] = array();
-$resurrection_run = 'pay-cleanup-interleave';
-$resurrection_ref = WP_Agent_Workflow_Branch_Store::put_branch( $resurrection_run, 'branch', array( 'run_id' => $resurrection_run, 'handle_id' => 'branch', 'key' => 'branch' ) );
+$resurrection_run = 'pay-A';
+$resurrection_ref = WP_Agent_Workflow_Branch_Store::put_branch( $resurrection_run, 'race-handle', array( 'run_id' => $resurrection_run, 'handle_id' => 'race-handle', 'key' => 'branch' ) );
 $resurrection_result = array( 'key' => 'branch', 'status' => 'succeeded', 'output' => array( 'ok' => true ) );
-WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $resurrection_run, 'branch', $resurrection_ref, '', $resurrection_result );
-$GLOBALS['__get_option_after_read'] = static function ( string $option ) use ( $resurrection_run, $resurrection_ref ): void {
+$GLOBALS['__update_option_before_write'] = static function ( string $option ) use ( $resurrection_run, $resurrection_ref ): void {
 	if ( $resurrection_ref !== $option ) {
 		return;
 	}
-	$GLOBALS['__get_option_after_read'] = null;
+	$GLOBALS['__update_option_before_write'] = null;
 	WP_Agent_Workflow_Branch_Store::forget_run( $resurrection_run );
 };
-WP_Agent_Workflow_Branch_Store::forget_reconcile_receipt( $resurrection_run, 'branch', $resurrection_ref, '' );
+WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $resurrection_run, 'race-handle', $resurrection_ref, '', $resurrection_result );
+smoke_assert( false, isset( $GLOBALS['__options'][ $resurrection_ref ]['descriptor'] ), 'receipt put race: stale writer cannot recreate descriptor state', $failures, $passes );
+$GLOBALS['__branch_effects'] = 1;
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder ) { return $recorder; } );
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_reconcile_action(
+	array(
+		'run_id'      => $resurrection_run,
+		'handle_id'   => 'race-handle',
+		'result_ref'  => $resurrection_ref,
+		'context_ref' => '',
+	)
+);
 $resurrection_leftover = array_filter(
 	array_keys( $GLOBALS['__options'] ),
 	static fn ( $option ): bool => str_starts_with( (string) $option, 'agents_wf_branch_' )
 );
-smoke_assert( array(), array_values( $resurrection_leftover ), 'receipt cleanup race: terminal forget cannot be followed by descriptor resurrection', $failures, $passes );
+smoke_assert( array(), array_values( $resurrection_leftover ), 'receipt put race: terminal retry removes row written after forget_run', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__branch_effects'], 'receipt put race: terminal retry does not repeat branch effects', $failures, $passes );
 
 // A consumer-owned branch ref must keep terminal result persistence and cleanup
 // in that same custom store. No local option fallback is permitted.

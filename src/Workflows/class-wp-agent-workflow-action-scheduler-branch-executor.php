@@ -829,6 +829,16 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			}
 		}
 
+		// A previous attempt may have completed branch effects and persisted a
+		// reconcile receipt before its retry enqueue failed. Resume from that receipt
+		// before reading the descriptor so retrying the branch action cannot repeat
+		// external effects.
+		$receipt = '' !== $store_ref ? WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $store_ref, $context_ref ) : null;
+		if ( null !== $receipt ) {
+			self::reconcile_branch_result( $run_id, $handle_id, $store_ref, $context_ref, $receipt['branch_result'], $receipt['continuation'], true );
+			return;
+		}
+
 		// Rehydrate the full self-contained descriptor from the branch store using
 		// the lightweight ref the AS args carried. The store re-seats the run-scoped
 		// shared context into branch_vars.context, so the branch runs against the
@@ -852,20 +862,19 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 				),
 				'item'   => null,
 			);
-			self::persist_and_reconcile_branch_result( $payload, $branch_result );
+			self::reconcile_branch_action_result( $payload, $branch_result );
 			return;
 		}
 
 		$key           = self::string_value( $descriptor['key'] ?? '' );
 		$branch_result = self::execute_branch( $descriptor, $key );
 
-		self::persist_and_reconcile_branch_result( $payload, $branch_result );
+		self::reconcile_branch_action_result( $payload, $branch_result );
 	}
 
 	/**
-	 * Persist and reconcile a completed branch result. Persistence happens before
-	 * reconciliation so a lock-contention retry can survive process exit without
-	 * executing the completed branch again.
+	 * Reconcile a completed branch result directly from memory. Only lock
+	 * contention persists a retry receipt, minimizing post-terminal writes.
 	 *
 	 * @since 0.7.0
 	 *
@@ -873,17 +882,13 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * @param array<string,mixed> $branch_result Terminal branch result.
 	 * @return void
 	 */
-	private static function persist_and_reconcile_branch_result( array $payload, array $branch_result ): void {
+	private static function reconcile_branch_action_result( array $payload, array $branch_result ): void {
 		$run_id      = self::string_value( $payload['run_id'] ?? '' );
 		$handle_id   = self::string_value( $payload['handle_id'] ?? '' );
 		$store_ref   = self::string_value( $payload['store_ref'] ?? '' );
 		$context_ref = self::string_value( $payload['context_ref'] ?? '' );
-		$result_ref  = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $run_id, $handle_id, $store_ref, $context_ref, $branch_result );
-		if ( is_wp_error( $result_ref ) ) {
-			throw new \RuntimeException( $result_ref->get_error_message() );
-		}
 
-		self::reconcile_branch_result( $run_id, $handle_id, $result_ref, $context_ref, $branch_result, array(), false );
+		self::reconcile_branch_result( $run_id, $handle_id, $store_ref, $context_ref, $branch_result, array(), false );
 	}
 
 	/**
@@ -953,6 +958,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 
 		if ( ! is_wp_error( $result ) ) {
 			WP_Agent_Workflow_Branch_Store::forget_reconcile_receipt( $run_id, $handle_id, $result_ref, $context_ref );
+			if ( is_object( $result ) && method_exists( $result, 'is_suspended' ) && ! $result->is_suspended() ) {
+				WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
+			}
 			return;
 		}
 		if ( 'agents_reconcile_lock_unavailable' !== $result->get_error_code() ) {
@@ -963,13 +971,11 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$next_continuation = is_array( $error_data ) && is_array( $error_data['reconcile_continuation'] ?? null )
 			? self::string_keyed_array( $error_data['reconcile_continuation'] )
 			: $continuation;
-		if ( $next_continuation !== $continuation ) {
-			$next_ref = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $run_id, $handle_id, $result_ref, $context_ref, $branch_result, $next_continuation );
-			if ( is_wp_error( $next_ref ) ) {
-				throw new \RuntimeException( $next_ref->get_error_message() );
-			}
-			$result_ref = $next_ref;
+		$next_ref = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $run_id, $handle_id, $result_ref, $context_ref, $branch_result, $next_continuation );
+		if ( is_wp_error( $next_ref ) ) {
+			throw new \RuntimeException( $next_ref->get_error_message() );
 		}
+		$result_ref = $next_ref;
 
 		$action_id = self::enqueue_async_action(
 			self::RECONCILE_HOOK,

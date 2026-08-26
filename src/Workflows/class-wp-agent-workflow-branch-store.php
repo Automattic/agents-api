@@ -276,9 +276,10 @@ final class WP_Agent_Workflow_Branch_Store {
 	}
 
 	/**
-	 * Persist a terminal branch result and opaque continuation state inside the
-	 * branch's existing descriptor row. Reusing that already-indexed per-branch
-	 * row avoids a concurrent shared-index append during branch completion.
+	 * Persist a terminal branch result and opaque continuation state as a
+	 * receipt-only record. This deliberately replaces neither a stale descriptor
+	 * snapshot nor the shared run index, so terminal cleanup cannot be followed by
+	 * descriptor resurrection.
 	 *
 	 * @since 0.7.0
 	 *
@@ -295,26 +296,7 @@ final class WP_Agent_Workflow_Branch_Store {
 			'branch_result' => $branch_result,
 			'continuation'  => $continuation,
 		);
-		$row = self::read_row( $store_ref );
 
-		if ( null !== $row && is_array( $row['descriptor'] ?? null ) ) {
-			$descriptor                                = $row['descriptor'];
-			$descriptor[ self::RECONCILE_RECEIPT_KEY ] = $receipt;
-			$row['descriptor']                          = $descriptor;
-			self::write_row( $store_ref, $row );
-
-			$persisted            = self::read_row( $store_ref );
-			$persisted_descriptor = null !== $persisted && is_array( $persisted['descriptor'] ?? null ) ? $persisted['descriptor'] : array();
-			if ( $receipt === ( $persisted_descriptor[ self::RECONCILE_RECEIPT_KEY ] ?? null ) ) {
-				return $store_ref;
-			}
-
-			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'Could not durably persist the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
-		}
-
-		// A missing or expired built-in descriptor still has a deterministic ref.
-		// Persist a receipt-only row at that exact ref: no shared-index append, and
-		// successful reconciliation can delete the row directly.
 		if ( self::branch_ref( $run_id, $handle_id ) === $store_ref ) {
 			self::write_row(
 				$store_ref,
@@ -330,21 +312,18 @@ final class WP_Agent_Workflow_Branch_Store {
 				return $store_ref;
 			}
 
-			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'Could not durably persist the terminal result for missing branch `%s` in run `%s`.', $handle_id, $run_id ) );
+			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'Could not durably persist the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
 		}
 
-		// A non-local ref belongs to the consumer that supplied it through the
-		// existing branch-store filters. Require that same owner to persist and read
-		// the receipt; never fall back to an unexpected local option row.
-		$descriptor = self::filtered_get_branch( $store_ref, $context_ref );
-		if ( null === $descriptor ) {
-			$descriptor = array(
-				'run_id'    => $run_id,
-				'handle_id' => $handle_id,
-			);
-		}
-		$descriptor[ self::RECONCILE_RECEIPT_KEY ] = $receipt;
-		$result_ref = self::filtered_put_branch( $run_id, $handle_id, self::strip_shared_context( $descriptor ) );
+		// A non-local ref belongs to a consumer store. Persist only the receipt shape
+		// through its existing put/get contract; never rehydrate and rewrite a stale
+		// descriptor, and never fall back to local options.
+		$receipt_record = array(
+			'run_id'                        => $run_id,
+			'handle_id'                     => $handle_id,
+			self::RECONCILE_RECEIPT_KEY     => $receipt,
+		);
+		$result_ref = self::filtered_put_branch( $run_id, $handle_id, $receipt_record );
 		if ( null === $result_ref ) {
 			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'The branch store that owns `%s` did not persist the terminal result.', $store_ref ) );
 		}
@@ -643,16 +622,4 @@ final class WP_Agent_Workflow_Branch_Store {
 		return $normalized;
 	}
 
-	/**
-	 * Keep the existing custom-store put contract free of shared context copies.
-	 *
-	 * @param array<string,mixed> $descriptor Branch descriptor.
-	 * @return array<string,mixed>
-	 */
-	private static function strip_shared_context( array $descriptor ): array {
-		if ( is_array( $descriptor['branch_vars'] ?? null ) && array_key_exists( 'context', $descriptor['branch_vars'] ) ) {
-			unset( $descriptor['branch_vars']['context'] );
-		}
-		return $descriptor;
-	}
 }

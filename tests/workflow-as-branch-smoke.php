@@ -785,9 +785,8 @@ $final5 = $recorder5->find( 'as-two' );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $final5->get_status(), 'multi-fanout: second resume reaches terminal success', $failures, $passes );
 smoke_assert( $group5, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' ), 'multi-fanout: terminal run retains the same deterministic group identity', $failures, $passes );
 
-// A terminal result must be durably readable before reconciliation begins. If
-// the branch-row update fails while the reconcile lock is also contended, the
-// original action fails loudly and no unrecoverable reconcile retry is queued.
+// A contended result is persisted only after the in-memory reconcile attempt. If
+// that receipt write fails, the action fails loudly and queues no unreadable retry.
 AS_Shim::reset();
 $recorder6 = new AS_Smoke_Recorder();
 remove_all_filters( 'wp_agent_workflow_run_recorder' );
@@ -816,7 +815,7 @@ try {
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $run6->get_status(), 'failed result write: fixture starts suspended', $failures, $passes );
 smoke_assert( true, $write_failed6, 'failed result write: branch action fails loudly before completing', $failures, $passes );
 smoke_assert( $effect_before6 + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'failed result write: branch side effect ran exactly once', $failures, $passes );
-smoke_assert( 0, $lock_attempts6, 'failed result write: reconcile is not attempted with an unreadable result', $failures, $passes );
+smoke_assert( 1, $lock_attempts6, 'failed result write: in-memory reconcile is attempted before receipt persistence', $failures, $passes );
 smoke_assert( 0, count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK ) ), 'failed result write: no stranded reconcile-only retry is queued', $failures, $passes );
 $GLOBALS['__reject_option_write'] = '';
 remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
@@ -872,6 +871,44 @@ foreach ( array( 'missing', 'expired' ) as $descriptor_state ) {
 	smoke_assert( 'workflow_parallel_required_branch_failed', $edge_final->get_error()['code'] ?? '', $descriptor_state . ' descriptor: terminal failure preserves required-branch semantics', $failures, $passes );
 	remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
 }
+
+// If receipt persistence succeeds but enqueueing RECONCILE_HOOK fails, retrying
+// the original branch payload must discover the receipt before executing effects.
+AS_Shim::reset();
+$GLOBALS['__options'] = array();
+$recorder7 = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder7 ) { return $recorder7; } );
+( new WP_Agent_Workflow_Runner( $recorder7 ) )->run( as_smoke_roles_spec(), array(), array( 'run_id' => 'as-enqueue-fail' ) );
+$branches7 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+$payload7  = $branches7[0]['args'][0] ?? array();
+$lock_attempts7 = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function ( $override, string $run_id, callable $critical ) use ( &$lock_attempts7 ) {
+		unset( $override );
+		if ( 'as-enqueue-fail' === $run_id && 0 === $lock_attempts7++ ) {
+			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+		}
+		return $critical();
+	},
+	10,
+	3
+);
+$effect_before7 = (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 );
+AS_Shim::$reject_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK;
+$enqueue_failed7 = false;
+try {
+	AS_Shim::fire( $branches7[0]['id'] );
+} catch ( \RuntimeException $error ) {
+	$enqueue_failed7 = str_contains( $error->getMessage(), 'enqueue a reconcile retry' );
+}
+AS_Shim::$reject_hook = '';
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_branch_action( $payload7 );
+smoke_assert( true, $enqueue_failed7, 'failed retry enqueue: original branch action fails loudly after persisting receipt', $failures, $passes );
+smoke_assert( $effect_before7 + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'failed retry enqueue: retried branch payload does not repeat side effect', $failures, $passes );
+smoke_assert( 1, count( $recorder7->find( 'as-enqueue-fail' )->get_suspension()['completed'] ?? array() ), 'failed retry enqueue: retried branch payload reconciles persisted result', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
