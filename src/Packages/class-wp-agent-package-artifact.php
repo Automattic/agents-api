@@ -239,26 +239,7 @@ if ( ! class_exists( 'WP_Agent_Package_Artifact' ) ) {
 		 * @return string
 		 */
 		private function prepare_source( $source ): string {
-			$source = trim( str_replace( '\\', '/', self::string_value( $source ) ) );
-			if ( '' === $source ) {
-				return '';
-			}
-
-			if ( str_starts_with( $source, '/' ) || preg_match( '/^[A-Za-z]:\//', $source ) ) {
-				throw new InvalidArgumentException( 'Agent package artifact source must be relative to the package.' );
-			}
-
-			$parts = array_filter(
-				explode( '/', $source ),
-				static function ( string $part ): bool {
-					return '' !== $part;
-				}
-			);
-			if ( in_array( '..', $parts, true ) ) {
-				throw new InvalidArgumentException( 'Agent package artifact source cannot contain parent directory segments.' );
-			}
-
-			return implode( '/', $parts );
+			return WP_Agent_Package_Artifact_Identity::normalize_source( $source );
 		}
 
 		/**

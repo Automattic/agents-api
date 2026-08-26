@@ -105,6 +105,7 @@ require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-materialization-resu
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-installed-agent-state-store.php';
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-installed-agent-projector.php';
 require_once AGENTS_API_PATH . 'src/Registry/class-wp-agent-registered-agent-materialization-adapter.php';
+require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-identity.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifact-type.php';
 require_once AGENTS_API_PATH . 'src/Packages/class-wp-agent-package-artifacts-registry.php';

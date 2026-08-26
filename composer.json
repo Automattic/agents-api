@@ -41,6 +41,7 @@
       "php tests/runtime-agent-bundle-importer-smoke.php",
       "php tests/package-lifecycle-smoke.php",
       "php tests/package-duplicate-artifact-identity-smoke.php",
+      "php tests/package-artifact-id-normalization-smoke.php",
       "php tests/package-capability-contract-smoke.php",
       "php tests/package-adoption-orchestration-smoke.php",
       "php tests/execution-principal-smoke.php",

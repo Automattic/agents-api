@@ -182,12 +182,7 @@ if ( ! class_exists( 'WP_Agent_Package_Installed_Artifact' ) ) {
 		}
 
 		private function prepare_id( mixed $value ): string {
-			$value = trim( str_replace( '\\', '/', $this->string_value( $value ) ) );
-			if ( '' === $value || str_starts_with( $value, '/' ) || str_contains( $value, '..' ) ) {
-				throw new InvalidArgumentException( 'Agent package installed artifact artifact_id must be a non-empty package-local identifier.' );
-			}
-
-			return $value;
+			return WP_Agent_Package_Artifact_Identity::normalize_id( $value );
 		}
 
 		private function prepare_string( mixed $value, string $field ): string {
