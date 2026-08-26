@@ -34,11 +34,11 @@ final class WP_Agent_Memory_Scope {
 	public readonly string $filename;
 
 	/**
-	 * @param string $layer          Memory layer identifier (for example shared, agent, user, or network).
+	 * @param string $layer          Memory layer identifier (for example shared, agent, user, principal, or network).
 	 * @param string $workspace_type Generic workspace kind.
 	 * @param string $workspace_id   Stable workspace identifier within the workspace type.
-	 * @param int    $user_id        Effective WordPress user ID. 0 = shared / no user.
-	 * @param int    $agent_id       Agent ID for direct resolution. 0 = resolve from user_id.
+	 * @param int    $user_id        Effective WordPress user ID. 0 = shared / no user. Principal memory requires a user.
+	 * @param int    $agent_id       Agent ID for direct resolution. 0 = resolve from user_id. Principal memory requires an agent.
 	 * @param string $filename       Filename or relative path within the layer
 	 *                               (e.g. 'MEMORY.md', 'contexts/chat.md', 'daily/2026/04/17.md').
 	 */

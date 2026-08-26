@@ -18,7 +18,10 @@
  *      rehydrates a branch from its payload, runs it through the SHARED
  *      `run_branch_steps()`, and drives the REAL reconcile.
  *
- *   3. Registers the resume action callback ({@see RESUME_HOOK}) and the
+ *   3. Registers the aggregate continuation callback ({@see AGGREGATE_HOOK}) and
+ *      its Action Scheduler failed-action recovery hooks.
+ *
+ *   4. Registers the resume action callback ({@see RESUME_HOOK}) and the
  *      deferred-resume seam ({@see wp_agent_workflow_resume_dispatch}) so the
  *      "all branches terminal → resume" transition is performed as ONE
  *      atomically-claimed AS action instead of resuming inline. AS's claim is
@@ -78,7 +81,56 @@ add_action(
 	1
 );
 
-// 3a. Resume action: AS claimed it exactly once → re-check SUSPENDED → resume.
+// Recover branch actions that failed after persisting a terminal receipt (most
+// importantly: RECONCILE_HOOK enqueue returned 0 and the callback threw). The
+// failed action remains fetchable from AS, so recovery can inspect its payload
+// and continue reconciliation without invoking branch effects again.
+add_action(
+	'action_scheduler_failed_execution',
+	static function ( $action_id, $error = null ): void {
+		if ( is_int( $action_id ) || is_string( $action_id ) ) {
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::recover_failed_action( $action_id, $error );
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::handle_failed_action( is_numeric( $action_id ) ? (int) $action_id : 0 );
+		}
+	},
+	20,
+	2
+);
+add_action(
+	'action_scheduler_failed_action',
+	static function ( $action_id, $error = null ): void {
+		if ( is_int( $action_id ) || is_string( $action_id ) ) {
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::recover_failed_action( $action_id, $error );
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::handle_failed_action( is_numeric( $action_id ) ? (int) $action_id : 0 );
+		}
+	},
+	20,
+	2
+);
+
+// 3a. Reconcile-only retry: read the persisted terminal result and merge it.
+add_action(
+	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK,
+	/**
+	 * @param array<string,mixed> $payload Action payload: { run_id, handle_id, result_ref, context_ref }.
+	 */
+	static function ( $payload = array() ): void {
+		WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_reconcile_action( is_array( $payload ) ? $payload : array() );
+	},
+	10,
+	1
+);
+
+// 3b. Resume action: AS claimed it exactly once → re-check SUSPENDED → resume.
+add_action(
+	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK,
+	static function ( $payload = array() ): void {
+		WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_aggregate_action( is_array( $payload ) ? $payload : array() );
+	},
+	10,
+	1
+);
+
 add_action(
 	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK,
 	/**
@@ -91,7 +143,39 @@ add_action(
 	1
 );
 
-// 3b. Deferred-resume seam: enqueue a claimed RESUME action for AS-owned runs
+// Durable aggregate dispatch seam. Returning an action id tells reconcile that
+// aggregation is owned by Action Scheduler; null preserves non-AS inline paths.
+add_filter(
+	'wp_agent_workflow_aggregate_dispatch',
+	static function ( $action_id, $run_id, $executor_id, $generation, $owner_token, $recover_failure ) {
+		if ( is_int( $action_id ) || WP_Agent_Workflow_Action_Scheduler_Branch_Executor::ID !== $executor_id ) {
+			return $action_id;
+		}
+		return WP_Agent_Workflow_Action_Scheduler_Branch_Executor::enqueue_aggregate_action(
+			is_string( $run_id ) ? $run_id : '',
+			is_string( $generation ) ? $generation : '',
+			is_string( $owner_token ) ? $owner_token : '',
+			(bool) $recover_failure
+		);
+	},
+	10,
+	6
+);
+
+// Fatal shutdown is separate from AS's failed execution/timeout hooks above.
+add_action(
+	'action_scheduler_unexpected_shutdown',
+	static function ( $action_id, $error = null ): void {
+		if ( is_int( $action_id ) || is_string( $action_id ) ) {
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::recover_failed_action( $action_id, $error );
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::handle_failed_action( is_numeric( $action_id ) ? (int) $action_id : 0 );
+		}
+	},
+	20,
+	2
+);
+
+// 3c. Deferred-resume seam: enqueue a claimed RESUME action for AS-owned runs
 //     instead of resuming inline in the reconcile request.
 add_filter(
 	'wp_agent_workflow_resume_dispatch',
@@ -230,10 +314,12 @@ add_filter(
 	 * @return int
 	 */
 	static function ( $batches ) {
-		$incoming = is_numeric( $batches ) ? (int) $batches : 1;
-		$branches = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count();
-		$resumes  = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::resume_inflight_count();
-		if ( $branches < 1 && $resumes < 1 ) {
+		$incoming   = is_numeric( $batches ) ? (int) $batches : 1;
+		$branches   = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count();
+		$resumes    = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::resume_inflight_count();
+		$reconciles = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::reconcile_inflight_count();
+		$aggregates = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::aggregate_inflight_count();
+		if ( $branches < 1 && $resumes < 1 && $reconciles < 1 && $aggregates < 1 ) {
 			return $incoming;
 		}
 
@@ -244,18 +330,18 @@ add_filter(
 		// parallel-branch behavior.
 		$branch_ceiling = max( $incoming, min( $branches, $max ) );
 
-		// Resume headroom is ADDITIVE on top of the branch ceiling — the resume needs
-		// a slot BEYOND the branches and beyond any UNRELATED claims that are already
+		// Continuation headroom is ADDITIVE on top of the branch ceiling — resume and
+		// reconcile-only actions need slots BEYOND branches and UNRELATED claims already
 		// consuming the branch ceiling. If it merely matched the ceiling it would be
-		// starved: AS's has_maximum_concurrent_batches() compares the GLOBAL claim
-		// count against the ceiling, so a lone due resume with even one unrelated claim
+		// starved: AS's has_maximum_concurrent_batches() compares the GLOBAL claim count
+		// against the ceiling, so a lone due continuation with one unrelated claim
 		// outstanding would sit at claim_count >= ceiling and never be admitted. Adding
-		// the resume count lifts the ceiling above the outstanding claims so the WP-Cron
-		// runner is admitted and claims the resume. Bounded (a fan-out has one resume;
-		// concurrent fan-outs are bounded by MAX) so the raise stays sane.
-		$resume_headroom = min( $resumes, $max );
+		// each bounded count lifts the ceiling so the WP-Cron runner can claim it.
+		$resume_headroom    = min( $resumes, $max );
+		$reconcile_headroom = min( $reconciles, $max );
+		$aggregate_headroom = min( $aggregates, $max );
 
-		return $branch_ceiling + $resume_headroom;
+		return $branch_ceiling + $resume_headroom + $reconcile_headroom + $aggregate_headroom;
 	},
 	100
 );
@@ -270,7 +356,10 @@ add_filter(
 		// Pin to 1 while branches are in flight (pending or in-progress) so each worker
 		// claims exactly one branch; otherwise pass the incoming value through so
 		// ordinary AS throughput (25) is untouched.
-		if ( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count() > 0 ) {
+		if (
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count() > 0 ||
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::aggregate_inflight_count() > 0
+		) {
 			return 1;
 		}
 		return is_numeric( $batch_size ) ? (int) $batch_size : 25;

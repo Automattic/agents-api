@@ -72,6 +72,20 @@ class WP_Agent_Provider_Turn_Result {
 			$normalized['failure'] = $failure;
 		}
 
+		if ( array_key_exists( 'structured_output', $result ) ) {
+			if ( ! is_array( $result['structured_output'] ) || ! array_key_exists( 'parsed', $result['structured_output'] ) ) {
+				throw self::invalid( 'structured_output', 'must be an array with a parsed key' );
+			}
+			$structured = array( 'parsed' => $result['structured_output']['parsed'] );
+			if ( false === wp_json_encode( $structured['parsed'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ) {
+				throw self::invalid( 'structured_output.parsed', 'must be JSON serializable' );
+			}
+			if ( isset( $result['structured_output']['diagnostics'] ) ) {
+				$structured['diagnostics'] = self::assoc_array( $result['structured_output']['diagnostics'], 'structured_output.diagnostics' );
+			}
+			$normalized['structured_output'] = $structured;
+		}
+
 		return $normalized;
 	}
 

@@ -105,6 +105,8 @@ composer require wordpress/agents-api:^0.1
 
 Composer autoloads `agents-api.php` through the package `files` autoload entry. The consuming project must load Composer's generated `vendor/autoload.php` during WordPress bootstrap. After that, the same public API is available as in the plugin activation path.
 
+Public agent package definitions are classmapped, so Composer-aware IDEs and static analyzers discover their concrete types without executing the WordPress runtime bootstrap.
+
 Pin released tags (`^0.1`, `0.1.x`, or an exact `0.1.0` tag) for reproducible production installs. Track `main` only for active substrate development.
 
 ## Consumer Integration

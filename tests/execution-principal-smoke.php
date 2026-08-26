@@ -121,6 +121,7 @@ agents_api_smoke_assert_equals( null, $user_session->token_id, 'user_session omi
 agents_api_smoke_assert_equals( null, $user_session->binding(), 'user_session binding defaults to null', $failures, $passes );
 agents_api_smoke_assert_equals( null, $user_session->to_array()['binding'], 'principal exports null binding as no-op', $failures, $passes );
 agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_USER, 'key' => '99' ), $user_session->conversation_owner(), 'user_session derives user conversation owner', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_USER, 'key' => '99' ), $user_session->turn_actor(), 'user_session derives user turn actor when omitted', $failures, $passes );
 
 add_filter(
 	'agents_api_execution_principal',
@@ -182,6 +183,33 @@ $audience_owner_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::audience(
 );
 agents_api_smoke_assert_equals( array( 'type' => AgentsAPI\AI\WP_Agent_Execution_Principal::OWNER_TYPE_AUDIENCE, 'key' => 'browser-session:opaque-123' ), $audience_owner_principal->conversation_owner(), 'audience principal can carry opaque conversation owner key', $failures, $passes );
 agents_api_smoke_assert_equals( 'browser-session:opaque-123', $audience_owner_principal->to_array()['owner_key'], 'principal exports owner key', $failures, $passes );
+
+$speaker_one = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
+	array_merge(
+		$audience_owner_principal->to_array(),
+		array(
+			'actor_type' => 'person',
+			'actor_key'  => 'channel-user:alice',
+		)
+	)
+);
+$speaker_two = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
+	array_merge(
+		$audience_owner_principal->to_array(),
+		array(
+			'actor_type' => 'person',
+			'actor_key'  => 'channel-user:bob',
+		)
+	)
+);
+agents_api_smoke_assert_equals( $speaker_one->conversation_owner(), $speaker_two->conversation_owner(), 'mixed speakers retain the shared conversation owner', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => 'person', 'key' => 'channel-user:alice' ), $speaker_one->turn_actor(), 'first speaker keeps explicit external actor', $failures, $passes );
+agents_api_smoke_assert_equals( array( 'type' => 'person', 'key' => 'channel-user:bob' ), $speaker_two->turn_actor(), 'sequential speaker keeps separate external actor', $failures, $passes );
+agents_api_smoke_assert_equals( 'person', $speaker_one->to_array()['actor_type'], 'principal round trip exports explicit actor type', $failures, $passes );
+agents_api_smoke_assert_equals( 'channel-user:alice', $speaker_one->to_array()['actor_key'], 'principal round trip exports explicit actor key', $failures, $passes );
+agents_api_smoke_assert_equals( 'person', $speaker_one->to_safe_metadata()['actor_type'], 'safe metadata includes actor type', $failures, $passes );
+agents_api_smoke_assert_equals( true, $speaker_one->to_safe_metadata()['has_turn_actor'], 'safe metadata records actor presence', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'actor_key', $speaker_one->to_safe_metadata() ), 'safe metadata omits opaque actor key', $failures, $passes );
 
 $audience_from_array = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
 	array(
@@ -252,6 +280,20 @@ try {
 	agents_api_smoke_assert_equals( true, false, 'zero token id is rejected', $failures, $passes );
 } catch ( InvalidArgumentException $e ) {
 	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'token_id' ), 'zero token id is rejected', $failures, $passes );
+}
+
+try {
+	new AgentsAPI\AI\WP_Agent_Execution_Principal( 0, 'agent', AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_AUDIENCE, AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_CHAT, null, array(), null, null, null, null, 'audience:shared', array(), 'channel', 'shared-thread', null, 'person', null );
+	agents_api_smoke_assert_equals( true, false, 'partial actor pair is rejected', $failures, $passes );
+} catch ( InvalidArgumentException $e ) {
+	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'actor' ), 'partial actor pair is rejected', $failures, $passes );
+}
+
+try {
+	new AgentsAPI\AI\WP_Agent_Execution_Principal( 0, 'agent', AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_AUDIENCE, AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_CHAT, null, array(), null, null, null, null, 'audience:shared', array(), 'channel', 'shared-thread', null, '', 'channel-user:empty-type' );
+	agents_api_smoke_assert_equals( true, false, 'empty actor type is rejected', $failures, $passes );
+} catch ( InvalidArgumentException $e ) {
+	agents_api_smoke_assert_equals( true, str_contains( $e->getMessage(), 'actor_type' ), 'empty actor type is rejected', $failures, $passes );
 }
 
 $resource = fopen( 'php://memory', 'r' );

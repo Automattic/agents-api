@@ -22,11 +22,13 @@ interface WP_Agent_Workspace_Run_Control_Store extends WP_Agent_Run_Control_Stor
 
 	/**
 	 * @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}
+	 * @throws WP_Agent_Run_Control_Store_Exception When storage is temporarily unavailable.
 	 */
 	public function get_workspace_state( string $store_key, WP_Agent_Workspace_Scope $workspace ): array;
 
 	/**
 	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state State envelope.
+	 * @throws WP_Agent_Run_Control_Store_Exception When storage is temporarily unavailable.
 	 */
 	public function save_workspace_state( string $store_key, WP_Agent_Workspace_Scope $workspace, array $state ): void;
 }

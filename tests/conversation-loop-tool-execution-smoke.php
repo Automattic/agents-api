@@ -768,6 +768,70 @@ agents_api_smoke_assert_equals( true, isset( $loop_runtime_tool_store->requests[
 agents_api_smoke_assert_equals( 1, did_action( 'agents_api_runtime_tool_request_created' ), 'loop persistence emits generic runtime tool created event', $failures, $passes );
 agents_api_smoke_assert_equals( 1, $loop_runtime_tool_store->requests[ $stored_request_id ]['metadata']['turn_count'] ?? 0, 'stored pending request records generic turn metadata for replay', $failures, $passes );
 
+echo "\n[Option-provided pending decisions remain stable through a no-op filter (#521):\n";
+
+$pending_noop_filter_called = false;
+add_filter(
+	'agents_api_pre_tool_call_decision',
+	static function ( array $decision, array $context ) use ( &$pending_noop_filter_called ): array {
+		if ( 'call_option_pending' === ( $context['tool_call_id'] ?? '' ) ) {
+			$pending_noop_filter_called = true;
+		}
+
+		return $decision;
+	},
+	10,
+	2
+);
+
+$executor->executed    = array();
+$option_pending_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'pending via option' ) ),
+	static function ( array $messages ): array {
+		return array(
+			'messages'   => $messages,
+			'tool_calls' => array(
+				array(
+					'id'         => 'call_option_pending',
+					'name'       => 'client/summarize',
+					'parameters' => array( 'text' => 'needs host runtime' ),
+				),
+			),
+		);
+	},
+	array(
+		'max_turns'                  => 3,
+		'tool_executor'              => $executor,
+		'tool_declarations'          => $tools,
+		'runtime_tool_request_store' => $loop_runtime_tool_store,
+		'pre_tool_mediator'          => static function (): array {
+			return array(
+				'action'               => 'pending',
+				'runtime_tool_request' => array(
+					'request_id'   => 'runtime_tool_521',
+					'tool_name'    => 'client/summarize',
+					'tool_call_id' => 'call_option_pending',
+					'parameters'   => array( 'text' => 'needs host runtime' ),
+					'run_id'       => 'run-option-pending',
+					'timeout_at'   => '2026-08-23T12:00:00Z',
+					'runtime'      => array( 'completion_signal' => 'external_result' ),
+					'metadata'     => array( 'transport' => 'host' ),
+				),
+			);
+		},
+	)
+);
+
+$option_pending_request = $option_pending_result['runtime_tool_pending'] ?? array();
+agents_api_smoke_assert_equals( true, $pending_noop_filter_called, 'option-provided pending decision passes through the active no-op filter', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $executor->executed ), 'option-provided pending decision prevents executor call', $failures, $passes );
+agents_api_smoke_assert_equals( 'runtime_tool_521', $option_pending_request['request_id'] ?? '', 'returned pending request preserves the host-provided request ID', $failures, $passes );
+agents_api_smoke_assert_equals( 'runtime_tool_521', $loop_runtime_tool_store->requests['runtime_tool_521']['request_id'] ?? '', 'persisted pending request preserves the host-provided request ID', $failures, $passes );
+agents_api_smoke_assert_equals( $option_pending_request, $loop_runtime_tool_store->requests['runtime_tool_521'] ?? array(), 'returned and persisted pending requests retain the same canonical request', $failures, $passes );
+agents_api_smoke_assert_equals( '2026-08-23T12:00:00Z', $option_pending_request['timeout_at'] ?? '', 'pending normalization preserves the canonical timeout', $failures, $passes );
+agents_api_smoke_assert_equals( 'external_result', $option_pending_request['runtime']['completion_signal'] ?? '', 'pending normalization preserves canonical runtime metadata', $failures, $passes );
+agents_api_smoke_assert_equals( 'host', $option_pending_request['metadata']['transport'] ?? '', 'pending normalization preserves canonical host metadata', $failures, $passes );
+
 echo "\n[Pre-tool filter hook allows, rejects, or pauses external runtime tools (#259):\n";
 
 $filter_contexts = array();

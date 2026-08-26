@@ -287,6 +287,14 @@ namespace {
 			$GLOBALS['__adapter_smoke']['declarations'] = $declarations;
 			return $this;
 		}
+		public function as_output_mime_type( string $mime_type ): self {
+			$GLOBALS['__adapter_smoke']['output_mime_type'] = $mime_type;
+			return $this;
+		}
+		public function as_output_schema( array $schema ): self {
+			$GLOBALS['__adapter_smoke']['output_schema'] = $schema;
+			return $this;
+		}
 		public function using_request_options( \WordPress\AiClient\Providers\Http\DTO\RequestOptions $options ): self {
 			$GLOBALS['__adapter_smoke']['request_timeout'] = $options->getTimeout();
 			return $this;
@@ -399,11 +407,60 @@ namespace {
 	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__adapter_smoke']['prompt_parts'] ?? array() ), 'run_turn sends the latest user turn as the current prompt', $failures, $passes );
 	agents_api_smoke_assert_equals( 2, count( $GLOBALS['__adapter_smoke']['history'] ?? array() ), 'run_turn sends earlier turns as history', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $GLOBALS['__adapter_smoke']['declarations'] ?? array() ), 'run_turn maps tool declarations to function declarations', $failures, $passes );
-	agents_api_smoke_assert_equals( 'client/lookup', $GLOBALS['__adapter_smoke']['declarations'][0]->name ?? '', 'function declaration carries the logical tool name', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client__lookup', $GLOBALS['__adapter_smoke']['declarations'][0]->name ?? '', 'function declaration carries the provider-safe tool name', $failures, $passes );
 	$model_parameters = $GLOBALS['__adapter_smoke']['declarations'][0]->parameters ?? array();
 	agents_api_smoke_assert_equals( false, array_key_exists( 'scope_id', $model_parameters['properties'] ?? array() ), 'function declaration excludes authoritative parameters from model input', $failures, $passes );
 	agents_api_smoke_assert_equals( array( 'query' ), $model_parameters['required'] ?? array(), 'function declaration excludes authoritative parameters from model requirements', $failures, $passes );
 	agents_api_smoke_assert_equals( 600.0, $GLOBALS['__adapter_smoke']['request_timeout'] ?? null, 'run_turn applies the raised 600s agentic per-request timeout to the builder by default', $failures, $passes );
+
+	echo "\n[1a] Structured output maps through the installed public wp-ai-client APIs:\n";
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( '{"items":[1,2]}', array(), array( 1, 1, 2 ) );
+	$structured_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+		array( array( 'role' => 'user', 'content' => 'return JSON' ) ), array(), array(), array(), array(), array(), '', '', array(), null,
+		new AgentsAPI\AI\WP_Agent_Structured_Output_Request( array( 'type' => 'object', 'required' => array( 'items' ), 'properties' => array( 'items' => array( 'type' => 'array' ) ) ), 'result', true )
+	);
+	$structured_result = $adapter->run_turn( $structured_request );
+	agents_api_smoke_assert_equals( 'application/json', $GLOBALS['__adapter_smoke']['output_mime_type'] ?? '', 'structured output selects JSON MIME output through the public builder API', $failures, $passes );
+	agents_api_smoke_assert_equals( 'object', $GLOBALS['__adapter_smoke']['output_schema']['type'] ?? '', 'structured output maps the requested JSON Schema through the public builder API', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 1, 2 ), $structured_result['structured_output']['parsed']->items ?? null, 'structured output parses the provider JSON response as an object', $failures, $passes );
+
+	$shape_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+		array( array( 'role' => 'user', 'content' => 'return JSON' ) ), array(), array(), array(), array(), array(), '', '', array(), null,
+		new AgentsAPI\AI\WP_Agent_Structured_Output_Request( array( 'type' => 'object' ), null, false )
+	);
+	foreach ( array( '{}' => 'object', '[]' => 'array', '{"key":"value"}' => 'object', '[1,2]' => 'array', '"text"' => 'string', '42' => 'integer', 'true' => 'boolean', 'null' => 'NULL' ) as $json => $expected_type ) {
+		$GLOBALS['__adapter_smoke']['next_result'] = $make_result( $json, array(), array( 1, 1, 2 ) );
+		$value = $adapter->run_turn( $shape_request )['structured_output']['parsed'];
+		$actual_type = $value instanceof \stdClass ? 'object' : ( is_array( $value ) ? 'array' : gettype( $value ) );
+		agents_api_smoke_assert_equals( $expected_type, $actual_type, 'structured output preserves JSON ' . $expected_type . ' shape', $failures, $passes );
+	}
+
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( '{"wrong":true}', array(), array( 1, 1, 2 ) );
+	$mismatch = $adapter->run_turn( $structured_request );
+	agents_api_smoke_assert_equals( 'structured_output_schema_mismatch', $mismatch['failure']['type'] ?? '', 'strict structured output returns a typed schema mismatch', $failures, $passes );
+	agents_api_smoke_assert_equals( false, str_contains( wp_json_encode( $mismatch ), 'wrong' ), 'strict schema mismatch does not expose raw provider output', $failures, $passes );
+
+	$permissive_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+		array( array( 'role' => 'user', 'content' => 'return JSON' ) ), array(), array(), array(), array(), array(), '', '', array(), null,
+		new AgentsAPI\AI\WP_Agent_Structured_Output_Request( array( 'type' => 'object', 'required' => array( 'required' ) ), null, false )
+	);
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( '{"wrong":true}', array(), array( 1, 1, 2 ) );
+	$permissive = $adapter->run_turn( $permissive_request );
+	agents_api_smoke_assert_equals( true, isset( $permissive['structured_output'] ), 'non-strict structured output preserves parse-only behavior', $failures, $passes );
+
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( '{bad', array(), array( 1, 1, 2 ) );
+	$invalid_json = $adapter->run_turn( $structured_request );
+	agents_api_smoke_assert_equals( 'structured_output_invalid_json', $invalid_json['failure']['type'] ?? '', 'invalid JSON returns a typed structured-output failure', $failures, $passes );
+
+	$host_payload = null;
+	$host_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', '', array( 'dispatch_provider' => static function ( array $payload ) use ( &$host_payload, $make_result ) {
+		$host_payload = $payload;
+		return $make_result( '{"items":[]}', array(), array( 1, 1, 2 ) );
+	} ) );
+	$host_result = $host_adapter->run_turn( $structured_request );
+	agents_api_smoke_assert_equals( 'json_schema', $host_payload['structured_output']['format'] ?? '', 'host dispatch payload includes normalized structured output', $failures, $passes );
+	agents_api_smoke_assert_equals( true, $host_result['structured_output']['parsed'] instanceof \stdClass, 'host dispatch result follows the shared structured parse tail', $failures, $passes );
 
 	echo "\n[1b] request timeout is configurable and honors a caller-supplied override + filter:\n";
 	$GLOBALS['__adapter_smoke']                = array();
@@ -688,6 +745,51 @@ namespace {
 	$GLOBALS['__agents_api_smoke_actions']['agents_api_provider_turn_retry']             = array();
 	$GLOBALS['__agents_api_smoke_actions']['agents_api_provider_turn_retry_max_attempts'] = array();
 
+	echo "\n[3g] A transient failure is not retried after client-visible deltas were emitted:\n";
+	$stream_retry_attempts = 0;
+	$stream_retry_sleeps   = array();
+	$stream_retry_deltas   = array();
+	$stream_retry_adapter  = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter(
+		'fake-provider',
+		'fake-model',
+		'sys',
+		array(
+			'dispatch_provider' => static function ( array $payload ) use ( &$stream_retry_attempts ) {
+				++$stream_retry_attempts;
+				$payload['request']->emitDelta( array( 'type' => 'content', 'text' => 'partial' ) );
+				return new WP_Error( 'prompt_upstream_server_error', 'Service Unavailable (503)', array( 'status' => 503 ) );
+			},
+			'retry_sleeper'    => static function ( $seconds ) use ( &$stream_retry_sleeps ) {
+				$stream_retry_sleeps[] = $seconds;
+			},
+		)
+	);
+	$stream_retry_threw = false;
+	try {
+		$stream_retry_adapter->run_turn(
+			new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+				array( array( 'role' => 'user', 'content' => 'stream then fail' ) ),
+				array(),
+				array(),
+				array(),
+				array(),
+				array(),
+				'',
+				'',
+				array(),
+				static function ( array $delta ) use ( &$stream_retry_deltas ): void {
+					$stream_retry_deltas[] = $delta;
+				}
+			)
+		);
+	} catch ( \RuntimeException $error ) {
+		$stream_retry_threw = false !== strpos( $error->getMessage(), '503' );
+	}
+	agents_api_smoke_assert_equals( true, $stream_retry_threw, 'the transient failure remains visible after partial output', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, $stream_retry_attempts, 'provider dispatch is not repeated after exposing a partial response', $failures, $passes );
+	agents_api_smoke_assert_equals( array(), $stream_retry_sleeps, 'no retry backoff occurs after exposing a partial response', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'partial' ), array_column( $stream_retry_deltas, 'text' ), 'client receives the partial delta exactly once', $failures, $passes );
+
 	echo "\n[4] run_conversation() drives the loop end-to-end through the default adapter:\n";
 	$turn = 0;
 	$GLOBALS['__adapter_smoke'] = array();
@@ -820,7 +922,7 @@ namespace {
 	agents_api_smoke_assert_equals( 1, count( $dispatch_payload['prompt_parts'] ?? array() ), 'dispatch payload carries the current-prompt message parts', $failures, $passes );
 	agents_api_smoke_assert_equals( 2, count( $dispatch_payload['history'] ?? array() ), 'dispatch payload carries the history messages', $failures, $passes );
 	agents_api_smoke_assert_equals( 1, count( $dispatch_payload['function_declarations'] ?? array() ), 'dispatch payload carries the function declarations', $failures, $passes );
-	agents_api_smoke_assert_equals( 'client/lookup', $dispatch_payload['function_declarations'][0]->name ?? '', 'dispatch payload function declaration carries the logical tool name', $failures, $passes );
+	agents_api_smoke_assert_equals( 'client__lookup', $dispatch_payload['function_declarations'][0]->name ?? '', 'dispatch payload function declaration carries the provider-safe tool name', $failures, $passes );
 	agents_api_smoke_assert_equals( 0.5, $dispatch_payload['options']['temperature'] ?? null, 'dispatch payload carries adapter options (temperature)', $failures, $passes );
 	agents_api_smoke_assert_equals( 256, $dispatch_payload['options']['max_tokens'] ?? null, 'dispatch payload carries adapter options (max_tokens)', $failures, $passes );
 	agents_api_smoke_assert_equals( true, ( $dispatch_payload['request'] ?? null ) instanceof AgentsAPI\AI\WP_Agent_Provider_Turn_Request, 'dispatch payload carries the WP_Agent_Provider_Turn_Request', $failures, $passes );
@@ -900,7 +1002,94 @@ namespace {
 	agents_api_smoke_assert_equals( 'bare again', $restore_raw['content'], 'set_dispatch_provider(null) falls back to the bare builder', $failures, $passes );
 	agents_api_smoke_assert_equals( true, ( $GLOBALS['__adapter_smoke']['model'] ?? null ) instanceof \WordPress\AiClient\Providers\Models\Contracts\ModelInterface, 'restored bare path drives the wp_ai_client builder again with a resolved ModelInterface', $failures, $passes );
 
-	echo "\n[9] Public result normalization helpers on WP_Agent_Provider_Turn_Result:\n";
+	echo "\n[9] Host dispatch discovery uses request context, preserves explicit precedence, and falls back safely:\n";
+	$host_dispatch_payload = null;
+	$host_filter_initial   = 'not-called';
+	$host_resolved_model   = null;
+	$host_dispatch_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request(
+		array( array( 'role' => 'user', 'content' => 'host dispatch' ) ),
+		array(),
+		array( 'provider_id' => 'host-provider', 'model_id' => 'host-model' ),
+		array(),
+		array( 'host_route' => 'primary' )
+	);
+	add_filter(
+		'wp_agent_provider_turn_dispatch',
+		static function ( $dispatcher, $request, $provider_id, $model_id ) use ( &$host_dispatch_payload, &$host_filter_initial, &$host_resolved_model, $make_result ) {
+			$host_filter_initial = $dispatcher;
+			$host_resolved_model = array( $provider_id, $model_id );
+			$GLOBALS['__adapter_smoke']['host_dispatch_request'] = $request;
+			return static function ( array $payload ) use ( &$host_dispatch_payload, $make_result ) {
+				$host_dispatch_payload = $payload;
+				return $make_result( 'host dispatched', array(), array( 2, 3, 5 ) );
+			};
+		},
+		10,
+		4
+	);
+	$GLOBALS['__adapter_smoke']          = array();
+	$host_raw = ( new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fallback-provider', 'fallback-model', 'sys' ) )->run_turn( $host_dispatch_request );
+	agents_api_smoke_assert_equals( null, $host_filter_initial, 'host dispatch filter starts with null when no dispatcher is explicit', $failures, $passes );
+	agents_api_smoke_assert_equals( 'host dispatched', $host_raw['content'], 'host-discovered dispatcher drives the shared normalization tail', $failures, $passes );
+	agents_api_smoke_assert_equals( $host_dispatch_request, $GLOBALS['__adapter_smoke']['host_dispatch_request'] ?? null, 'host dispatch filter receives the exact provider-turn request context', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'host-provider', 'host-model' ), $host_resolved_model, 'host dispatch filter receives effective request model overrides', $failures, $passes );
+	agents_api_smoke_assert_equals( 'host-provider', $host_dispatch_payload['provider_id'] ?? '', 'host-discovered dispatcher receives normalized provider payload', $failures, $passes );
+	agents_api_smoke_assert_equals( $host_dispatch_request, $host_dispatch_payload['request'] ?? null, 'host-discovered dispatcher payload retains the full request', $failures, $passes );
+	agents_api_smoke_assert_equals( false, isset( $GLOBALS['__adapter_smoke']['model'] ), 'host-discovered dispatcher bypasses the bare builder', $failures, $passes );
+	$GLOBALS['__agents_api_smoke_actions']['wp_agent_provider_turn_dispatch'] = array();
+
+	$fallback_resolved_model = null;
+	add_filter(
+		'wp_agent_provider_turn_dispatch',
+		static function ( $dispatcher, $request, $provider_id, $model_id ) use ( &$fallback_resolved_model, $make_result ) {
+			unset( $dispatcher, $request );
+			$fallback_resolved_model = array( $provider_id, $model_id );
+			return static fn ( array $payload ) => $make_result( 'fallback ids dispatched', array(), array( 1, 1, 2 ) );
+		},
+		10,
+		4
+	);
+	$fallback_discovery_request = new AgentsAPI\AI\WP_Agent_Provider_Turn_Request( array( array( 'role' => 'user', 'content' => 'constructor defaults' ) ) );
+	$fallback_discovery_result  = ( new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fallback-provider', 'fallback-model', 'sys' ) )->run_turn( $fallback_discovery_request );
+	agents_api_smoke_assert_equals( 'fallback ids dispatched', $fallback_discovery_result['content'], 'host dispatcher can claim a request whose effective model comes from constructor defaults', $failures, $passes );
+	agents_api_smoke_assert_equals( array( 'fallback-provider', 'fallback-model' ), $fallback_resolved_model, 'host dispatch filter receives effective constructor fallback ids', $failures, $passes );
+	$GLOBALS['__agents_api_smoke_actions']['wp_agent_provider_turn_dispatch'] = array();
+
+	$discovery_calls = 0;
+	$explicit_calls  = 0;
+	add_filter(
+		'wp_agent_provider_turn_dispatch',
+		static function ( $dispatcher ) use ( &$discovery_calls, $make_result ) {
+			++$discovery_calls;
+			return static fn ( array $payload ) => $make_result( 'discovered should not run', array(), array( 0, 0, 0 ) );
+		}
+	);
+	$explicit_adapter = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'sys' );
+	$explicit_adapter->set_dispatch_provider(
+		static function ( array $payload ) use ( &$explicit_calls, $make_result ) {
+			++$explicit_calls;
+			return $make_result( 'explicit dispatched', array(), array( 1, 1, 2 ) );
+		}
+	);
+	agents_api_smoke_assert_equals( 'explicit dispatched', $explicit_adapter->run_turn( $host_dispatch_request )['content'], 'explicit dispatcher takes precedence over host discovery', $failures, $passes );
+	agents_api_smoke_assert_equals( 1, $explicit_calls, 'explicit dispatcher runs when configured', $failures, $passes );
+	agents_api_smoke_assert_equals( 0, $discovery_calls, 'explicit dispatcher prevents host discovery from running', $failures, $passes );
+	$GLOBALS['__agents_api_smoke_actions']['wp_agent_provider_turn_dispatch'] = array();
+
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'invalid filter fallback', array(), array( 1, 1, 2 ) );
+	add_filter( 'wp_agent_provider_turn_dispatch', static fn () => 'not a callable' );
+	$invalid_raw = ( new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'sys' ) )->run_turn( $host_dispatch_request );
+	agents_api_smoke_assert_equals( 'invalid filter fallback', $invalid_raw['content'], 'invalid host dispatch filter value falls back to the bare builder', $failures, $passes );
+	agents_api_smoke_assert_equals( true, ( $GLOBALS['__adapter_smoke']['model'] ?? null ) instanceof \WordPress\AiClient\Providers\Models\Contracts\ModelInterface, 'invalid host dispatch filter value preserves bare-builder behavior', $failures, $passes );
+	$GLOBALS['__agents_api_smoke_actions']['wp_agent_provider_turn_dispatch'] = array();
+
+	$GLOBALS['__adapter_smoke']                = array();
+	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'no host fallback', array(), array( 1, 1, 2 ) );
+	$no_host_raw = ( new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'sys' ) )->run_turn( $host_dispatch_request );
+	agents_api_smoke_assert_equals( 'no host fallback', $no_host_raw['content'], 'no host dispatcher retains the bare-builder fallback', $failures, $passes );
+
+	echo "\n[10] Public result normalization helpers on WP_Agent_Provider_Turn_Result:\n";
 	$helper_result = $make_result( 'helper text', array(), array( 4, 6, 10 ) );
 	agents_api_smoke_assert_equals( 'helper text', AgentsAPI\AI\WP_Agent_Provider_Turn_Result::result_text( $helper_result ), 'public result_text() extracts assistant text', $failures, $passes );
 	$helper_usage = AgentsAPI\AI\WP_Agent_Provider_Turn_Result::result_usage( $helper_result );
@@ -910,7 +1099,7 @@ namespace {
 	$tool_only_result = $make_result( '', array( array( 'name' => 'client/lookup', 'parameters' => array( 'q' => 'x' ), 'id' => 'tc-1' ) ), array( 1, 0, 1 ) );
 	agents_api_smoke_assert_equals( '', AgentsAPI\AI\WP_Agent_Provider_Turn_Result::result_text( $tool_only_result ), 'public result_text() returns empty for a tool-only turn', $failures, $passes );
 
-	echo "\n[10] Regression: a STRING model id is resolved to a ModelInterface and the turn dispatches (no TypeError):\n";
+	echo "\n[11] Regression: a STRING model id is resolved to a ModelInterface and the turn dispatches (no TypeError):\n";
 	$GLOBALS['__adapter_smoke']                = array();
 	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'resolved-and-dispatched', array(), array( 1, 2, 3 ) );
 
@@ -929,7 +1118,7 @@ namespace {
 	agents_api_smoke_assert_equals( 'gpt-5.5', $regression_model->model_id ?? '', 'the resolved ModelInterface carries the requested string model id', $failures, $passes );
 	agents_api_smoke_assert_equals( 'resolved-and-dispatched', $regression_raw['content'], 'the turn dispatches and produces content (no TypeError, no empty completion)', $failures, $passes );
 
-	echo "\n[11] Regression: an unresolvable model id surfaces a clear RuntimeException, not a TypeError:\n";
+	echo "\n[12] Regression: an unresolvable model id surfaces a clear RuntimeException, not a TypeError:\n";
 	$GLOBALS['__adapter_smoke']                = array();
 	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'unused', array(), array( 0, 0, 0 ) );
 	$bad_model_adapter                         = new AgentsAPI\AI\WP_Agent_Default_Provider_Turn_Adapter( 'fake-provider', 'fake-model', 'sys' );
@@ -948,7 +1137,7 @@ namespace {
 	agents_api_smoke_assert_equals( true, false !== strpos( $bad_model_message, 'Unable to resolve model' ), 'an unresolvable model id throws an actionable RuntimeException (not a TypeError)', $failures, $passes );
 	agents_api_smoke_assert_equals( true, false !== strpos( $bad_model_message, '__unregistered__' ), 'the resolution error names the unresolvable model id', $failures, $passes );
 
-	echo "\n[12] Regression: a no-parameter tool's function declaration serializes 'parameters' as a JSON OBJECT, never an array:\n";
+	echo "\n[13] Regression: a no-parameter tool's function declaration serializes 'parameters' as a JSON OBJECT, never an array:\n";
 	$GLOBALS['__adapter_smoke']                = array();
 	$GLOBALS['__adapter_smoke']['next_result'] = $make_result( 'ok', array(), array( 1, 1, 2 ) );
 
@@ -1011,11 +1200,38 @@ namespace {
 	agents_api_smoke_assert_equals( true, false !== strpos( $wrapped_empty, '"parameters":{' ), 'wrapped tool payload contains "parameters":{ (an object)', $failures, $passes );
 	agents_api_smoke_assert_equals( false, false !== strpos( $wrapped_empty, '"parameters":[' ), 'wrapped tool payload never contains "parameters":[ (the OpenAI 400 shape)', $failures, $passes );
 
-	// The real-schema tool: object stays an object and the declared schema is preserved verbatim.
-	$real_json = json_encode( $decls_by_name['client/lookup']->parameters ?? null );
+	// The real-schema tool: object stays an object and the declared schema is preserved
+	// verbatim. Keyed by the provider-safe alias, because that is the name the
+	// declaration is emitted under (see the provider-safe assertions below).
+	$real_json = json_encode( $decls_by_name['client__lookup']->parameters ?? null );
 	agents_api_smoke_assert_equals( true, '{' === substr( $real_json, 0, 1 ), 'real-schema tool parameters remain a JSON object', $failures, $passes );
 	agents_api_smoke_assert_equals( true, false !== strpos( $real_json, '"query"' ), 'real-schema tool preserves its declared properties unchanged', $failures, $passes );
-	agents_api_smoke_assert_equals( 'object', $decls_by_name['client/lookup']->parameters['type'] ?? '', 'real-schema tool keeps its declared type', $failures, $passes );
+	agents_api_smoke_assert_equals( 'object', $decls_by_name['client__lookup']->parameters['type'] ?? '', 'real-schema tool keeps its declared type', $failures, $passes );
+
+	/*
+	 * Provider-safe tool names.
+	 *
+	 * Provider tool-name validation rejects the `/` in a canonical namespaced
+	 * name — the same constraint #320 addressed for client runtime declarations.
+	 * Host tools derived from abilities cannot dodge it, because the Abilities API
+	 * requires a namespaced name, so the alias has to be what reaches the provider.
+	 * Mediation still resolves the canonical declaration, because
+	 * WP_Agent_Tool_Execution_Core maps the emitted name back through
+	 * canonicalNameForProviderToolName().
+	 */
+	agents_api_smoke_assert_equals( true, isset( $decls_by_name['client__lookup'] ), 'namespaced tool is emitted under its provider-safe alias', $failures, $passes );
+	agents_api_smoke_assert_equals( false, isset( $decls_by_name['client/lookup'] ), 'namespaced tool is never emitted under its canonical name', $failures, $passes );
+	agents_api_smoke_assert_equals( true, isset( $decls_by_name['workspace_show'] ), 'an already provider-safe name is emitted unchanged', $failures, $passes );
+
+	foreach ( array_keys( $decls_by_name ) as $emitted_name ) {
+		agents_api_smoke_assert_equals(
+			1,
+			preg_match( '/^[a-zA-Z0-9_-]{1,128}$/', (string) $emitted_name ),
+			sprintf( 'emitted tool name "%s" satisfies provider tool-name validation', $emitted_name ),
+			$failures,
+			$passes
+		);
+	}
 
 	agents_api_smoke_finish( 'Agents API default provider-turn adapter', $failures, $passes );
 }
