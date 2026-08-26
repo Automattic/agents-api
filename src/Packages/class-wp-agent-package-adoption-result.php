@@ -208,6 +208,9 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Result' ) ) {
 			if ( 'failed' === $this->status ) {
 				return \AgentsAPI\AI\WP_Agent_Run_Result_Envelope::STATUS_FAILED;
 			}
+			if ( 'partial' === $this->status && ! empty( $this->failed_artifacts ) ) {
+				return \AgentsAPI\AI\WP_Agent_Run_Result_Envelope::STATUS_INCOMPLETE;
+			}
 			if ( in_array( $this->status, array( 'skipped', 'needs-approval' ), true ) ) {
 				return 'needs-approval' === $this->status ? \AgentsAPI\AI\WP_Agent_Run_Result_Envelope::STATUS_APPROVAL_REQUIRED : \AgentsAPI\AI\WP_Agent_Run_Result_Envelope::STATUS_SKIPPED;
 			}

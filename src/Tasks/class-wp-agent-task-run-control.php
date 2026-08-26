@@ -101,8 +101,9 @@ class WP_Agent_Task_Run_Control {
 	 * @param array<string,mixed> $run Raw or normalized run payload.
 	 */
 	public static function to_run_result_envelope( array $run ): WP_Agent_Run_Result_Envelope {
-		$normalized = self::normalize_run( $run );
-		$status     = self::envelope_status( self::string_value( $normalized['status'] ) );
+		$normalized  = self::normalize_run( $run );
+		$task_status = self::string_value( $normalized['status'] );
+		$status      = self::envelope_status( $task_status );
 
 		return WP_Agent_Run_Result_Envelope::from_array(
 			array(
@@ -110,14 +111,13 @@ class WP_Agent_Task_Run_Control {
 				'status'        => $status,
 				'outputs'       => self::map_value( $normalized['output'] ?? array() ),
 				'artifact_refs' => WP_Agent_Run_Result_Envelope::normalize_refs( $normalized['artifact_refs'] ?? array() ),
-				'evidence_refs' => WP_Agent_Run_Result_Envelope::normalize_refs( $normalized['evidence_refs'] ?? array() ),
 				'provenance'    => self::map_value( $normalized['provenance'] ?? array() ),
 				'timestamps'    => array(
 					'started_at' => $normalized['started_at'] ?? '',
 					'updated_at' => $normalized['updated_at'] ?? '',
 				),
-				'error'         => self::map_value( $normalized['error'] ?? array() ),
-				'cancellation'  => self::map_value( $normalized['cancellation'] ?? array() ),
+				'error'         => self::error_envelope( $task_status, $normalized ),
+				'cancellation'  => self::cancellation_envelope( $task_status ),
 				'metadata'      => self::map_value( $normalized['metadata'] ?? array() ) + array(
 					'session_id'        => $normalized['session_id'],
 					'executor_id'       => $normalized['executor_id'],
@@ -150,6 +150,55 @@ class WP_Agent_Task_Run_Control {
 			return WP_Agent_Run_Result_Envelope::STATUS_CANCELLING;
 		}
 		return WP_Agent_Run_Result_Envelope::normalize_status( $status );
+	}
+
+	/**
+	 * Build the canonical error envelope for a failed run.
+	 *
+	 * Executors record failure details under `diagnostics` (see agents_run_task),
+	 * so failed runs must surface that as the envelope's stable `error` field —
+	 * mirroring how the workflow/runtime producers carry their own error map.
+	 * Non-failed runs carry an empty error.
+	 *
+	 * @param string              $task_status Normalized task status.
+	 * @param array<string,mixed> $normalized  Normalized run payload.
+	 * @return array<string,mixed>
+	 */
+	private static function error_envelope( string $task_status, array $normalized ): array {
+		if ( self::STATUS_FAILED !== $task_status ) {
+			return array();
+		}
+
+		$diagnostics = self::map_value( $normalized['diagnostics'] ?? array() );
+		$code        = self::non_empty_string_value( $diagnostics['error_code'] ?? null );
+		$message     = self::non_empty_string_value( $diagnostics['error_message'] ?? null );
+
+		$error = array(
+			'code'    => $code ?? 'agents_task_run_failed',
+			'message' => $message ?? 'The task run failed.',
+		);
+		if ( array() !== $diagnostics ) {
+			$error['data'] = array( 'diagnostics' => $diagnostics );
+		}
+
+		return $error;
+	}
+
+	/**
+	 * Build the cancellation envelope for a run whose cancellation was requested.
+	 *
+	 * @param string $task_status Normalized task status.
+	 * @return array<string,mixed>
+	 */
+	private static function cancellation_envelope( string $task_status ): array {
+		if ( ! in_array( $task_status, array( self::STATUS_CANCELLING, self::STATUS_CANCELLED ), true ) ) {
+			return array();
+		}
+
+		return array(
+			'requested' => true,
+			'status'    => $task_status,
+		);
 	}
 
 	/**
