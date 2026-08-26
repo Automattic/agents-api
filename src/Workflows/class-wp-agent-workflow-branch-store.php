@@ -55,6 +55,10 @@ defined( 'ABSPATH' ) || exit;
  */
 final class WP_Agent_Workflow_Branch_Store {
 
+	public const BACKEND_BUILTIN = 'builtin';
+	public const BACKEND_CUSTOM  = 'custom';
+	public const BACKEND_LEGACY  = 'legacy';
+
 	/**
 	 * Option-name prefix for a per-branch descriptor row. The run id and handle
 	 * id are folded into the key so rows never collide across runs/branches and
@@ -193,9 +197,22 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @return string The store ref (the option name) placed in the AS args.
 	 */
 	public static function put_branch( string $run_id, string $handle_id, array $descriptor ): string {
+		$stored = self::put_branch_with_provenance( $run_id, $handle_id, $descriptor );
+		return $stored['ref'];
+	}
+
+	/**
+	 * Persist a descriptor and report which backend owns its opaque ref.
+	 *
+	 * @param string              $run_id     Run id.
+	 * @param string              $handle_id  Branch handle id.
+	 * @param array<string,mixed> $descriptor Branch descriptor.
+	 * @return array{ref:string,backend:string}
+	 */
+	public static function put_branch_with_provenance( string $run_id, string $handle_id, array $descriptor ): array {
 		$override = self::filtered_put_branch( $run_id, $handle_id, $descriptor );
 		if ( is_string( $override ) ) {
-			return $override;
+			return array( 'ref' => $override, 'backend' => self::BACKEND_CUSTOM );
 		}
 
 		$ref = self::branch_ref( $run_id, $handle_id );
@@ -209,7 +226,7 @@ final class WP_Agent_Workflow_Branch_Store {
 			)
 		);
 		self::index_ref( $run_id, $ref );
-		return $ref;
+		return array( 'ref' => $ref, 'backend' => self::BACKEND_BUILTIN );
 	}
 
 	/**
@@ -287,17 +304,18 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @param string              $handle_id     Branch handle id.
 	 * @param string              $store_ref     Existing branch descriptor ref.
 	 * @param string              $context_ref   Existing shared-context ref.
+	 * @param string              $backend       Explicit descriptor backend provenance.
 	 * @param array<string,mixed> $branch_result Terminal BranchResult.
 	 * @param array<string,mixed> $continuation  Opaque reconcile continuation state.
 	 * @return string|\WP_Error Durable receipt ref, or a hard persistence failure.
 	 */
-	public static function put_reconcile_receipt( string $run_id, string $handle_id, string $store_ref, string $context_ref, array $branch_result, array $continuation = array() ) {
+	public static function put_reconcile_receipt( string $run_id, string $handle_id, string $store_ref, string $context_ref, string $backend, array $branch_result, array $continuation = array() ) {
 		$receipt = array(
 			'branch_result' => $branch_result,
 			'continuation'  => $continuation,
 		);
 
-		if ( self::branch_ref( $run_id, $handle_id ) === $store_ref ) {
+		if ( self::BACKEND_BUILTIN === $backend ) {
 			self::write_row(
 				$store_ref,
 				array(
@@ -315,21 +333,17 @@ final class WP_Agent_Workflow_Branch_Store {
 			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'Could not durably persist the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
 		}
 
-		// A non-local ref belongs to a consumer store. Persist only the receipt shape
-		// through its existing put/get contract; never rehydrate and rewrite a stale
-		// descriptor, and never fall back to local options.
-		$receipt_record = array(
-			'run_id'                        => $run_id,
-			'handle_id'                     => $handle_id,
-			self::RECONCILE_RECEIPT_KEY     => $receipt,
-		);
-		$result_ref = self::filtered_put_branch( $run_id, $handle_id, $receipt_record );
-		if ( null === $result_ref ) {
-			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'The branch store that owns `%s` did not persist the terminal result.', $store_ref ) );
+		if ( self::BACKEND_CUSTOM !== $backend ) {
+			return new \WP_Error( 'workflow_branch_receipt_backend_unknown', sprintf( 'Branch `%s` in run `%s` has no explicit receipt backend provenance.', $handle_id, $run_id ) );
 		}
 
-		$persisted = self::filtered_get_branch( $result_ref, $context_ref );
-		if ( null === $persisted || $receipt !== ( $persisted[ self::RECONCILE_RECEIPT_KEY ] ?? null ) ) {
+		$result_ref = self::filtered_put_receipt( $store_ref, $run_id, $handle_id, $receipt );
+		if ( null === $result_ref ) {
+			return new \WP_Error( 'workflow_branch_receipt_backend_unsupported', sprintf( 'The custom branch store that owns `%s` does not provide durable reconcile receipt persistence.', $store_ref ) );
+		}
+
+		$persisted = self::filtered_get_receipt( $result_ref, $context_ref );
+		if ( null === $persisted || $receipt !== $persisted ) {
 			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'The branch store could not verify the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
 		}
 
@@ -344,9 +358,23 @@ final class WP_Agent_Workflow_Branch_Store {
 	 *
 	 * @param string $result_ref  Opaque receipt ref.
 	 * @param string $context_ref Existing shared-context ref.
+	 * @param string $backend     Explicit descriptor backend provenance.
 	 * @return array{branch_result:array<string,mixed>,continuation:array<string,mixed>}|null
 	 */
-	public static function get_reconcile_receipt( string $result_ref, string $context_ref ): ?array {
+	public static function get_reconcile_receipt( string $result_ref, string $context_ref, string $backend ): ?array {
+		if ( self::BACKEND_CUSTOM === $backend ) {
+			$receipt = self::filtered_get_receipt( $result_ref, $context_ref );
+			if ( null === $receipt || ! is_array( $receipt['branch_result'] ?? null ) ) {
+				return null;
+			}
+			return array(
+				'branch_result' => self::string_keyed_array( $receipt['branch_result'] ),
+				'continuation'  => is_array( $receipt['continuation'] ?? null ) ? self::string_keyed_array( $receipt['continuation'] ) : array(),
+			);
+		}
+		if ( self::BACKEND_BUILTIN !== $backend ) {
+			return null;
+		}
 		$row = self::read_row( $result_ref );
 		if ( null !== $row && is_array( $row[ self::RECONCILE_RECEIPT_KEY ] ?? null ) ) {
 			$receipt = $row[ self::RECONCILE_RECEIPT_KEY ];
@@ -375,10 +403,17 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @param string $handle_id   Branch handle id.
 	 * @param string $result_ref  Receipt ref.
 	 * @param string $context_ref Shared-context ref for custom stores.
+	 * @param string $backend     Explicit descriptor backend provenance.
 	 * @return void
 	 */
-	public static function forget_reconcile_receipt( string $run_id, string $handle_id, string $result_ref, string $context_ref ): void {
-		unset( $context_ref );
+	public static function forget_reconcile_receipt( string $run_id, string $handle_id, string $result_ref, string $context_ref, string $backend ): void {
+		if ( self::BACKEND_CUSTOM === $backend ) {
+			self::filtered_forget_receipt( $result_ref, $run_id, $handle_id, $context_ref );
+			return;
+		}
+		if ( self::BACKEND_BUILTIN !== $backend ) {
+			return;
+		}
 		$row = self::read_row( $result_ref );
 		if ( null === $row ) {
 			return;
@@ -579,6 +614,62 @@ final class WP_Agent_Workflow_Branch_Store {
 		 */
 		$descriptor = apply_filters( 'wp_agent_workflow_branch_store_get', null, $store_ref, $context_ref );
 		return is_array( $descriptor ) ? $descriptor : null;
+	}
+
+	/** @param array<string,mixed> $receipt */
+	private static function filtered_put_receipt( string $store_ref, string $run_id, string $handle_id, array $receipt ): ?string {
+		if ( ! function_exists( 'apply_filters' ) ) {
+			return null;
+		}
+		/**
+		 * Persist a reconcile receipt in the custom backend that owns a branch ref.
+		 *
+		 * @since 0.7.0
+		 *
+		 * @param string|null         $receipt_ref No implementation by default.
+		 * @param string              $store_ref   Owning descriptor ref.
+		 * @param string              $run_id      Run id.
+		 * @param string              $handle_id   Handle id.
+		 * @param array<string,mixed> $receipt     Receipt payload.
+		 */
+		$receipt_ref = apply_filters( 'wp_agent_workflow_branch_receipt_put', null, $store_ref, $run_id, $handle_id, $receipt );
+		return is_string( $receipt_ref ) && '' !== $receipt_ref ? $receipt_ref : null;
+	}
+
+	/** @return array<string,mixed>|null */
+	private static function filtered_get_receipt( string $receipt_ref, string $context_ref ): ?array {
+		if ( ! function_exists( 'apply_filters' ) ) {
+			return null;
+		}
+		/**
+		 * Read a reconcile receipt from a custom branch backend.
+		 *
+		 * @since 0.7.0
+		 *
+		 * @param array<string,mixed>|null $receipt    No implementation by default.
+		 * @param string                   $receipt_ref Receipt ref.
+		 * @param string                   $context_ref Shared-context ref.
+		 */
+		$receipt = apply_filters( 'wp_agent_workflow_branch_receipt_get', null, $receipt_ref, $context_ref );
+		return is_array( $receipt ) ? $receipt : null;
+	}
+
+	private static function filtered_forget_receipt( string $receipt_ref, string $run_id, string $handle_id, string $context_ref ): bool {
+		if ( ! function_exists( 'apply_filters' ) ) {
+			return false;
+		}
+		/**
+		 * Delete one reconcile receipt from a custom branch backend.
+		 *
+		 * @since 0.7.0
+		 *
+		 * @param bool   $handled     No implementation by default.
+		 * @param string $receipt_ref Receipt ref.
+		 * @param string $run_id      Run id.
+		 * @param string $handle_id   Handle id.
+		 * @param string $context_ref Shared-context ref.
+		 */
+		return (bool) apply_filters( 'wp_agent_workflow_branch_receipt_delete', false, $receipt_ref, $run_id, $handle_id, $context_ref );
 	}
 
 	/**

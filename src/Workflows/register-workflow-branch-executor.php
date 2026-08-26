@@ -78,6 +78,31 @@ add_action(
 	1
 );
 
+// Recover branch actions that failed after persisting a terminal receipt (most
+// importantly: RECONCILE_HOOK enqueue returned 0 and the callback threw). The
+// failed action remains fetchable from AS, so recovery can inspect its payload
+// and continue reconciliation without invoking branch effects again.
+add_action(
+	'action_scheduler_failed_execution',
+	static function ( $action_id, $error = null ): void {
+		if ( is_int( $action_id ) || is_string( $action_id ) ) {
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::recover_failed_action( $action_id, $error );
+		}
+	},
+	20,
+	2
+);
+add_action(
+	'action_scheduler_failed_action',
+	static function ( $action_id, $error = null ): void {
+		if ( is_int( $action_id ) || is_string( $action_id ) ) {
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::recover_failed_action( $action_id, $error );
+		}
+	},
+	20,
+	2
+);
+
 // 3a. Reconcile-only retry: read the persisted terminal result and merge it.
 add_action(
 	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK,
