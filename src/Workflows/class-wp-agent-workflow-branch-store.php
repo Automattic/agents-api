@@ -107,35 +107,42 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @return string Opaque admission token, or an empty string on persistence failure.
 	 */
 	public static function begin_admission( string $run_id ): string {
-		if ( '' === $run_id ) {
+		if ( '' === $run_id || ! function_exists( 'delete_option' ) ) {
 			return '';
 		}
 
-		$token = self::ADMISSION_PREFIX . md5( $run_id . ':' . uniqid( '', true ) );
+		$ref   = self::ADMISSION_PREFIX . md5( $run_id );
+		$token = $ref . ':' . md5( uniqid( $run_id . ':', true ) );
 		self::write_row(
-			$token,
+			$ref,
 			array(
 				'run_id'  => $run_id,
+				'token'   => $token,
 				'status'  => 'pending',
 				'expires' => time() + self::TTL_SECONDS,
 			)
 		);
-		self::index_ref( $run_id, $token );
 
-		return 'pending' === self::admission_status( $token ) ? $token : '';
+		if ( 'pending' === self::admission_status( $token ) ) {
+			return $token;
+		}
+
+		delete_option( $ref );
+		return '';
 	}
 
 	/**
 	 * Open an admission fence after every sibling is durably enqueued.
 	 */
 	public static function admit( string $token ): bool {
-		$row = self::read_row( $token );
-		if ( null === $row || 'pending' !== ( $row['status'] ?? '' ) ) {
+		$ref = self::admission_ref( $token );
+		$row = '' !== $ref ? self::read_row( $ref ) : null;
+		if ( null === $row || ! hash_equals( $token, is_string( $row['token'] ?? null ) ? $row['token'] : '' ) || 'pending' !== ( $row['status'] ?? '' ) ) {
 			return false;
 		}
 
 		$row['status'] = 'admitted';
-		self::write_row( $token, $row );
+		self::write_row( $ref, $row );
 		return 'admitted' === self::admission_status( $token );
 	}
 
@@ -143,13 +150,14 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * Close an admission fence before compensating a partial enqueue.
 	 */
 	public static function reject_admission( string $token ): void {
-		$row = self::read_row( $token );
-		if ( null === $row ) {
+		$ref = self::admission_ref( $token );
+		$row = '' !== $ref ? self::read_row( $ref ) : null;
+		if ( null === $row || ! hash_equals( $token, is_string( $row['token'] ?? null ) ? $row['token'] : '' ) ) {
 			return;
 		}
 
 		$row['status'] = 'rejected';
-		self::write_row( $token, $row );
+		self::write_row( $ref, $row );
 	}
 
 	/**
@@ -158,8 +166,12 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @return string pending, admitted, or rejected.
 	 */
 	public static function admission_status( string $token ): string {
-		$row    = '' !== $token ? self::read_row( $token ) : null;
-		$status = is_array( $row ) && is_string( $row['status'] ?? null ) ? $row['status'] : '';
+		$ref    = self::admission_ref( $token );
+		$row    = '' !== $ref ? self::read_row( $ref ) : null;
+		if ( null === $row || ! hash_equals( $token, is_string( $row['token'] ?? null ) ? $row['token'] : '' ) ) {
+			return 'rejected';
+		}
+		$status = is_string( $row['status'] ?? null ) ? $row['status'] : '';
 		return in_array( $status, array( 'pending', 'admitted' ), true ) ? $status : 'rejected';
 	}
 
@@ -271,6 +283,11 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @return void
 	 */
 	public static function forget_run( string $run_id ): void {
+		// Admission has a deterministic per-run ref, so its cleanup never depends
+		// on the mutable branch index or a consumer-owned payload store.
+		if ( function_exists( 'delete_option' ) ) {
+			delete_option( self::ADMISSION_PREFIX . md5( $run_id ) );
+		}
 		if ( self::filtered_forget_run( $run_id ) ) {
 			return;
 		}
@@ -288,6 +305,15 @@ final class WP_Agent_Workflow_Branch_Store {
 		}
 		delete_option( self::INDEX_PREFIX . md5( $run_id ) );
 		delete_option( self::CONTEXT_PREFIX . md5( $run_id ) );
+	}
+
+	/**
+	 * Resolve the deterministic option ref embedded in an admission token.
+	 */
+	private static function admission_ref( string $token ): string {
+		$separator = strrpos( $token, ':' );
+		$ref       = false !== $separator ? substr( $token, 0, $separator ) : '';
+		return str_starts_with( $ref, self::ADMISSION_PREFIX ) ? $ref : '';
 	}
 
 	/**

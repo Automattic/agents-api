@@ -170,18 +170,20 @@ final class AS_Limit_Shim {
 	/** When true, every enqueue "fails" the way AS's runner swallows — throws. */
 	public static bool $force_fail = false;
 	public static int $fail_on_attempt = 0;
+	public static bool $reject_after_delayed_enqueue = false;
 	private static int $enqueue_attempt = 0;
 	/** @var array<int,bool> */
 	public static array $cancelled = array();
 
 	public static function reset(): void {
-		self::$queue           = array();
-		self::$claimed         = array();
-		self::$seq             = 0;
-		self::$force_fail      = false;
-		self::$fail_on_attempt = 0;
-		self::$enqueue_attempt = 0;
-		self::$cancelled       = array();
+		self::$queue                        = array();
+		self::$claimed                      = array();
+		self::$seq                          = 0;
+		self::$force_fail                   = false;
+		self::$fail_on_attempt              = 0;
+		self::$reject_after_delayed_enqueue = false;
+		self::$enqueue_attempt              = 0;
+		self::$cancelled                    = array();
 	}
 
 	public static function enqueue( string $hook, array $args, string $group ): int {
@@ -285,7 +287,12 @@ if ( ! function_exists( 'as_enqueue_async_action' ) ) {
 if ( ! function_exists( 'as_schedule_single_action' ) ) {
 	function as_schedule_single_action( int $timestamp, string $hook, array $args = array(), string $group = '' ) {
 		unset( $timestamp );
-		return AS_Limit_Shim::enqueue( $hook, $args, $group );
+		$action_id = AS_Limit_Shim::enqueue( $hook, $args, $group );
+		if ( AS_Limit_Shim::$reject_after_delayed_enqueue ) {
+			$payload = is_array( $args[0] ?? null ) ? $args[0] : array();
+			\AgentsAPI\AI\Workflows\WP_Agent_Workflow_Branch_Store::reject_admission( (string) ( $payload['admission_token'] ?? '' ) );
+		}
+		return $action_id;
 	}
 }
 if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
@@ -551,12 +558,41 @@ foreach ( array_keys( $GLOBALS['__options'] ) as $opt ) {
 }
 smoke_assert( 0, $leftover2, 'bug2: failed dispatch cleaned up its stored rows (no orphans)', $failures, $passes );
 
+// A payload queued by the previous release has no admission token. It must
+// retain its pre-upgrade execution behavior instead of being silently fenced.
+AS_Limit_Shim::reset();
+$GLOBALS['__options']        = array();
+$GLOBALS['__branch_effects'] = 0;
+$legacy_ref = WP_Agent_Workflow_Branch_Store::put_branch(
+	'pay-legacy',
+	'pay-legacy:scatter:first:0',
+	array(
+		'run_id'     => 'pay-legacy',
+		'step_id'    => 'scatter',
+		'handle_id'  => 'pay-legacy:scatter:first:0',
+		'key'        => 'first',
+		'required'   => true,
+		'steps'      => array( array( 'id' => 'first', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'legacy' ) ) ),
+		'branch_vars' => array(),
+	)
+);
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_branch_action(
+	array(
+		'run_id'    => 'pay-legacy',
+		'handle_id' => 'pay-legacy:scatter:first:0',
+		'store_ref' => $legacy_ref,
+	)
+);
+smoke_assert( 1, $GLOBALS['__branch_effects'], 'upgrade compatibility: a legacy payload without admission_token still executes', $failures, $passes );
+WP_Agent_Workflow_Branch_Store::forget_run( 'pay-legacy' );
+
 // A later enqueue failure fences a worker racing compensation, cancels every
 // pending sibling/retry, and only then releases branch payload storage.
 AS_Limit_Shim::reset();
-$GLOBALS['__options']             = array();
-$GLOBALS['__branch_effects']      = 0;
-AS_Limit_Shim::$fail_on_attempt   = 2;
+$GLOBALS['__options'] = array();
+$GLOBALS['__branch_effects'] = 0;
+AS_Limit_Shim::$fail_on_attempt = 2;
+AS_Limit_Shim::$reject_after_delayed_enqueue = true;
 $partial = $executor->dispatch(
 	array(
 		array( 'key' => 'first', 'run_id' => 'pay-partial', 'step_id' => 'scatter', 'required' => true, 'steps' => array( array( 'id' => 'first', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'first' ) ) ), 'branch_vars' => array( 'context' => array() ) ),
@@ -575,6 +611,11 @@ foreach ( array_keys( $GLOBALS['__options'] ) as $opt ) {
 	}
 }
 smoke_assert( 0, $leftover3, 'atomic admission: fenced compensation cleans branch-store rows', $failures, $passes );
+
+$cleanup_token = WP_Agent_Workflow_Branch_Store::begin_admission( 'pay-cleanup' );
+smoke_assert( 'pending', WP_Agent_Workflow_Branch_Store::admission_status( $cleanup_token ), 'admission storage: persisted generation is readable before cleanup', $failures, $passes );
+WP_Agent_Workflow_Branch_Store::forget_run( 'pay-cleanup' );
+smoke_assert( 'rejected', WP_Agent_Workflow_Branch_Store::admission_status( $cleanup_token ), 'admission storage: deterministic cleanup does not depend on branch indexing', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );

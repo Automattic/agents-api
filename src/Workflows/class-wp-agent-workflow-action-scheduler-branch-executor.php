@@ -777,13 +777,18 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			return;
 		}
 
-		$admission_status = WP_Agent_Workflow_Branch_Store::admission_status( $admission_token );
-		if ( 'pending' === $admission_status ) {
-			self::defer_pending_branch( $payload, $run_id );
-			return;
-		}
-		if ( 'admitted' !== $admission_status ) {
-			return;
+		// Payloads queued before admission fencing shipped have no token and must
+		// retain their original execution behavior across an upgrade.
+		if ( array_key_exists( 'admission_token', $payload ) ) {
+			$admission_status = WP_Agent_Workflow_Branch_Store::admission_status( $admission_token );
+			if ( 'pending' === $admission_status ) {
+				self::defer_pending_branch( $payload, $run_id, $admission_token );
+				return;
+			}
+			if ( 'admitted' !== $admission_status ) {
+				self::cancel_matching_actions( $payload, $run_id );
+				return;
+			}
 		}
 
 		// Rehydrate the full self-contained descriptor from the branch store using
@@ -1114,25 +1119,41 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	}
 
 	/**
+	 * Remove pending copies of one exact branch payload.
+	 *
+	 * @param array<mixed> $payload Branch payload.
+	 */
+	private static function cancel_matching_actions( array $payload, string $run_id ): void {
+		if ( function_exists( 'as_unschedule_all_actions' ) ) {
+			as_unschedule_all_actions( self::BRANCH_HOOK, array( $payload ), self::group_for_run( $run_id ) );
+		}
+	}
+
+	/**
 	 * Requeue a branch claimed before its dispatch generation is committed.
 	 *
 	 * @param array<mixed> $payload Branch payload.
 	 */
-	private static function defer_pending_branch( array $payload, string $run_id ): void {
+	private static function defer_pending_branch( array $payload, string $run_id, string $admission_token ): void {
 		$group = self::group_for_run( $run_id );
-		if ( function_exists( 'as_schedule_single_action' ) ) {
-			try {
-				$action_id = (int) as_schedule_single_action( time() + 1, self::BRANCH_HOOK, array( $payload ), $group );
-				if ( $action_id > 0 ) {
-					return;
-				}
-			} catch ( \Throwable $error ) {
-				unset( $error );
-			}
+		if ( ! function_exists( 'as_schedule_single_action' ) ) {
+			throw new \RuntimeException( sprintf( 'Could not defer branch for run `%s`: delayed Action Scheduler enqueue is unavailable.', $run_id ) );
 		}
 
-		if ( self::enqueue_async_action( self::BRANCH_HOOK, array( $payload ), $group ) <= 0 ) {
+		try {
+			$action_id = (int) as_schedule_single_action( time() + 1, self::BRANCH_HOOK, array( $payload ), $group );
+		} catch ( \Throwable $error ) {
+			unset( $error );
+			$action_id = 0;
+		}
+		if ( $action_id <= 0 ) {
 			throw new \RuntimeException( sprintf( 'Could not defer branch for run `%s` while fan-out admission was pending.', $run_id ) );
+		}
+
+		// Compensation may have scanned while this worker was scheduling its copy.
+		// Re-check after enqueue so rejection closes that final insertion race.
+		if ( 'rejected' === WP_Agent_Workflow_Branch_Store::admission_status( $admission_token ) ) {
+			self::cancel_matching_actions( $payload, $run_id );
 		}
 	}
 

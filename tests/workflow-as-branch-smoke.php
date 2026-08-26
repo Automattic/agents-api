@@ -411,6 +411,27 @@ add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder
 $selected = apply_filters( 'wp_agent_workflow_step_executor', null, array( 'id' => 'scatter', 'type' => 'parallel' ), array() );
 smoke_assert_true( $selected instanceof WP_Agent_Workflow_Action_Scheduler_Branch_Executor, 'selection: AS present → AS branch executor selected', $failures, $passes );
 
+// A runtime exposing async enqueue without delayed enqueue cannot safely retry
+// a branch claimed while admission is pending. It must fail closed rather than
+// amplify the queue with immediate self-requeues.
+$pending_token        = \AgentsAPI\AI\Workflows\WP_Agent_Workflow_Branch_Store::begin_admission( 'as-no-delay' );
+$pending_error        = '';
+$pending_queue_before = count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK ) );
+try {
+	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_branch_action(
+		array(
+			'run_id'          => 'as-no-delay',
+			'handle_id'       => 'as-no-delay:scatter:first:0',
+			'admission_token' => $pending_token,
+		)
+	);
+} catch ( \RuntimeException $error ) {
+	$pending_error = $error->getMessage();
+}
+smoke_assert_true( str_contains( $pending_error, 'delayed Action Scheduler enqueue is unavailable' ), 'pending admission: unavailable delayed enqueue fails closed without immediate queue amplification', $failures, $passes );
+smoke_assert( $pending_queue_before, count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK ) ), 'pending admission: unavailable delayed enqueue adds no immediate retry action', $failures, $passes );
+\AgentsAPI\AI\Workflows\WP_Agent_Workflow_Branch_Store::forget_run( 'as-no-delay' );
+
 $tables_before = $recorder->tables();
 
 $run = ( new WP_Agent_Workflow_Runner( $recorder ) )->run( as_smoke_roles_spec(), array(), array( 'run_id' => 'as-A' ) );
