@@ -109,7 +109,7 @@ class WP_Agent_Run_Control {
 			$normalized['cancelled'] = (bool) $run['cancelled'];
 		}
 
-		return $normalized;
+		return self::normalize_cancellation_state( $normalized );
 	}
 
 	/**
@@ -253,6 +253,10 @@ class WP_Agent_Run_Control {
 			$store_key,
 			static function ( array $state ) use ( $run_id, $run ): array {
 				$current = $state['runs'][ $run_id ] ?? null;
+				if ( is_array( $current ) ) {
+					$current                    = self::normalize_cancellation_state( $current );
+					$state['runs'][ $run_id ] = $current;
+				}
 				if ( is_array( $current ) && ( self::is_terminal_status( $current['status'] ?? null ) || self::is_cancellation_requested( $current ) ) ) {
 					return array( 'state' => $state, 'result' => $current );
 				}
@@ -285,6 +289,10 @@ class WP_Agent_Run_Control {
 			$store_key,
 			static function ( array $state ) use ( $run_id, $normalized ): array {
 				$current = $state['runs'][ $run_id ] ?? null;
+				if ( is_array( $current ) ) {
+					$current                    = self::normalize_cancellation_state( $current );
+					$state['runs'][ $run_id ] = $current;
+				}
 				if ( is_array( $current ) && self::is_terminal_status( $current['status'] ?? null ) ) {
 					return array( 'state' => $state, 'result' => $current );
 				}
@@ -321,7 +329,8 @@ class WP_Agent_Run_Control {
 					return array( 'state' => $state, 'result' => null );
 				}
 
-				$run = $state['runs'][ $run_id ];
+				$run                      = self::normalize_cancellation_state( $state['runs'][ $run_id ] );
+				$state['runs'][ $run_id ] = $run;
 				if ( self::is_terminal_status( $run['status'] ?? null ) ) {
 					return array( 'state' => $state, 'result' => $run );
 				}
@@ -364,7 +373,8 @@ class WP_Agent_Run_Control {
 					return array( 'state' => $state, 'result' => null );
 				}
 
-				$run = $state['runs'][ $run_id ];
+				$run                      = self::normalize_cancellation_state( $state['runs'][ $run_id ] );
+				$state['runs'][ $run_id ] = $run;
 				if ( self::is_terminal_status( $run['status'] ?? null ) ) {
 					return array( 'state' => $state, 'result' => $run );
 				}

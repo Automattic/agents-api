@@ -191,6 +191,7 @@ require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-executor.
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-runner.php';
 
 use AgentsAPI\AI\WP_Agent_Run_Control;
+use AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store;
 use AgentsAPI\AI\WP_Agent_Run_Control_Store;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result;
@@ -241,6 +242,35 @@ class Memory_Run_Control_Store implements WP_Agent_Run_Control_Store {
 	}
 }
 
+class Workflow_Late_Cancel_Store implements WP_Agent_Atomic_Run_Control_Store {
+	public bool $cancel_before_next_mutation = false;
+	/** @var array<string,array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}> */
+	private array $states = array();
+
+	public function get_state( string $store_key ): array {
+		return $this->states[ $store_key ] ?? array( 'runs' => array(), 'queues' => array(), 'events' => array() );
+	}
+
+	public function save_state( string $store_key, array $state ): void {
+		$this->states[ $store_key ] = $state;
+	}
+
+	public function mutate_state( string $store_key, callable $mutation ): mixed {
+		$state = $this->get_state( $store_key );
+		if ( $this->cancel_before_next_mutation ) {
+			$this->cancel_before_next_mutation = false;
+			foreach ( $state['runs'] as &$run ) {
+				$run['status']    = WP_Agent_Run_Control::STATUS_CANCELLING;
+				$run['cancelled'] = true;
+			}
+			unset( $run );
+		}
+		$mutated                   = $mutation( $state );
+		$this->states[ $store_key ] = $mutated['state'];
+		return $mutated['result'];
+	}
+}
+
 // ─── Happy path: 2 sequential ability steps with bindings between them ───
 
 workflow_runner_smoke_register_ability(
@@ -276,6 +306,16 @@ workflow_runner_smoke_register_ability(
 	static function ( array $input ): array {
 		WP_Agent_Run_Control::request_cancel( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, (string) ( $input['run_id'] ?? '' ) );
 		return array( 'cancel_requested' => true );
+	}
+);
+workflow_runner_smoke_register_ability(
+	'demo/arm-late-cancel',
+	static function (): array {
+		$store = $GLOBALS['__workflow_late_cancel_store'] ?? null;
+		if ( $store instanceof Workflow_Late_Cancel_Store ) {
+			$store->cancel_before_next_mutation = true;
+		}
+		return array( 'completed' => true );
 	}
 );
 workflow_runner_smoke_register_ability(
@@ -352,6 +392,43 @@ smoke_assert( 1, $result->get_replay_metadata()['run_record_schema_version'] ?? 
 smoke_assert( '1.2.3', $result->get_replay_metadata()['workflow_spec_version'] ?? '', 'replay metadata includes workflow spec version', $failures, $passes );
 smoke_assert( true, 64 === strlen( $result->get_replay_metadata()['workflow_spec_hash'] ?? '' ), 'replay metadata includes sha256 spec hash', $failures, $passes );
 smoke_assert( $spec->to_array(), $result->get_replay_metadata()['workflow_spec_snapshot'] ?? array(), 'replay metadata includes workflow spec snapshot', $failures, $passes );
+
+// ─── Cancellation committed inside finish wins every terminal projection ─
+
+$late_cancel_spec = WP_Agent_Workflow_Spec::from_array(
+	array(
+		'id'    => 'demo/late-cancel',
+		'steps' => array(
+			array( 'id' => 'arm', 'type' => 'ability', 'ability' => 'demo/arm-late-cancel' ),
+		),
+	)
+);
+$late_cancel_store                         = new Workflow_Late_Cancel_Store();
+$GLOBALS['__workflow_late_cancel_store']  = $late_cancel_store;
+$late_cancel_hook_result                  = null;
+WP_Agent_Run_Control::set_store( $late_cancel_store );
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( WP_Agent_Workflow_Run_Result $completed, string $run_id ) use ( &$late_cancel_hook_result ): void {
+		if ( 'late-cancel-run' === $run_id ) {
+			$late_cancel_hook_result = $completed;
+		}
+	},
+	10,
+	2
+);
+$late_cancel_recorder = new Capture_Recorder();
+$late_cancel_result   = ( new WP_Agent_Workflow_Runner( $late_cancel_recorder ) )->run( $late_cancel_spec, array(), array( 'run_id' => 'late-cancel-run' ) );
+$late_cancel_record   = end( $late_cancel_recorder->writes );
+$late_cancel_stored   = WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, 'late-cancel-run' );
+
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $late_cancel_result->get_status(), 'late atomic cancellation replaces the runner candidate return', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $late_cancel_record['status'] ?? '', 'late atomic cancellation reaches the recorder terminal update', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $late_cancel_hook_result instanceof WP_Agent_Workflow_Run_Result ? $late_cancel_hook_result->get_status() : '', 'late atomic cancellation reaches the completion hook', $failures, $passes );
+smoke_assert( WP_Agent_Run_Control::STATUS_CANCELLED, $late_cancel_stored['status'] ?? '', 'late atomic cancellation is the run-control winner', $failures, $passes );
+smoke_assert( 'cancel_requested', $late_cancel_result->get_error()['code'] ?? '', 'late atomic cancellation returns the canonical cancellation error', $failures, $passes );
+WP_Agent_Run_Control::reset_store();
+unset( $GLOBALS['__workflow_late_cancel_store'] );
 
 // ─── Generic run-control cancellation stops before the next step ──────
 

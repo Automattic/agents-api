@@ -400,14 +400,16 @@ class WP_Agent_Workflow_Runner {
 			)
 		);
 
-		if ( $this->recorder ) {
-			$this->recorder->update( $result );
-		}
-		WP_Agent_Run_Control::finish_run(
+		$authoritative = WP_Agent_Run_Control::finish_run(
 			self::RUN_CONTROL_STORE,
 			$result->get_run_id(),
 			$failed ? WP_Agent_Run_Control::STATUS_FAILED : WP_Agent_Run_Control::STATUS_SUCCEEDED
 		);
+		$result        = self::project_authoritative_terminal( $result, $authoritative );
+
+		if ( $this->recorder ) {
+			$this->recorder->update( $result );
+		}
 
 		/**
 		 * Fires when a workflow run reaches a terminal state through the step loop.
@@ -517,6 +519,24 @@ class WP_Agent_Workflow_Runner {
 	private static function cancelled_result( WP_Agent_Workflow_Run_Result $result, array $step_records ): WP_Agent_Workflow_Run_Result {
 		WP_Agent_Run_Control::finish_run( self::RUN_CONTROL_STORE, $result->get_run_id(), WP_Agent_Run_Control::STATUS_CANCELLED );
 
+		return self::project_cancelled_result( $result, $step_records );
+	}
+
+	/**
+	 * Project the serialized run-control winner into the workflow result.
+	 *
+	 * @param array<string,mixed>|null $authoritative Authoritative run-control row.
+	 */
+	private static function project_authoritative_terminal( WP_Agent_Workflow_Run_Result $result, ?array $authoritative ): WP_Agent_Workflow_Run_Result {
+		if ( null !== $authoritative && WP_Agent_Run_Control::STATUS_CANCELLED === ( $authoritative['status'] ?? '' ) ) {
+			return self::project_cancelled_result( $result, $result->get_steps() );
+		}
+
+		return $result;
+	}
+
+	/** @param array<mixed> $step_records Steps completed before cancellation won. */
+	private static function project_cancelled_result( WP_Agent_Workflow_Run_Result $result, array $step_records ): WP_Agent_Workflow_Run_Result {
 		return $result->with(
 			array(
 				'status'   => WP_Agent_Workflow_Run_Result::STATUS_CANCELLED,

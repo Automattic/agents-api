@@ -182,6 +182,38 @@ foreach ( array( null, $workspace ) as $scope ) {
 		$events_after_noops = count( $finish_first->get_state( 'finish-first' )['events']['same-run'] ?? array() );
 	}
 	agents_api_smoke_assert_equals( $events_before_noops, $events_after_noops, "{$scope_name} post-terminal lifecycle requests are event-free no-ops", $failures, $passes );
+
+	foreach ( array( 'start', 'save', 'finish', 'cancel' ) as $operation ) {
+		$legacy_spy = new Run_Control_Atomic_Spy_Store();
+		$run_id     = 'legacy-' . $operation;
+		$legacy_spy->inject_run(
+			'legacy-terminal',
+			$run_id,
+			array(
+				'run_id'    => $run_id,
+				'status'    => WP_Agent_Run_Control::STATUS_SUCCEEDED,
+				'cancelled' => true,
+			),
+			$scope
+		);
+		WP_Agent_Run_Control::set_store( $legacy_spy );
+		agents_api_smoke_assert_equals( false, atomic_get_run( 'legacy-terminal', $run_id, $scope )['cancelled'] ?? null, "{$scope_name} reads normalize a legacy succeeded/cancelled contradiction", $failures, $passes );
+
+		if ( 'start' === $operation ) {
+			atomic_start( 'legacy-terminal', $run_id, $scope );
+		} elseif ( 'save' === $operation ) {
+			atomic_save( 'legacy-terminal', $run_id, WP_Agent_Run_Control::STATUS_RUNNING, $scope );
+		} elseif ( 'finish' === $operation ) {
+			WP_Agent_Run_Control::finish_run( 'legacy-terminal', $run_id, WP_Agent_Run_Control::STATUS_FAILED, $scope );
+		} else {
+			WP_Agent_Run_Control::request_cancel( 'legacy-terminal', $run_id, $scope );
+		}
+
+		$legacy_state = null === $scope ? $legacy_spy->get_state( 'legacy-terminal' ) : $legacy_spy->get_workspace_state( 'legacy-terminal', $scope );
+		agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_SUCCEEDED, $legacy_state['runs'][ $run_id ]['status'] ?? null, "{$scope_name} {$operation} keeps a legacy terminal status monotonic", $failures, $passes );
+		agents_api_smoke_assert_equals( false, $legacy_state['runs'][ $run_id ]['cancelled'] ?? null, "{$scope_name} {$operation} persists the healed cancellation flag before its terminal guard", $failures, $passes );
+		agents_api_smoke_assert_equals( array(), $legacy_state['events'][ $run_id ] ?? array(), "{$scope_name} {$operation} heals legacy terminal state without a lifecycle event", $failures, $passes );
+	}
 }
 
 $failure_spy               = new Run_Control_Atomic_Spy_Store();

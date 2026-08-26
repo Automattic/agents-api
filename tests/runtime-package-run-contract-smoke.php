@@ -220,6 +220,37 @@ require_once __DIR__ . '/../src/Abilities/functions-ability-dispatch.php';
 
 use AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Request;
 use AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Result;
+use AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store;
+use AgentsAPI\AI\WP_Agent_Run_Control;
+
+final class Runtime_Package_Late_Cancel_Store implements WP_Agent_Atomic_Run_Control_Store {
+	public bool $cancel_before_next_mutation = false;
+	/** @var array<string,array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}> */
+	private array $states = array();
+
+	public function get_state( string $store_key ): array {
+		return $this->states[ $store_key ] ?? array( 'runs' => array(), 'queues' => array(), 'events' => array() );
+	}
+
+	public function save_state( string $store_key, array $state ): void {
+		$this->states[ $store_key ] = $state;
+	}
+
+	public function mutate_state( string $store_key, callable $mutation ): mixed {
+		$state = $this->get_state( $store_key );
+		if ( $this->cancel_before_next_mutation ) {
+			$this->cancel_before_next_mutation = false;
+			foreach ( $state['runs'] as &$run ) {
+				$run['status']    = WP_Agent_Run_Control::STATUS_CANCELLING;
+				$run['cancelled'] = true;
+			}
+			unset( $run );
+		}
+		$mutated                    = $mutation( $state );
+		$this->states[ $store_key ] = $mutated['state'];
+		return $mutated['result'];
+	}
+}
 
 echo "\n[0] Runtime package ability resolves in normal and late Abilities API lifecycles:\n";
 do_action( 'init' );
@@ -384,5 +415,35 @@ $helper_dispatch = wp_agent_run_runtime_package(
 agents_api_smoke_assert_equals( false, is_wp_error( $helper_dispatch ), 'public helper returns handler output', $failures, $passes );
 agents_api_smoke_assert_equals( 'succeeded', is_array( $helper_dispatch ) ? $helper_dispatch['status'] ?? '' : '', 'public helper preserves result status', $failures, $passes );
 agents_api_smoke_assert_equals( 'build-site', is_array( $helper_dispatch ) ? $helper_dispatch['result']['workflow_id'] ?? '' : '', 'public helper passes workflow to handler', $failures, $passes );
+
+echo "\n[5] Atomic cancellation wins after the handler returns success:\n";
+$GLOBALS['__agents_api_smoke_actions']['wp_agent_runtime_package_run_handler'] = array();
+$late_cancel_store = new Runtime_Package_Late_Cancel_Store();
+WP_Agent_Run_Control::set_store( $late_cancel_store );
+add_filter(
+	'wp_agent_runtime_package_run_handler',
+	static function () use ( $late_cancel_store ): callable {
+		return static function () use ( $late_cancel_store ): array {
+			$late_cancel_store->cancel_before_next_mutation = true;
+			return array(
+				'status' => WP_Agent_Runtime_Package_Run_Result::STATUS_SUCCEEDED,
+				'result' => array( 'candidate' => 'handler-success' ),
+			);
+		};
+	}
+);
+$late_cancel_dispatch = AgentsAPI\AI\agents_runtime_package_run_dispatch(
+	array(
+		'run_id'   => 'runtime-late-cancel',
+		'package'  => array( 'slug' => 'site-builder' ),
+		'workflow' => array( 'id' => 'late-cancel' ),
+	)
+);
+$late_cancel_run = WP_Agent_Run_Control::get_run( AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, 'runtime-late-cancel' );
+agents_api_smoke_assert_equals( WP_Agent_Runtime_Package_Run_Result::STATUS_CANCELLED, is_array( $late_cancel_dispatch ) ? $late_cancel_dispatch['status'] ?? '' : '', 'dispatcher returns the authoritative cancellation winner', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_CANCELLED, $late_cancel_run['status'] ?? '', 'runtime package run-control stores the cancellation winner', $failures, $passes );
+agents_api_smoke_assert_equals( 'cancel_requested', is_array( $late_cancel_dispatch ) ? $late_cancel_dispatch['error']['code'] ?? '' : '', 'dispatcher projects the canonical cancellation error', $failures, $passes );
+agents_api_smoke_assert_equals( 'handler-success', is_array( $late_cancel_dispatch ) ? $late_cancel_dispatch['result']['candidate'] ?? '' : '', 'cancellation projection preserves handler evidence', $failures, $passes );
+WP_Agent_Run_Control::reset_store();
 
 agents_api_smoke_finish( 'Agents API runtime package run contract', $failures, $passes );

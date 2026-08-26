@@ -237,7 +237,7 @@ function agents_runtime_package_run_dispatch( array $input ) {
 	$result['run_id'] = $run_id;
 	$normalized       = WP_Agent_Runtime_Package_Run_Result::from_array( $result )->to_array();
 	$status           = WP_Agent_Run_Control::normalize_status( $normalized['status'] ?? WP_Agent_Run_Control::STATUS_SUCCEEDED );
-	WP_Agent_Run_Control::save_run(
+	$authoritative = WP_Agent_Run_Control::save_run(
 		AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE,
 		array(
 			'run_id'     => $run_id,
@@ -249,6 +249,13 @@ function agents_runtime_package_run_dispatch( array $input ) {
 			'started_at' => WP_Agent_Run_Control::now(),
 		)
 	);
+	if ( WP_Agent_Run_Control::STATUS_CANCELLED === ( $authoritative['status'] ?? '' ) ) {
+		$normalized['status'] = WP_Agent_Runtime_Package_Run_Result::STATUS_CANCELLED;
+		$normalized['error']  = array(
+			'code'    => 'cancel_requested',
+			'message' => 'Runtime package run cancellation was requested.',
+		);
+	}
 
 	return $normalized;
 }
