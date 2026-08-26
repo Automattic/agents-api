@@ -217,8 +217,10 @@ $runtime_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Reque
 	public function recent_pending( array $query = array() ): array { unset( $query ); return array(); }
 };
 $pending_executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
+	public int $calls = 0;
 	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
 		unset( $tool_definition, $context );
+		++$this->calls;
 		return array(
 			'success'              => false,
 			'tool_name'            => $tool_call['tool_name'],
@@ -243,6 +245,8 @@ $runtime_store_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 'failed', $runtime_store_result['status'] ?? '', 'runtime-tool storage throw returns a failed result', $failures, $passes );
 agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-runtime-store' )['status'] ?? '', 'runtime-tool storage throw durably finalizes run control', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $persist_log ), 'runtime-tool storage throw persists the failed transcript', $failures, $passes );
+agents_api_smoke_assert_equals( 1, $pending_executor->calls, 'runtime-tool storage throw does not repeat the effect', $failures, $passes );
+agents_api_smoke_assert_equals( true, $runtime_store_result['tool_audit_events'][0]['effect_occurred'] ?? false, 'runtime-tool storage failure audit records the completed effect', $failures, $passes );
 
 echo "\n[5] Completed tool effects remain in the failed audit when later policy throws:\n";
 $policy_executor->calls = 0;
@@ -271,7 +275,59 @@ agents_api_smoke_assert_equals( 1, count( $post_tool_result['tool_execution_resu
 agents_api_smoke_assert_equals( 1, count( $post_tool_result['tool_audit_events'] ?? array() ), 'failed result retains completed tool audit event', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $persist_log[0]['result']['tool_execution_results'] ?? array() ), 'persisted transcript retains completed tool effect', $failures, $passes );
 
-echo "\n[6] The turn-runner contract violation finalizes run control and still escapes:\n";
+echo "\n[6] Hook and truncator throws retain the immediate effect checkpoint:\n";
+$hook_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+	public function create( array $request ): void { unset( $request ); }
+	public function get( string $request_id ): ?array { unset( $request_id ); return null; }
+	public function complete( string $request_id, array $result ): void { unset( $request_id, $result ); }
+	public function timeout( string $request_id ): void { unset( $request_id ); }
+	public function recent_pending( array $query = array() ): array { unset( $query ); return array(); }
+};
+add_action(
+	'agents_api_runtime_tool_request_created',
+	static function (): void {
+		throw new RuntimeException( 'runtime lifecycle hook unavailable' );
+	}
+);
+$pending_executor->calls = 0;
+$hook_result             = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'hook failure' ) ),
+	$tool_turn,
+	array(
+		'run_id'                => 'fail-closed-post-tool-hook',
+		'transcript_session_id' => 'fail-closed-post-tool-hook-session',
+		'tool_executor'         => $pending_executor,
+		'tool_declarations'     => $policy_tools,
+		'runtime_tool_request_store' => $hook_store,
+	)
+);
+agents_api_smoke_assert_equals( 1, $pending_executor->calls, 'post-effect hook throw executes the tool exactly once', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $hook_result['status'] ?? '', 'post-effect hook throw fails the run', $failures, $passes );
+agents_api_smoke_assert_equals( true, $hook_result['tool_audit_events'][0]['effect_occurred'] ?? false, 'post-effect hook failure audit records the completed effect', $failures, $passes );
+
+$throwing_truncator = new class() implements AgentsAPI\AI\WP_Agent_Tool_Result_Truncator {
+	public function truncate_result( array $result, string $tool_name, array $context = array() ): array {
+		unset( $result, $tool_name, $context );
+		throw new RuntimeException( 'truncator unavailable' );
+	}
+};
+$policy_executor->calls = 0;
+$truncator_result       = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'truncator failure' ) ),
+	$tool_turn,
+	array(
+		'run_id'                => 'fail-closed-post-tool-truncator',
+		'transcript_session_id' => 'fail-closed-post-tool-truncator-session',
+		'tool_executor'         => $policy_executor,
+		'tool_declarations'     => $policy_tools,
+		'tool_result_truncator' => $throwing_truncator,
+	)
+);
+agents_api_smoke_assert_equals( 1, $policy_executor->calls, 'truncator throw executes the tool exactly once', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $truncator_result['status'] ?? '', 'truncator throw fails the run', $failures, $passes );
+agents_api_smoke_assert_equals( true, $truncator_result['tool_audit_events'][0]['effect_occurred'] ?? false, 'truncator failure audit records the completed effect', $failures, $passes );
+
+echo "\n[7] The turn-runner contract violation finalizes run control and still escapes:\n";
 $threw = false;
 $persist_log = array();
 try {
@@ -293,7 +349,7 @@ agents_api_smoke_assert_equals( true, $threw, 'deliberate contract violation is 
 agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-contract' )['status'] ?? '', 'contract violation does not strand running run control', $failures, $passes );
 agents_api_smoke_assert_equals( 'failed', $persist_log[0]['status'] ?? '', 'contract violation persists a canonical failed result', $failures, $passes );
 
-echo "\n[7] Run-control finalization storage failures remain retryable and visible:\n";
+echo "\n[8] Run-control finalization storage failures remain retryable and visible:\n";
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {
 		public function __construct( private string $code = '', private string $message = '' ) {}
@@ -333,5 +389,65 @@ try {
 }
 agents_api_smoke_assert_equals( true, $finalization_error instanceof AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception, 'terminal storage failure escapes as the canonical retryable exception', $failures, $passes );
 agents_api_smoke_assert_equals( 'running', $failing_store->state['runs']['fail-closed-finalization']['status'] ?? '', 'failed terminal write remains visibly retryable instead of pretending completion', $failures, $passes );
+
+echo "\n[9] Missing finalization records are rejected as retryable failures:\n";
+$missing_store = new class() implements AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store {
+	public array $state = array( 'runs' => array(), 'queues' => array(), 'events' => array() );
+	private int $mutations = 0;
+	public function get_state( string $store_key ): array { unset( $store_key ); return $this->state; }
+	public function save_state( string $store_key, array $state ): void { unset( $store_key ); $this->state = $state; }
+	public function mutate_state( string $store_key, callable $mutation ): mixed {
+		unset( $store_key );
+		++$this->mutations;
+		$mutated = $mutation( 1 < $this->mutations ? array( 'runs' => array(), 'queues' => array(), 'events' => array() ) : $this->state );
+		if ( 1 === $this->mutations ) {
+			$this->state = $mutated['state'];
+		}
+		return $mutated['result'];
+	}
+};
+AgentsAPI\AI\WP_Agent_Run_Control::set_store( $missing_store );
+$missing_error = null;
+try {
+	AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+		array( array( 'role' => 'user', 'content' => 'missing terminal record' ) ),
+		$turn_runner,
+		array( 'run_id' => 'fail-closed-missing-record', 'transcript_session_id' => 'fail-closed-missing-record-session' )
+	);
+} catch ( AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception $error ) {
+	$missing_error = $error;
+}
+agents_api_smoke_assert_equals( true, $missing_error instanceof AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception, 'missing terminal record is a retryable finalization failure', $failures, $passes );
+agents_api_smoke_assert_equals( 'running', $missing_store->state['runs']['fail-closed-missing-record']['status'] ?? '', 'missing finalization does not claim a terminal status', $failures, $passes );
+
+echo "\n[10] Failed transcript persistence is explicit after durable run finalization:\n";
+AgentsAPI\AI\WP_Agent_Run_Control::set_store( new Agents_API_Memory_Atomic_Run_Control_Store() );
+$throwing_persister = new class() implements AgentsAPI\AI\WP_Agent_Transcript_Persister {
+	public function persist( array $messages, AgentsAPI\AI\WP_Agent_Conversation_Request $request, array $result ): string {
+		unset( $messages, $request, $result );
+		throw new RuntimeException( 'transcript store unavailable' );
+	}
+};
+$persistence_error = null;
+$persistence_result = null;
+try {
+	$persistence_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+		array( array( 'role' => 'user', 'content' => 'persist failure audit' ) ),
+		$turn_runner,
+		array(
+			'run_id'                => 'fail-closed-transcript-store',
+			'transcript_session_id' => 'fail-closed-transcript-store-session',
+			'max_turns'             => 2,
+			'should_continue'       => static function (): bool { throw new RuntimeException( 'continuation failed' ); },
+			'transcript_persister'  => $throwing_persister,
+		)
+	);
+} catch ( AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception $error ) {
+	$persistence_error = $error;
+}
+agents_api_smoke_assert_equals( null, $persistence_result, 'transcript storage failure never returns an ordinary failed result', $failures, $passes );
+agents_api_smoke_assert_equals( true, $persistence_error instanceof AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception, 'transcript storage failure is exposed as retryable finalization diagnostics', $failures, $passes );
+agents_api_smoke_assert_equals( 'transcript store unavailable', $persistence_error?->getPrevious()?->getMessage(), 'retryable diagnostics preserve the underlying persistence error', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-transcript-store' )['status'] ?? '', 'transcript storage failure still leaves an observable durable failed run', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API conversation loop fail-closed', $failures, $passes );
