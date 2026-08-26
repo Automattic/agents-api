@@ -445,6 +445,7 @@ foreach (
 		WP_Agent_Run_Control::STATUS_SUCCEEDED => WP_Agent_Runtime_Package_Run_Result::STATUS_SUCCEEDED,
 		WP_Agent_Run_Control::STATUS_FAILED    => WP_Agent_Runtime_Package_Run_Result::STATUS_FAILED,
 		WP_Agent_Run_Control::STATUS_CANCELLED => WP_Agent_Runtime_Package_Run_Result::STATUS_CANCELLED,
+		WP_Agent_Run_Control::STATUS_SKIPPED   => WP_Agent_Runtime_Package_Run_Result::STATUS_SKIPPED,
 	) as $stored_status => $response_status
 ) {
 	$reused_run_id = 'runtime-reused-' . $stored_status;
@@ -593,6 +594,38 @@ foreach ( array( 'no_handler', 'handler_error', 'invalid_result' ) as $error_exi
 	agents_api_smoke_assert_equals( 'cancel_requested', is_array( $error_result ) ? $error_result['error']['code'] ?? '' : '', "{$error_exit} exit projects the canonical cancellation error", $failures, $passes );
 	agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_CANCELLED, $error_stored['status'] ?? '', "{$error_exit} exit matches authoritative storage", $failures, $passes );
 }
+WP_Agent_Run_Control::reset_store();
+
+echo "\n[9] Skipped handler outcomes are terminal and replay-safe:\n";
+$GLOBALS['__agents_api_smoke_actions']['wp_agent_runtime_package_run_handler'] = array();
+$skipped_store   = new Runtime_Package_Late_Cancel_Store();
+$skipped_effects = 0;
+WP_Agent_Run_Control::set_store( $skipped_store );
+add_filter(
+	'wp_agent_runtime_package_run_handler',
+	static function () use ( &$skipped_effects ): callable {
+		return static function () use ( &$skipped_effects ): array {
+			++$skipped_effects;
+			return array(
+				'status' => WP_Agent_Runtime_Package_Run_Result::STATUS_SKIPPED,
+				'result' => array( 'reason' => 'not_applicable' ),
+			);
+		};
+	}
+);
+$skipped_input = array(
+	'run_id'   => 'runtime-skipped-terminal',
+	'package'  => array( 'slug' => 'site-builder' ),
+	'workflow' => array( 'id' => 'skip' ),
+);
+$skipped_first  = AgentsAPI\AI\agents_runtime_package_run_dispatch( $skipped_input );
+$skipped_replay = AgentsAPI\AI\agents_runtime_package_run_dispatch( $skipped_input );
+$skipped_run    = WP_Agent_Run_Control::get_run( AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, 'runtime-skipped-terminal' );
+agents_api_smoke_assert_equals( WP_Agent_Runtime_Package_Run_Result::STATUS_SKIPPED, is_array( $skipped_first ) ? $skipped_first['status'] ?? '' : '', 'handler skipped result remains skipped', $failures, $passes );
+agents_api_smoke_assert_equals( 'not_applicable', is_array( $skipped_first ) ? $skipped_first['result']['reason'] ?? '' : '', 'initial skipped result preserves handler payload', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_SKIPPED, $skipped_run['status'] ?? '', 'skipped is terminal in authoritative run-control storage', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Runtime_Package_Run_Result::STATUS_SKIPPED, is_array( $skipped_replay ) ? $skipped_replay['status'] ?? '' : '', 'skipped duplicate returns the stored terminal winner', $failures, $passes );
+agents_api_smoke_assert_equals( 1, $skipped_effects, 'skipped duplicate does not re-execute handler effects', $failures, $passes );
 WP_Agent_Run_Control::reset_store();
 
 agents_api_smoke_finish( 'Agents API runtime package run contract', $failures, $passes );

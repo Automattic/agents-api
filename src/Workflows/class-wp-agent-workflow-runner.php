@@ -150,7 +150,7 @@ class WP_Agent_Workflow_Runner {
 				// Recorder unavailable on entry — return a failed result without
 				// running steps. The caller still gets the in-memory record so
 				// observability hooks fire; the step pipeline does not run.
-				return $result->with(
+				$terminal = $result->with(
 					array(
 						'status'   => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
 						'error'    => array(
@@ -160,6 +160,8 @@ class WP_Agent_Workflow_Runner {
 						'ended_at' => time(),
 					)
 				);
+				WP_Agent_Run_Control::start_run( self::RUN_CONTROL_STORE, $run_id, array( 'workflow_id' => $spec->get_id(), 'metadata' => $metadata ) );
+				return $this->complete_terminal_result( $terminal, false );
 			}
 			if ( '' !== $persisted ) {
 				$result = $result->with( array( 'run_id' => $persisted ) );
@@ -185,12 +187,7 @@ class WP_Agent_Workflow_Runner {
 					'ended_at' => time(),
 				)
 			);
-			$terminal = self::authoritative_terminal_result( $terminal );
-			if ( $this->recorder ) {
-				$this->recorder->update( $terminal );
-			}
-			do_action( 'wp_agent_workflow_run_completed', $terminal, $terminal->get_run_id() );
-			return $terminal;
+			return $this->complete_terminal_result( $terminal );
 		}
 
 		$context  = new WP_Agent_Workflow_Run_Context(
@@ -224,12 +221,12 @@ class WP_Agent_Workflow_Runner {
 	 */
 	public function resume( string $run_id, array $options = array() ): WP_Agent_Workflow_Run_Result {
 		if ( null === $this->recorder ) {
-			return self::resume_error_result( $run_id, 'workflow_resume_no_recorder', 'A recorder is required to resume a suspended run.' );
+			return $this->resume_failure( null, $run_id, 'workflow_resume_no_recorder', 'A recorder is required to resume a suspended run.', false );
 		}
 
 		$result = $this->recorder->find( $run_id );
 		if ( null === $result ) {
-			return self::resume_error_result( $run_id, 'workflow_resume_run_not_found', sprintf( 'No suspended run was found for run_id `%s`.', $run_id ) );
+			return $this->resume_failure( null, $run_id, 'workflow_resume_run_not_found', sprintf( 'No suspended run was found for run_id `%s`.', $run_id ) );
 		}
 		if ( ! $result->is_suspended() ) {
 			// Idempotency guard: an already-resumed (or never-suspended) run is
@@ -240,7 +237,7 @@ class WP_Agent_Workflow_Runner {
 		$suspension = $result->get_suspension();
 		$spec       = self::spec_from_result( $result );
 		if ( null === $spec ) {
-			return self::resume_error_result( $run_id, 'workflow_resume_spec_unavailable', 'The suspended run has no replayable spec snapshot to resume from.' );
+			return $this->resume_failure( $result, $run_id, 'workflow_resume_spec_unavailable', 'The suspended run has no replayable spec snapshot to resume from.' );
 		}
 
 		$snapshot = is_array( $suspension['context_snapshot'] ?? null ) ? $suspension['context_snapshot'] : array();
@@ -315,24 +312,14 @@ class WP_Agent_Workflow_Runner {
 			$step = $steps[ $step_index ];
 
 			if ( self::is_cancel_requested( $result->get_run_id() ) ) {
-				$result = self::authoritative_terminal_result( self::cancelled_result( $result, $step_records ) );
-				if ( $this->recorder ) {
-					$this->recorder->update( $result );
-				}
-				do_action( 'wp_agent_workflow_run_completed', $result, $result->get_run_id() );
-				return $result;
+				return $this->complete_terminal_result( self::cancelled_result( $result, $step_records ) );
 			}
 
 			$record         = self::string_keyed_array( $executor->execute( $step, $context ) );
 			$step_records[] = $record;
 
 			if ( self::is_cancel_requested( $result->get_run_id() ) ) {
-				$result = self::authoritative_terminal_result( self::cancelled_result( $result, $step_records ) );
-				if ( $this->recorder ) {
-					$this->recorder->update( $result );
-				}
-				do_action( 'wp_agent_workflow_run_completed', $result, $result->get_run_id() );
-				return $result;
+				return $this->complete_terminal_result( self::cancelled_result( $result, $step_records ) );
 			}
 
 			// Pending / suspend gate — BEFORE the failure gate. The step asked
@@ -403,30 +390,16 @@ class WP_Agent_Workflow_Runner {
 			)
 		);
 
-		$result = self::authoritative_terminal_result( $result );
+		return $this->complete_terminal_result( $result );
+	}
 
-		if ( $this->recorder ) {
+	/** Complete one terminal result after projecting the run-control winner. */
+	private function complete_terminal_result( WP_Agent_Workflow_Run_Result $result, bool $update_recorder = true ): WP_Agent_Workflow_Run_Result {
+		$result = self::authoritative_terminal_result( $result );
+		if ( $update_recorder && $this->recorder ) {
 			$this->recorder->update( $result );
 		}
-
-		/**
-		 * Fires when a workflow run reaches a terminal state through the step loop.
-		 *
-		 * This is the single funnel for a run finishing — whether it ran straight
-		 * through in one request ({@see run()}) or completed via an async resume
-		 * after its parallel branches reconciled ({@see resume()}). It lets an
-		 * async consumer react to completion WITHOUT block-polling the recorder:
-		 * a consumer that dispatched an async fanout can return immediately from
-		 * its own worker and do its finalization here instead, so it never holds a
-		 * queue claim while waiting on the very branches it dispatched.
-		 *
-		 * @since 0.5.0
-		 *
-		 * @param WP_Agent_Workflow_Run_Result $result The terminal run result.
-		 * @param string                       $run_id The run id.
-		 */
 		do_action( 'wp_agent_workflow_run_completed', $result, $result->get_run_id() );
-
 		return $result;
 	}
 
@@ -506,6 +479,26 @@ class WP_Agent_Workflow_Runner {
 		);
 	}
 
+	private function resume_failure( ?WP_Agent_Workflow_Run_Result $result, string $run_id, string $code, string $message, bool $update_recorder = true ): WP_Agent_Workflow_Run_Result {
+		if ( null === $result ) {
+			$result = self::resume_error_result( $run_id, $code, $message );
+		} else {
+			$metadata = $result->get_metadata();
+			unset( $metadata['_suspension'] );
+			$result = $result->with(
+				array(
+					'status'   => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
+					'error'    => array( 'code' => $code, 'message' => $message ),
+					'ended_at' => time(),
+					'metadata' => $metadata,
+				)
+			);
+		}
+
+		WP_Agent_Run_Control::start_run( self::RUN_CONTROL_STORE, $run_id, array( 'workflow_id' => $result->get_workflow_id() ) );
+		return $this->complete_terminal_result( $result, $update_recorder );
+	}
+
 	/** @phpstan-impure */
 	private static function is_cancel_requested( string $run_id ): bool {
 		return WP_Agent_Run_Control::cancel_requested( self::RUN_CONTROL_STORE, $run_id );
@@ -545,6 +538,26 @@ class WP_Agent_Workflow_Runner {
 					),
 				)
 			);
+		}
+		$terminal_errors = array(
+			WP_Agent_Run_Control::STATUS_BUDGET_EXCEEDED => array( 'workflow_run_budget_exceeded', 'The workflow run exceeded its budget.' ),
+			WP_Agent_Run_Control::STATUS_STALLED         => array( 'workflow_run_stalled', 'The workflow run stalled.' ),
+			WP_Agent_Run_Control::STATUS_INTERRUPTED     => array( 'workflow_run_interrupted', 'The workflow run was interrupted.' ),
+		);
+		if ( isset( $terminal_errors[ $stored_status ] ) ) {
+			return $result->with(
+				array(
+					'status'   => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
+					'error'    => array(
+						'code'    => $terminal_errors[ $stored_status ][0],
+						'message' => $terminal_errors[ $stored_status ][1],
+					),
+					'ended_at' => time(),
+				)
+			);
+		}
+		if ( WP_Agent_Run_Control::STATUS_SKIPPED === $stored_status ) {
+			return $result->with( array( 'status' => WP_Agent_Workflow_Run_Result::STATUS_SKIPPED, 'error' => array() ) );
 		}
 		if ( in_array( $stored_status, array( WP_Agent_Run_Control::STATUS_SUCCEEDED, WP_Agent_Run_Control::STATUS_COMPLETED ), true ) ) {
 			return $result->with( array( 'status' => WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, 'error' => array() ) );

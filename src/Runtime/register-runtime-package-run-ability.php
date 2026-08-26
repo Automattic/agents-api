@@ -267,6 +267,7 @@ function agents_runtime_package_run_is_terminal_status( mixed $status ): bool {
 			WP_Agent_Run_Control::STATUS_COMPLETED,
 			WP_Agent_Run_Control::STATUS_SUCCEEDED,
 			WP_Agent_Run_Control::STATUS_FAILED,
+			WP_Agent_Run_Control::STATUS_SKIPPED,
 			WP_Agent_Run_Control::STATUS_CANCELLED,
 			WP_Agent_Run_Control::STATUS_BUDGET_EXCEEDED,
 			WP_Agent_Run_Control::STATUS_STALLED,
@@ -297,6 +298,8 @@ function agents_runtime_package_run_project_authoritative( array $authoritative,
 	$status = WP_Agent_Run_Control::normalize_status( $authoritative['status'] ?? '' );
 	if ( WP_Agent_Run_Control::STATUS_CANCELLED === $status ) {
 		$runtime_status = WP_Agent_Runtime_Package_Run_Result::STATUS_CANCELLED;
+	} elseif ( WP_Agent_Run_Control::STATUS_SKIPPED === $status ) {
+		$runtime_status = WP_Agent_Runtime_Package_Run_Result::STATUS_SKIPPED;
 	} elseif ( in_array( $status, array( WP_Agent_Run_Control::STATUS_FAILED, WP_Agent_Run_Control::STATUS_BUDGET_EXCEEDED, WP_Agent_Run_Control::STATUS_STALLED, WP_Agent_Run_Control::STATUS_INTERRUPTED ), true ) ) {
 		$runtime_status = WP_Agent_Runtime_Package_Run_Result::STATUS_FAILED;
 	} elseif ( in_array( $status, array( WP_Agent_Run_Control::STATUS_SUCCEEDED, WP_Agent_Run_Control::STATUS_COMPLETED ), true ) ) {

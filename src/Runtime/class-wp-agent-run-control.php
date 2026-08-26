@@ -23,6 +23,7 @@ class WP_Agent_Run_Control {
 	public const STATUS_COMPLETED            = 'completed';
 	public const STATUS_SUCCEEDED            = 'succeeded';
 	public const STATUS_FAILED               = 'failed';
+	public const STATUS_SKIPPED              = 'skipped';
 	public const STATUS_RUNTIME_TOOL_PENDING = 'runtime_tool_pending';
 	public const STATUS_APPROVAL_REQUIRED    = 'approval_required';
 	public const STATUS_BUDGET_EXCEEDED      = 'budget_exceeded';
@@ -41,6 +42,7 @@ class WP_Agent_Run_Control {
 			self::STATUS_COMPLETED,
 			self::STATUS_SUCCEEDED,
 			self::STATUS_FAILED,
+			self::STATUS_SKIPPED,
 			self::STATUS_RUNTIME_TOOL_PENDING,
 			self::STATUS_APPROVAL_REQUIRED,
 			self::STATUS_BUDGET_EXCEEDED,
@@ -530,6 +532,7 @@ class WP_Agent_Run_Control {
 				self::STATUS_COMPLETED,
 				self::STATUS_SUCCEEDED,
 				self::STATUS_FAILED,
+				self::STATUS_SKIPPED,
 				self::STATUS_CANCELLED,
 				self::STATUS_BUDGET_EXCEEDED,
 				self::STATUS_STALLED,
