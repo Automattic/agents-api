@@ -315,6 +315,7 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Branch_Executor;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Scoped_Drain;
 
 $branch_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK;
+$reconcile_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK;
 $aggregate_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK;
 $resume_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK;
 $group       = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::GROUP;
@@ -322,9 +323,9 @@ $group       = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::GROUP;
 // The drain's default scope must be the executor's hooks + group (read, never
 // hardcoded), so this and the executor can never drift.
 smoke_assert(
-	array( $branch_hook, $aggregate_hook, $resume_hook ),
+	array( $branch_hook, $reconcile_hook, $aggregate_hook, $resume_hook ),
 	WP_Agent_Workflow_Scoped_Drain::default_hooks(),
-	'default_hooks() includes branch, aggregate, and resume continuations',
+	'default_hooks() includes branch, reconcile, aggregate, and resume hooks',
 	$failures,
 	$passes
 );

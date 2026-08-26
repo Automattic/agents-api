@@ -103,6 +103,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	public static function default_hooks(): array {
 		return array(
 			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK,
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK,
 			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK,
 			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK,
 		);

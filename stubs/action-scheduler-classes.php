@@ -41,6 +41,11 @@ abstract class ActionScheduler_Store {
 		throw new \RuntimeException( 'stub' );
 	}
 
+	/** @param int|string $action_id Action id. */
+	public function fetch_action( $action_id ): ActionScheduler_Action {
+		throw new \RuntimeException( 'stub' );
+	}
+
 	/**
 	 * @param int                 $max_actions Maximum actions to claim.
 	 * @param \DateTime|null      $before_date Claim actions scheduled before this date.
@@ -53,9 +58,18 @@ abstract class ActionScheduler_Store {
 
 	public function release_claim( ActionScheduler_ActionClaim $claim ): void {}
 
-	public function fetch_action( int $action_id ): object {
-		unset( $action_id );
-		return new \stdClass();
+	/** @param int|string $action_id Action id. */
+	public function cancel_action( $action_id ): void {}
+}
+
+class ActionScheduler_Action {
+	public function get_hook(): string {
+		return '';
+	}
+
+	/** @return array<int,mixed> */
+	public function get_args(): array {
+		return array();
 	}
 }
 

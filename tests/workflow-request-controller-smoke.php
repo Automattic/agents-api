@@ -132,7 +132,7 @@ controller_assert( $failed['terminal'] && $cancelled['terminal'], 'failed and ca
 controller_assert( in_array( 'failed', $cleaned, true ) && in_array( 'cancelled', $cleaned, true ), 'failed and cancelled runs release terminal cleanup' );
 controller_assert( array() === ( $controller->get( 'one' )['lease'] ?? null ), 'terminal lease is cleared' );
 $one_group_cleanup = array_filter( $GLOBALS['controller_unscheduled'], static function ( array $call ) use ( $one ): bool { return 'agents-api-run-' . md5( $one['run_id'] ) === $call[2]; } );
-controller_assert( 3 === count( $one_group_cleanup ), 'terminal cleanup removes only the run-scoped branch, aggregate, and resume actions' );
+controller_assert( 4 === count( $one_group_cleanup ), 'terminal cleanup removes only the run-scoped branch, reconcile, aggregate, and resume actions' );
 controller_assert( array() === array_filter( $one_group_cleanup, static fn ( array $call ): bool => null !== $call[1] ), 'terminal cleanup matches every argument shape in the run-scoped group' );
 $state = WP_Agent_Run_Control::state( 'controller-test' );
 $state['runs']['two']['lease'] = array( 'token' => 'other-worker', 'worker_id' => 'worker-a', 'expires_at' => time() + 60 );

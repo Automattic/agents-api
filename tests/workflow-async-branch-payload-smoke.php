@@ -64,6 +64,7 @@ if ( ! class_exists( 'WP_Ability' ) ) {
 $GLOBALS['__filters']   = array();
 $GLOBALS['__abilities'] = array();
 $GLOBALS['__options']   = array();
+$GLOBALS['__update_option_before_write'] = null;
 
 if ( ! function_exists( 'add_filter' ) ) {
 	function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
@@ -137,6 +138,9 @@ if ( ! function_exists( 'add_option' ) ) {
 if ( ! function_exists( 'update_option' ) ) {
 	function update_option( string $option, $value, $autoload = null ): bool {
 		unset( $autoload );
+		if ( is_callable( $GLOBALS['__update_option_before_write'] ) ) {
+			call_user_func( $GLOBALS['__update_option_before_write'], $option, $value );
+		}
 		$GLOBALS['__options'][ $option ] = $value;
 		return true;
 	}
@@ -169,15 +173,31 @@ final class AS_Limit_Shim {
 	private static int $seq = 0;
 	/** When true, every enqueue "fails" the way AS's runner swallows — throws. */
 	public static bool $force_fail = false;
+	public static int $fail_on_attempt = 0;
+	public static bool $reject_after_delayed_enqueue = false;
+	private static int $enqueue_attempt = 0;
+	/** @var array<int,bool> */
+	public static array $cancelled = array();
 
 	public static function reset(): void {
-		self::$queue      = array();
-		self::$claimed    = array();
-		self::$seq        = 0;
-		self::$force_fail = false;
+		self::$queue                        = array();
+		self::$claimed                      = array();
+		self::$seq                          = 0;
+		self::$force_fail                   = false;
+		self::$fail_on_attempt              = 0;
+		self::$reject_after_delayed_enqueue = false;
+		self::$enqueue_attempt              = 0;
+		self::$cancelled                    = array();
 	}
 
 	public static function enqueue( string $hook, array $args, string $group ): int {
+		++self::$enqueue_attempt;
+		if ( self::$fail_on_attempt === self::$enqueue_attempt ) {
+			if ( isset( self::$queue[0] ) ) {
+				self::fire( self::$queue[0]['id'] );
+			}
+			throw new \RuntimeException( 'Later enqueue failed (simulated).' );
+		}
 		if ( self::$force_fail ) {
 			throw new \RuntimeException( 'ActionScheduler queue is unavailable (simulated).' );
 		}
@@ -223,6 +243,9 @@ final class AS_Limit_Shim {
 	}
 
 	public static function fire( int $id ): bool {
+		if ( ! empty( self::$cancelled[ $id ] ) ) {
+			return false;
+		}
 		if ( ! self::claim( $id ) ) {
 			return false;
 		}
@@ -234,6 +257,25 @@ final class AS_Limit_Shim {
 		}
 		return false;
 	}
+
+	public static function cancel( string $hook, array $args, string $group ): void {
+		foreach ( self::$queue as $action ) {
+			if ( $hook === $action['hook'] && $group === $action['group'] && $args === $action['args'] ) {
+				self::$cancelled[ $action['id'] ] = true;
+			}
+		}
+	}
+
+	public static function runnable_count(): int {
+		return count(
+			array_filter(
+				self::$queue,
+				static function ( array $action ): bool {
+					return empty( self::$cancelled[ $action['id'] ] ) && empty( self::$claimed[ $action['id'] ] );
+				}
+			)
+		);
+	}
 }
 
 function wp_json_encode_shim( $value ): string {
@@ -244,6 +286,22 @@ function wp_json_encode_shim( $value ): string {
 if ( ! function_exists( 'as_enqueue_async_action' ) ) {
 	function as_enqueue_async_action( string $hook, array $args = array(), string $group = '' ) {
 		return AS_Limit_Shim::enqueue( $hook, $args, $group );
+	}
+}
+if ( ! function_exists( 'as_schedule_single_action' ) ) {
+	function as_schedule_single_action( int $timestamp, string $hook, array $args = array(), string $group = '' ) {
+		unset( $timestamp );
+		$action_id = AS_Limit_Shim::enqueue( $hook, $args, $group );
+		if ( AS_Limit_Shim::$reject_after_delayed_enqueue ) {
+			$payload = is_array( $args[0] ?? null ) ? $args[0] : array();
+			\AgentsAPI\AI\Workflows\WP_Agent_Workflow_Branch_Store::reject_admission( (string) ( $payload['admission_token'] ?? '' ) );
+		}
+		return $action_id;
+	}
+}
+if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
+	function as_unschedule_all_actions( string $hook, ?array $args = array(), string $group = '' ): void {
+		AS_Limit_Shim::cancel( $hook, is_array( $args ) ? $args : array(), $group );
 	}
 }
 
@@ -325,9 +383,11 @@ function payload_register_ability( string $name, \Closure $handler ): void {
 payload_register_ability(
 	'demo/role-worker',
 	static function ( array $input ): array {
+		++$GLOBALS['__branch_effects'];
 		return array( 'fragment' => strtoupper( (string) ( $input['label'] ?? 'X' ) ) );
 	}
 );
+$GLOBALS['__branch_effects'] = 0;
 payload_register_ability(
 	'demo/aggregate',
 	static function ( array $input ): array {
@@ -504,6 +564,273 @@ foreach ( array_keys( $GLOBALS['__options'] ) as $opt ) {
 	}
 }
 smoke_assert( 0, $leftover2, 'bug2: failed dispatch cleaned up its stored rows (no orphans)', $failures, $passes );
+
+// Concurrent terminal writers must not append separate refs through the shared
+// run index. Restore a stale pre-result index snapshot to model a lost concurrent
+// index update, then prove cleanup still removes every row because each receipt
+// lives in its already-indexed descriptor.
+$GLOBALS['__options'] = array();
+$cleanup_run = 'pay-concurrent-cleanup';
+$cleanup_a   = WP_Agent_Workflow_Branch_Store::put_branch( $cleanup_run, 'a', array( 'run_id' => $cleanup_run, 'handle_id' => 'a', 'key' => 'a' ) );
+$cleanup_b   = WP_Agent_Workflow_Branch_Store::put_branch( $cleanup_run, 'b', array( 'run_id' => $cleanup_run, 'handle_id' => 'b', 'key' => 'b' ) );
+$index_key   = 'agents_wf_branch_index_' . md5( $cleanup_run );
+$stale_index = $GLOBALS['__options'][ $index_key ] ?? array();
+$cleanup_result = array( 'key' => 'a', 'status' => 'succeeded', 'output' => array( 'ok' => true ) );
+WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $cleanup_run, 'a', $cleanup_a, '', WP_Agent_Workflow_Branch_Store::BACKEND_BUILTIN, $cleanup_result );
+$cleanup_result['key'] = 'b';
+WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $cleanup_run, 'b', $cleanup_b, '', WP_Agent_Workflow_Branch_Store::BACKEND_BUILTIN, $cleanup_result );
+$GLOBALS['__options'][ $index_key ] = $stale_index;
+WP_Agent_Workflow_Branch_Store::forget_run( $cleanup_run );
+$cleanup_leftover = array_filter(
+	array_keys( $GLOBALS['__options'] ),
+	static fn ( $option ): bool => str_starts_with( (string) $option, 'agents_wf_branch_' )
+);
+smoke_assert( array(), array_values( $cleanup_leftover ), 'concurrent cleanup: stale shared index cannot orphan terminal result rows', $failures, $passes );
+
+// Terminal cleanup can win immediately before a contended branch persists its
+// receipt. The stale writer may create a receipt-only row afterward, but a
+// terminal retry must discover it without effects and clean it deterministically.
+$GLOBALS['__options'] = array();
+$resurrection_run = 'pay-A';
+$resurrection_ref = WP_Agent_Workflow_Branch_Store::put_branch( $resurrection_run, 'race-handle', array( 'run_id' => $resurrection_run, 'handle_id' => 'race-handle', 'key' => 'branch' ) );
+$resurrection_result = array( 'key' => 'branch', 'status' => 'succeeded', 'output' => array( 'ok' => true ) );
+$GLOBALS['__update_option_before_write'] = static function ( string $option ) use ( $resurrection_run, $resurrection_ref ): void {
+	if ( $resurrection_ref !== $option ) {
+		return;
+	}
+	$GLOBALS['__update_option_before_write'] = null;
+	WP_Agent_Workflow_Branch_Store::forget_run( $resurrection_run );
+};
+WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $resurrection_run, 'race-handle', $resurrection_ref, '', WP_Agent_Workflow_Branch_Store::BACKEND_BUILTIN, $resurrection_result );
+smoke_assert( false, isset( $GLOBALS['__options'][ $resurrection_ref ]['descriptor'] ), 'receipt put race: stale writer cannot recreate descriptor state', $failures, $passes );
+$GLOBALS['__branch_effects'] = 1;
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder ) { return $recorder; } );
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_reconcile_action(
+	array(
+		'run_id'      => $resurrection_run,
+		'handle_id'   => 'race-handle',
+		'result_ref'  => $resurrection_ref,
+		'context_ref' => '',
+		'store_backend' => WP_Agent_Workflow_Branch_Store::BACKEND_BUILTIN,
+	)
+);
+$resurrection_leftover = array_filter(
+	array_keys( $GLOBALS['__options'] ),
+	static fn ( $option ): bool => str_starts_with( (string) $option, 'agents_wf_branch_' )
+);
+smoke_assert( array(), array_values( $resurrection_leftover ), 'receipt put race: terminal retry removes row written after forget_run', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__branch_effects'], 'receipt put race: terminal retry does not repeat branch effects', $failures, $passes );
+
+// A consumer-owned branch ref must keep terminal result persistence and cleanup
+// in that same custom store. No local option fallback is permitted.
+$GLOBALS['__options'] = array();
+$GLOBALS['__custom_branch_rows'] = array();
+$GLOBALS['__custom_receipts'] = array();
+add_filter(
+	'wp_agent_workflow_branch_store_put',
+	static function ( $ref, string $run_id, string $handle_id, array $descriptor ) {
+		unset( $ref );
+		$custom_ref = 'custom:' . md5( $run_id . ':' . $handle_id );
+		$GLOBALS['__custom_branch_rows'][ $custom_ref ] = $descriptor;
+		return $custom_ref;
+	},
+	10,
+	4
+);
+add_filter(
+	'wp_agent_workflow_branch_store_get',
+	static function ( $descriptor, string $store_ref ) {
+		unset( $descriptor );
+		return $GLOBALS['__custom_branch_rows'][ $store_ref ] ?? null;
+	},
+	10,
+	3
+);
+add_filter(
+	'wp_agent_workflow_branch_store_forget',
+	static function ( bool $handled, string $run_id ): bool {
+		unset( $handled, $run_id );
+		$GLOBALS['__custom_branch_rows'] = array();
+		$GLOBALS['__custom_receipts'] = array();
+		return true;
+	},
+	10,
+	2
+);
+add_filter(
+	'wp_agent_workflow_branch_receipt_put',
+	static function ( $receipt_ref, string $store_ref, string $run_id, string $handle_id, array $receipt ) {
+		unset( $receipt_ref, $run_id, $handle_id );
+		$GLOBALS['__custom_receipts'][ $store_ref ] = $receipt;
+		return $store_ref;
+	},
+	10,
+	5
+);
+add_filter(
+	'wp_agent_workflow_branch_receipt_get',
+	static function ( $receipt, string $receipt_ref ) {
+		unset( $receipt );
+		return $GLOBALS['__custom_receipts'][ $receipt_ref ] ?? null;
+	},
+	10,
+	3
+);
+add_filter(
+	'wp_agent_workflow_branch_receipt_delete',
+	static function ( bool $handled, string $receipt_ref ): bool {
+		unset( $handled );
+		unset( $GLOBALS['__custom_receipts'][ $receipt_ref ] );
+		return true;
+	},
+	10,
+	5
+);
+$custom_run = 'pay-custom-store';
+$custom_ref = WP_Agent_Workflow_Branch_Store::put_branch( $custom_run, 'custom-handle', array( 'run_id' => $custom_run, 'handle_id' => 'custom-handle', 'key' => 'custom' ) );
+$custom_result = array( 'key' => 'custom', 'status' => 'succeeded', 'output' => array( 'owned' => true ) );
+$custom_receipt_ref = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $custom_run, 'custom-handle', $custom_ref, '', WP_Agent_Workflow_Branch_Store::BACKEND_CUSTOM, $custom_result );
+$custom_receipt = is_wp_error( $custom_receipt_ref ) ? null : WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $custom_receipt_ref, '', WP_Agent_Workflow_Branch_Store::BACKEND_CUSTOM );
+smoke_assert( $custom_ref, $custom_receipt_ref, 'custom store: dedicated put filter owns terminal result persistence', $failures, $passes );
+smoke_assert( $custom_result, $custom_receipt['branch_result'] ?? null, 'custom store: dedicated get filter rehydrates the terminal result', $failures, $passes );
+smoke_assert( array(), $GLOBALS['__options'], 'custom store: terminal persistence creates no local option fallback', $failures, $passes );
+WP_Agent_Workflow_Branch_Store::forget_run( $custom_run );
+smoke_assert( array(), $GLOBALS['__custom_branch_rows'], 'custom store: existing forget filter cleans terminal result state', $failures, $passes );
+$custom_missing_run = 'pay-custom-store-missing';
+$custom_missing_ref = WP_Agent_Workflow_Branch_Store::put_branch( $custom_missing_run, 'missing-handle', array( 'run_id' => $custom_missing_run, 'handle_id' => 'missing-handle', 'key' => 'missing' ) );
+unset( $GLOBALS['__custom_branch_rows'][ $custom_missing_ref ] );
+$custom_missing_result = array( 'key' => '', 'status' => 'failed', 'output' => null, 'error' => array( 'code' => 'workflow_branch_descriptor_missing' ) );
+$custom_missing_receipt_ref = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $custom_missing_run, 'missing-handle', $custom_missing_ref, '', WP_Agent_Workflow_Branch_Store::BACKEND_CUSTOM, $custom_missing_result );
+$custom_missing_receipt = is_wp_error( $custom_missing_receipt_ref ) ? null : WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $custom_missing_receipt_ref, '', WP_Agent_Workflow_Branch_Store::BACKEND_CUSTOM );
+smoke_assert( $custom_missing_ref, $custom_missing_receipt_ref, 'custom store: owner filter persists a receipt-only missing descriptor', $failures, $passes );
+smoke_assert( 'workflow_branch_descriptor_missing', $custom_missing_receipt['branch_result']['error']['code'] ?? '', 'custom store: owner filter rehydrates receipt-only failure', $failures, $passes );
+smoke_assert( array(), $GLOBALS['__options'], 'custom store: missing-descriptor receipt still creates no local fallback', $failures, $passes );
+WP_Agent_Workflow_Branch_Store::forget_reconcile_receipt( $custom_missing_run, 'missing-handle', $custom_missing_ref, '', WP_Agent_Workflow_Branch_Store::BACKEND_CUSTOM );
+$custom_missing_after_reconcile = WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $custom_missing_ref, '', WP_Agent_Workflow_Branch_Store::BACKEND_CUSTOM );
+smoke_assert( null, $custom_missing_after_reconcile, 'custom store: dedicated receipt delete removes successful continuation', $failures, $passes );
+smoke_assert( array(), $GLOBALS['__options'], 'custom store: dedicated receipt cleanup creates no local option fallback', $failures, $passes );
+WP_Agent_Workflow_Branch_Store::forget_run( $custom_missing_run );
+smoke_assert( array(), $GLOBALS['__custom_branch_rows'], 'custom store: forget filter cleans receipt-only missing descriptor', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_branch_store_put' );
+remove_all_filters( 'wp_agent_workflow_branch_store_get' );
+remove_all_filters( 'wp_agent_workflow_branch_store_forget' );
+remove_all_filters( 'wp_agent_workflow_branch_receipt_put' );
+remove_all_filters( 'wp_agent_workflow_branch_receipt_get' );
+remove_all_filters( 'wp_agent_workflow_branch_receipt_delete' );
+
+// Opaque ref text cannot determine backend ownership. A custom descriptor store
+// may return the exact built-in-looking ref while receipts remain on a separate,
+// explicitly registered contract.
+$GLOBALS['__options'] = array();
+$GLOBALS['__lookalike_descriptors'] = array();
+$GLOBALS['__lookalike_receipts'] = array();
+$GLOBALS['__lookalike_descriptor_writes'] = 0;
+$lookalike_run    = 'pay-lookalike-custom';
+$lookalike_handle = 'lookalike-handle';
+$lookalike_ref    = 'agents_wf_branch_' . md5( $lookalike_run . ':' . $lookalike_handle );
+add_filter(
+	'wp_agent_workflow_branch_store_put',
+	static function ( $ref, string $run_id, string $handle_id, array $descriptor ) use ( $lookalike_ref ) {
+		unset( $ref, $run_id, $handle_id );
+		++$GLOBALS['__lookalike_descriptor_writes'];
+		$GLOBALS['__lookalike_descriptors'][ $lookalike_ref ] = $descriptor;
+		return $lookalike_ref;
+	},
+	10,
+	4
+);
+add_filter(
+	'wp_agent_workflow_branch_receipt_put',
+	static function ( $receipt_ref, string $store_ref, string $run_id, string $handle_id, array $receipt ) {
+		unset( $receipt_ref, $run_id, $handle_id );
+		$GLOBALS['__lookalike_receipts'][ $store_ref ] = $receipt;
+		return $store_ref;
+	},
+	10,
+	5
+);
+add_filter(
+	'wp_agent_workflow_branch_receipt_get',
+	static function ( $receipt, string $receipt_ref ) {
+		unset( $receipt );
+		return $GLOBALS['__lookalike_receipts'][ $receipt_ref ] ?? null;
+	},
+	10,
+	3
+);
+$lookalike_stored = WP_Agent_Workflow_Branch_Store::put_branch_with_provenance( $lookalike_run, $lookalike_handle, array( 'run_id' => $lookalike_run, 'handle_id' => $lookalike_handle ) );
+$lookalike_result = array( 'key' => 'lookalike', 'status' => 'succeeded', 'output' => array( 'ok' => true ) );
+$lookalike_receipt_ref = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $lookalike_run, $lookalike_handle, $lookalike_stored['ref'], '', $lookalike_stored['backend'], $lookalike_result );
+smoke_assert( WP_Agent_Workflow_Branch_Store::BACKEND_CUSTOM, $lookalike_stored['backend'], 'lookalike custom store: provenance is explicit despite built-in-looking ref', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__lookalike_descriptor_writes'], 'lookalike custom store: receipt persistence does not call descriptor put filter', $failures, $passes );
+smoke_assert( $lookalike_ref, $lookalike_receipt_ref, 'lookalike custom store: dedicated receipt contract owns persistence', $failures, $passes );
+smoke_assert( false, array_key_exists( $lookalike_ref, $GLOBALS['__options'] ), 'lookalike custom store: no local option fallback', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_branch_receipt_put' );
+$unsupported_receipt = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $lookalike_run, $lookalike_handle, $lookalike_stored['ref'], '', $lookalike_stored['backend'], $lookalike_result );
+smoke_assert( 'workflow_branch_receipt_backend_unsupported', is_wp_error( $unsupported_receipt ) ? $unsupported_receipt->get_error_code() : '', 'lookalike custom store: missing receipt contract fails clearly', $failures, $passes );
+smoke_assert( false, array_key_exists( $lookalike_ref, $GLOBALS['__options'] ), 'lookalike custom store: unsupported receipts still do not fall back locally', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_branch_store_put' );
+remove_all_filters( 'wp_agent_workflow_branch_receipt_get' );
+
+// A payload queued by the previous release has no admission token. It must
+// retain its pre-upgrade execution behavior instead of being silently fenced.
+AS_Limit_Shim::reset();
+$GLOBALS['__options']        = array();
+$GLOBALS['__branch_effects'] = 0;
+$legacy_ref = WP_Agent_Workflow_Branch_Store::put_branch(
+	'pay-legacy',
+	'pay-legacy:scatter:first:0',
+	array(
+		'run_id'     => 'pay-legacy',
+		'step_id'    => 'scatter',
+		'handle_id'  => 'pay-legacy:scatter:first:0',
+		'key'        => 'first',
+		'required'   => true,
+		'steps'      => array( array( 'id' => 'first', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'legacy' ) ) ),
+		'branch_vars' => array(),
+	)
+);
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_branch_action(
+	array(
+		'run_id'    => 'pay-legacy',
+		'handle_id' => 'pay-legacy:scatter:first:0',
+		'store_ref' => $legacy_ref,
+	)
+);
+smoke_assert( 1, $GLOBALS['__branch_effects'], 'upgrade compatibility: a legacy payload without admission_token still executes', $failures, $passes );
+WP_Agent_Workflow_Branch_Store::forget_run( 'pay-legacy' );
+
+// A later enqueue failure fences a worker racing compensation, cancels every
+// pending sibling/retry, and only then releases branch payload storage.
+AS_Limit_Shim::reset();
+$GLOBALS['__options'] = array();
+$GLOBALS['__branch_effects'] = 0;
+AS_Limit_Shim::$fail_on_attempt = 2;
+AS_Limit_Shim::$reject_after_delayed_enqueue = true;
+$partial = $executor->dispatch(
+	array(
+		array( 'key' => 'first', 'run_id' => 'pay-partial', 'step_id' => 'scatter', 'required' => true, 'steps' => array( array( 'id' => 'first', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'first' ) ) ), 'branch_vars' => array( 'context' => array() ) ),
+		array( 'key' => 'second', 'run_id' => 'pay-partial', 'step_id' => 'scatter', 'required' => true, 'steps' => array( array( 'id' => 'second', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'second' ) ) ), 'branch_vars' => array( 'context' => array() ) ),
+	),
+	array( '_workflow_run_id' => 'pay-partial', '_workflow_step_id' => 'scatter', 'shared_context' => array() )
+);
+smoke_assert( 'workflow_branch_dispatch_enqueue_failed', is_wp_error( $partial ) ? $partial->get_error_code() : '', 'atomic admission: later enqueue failure fails the whole dispatch', $failures, $passes );
+smoke_assert( 0, $GLOBALS['__branch_effects'], 'atomic admission: a worker racing compensation begins no branch effects', $failures, $passes );
+smoke_assert( 0, AS_Limit_Shim::runnable_count(), 'atomic admission: no earlier sibling or deferred retry remains runnable', $failures, $passes );
+
+$leftover3 = 0;
+foreach ( array_keys( $GLOBALS['__options'] ) as $opt ) {
+	if ( str_starts_with( (string) $opt, 'agents_wf_branch_' ) ) {
+		++$leftover3;
+	}
+}
+smoke_assert( 0, $leftover3, 'atomic admission: fenced compensation cleans branch-store rows', $failures, $passes );
+
+$cleanup_token = WP_Agent_Workflow_Branch_Store::begin_admission( 'pay-cleanup' );
+smoke_assert( 'pending', WP_Agent_Workflow_Branch_Store::admission_status( $cleanup_token ), 'admission storage: persisted generation is readable before cleanup', $failures, $passes );
+WP_Agent_Workflow_Branch_Store::forget_run( 'pay-cleanup' );
+smoke_assert( 'rejected', WP_Agent_Workflow_Branch_Store::admission_status( $cleanup_token ), 'admission storage: deterministic cleanup does not depend on branch indexing', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
