@@ -1135,8 +1135,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 				return true;
 			}
 			if ( 'agents_reconcile_lock_unavailable' !== $result->get_error_code() ) {
-				self::fail_reconcile_recovery( $run_id, $handle_id, $result->get_error_message() );
-				return true;
+				return self::fail_reconcile_recovery( $run_id, $handle_id, $result->get_error_message() );
 			}
 			$error_data = $result->get_error_data();
 			if ( is_array( $error_data ) && is_array( $error_data['reconcile_continuation'] ?? null ) ) {
@@ -1144,8 +1143,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			}
 		}
 
-		self::fail_reconcile_recovery( $run_id, $handle_id, 'Compatibility reconcile contention exceeded its bounded retry budget.' );
-		return true;
+		return self::fail_reconcile_recovery( $run_id, $handle_id, 'Compatibility reconcile contention exceeded its bounded retry budget.' );
 	}
 
 	/**
