@@ -227,11 +227,17 @@ final class Race_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	/** @var array<string,array<string,mixed>>|null */
 	private ?array $frozen = null;
 
+	private bool $fail_next_update = false;
+
 	public function start( WP_Agent_Workflow_Run_Result $result ) {
 		$this->rows[ $result->get_run_id() ] = $result->to_array();
 		return $result->get_run_id();
 	}
 	public function update( WP_Agent_Workflow_Run_Result $result ) {
+		if ( $this->fail_next_update ) {
+			$this->fail_next_update = false;
+			return new WP_Error( 'race_recorder_write_failed', 'Injected recorder update failure.' );
+		}
 		$this->rows[ $result->get_run_id() ] = $result->to_array();
 		return true;
 	}
@@ -262,6 +268,18 @@ final class Race_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	/** Resume serving live rows. */
 	public function unfreeze_reads(): void {
 		$this->frozen = null;
+	}
+
+	public function fail_next_update(): void {
+		$this->fail_next_update = true;
+	}
+
+	public function expire_reconcile_claim( string $run_id ): void {
+		$this->rows[ $run_id ]['metadata']['_suspension']['reconcile_claim']['expires'] = time() - 1;
+	}
+
+	public function reconcile_phase( string $run_id ): string {
+		return (string) ( $this->rows[ $run_id ]['metadata']['_suspension']['reconcile_claim']['phase'] ?? '' );
 	}
 
 	/** Whether the built-in add_option() reconcile lock row exists for the run. */
@@ -415,6 +433,24 @@ function race_execute_branch( array $descriptor ): array {
 	return array( 'key' => $key, 'status' => WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, 'output' => $run['last'], 'steps' => $run['steps'], 'error' => null );
 }
 
+/** Build an all-but-last reconciled run for continuation failure tests. */
+function race_prepare_continuation_run( string $run_id ): array {
+	$GLOBALS['__options'] = array();
+	$GLOBALS['__aggregate_calls'] = 0;
+	$GLOBALS['__resume_dispatch_calls'] = 0;
+	$GLOBALS['__during_aggregate'] = null;
+	$recorder = new Race_Recorder();
+	remove_all_filters( 'wp_agent_workflow_run_recorder' );
+	add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder ) { return $recorder; } );
+	( new WP_Agent_Workflow_Runner( $recorder ) )->run( race_roles_spec(), array(), array( 'run_id' => $run_id ) );
+	$descriptors = Race_Executor::$dispatched;
+	foreach ( array( 0, 1 ) as $index ) {
+		$branch = race_execute_branch( $descriptors[ $index ] );
+		agents_reconcile_workflow_branch( $run_id, (string) $descriptors[ $index ]['handle_id'], $branch );
+	}
+	return array( $recorder, $descriptors, race_execute_branch( $descriptors[2] ) );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // THE RACE: two sibling branches reconcile CONCURRENTLY (both read the frame
 // before either writes). Under the buggy code the later write clobbers the
@@ -517,6 +553,109 @@ smoke_assert( true, $GLOBALS['__aggregation_started_unlocked'], 'ttl: aggregatio
 smoke_assert( 1, $GLOBALS['__aggregate_calls'], 'ttl: one aggregator executes after a competing reconciler reclaims the expired lock', $failures, $passes );
 smoke_assert( 1, $GLOBALS['__resume_dispatch_calls'], 'ttl: one resume dispatches for the claimed suspension generation', $failures, $passes );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $final->get_status(), 'ttl: claimed owner commits and resumes successfully', $failures, $passes );
+
+// CLAIM WRITE FAILURE: aggregation cannot start until the pending continuation
+// and final completion are durable. A persisted-result retry can safely repeat
+// the transition because no external aggregate effect has begun.
+list( $recorder, $descriptors, $last_result ) = race_prepare_continuation_run( 'claim-write' );
+$recorder->fail_next_update();
+$failed_claim = agents_reconcile_workflow_branch( 'claim-write', (string) $descriptors[2]['handle_id'], $last_result );
+smoke_assert( 'agents_reconcile_lock_unavailable', is_wp_error( $failed_claim ) ? $failed_claim->get_error_code() : '', 'claim write: recorder failure returns PR #534 retry contract', $failures, $passes );
+smoke_assert( '', $recorder->reconcile_phase( 'claim-write' ), 'claim write: failed update installs no phantom continuation', $failures, $passes );
+smoke_assert( 0, $GLOBALS['__aggregate_calls'], 'claim write: aggregate effect does not run without durable ownership', $failures, $passes );
+$retried_claim = agents_reconcile_workflow_branch( 'claim-write', (string) $descriptors[2]['handle_id'], $last_result );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $retried_claim->get_status(), 'claim write: persisted-result retry safely completes the run', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__aggregate_calls'], 'claim write: retry executes aggregator exactly once', $failures, $passes );
+
+// AGGREGATE COMMIT WRITE FAILURE: effects have run, so a retry must never rerun
+// them. Once the abandoned owner is fenced stale, continuation persists an
+// honest uncertain-outcome failure and resumes the run to terminal.
+list( $recorder, $descriptors, $last_result ) = race_prepare_continuation_run( 'commit-write' );
+$GLOBALS['__during_aggregate'] = static function () use ( $recorder ): void {
+	$GLOBALS['__during_aggregate'] = null;
+	$recorder->fail_next_update();
+};
+$failed_commit = agents_reconcile_workflow_branch( 'commit-write', (string) $descriptors[2]['handle_id'], $last_result );
+smoke_assert( 'agents_reconcile_lock_unavailable', is_wp_error( $failed_commit ) ? $failed_commit->get_error_code() : '', 'commit write: recorder failure requests persisted reconcile retry', $failures, $passes );
+smoke_assert( 'aggregating', $recorder->reconcile_phase( 'commit-write' ), 'commit write: durable effect-start phase remains authoritative', $failures, $passes );
+$recorder->expire_reconcile_claim( 'commit-write' );
+$commit_recovery = agents_reconcile_workflow_branch( 'commit-write', (string) $descriptors[2]['handle_id'], $last_result );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $commit_recovery->get_status(), 'commit write: stale ambiguous owner terminalizes honestly', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__aggregate_calls'], 'commit write: external aggregator is never rerun after uncertainty', $failures, $passes );
+smoke_assert( 'workflow_parallel_aggregation_outcome_uncertain', $commit_recovery->get_error()['code'] ?? '', 'commit write: terminal failure names uncertain aggregate outcome', $failures, $passes );
+
+// SECOND LOCK CONTENTION: the original aggregate result cannot be committed, and
+// PR #534 receives the same retryable contract. Redelivery advances the persisted
+// aggregating phase instead of stopping at the completed-handle guard.
+list( $recorder, $descriptors, $last_result ) = race_prepare_continuation_run( 'commit-lock' );
+$lock_calls = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function ( $override, string $run_id, callable $critical ) use ( &$lock_calls ) {
+		unset( $override, $run_id );
+		++$lock_calls;
+		return 3 === $lock_calls ? new WP_Error( 'agents_reconcile_lock_unavailable', 'Injected second-phase contention.' ) : $critical();
+	},
+	10,
+	3
+);
+$contended_commit = agents_reconcile_workflow_branch( 'commit-lock', (string) $descriptors[2]['handle_id'], $last_result );
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+smoke_assert( 'agents_reconcile_lock_unavailable', is_wp_error( $contended_commit ) ? $contended_commit->get_error_code() : '', 'commit lock: second-phase contention requests reconcile-only retry', $failures, $passes );
+smoke_assert( 'aggregating', $recorder->reconcile_phase( 'commit-lock' ), 'commit lock: continuation records that effects may have begun', $failures, $passes );
+$recorder->expire_reconcile_claim( 'commit-lock' );
+$lock_recovery = agents_reconcile_workflow_branch( 'commit-lock', (string) $descriptors[2]['handle_id'], $last_result );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $lock_recovery->get_status(), 'commit lock: completed-handle retry advances to terminal recovery', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__aggregate_calls'], 'commit lock: continuation never repeats aggregator effects', $failures, $passes );
+
+// PROCESS LOSS BEFORE AGGREGATION: stop after persisting `pending`, then let a
+// duplicate completed-result delivery start and finish the safe continuation.
+list( $recorder, $descriptors, $last_result ) = race_prepare_continuation_run( 'lost-before' );
+$pending = \AgentsAPI\AI\Workflows\agents_workflow_reconcile_with_lock(
+	'lost-before',
+	static function () use ( $recorder, $descriptors, $last_result ) {
+		return \AgentsAPI\AI\Workflows\agents_reconcile_workflow_branch_locked( $recorder, 'lost-before', (string) $descriptors[2]['handle_id'], $last_result );
+	}
+);
+smoke_assert( 'begin', $pending['action'] ?? '', 'lost before aggregate: pending continuation persists before effects', $failures, $passes );
+smoke_assert( 'pending', $recorder->reconcile_phase( 'lost-before' ), 'lost before aggregate: durable phase proves effects have not begun', $failures, $passes );
+$before_recovery = agents_reconcile_workflow_branch( 'lost-before', (string) $descriptors[2]['handle_id'], $last_result );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $before_recovery->get_status(), 'lost before aggregate: duplicate delivery safely continues pending work', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__aggregate_calls'], 'lost before aggregate: recovery executes aggregator once', $failures, $passes );
+
+// PROCESS LOSS AFTER COMMIT BEFORE RESUME: drive through the durable commit but
+// omit dispatch. A duplicate reconcile observes `committed`, skips aggregation,
+// and resumes from the recorded output.
+list( $recorder, $descriptors, $last_result ) = race_prepare_continuation_run( 'lost-after' );
+$pending = \AgentsAPI\AI\Workflows\agents_workflow_reconcile_with_lock(
+	'lost-after',
+	static function () use ( $recorder, $descriptors, $last_result ) {
+		return \AgentsAPI\AI\Workflows\agents_reconcile_workflow_branch_locked( $recorder, 'lost-after', (string) $descriptors[2]['handle_id'], $last_result );
+	}
+);
+$aggregation = \AgentsAPI\AI\Workflows\agents_workflow_reconcile_with_lock(
+	'lost-after',
+	static function () use ( $recorder, $pending ) {
+		return \AgentsAPI\AI\Workflows\agents_workflow_begin_reconcile_aggregation( $recorder, 'lost-after', $pending['generation'] );
+	}
+);
+$aggregate_output = WP_Agent_Workflow_Runner::aggregate_branch_results(
+	$aggregation['aggregate'],
+	$aggregation['branch_results'],
+	\AgentsAPI\AI\Workflows\agents_workflow_resolve_step_handlers()
+);
+$committed = \AgentsAPI\AI\Workflows\agents_workflow_reconcile_with_lock(
+	'lost-after',
+	static function () use ( $recorder, $aggregation, $aggregate_output ) {
+		return \AgentsAPI\AI\Workflows\agents_workflow_commit_reconcile_claim( $recorder, 'lost-after', $aggregation['owner_token'], $aggregation['generation'], $aggregation['step_index'], $aggregate_output );
+	}
+);
+smoke_assert( true, isset( $committed['result'] ), 'lost after commit: aggregate output is durable before resume dispatch', $failures, $passes );
+smoke_assert( 'committed', $recorder->reconcile_phase( 'lost-after' ), 'lost after commit: durable phase is resumable', $failures, $passes );
+$after_recovery = agents_reconcile_workflow_branch( 'lost-after', (string) $descriptors[2]['handle_id'], $last_result );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $after_recovery->get_status(), 'lost after commit: duplicate delivery resumes durable aggregate', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__aggregate_calls'], 'lost after commit: recovery does not rerun aggregator', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__resume_dispatch_calls'], 'lost after commit: recovery dispatches resume once', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
