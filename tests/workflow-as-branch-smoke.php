@@ -340,6 +340,8 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Runner;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Branch_Executor;
+use AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store;
+use AgentsAPI\AI\WP_Agent_Run_Control;
 
 // ── A durable, reloadable in-memory recorder ─────────────────────────────────
 // The frame lives in metadata._suspension inside the serialized row — there is
@@ -391,6 +393,35 @@ final class AS_Smoke_Recorder implements WP_Agent_Workflow_Run_Recorder {
 
 	public function fail_next_update(): void {
 		$this->fail_next_update = true;
+	}
+}
+
+final class AS_Late_Cancel_Run_Control_Store implements WP_Agent_Atomic_Run_Control_Store {
+	public bool $cancel_before_next_mutation = false;
+	/** @var array<string,array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}> */
+	private array $states = array();
+
+	public function get_state( string $store_key ): array {
+		return $this->states[ $store_key ] ?? array( 'runs' => array(), 'queues' => array(), 'events' => array() );
+	}
+
+	public function save_state( string $store_key, array $state ): void {
+		$this->states[ $store_key ] = $state;
+	}
+
+	public function mutate_state( string $store_key, callable $mutation ): mixed {
+		$state = $this->get_state( $store_key );
+		if ( $this->cancel_before_next_mutation ) {
+			$this->cancel_before_next_mutation = false;
+			foreach ( $state['runs'] as &$run ) {
+				$run['status']    = WP_Agent_Run_Control::STATUS_CANCELLING;
+				$run['cancelled'] = true;
+			}
+			unset( $run );
+		}
+		$mutated                    = $mutation( $state );
+		$this->states[ $store_key ] = $mutated['state'];
+		return $mutated['result'];
 	}
 }
 
@@ -1191,6 +1222,55 @@ smoke_assert( 1, $forget_calls8, 'failed-action recovery: run-scoped branch clea
 remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
 remove_all_filters( 'wp_agent_workflow_run_completed' );
 remove_all_filters( 'wp_agent_workflow_branch_store_forget' );
+
+// A cancellation committed inside reconcile-recovery finish must replace the
+// candidate failure before recorder publication and completion notification.
+AS_Shim::reset();
+$GLOBALS['__options'] = array();
+$reconcile_cancel_recorder = new AS_Smoke_Recorder();
+$reconcile_cancel_store    = new AS_Late_Cancel_Run_Control_Store();
+WP_Agent_Run_Control::set_store( $reconcile_cancel_store );
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $reconcile_cancel_recorder ) { return $reconcile_cancel_recorder; } );
+( new WP_Agent_Workflow_Runner( $reconcile_cancel_recorder ) )->run( as_smoke_roles_spec(), array(), array( 'run_id' => 'as-recovery-cancel' ) );
+$reconcile_cancel_branches = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+$reconcile_cancel_attempts = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function ( $override, string $run_id, callable $critical ) use ( &$reconcile_cancel_attempts ) {
+		unset( $override );
+		if ( 'as-recovery-cancel' === $run_id && $reconcile_cancel_attempts++ < 2 ) {
+			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+		}
+		return $critical();
+	},
+	10,
+	3
+);
+$reconcile_cancel_events = array();
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( WP_Agent_Workflow_Run_Result $result, string $run_id ) use ( &$reconcile_cancel_events ): void {
+		if ( 'as-recovery-cancel' === $run_id ) {
+			$reconcile_cancel_events[] = $result;
+		}
+	},
+	10,
+	2
+);
+$reconcile_cancel_store->cancel_before_next_mutation = true;
+AS_Shim::$reject_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK;
+AS_Shim::fire_with_failure_lifecycle( $reconcile_cancel_branches[0]['id'] );
+AS_Shim::$reject_hook = '';
+$reconcile_cancel_terminal = $reconcile_cancel_recorder->find( 'as-recovery-cancel' );
+$reconcile_cancel_stored   = WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, 'as-recovery-cancel' );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $reconcile_cancel_terminal->get_status(), 'reconcile recovery recorder receives the atomic cancellation winner', $failures, $passes );
+smoke_assert( 'cancel_requested', $reconcile_cancel_terminal->get_error()['code'] ?? '', 'reconcile recovery projects the canonical cancellation error', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, isset( $reconcile_cancel_events[0] ) ? $reconcile_cancel_events[0]->get_status() : '', 'reconcile recovery completion hook receives the cancellation winner', $failures, $passes );
+smoke_assert( WP_Agent_Run_Control::STATUS_CANCELLED, $reconcile_cancel_stored['status'] ?? '', 'reconcile recovery publication matches authoritative storage', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+remove_all_filters( 'wp_agent_workflow_run_completed' );
+WP_Agent_Run_Control::reset_store();
 
 // A RECONCILE_HOOK action can itself fail while handing off another contended
 // attempt. Its failed-action lifecycle must recover the receipt directly.

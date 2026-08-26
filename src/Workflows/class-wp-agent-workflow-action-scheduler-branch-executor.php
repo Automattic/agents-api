@@ -1203,6 +1203,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 						'metadata' => $metadata,
 					)
 				);
+				$terminal = WP_Agent_Workflow_Runner::authoritative_terminal_result( $terminal );
 				$updated = $recorder->update( $terminal );
 				return is_wp_error( $updated ) ? $updated : array( 'won' => true, 'terminal' => $terminal );
 			},
@@ -1212,7 +1213,6 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			return false;
 		}
 		$terminal = $transition['terminal'];
-		\AgentsAPI\AI\WP_Agent_Run_Control::finish_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, $run_id, \AgentsAPI\AI\WP_Agent_Run_Control::STATUS_FAILED );
 		do_action( 'wp_agent_workflow_run_completed', $terminal, $run_id );
 		WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
 		return true;
