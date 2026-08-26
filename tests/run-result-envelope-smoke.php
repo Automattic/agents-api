@@ -123,6 +123,7 @@ agents_api_smoke_assert_equals( 'queued cancel', $task_envelope->get_outputs()['
 agents_api_smoke_assert_equals( 'executor-1', $task_envelope->get_metadata()['executor_id'] ?? '', 'task executor id maps to metadata', $failures, $passes );
 agents_api_smoke_assert_equals( true, $task_envelope->get_cancellation()['requested'] ?? false, 'cancelling task run populates cancellation', $failures, $passes );
 agents_api_smoke_assert_equals( 'cancelling', $task_envelope->get_cancellation()['status'] ?? '', 'cancellation carries the task status', $failures, $passes );
+agents_api_smoke_assert_equals( false, isset( $task_envelope->get_cancellation()['requested_at'] ), 'task updated_at is not treated as the cancellation request time', $failures, $passes );
 agents_api_smoke_assert_equals( array(), $task_envelope->get_error(), 'non-failed task run carries empty error', $failures, $passes );
 
 $failed_task_envelope = WP_Agent_Task_Run_Control::to_run_result_envelope(
@@ -142,6 +143,17 @@ agents_api_smoke_assert_equals( 'executor_boom', $failed_task_envelope->get_erro
 agents_api_smoke_assert_equals( 'Executor exploded.', $failed_task_envelope->get_error()['message'] ?? '', 'failed task run maps diagnostics message into envelope error', $failures, $passes );
 agents_api_smoke_assert_equals( 'executor_boom', $failed_task_envelope->get_error()['data']['diagnostics']['error_code'] ?? '', 'failed task run preserves raw diagnostics under error data', $failures, $passes );
 agents_api_smoke_assert_equals( false, array() === $failed_task_envelope->get_error(), 'failed task run never carries an empty error', $failures, $passes );
+
+$failed_task_without_diagnostics = WP_Agent_Task_Run_Control::to_run_result_envelope(
+	array(
+		'run_id'      => 'task-run-failed-without-diagnostics',
+		'session_id'  => 'session-1',
+		'executor_id' => 'executor-1',
+		'status'      => 'failed',
+	)
+);
+agents_api_smoke_assert_equals( 'agents_task_run_failed', $failed_task_without_diagnostics->get_error()['code'] ?? '', 'failed task run uses a deterministic fallback code without diagnostics', $failures, $passes );
+agents_api_smoke_assert_equals( 'The task run failed.', $failed_task_without_diagnostics->get_error()['message'] ?? '', 'failed task run uses a deterministic fallback message without diagnostics', $failures, $passes );
 
 $succeeded_task_envelope = WP_Agent_Task_Run_Control::to_run_result_envelope(
 	array(

@@ -117,7 +117,7 @@ class WP_Agent_Task_Run_Control {
 					'updated_at' => $normalized['updated_at'] ?? '',
 				),
 				'error'         => self::error_envelope( $task_status, $normalized ),
-				'cancellation'  => self::cancellation_envelope( $task_status, $normalized ),
+				'cancellation'  => self::cancellation_envelope( $task_status ),
 				'metadata'      => self::map_value( $normalized['metadata'] ?? array() ) + array(
 					'session_id'        => $normalized['session_id'],
 					'executor_id'       => $normalized['executor_id'],
@@ -187,26 +187,18 @@ class WP_Agent_Task_Run_Control {
 	/**
 	 * Build the cancellation envelope for a run whose cancellation was requested.
 	 *
-	 * @param string              $task_status Normalized task status.
-	 * @param array<string,mixed> $normalized  Normalized run payload.
+	 * @param string $task_status Normalized task status.
 	 * @return array<string,mixed>
 	 */
-	private static function cancellation_envelope( string $task_status, array $normalized ): array {
+	private static function cancellation_envelope( string $task_status ): array {
 		if ( ! in_array( $task_status, array( self::STATUS_CANCELLING, self::STATUS_CANCELLED ), true ) ) {
 			return array();
 		}
 
-		$cancellation = array(
+		return array(
 			'requested' => true,
 			'status'    => $task_status,
 		);
-
-		$requested_at = self::non_empty_string_value( $normalized['updated_at'] ?? null );
-		if ( null !== $requested_at ) {
-			$cancellation['requested_at'] = $requested_at;
-		}
-
-		return $cancellation;
 	}
 
 	/**
