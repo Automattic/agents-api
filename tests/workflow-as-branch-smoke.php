@@ -323,7 +323,9 @@ function as_smoke_register_ability( string $name, \Closure $handler ): void {
 as_smoke_register_ability(
 	'demo/role-worker',
 	static function ( array $input ): array {
-		return array( 'fragment' => strtoupper( (string) ( $input['label'] ?? 'X' ) ) );
+		$label = (string) ( $input['label'] ?? 'X' );
+		$GLOBALS['__role_worker_effects'][ $label ] = (int) ( $GLOBALS['__role_worker_effects'][ $label ] ?? 0 ) + 1;
+		return array( 'fragment' => strtoupper( $label ) );
 	}
 );
 as_smoke_register_ability(
@@ -465,8 +467,8 @@ $handles = $frame['handles'] ?? array();
 smoke_assert( 2, count( $handles ), 'frame carries 2 sibling handles', $failures, $passes );
 smoke_assert_true( is_int( $handles[0]['ref'] ?? null ) && $handles[0]['ref'] > 0, 'handle ref is the AS action id', $failures, $passes );
 
-// A contended reconcile must enqueue another branch action instead of silently
-// completing the current action without recording its result.
+// A contended reconcile must enqueue a reconcile-only action carrying a durable
+// result ref. Draining that retry must not execute the branch effect again.
 $lock_attempts = 0;
 add_filter(
 	'wp_agent_workflow_reconcile_lock',
@@ -481,13 +483,22 @@ add_filter(
 	3
 );
 $branch_count_before_retry = count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK ) );
+$effect_count_before_retry = (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 );
 AS_Shim::fire( $branch_actions[0]['id'] );
 $branch_actions_with_retry = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
-smoke_assert( $branch_count_before_retry + 1, count( $branch_actions_with_retry ), 'lock contention: branch action re-enqueued', $failures, $passes );
+smoke_assert( $branch_count_before_retry, count( $branch_actions_with_retry ), 'lock contention: completed branch action is not re-enqueued', $failures, $passes );
+smoke_assert( $effect_count_before_retry + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'lock contention: branch side effect executes once before retry', $failures, $passes );
 smoke_assert( 0, count( $recorder->find( 'as-A' )->get_suspension()['completed'] ?? array() ), 'lock contention: result not recorded without lock', $failures, $passes );
-$retry_action = $branch_actions_with_retry[ count( $branch_actions_with_retry ) - 1 ];
+$reconcile_actions = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK );
+smoke_assert( 1, count( $reconcile_actions ), 'lock contention: reconcile-only retry enqueued', $failures, $passes );
+$retry_action = $reconcile_actions[0];
 AS_Shim::fire( $retry_action['id'] );
 smoke_assert( 1, count( $recorder->find( 'as-A' )->get_suspension()['completed'] ?? array() ), 'lock contention: queued retry records completion', $failures, $passes );
+smoke_assert( $effect_count_before_retry + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'lock contention: reconcile retry does not repeat branch side effect', $failures, $passes );
+$duplicate_retry_id = AS_Shim::enqueue( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK, $retry_action['args'], $retry_action['group'] );
+AS_Shim::fire( $duplicate_retry_id );
+smoke_assert( 1, count( $recorder->find( 'as-A' )->get_suspension()['completed'] ?? array() ), 'lock contention: duplicate reconcile delivery is an idempotent no-op', $failures, $passes );
+smoke_assert( $effect_count_before_retry + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'lock contention: duplicate reconcile delivery does not repeat the side effect', $failures, $passes );
 remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
 
 // TABLE-FREE: the frame lives in metadata._suspension, not a new table.

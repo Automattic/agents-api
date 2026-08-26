@@ -58,6 +58,14 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	public const BRANCH_HOOK = 'wp_agent_workflow_branch_run';
 
 	/**
+	 * Reconcile-only retry hook. Its payload references a persisted terminal
+	 * BranchResult, so this callback never executes branch steps.
+	 *
+	 * @since 0.7.0
+	 */
+	public const RECONCILE_HOOK = 'wp_agent_workflow_branch_reconcile';
+
+	/**
 	 * The resume action hook. When a reconcile observes all branches terminal it
 	 * enqueues ONE action under this hook rather than resuming inline; AS claims
 	 * it exactly once, and the callback re-checks the run is still SUSPENDED
@@ -772,39 +780,90 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 				),
 				'item'   => null,
 			);
-			self::reconcile_branch_result( $payload, $branch_result );
+			self::persist_and_reconcile_branch_result( $payload, $branch_result );
 			return;
 		}
 
 		$key           = self::string_value( $descriptor['key'] ?? '' );
 		$branch_result = self::execute_branch( $descriptor, $key );
 
-		self::reconcile_branch_result( $payload, $branch_result );
+		self::persist_and_reconcile_branch_result( $payload, $branch_result );
 	}
 
 	/**
-	 * Reconcile a completed branch, re-enqueuing it when lock contention prevents
-	 * the result from being recorded. Other errors are authoritative and are not
-	 * retried.
+	 * Persist and reconcile a completed branch result. Persistence happens before
+	 * reconciliation so a lock-contention retry can survive process exit without
+	 * executing the completed branch again.
 	 *
-	 * @since 0.5.0
+	 * @since 0.7.0
 	 *
-	 * @param array<mixed>        $payload       Original branch action payload.
+	 * @param array<mixed>        $payload       Branch action payload.
 	 * @param array<string,mixed> $branch_result Terminal branch result.
 	 * @return void
 	 */
-	private static function reconcile_branch_result( array $payload, array $branch_result ): void {
-		$run_id    = self::string_value( $payload['run_id'] ?? '' );
-		$handle_id = self::string_value( $payload['handle_id'] ?? '' );
-		$result    = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
+	private static function persist_and_reconcile_branch_result( array $payload, array $branch_result ): void {
+		$run_id     = self::string_value( $payload['run_id'] ?? '' );
+		$handle_id  = self::string_value( $payload['handle_id'] ?? '' );
+		$result_ref = WP_Agent_Workflow_Branch_Store::put_branch_result( $run_id, $handle_id, $branch_result );
+
+		self::reconcile_branch_result( $run_id, $handle_id, $result_ref, $branch_result );
+	}
+
+	/**
+	 * The RECONCILE_HOOK callback. Rehydrates a persisted terminal result and
+	 * retries only the recorder merge; branch execution is deliberately absent.
+	 *
+	 * @since 0.7.0
+	 *
+	 * @param array<mixed> $payload Action payload: { run_id, handle_id, result_ref }.
+	 * @return void
+	 */
+	public static function run_reconcile_action( array $payload ): void {
+		$run_id     = self::string_value( $payload['run_id'] ?? '' );
+		$handle_id  = self::string_value( $payload['handle_id'] ?? '' );
+		$result_ref = self::string_value( $payload['result_ref'] ?? '' );
+		if ( '' === $run_id || '' === $handle_id || '' === $result_ref ) {
+			return;
+		}
+
+		$branch_result = WP_Agent_Workflow_Branch_Store::get_branch_result( $result_ref );
+		if ( null === $branch_result ) {
+			throw new \RuntimeException( sprintf( 'Could not rehydrate the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
+		}
+
+		self::reconcile_branch_result( $run_id, $handle_id, $result_ref, $branch_result );
+	}
+
+	/**
+	 * Reconcile a persisted terminal result, enqueueing another reconcile-only
+	 * action when lock contention prevents it from being recorded.
+	 *
+	 * @param string              $run_id        Run id.
+	 * @param string              $handle_id     Branch handle id.
+	 * @param string              $result_ref    Durable terminal-result ref.
+	 * @param array<string,mixed> $branch_result Terminal BranchResult.
+	 * @return void
+	 */
+	private static function reconcile_branch_result( string $run_id, string $handle_id, string $result_ref, array $branch_result ): void {
+		$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
 
 		if ( ! is_wp_error( $result ) || 'agents_reconcile_lock_unavailable' !== $result->get_error_code() ) {
 			return;
 		}
 
-		$action_id = self::enqueue_async_action( self::BRANCH_HOOK, array( $payload ), self::group_for_run( $run_id ) );
+		$action_id = self::enqueue_async_action(
+			self::RECONCILE_HOOK,
+			array(
+				array(
+					'run_id'     => $run_id,
+					'handle_id'  => $handle_id,
+					'result_ref' => $result_ref,
+				),
+			),
+			self::group_for_run( $run_id )
+		);
 		if ( $action_id <= 0 ) {
-			throw new \RuntimeException( sprintf( 'Could not re-enqueue branch `%s` for run `%s` after reconcile lock contention.', $handle_id, $run_id ) );
+			throw new \RuntimeException( sprintf( 'Could not enqueue a reconcile retry for branch `%s` in run `%s` after lock contention.', $handle_id, $run_id ) );
 		}
 	}
 

@@ -78,7 +78,20 @@ add_action(
 	1
 );
 
-// 3a. Resume action: AS claimed it exactly once → re-check SUSPENDED → resume.
+// 3a. Reconcile-only retry: read the persisted terminal result and merge it.
+add_action(
+	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK,
+	/**
+	 * @param array<string,mixed> $payload Action payload: { run_id, handle_id, result_ref }.
+	 */
+	static function ( $payload = array() ): void {
+		WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_reconcile_action( is_array( $payload ) ? $payload : array() );
+	},
+	10,
+	1
+);
+
+// 3b. Resume action: AS claimed it exactly once → re-check SUSPENDED → resume.
 add_action(
 	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK,
 	/**
@@ -91,7 +104,7 @@ add_action(
 	1
 );
 
-// 3b. Deferred-resume seam: enqueue a claimed RESUME action for AS-owned runs
+// 3c. Deferred-resume seam: enqueue a claimed RESUME action for AS-owned runs
 //     instead of resuming inline in the reconcile request.
 add_filter(
 	'wp_agent_workflow_resume_dispatch',

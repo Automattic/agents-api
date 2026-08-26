@@ -74,6 +74,13 @@ final class WP_Agent_Workflow_Branch_Store {
 	private const CONTEXT_PREFIX = 'agents_wf_branch_ctx_';
 
 	/**
+	 * Option-name prefix for terminal branch results awaiting reconciliation.
+	 *
+	 * @since 0.7.0
+	 */
+	private const RESULT_PREFIX = 'agents_wf_branch_result_';
+
+	/**
 	 * Option-name prefix for the per-run index of branch ref keys, so
 	 * {@see self::forget_run()} can delete every branch row a run wrote without
 	 * scanning the options table.
@@ -187,6 +194,79 @@ final class WP_Agent_Workflow_Branch_Store {
 		}
 
 		return $descriptor;
+	}
+
+	/**
+	 * Persist a terminal branch result so reconciliation can be retried without
+	 * executing the branch again.
+	 *
+	 * @since 0.7.0
+	 *
+	 * @param string              $run_id        Run the branch belongs to.
+	 * @param string              $handle_id     Branch handle id.
+	 * @param array<string,mixed> $branch_result Terminal BranchResult.
+	 * @return string Opaque result ref carried by the reconcile action.
+	 */
+	public static function put_branch_result( string $run_id, string $handle_id, array $branch_result ): string {
+		if ( function_exists( 'apply_filters' ) ) {
+			/**
+			 * Filter terminal branch-result persistence. Return a non-empty string ref
+			 * to take over storage; return null to use the built-in option store.
+			 *
+			 * @since 0.7.0
+			 *
+			 * @param string|null         $ref           No override by default.
+			 * @param string              $run_id        Run id.
+			 * @param string              $handle_id     Branch handle id.
+			 * @param array<string,mixed> $branch_result Terminal BranchResult.
+			 */
+			$override = apply_filters( 'wp_agent_workflow_branch_store_put_result', null, $run_id, $handle_id, $branch_result );
+			if ( is_string( $override ) && '' !== $override ) {
+				return $override;
+			}
+		}
+
+		$ref = self::RESULT_PREFIX . md5( $run_id . ':' . $handle_id );
+		self::write_row(
+			$ref,
+			array(
+				'run_id'       => $run_id,
+				'handle_id'    => $handle_id,
+				'branch_result' => $branch_result,
+				'expires'      => time() + self::TTL_SECONDS,
+			)
+		);
+		self::index_ref( $run_id, $ref );
+		return $ref;
+	}
+
+	/**
+	 * Read a terminal branch result from its durable ref.
+	 *
+	 * @since 0.7.0
+	 *
+	 * @param string $result_ref Opaque result ref.
+	 * @return array<string,mixed>|null Terminal BranchResult, or null when unavailable.
+	 */
+	public static function get_branch_result( string $result_ref ): ?array {
+		if ( function_exists( 'apply_filters' ) ) {
+			/**
+			 * Filter terminal branch-result retrieval. Return an array to take over
+			 * retrieval; return null to use the built-in option store.
+			 *
+			 * @since 0.7.0
+			 *
+			 * @param array<string,mixed>|null $branch_result No override by default.
+			 * @param string                   $result_ref   Opaque result ref.
+			 */
+			$override = apply_filters( 'wp_agent_workflow_branch_store_get_result', null, $result_ref );
+			if ( is_array( $override ) ) {
+				return $override;
+			}
+		}
+
+		$row = self::read_row( $result_ref );
+		return is_array( $row['branch_result'] ?? null ) ? self::string_keyed_array( $row['branch_result'] ) : null;
 	}
 
 	/**
@@ -372,5 +452,21 @@ final class WP_Agent_Workflow_Branch_Store {
 		 * @param string $run_id  Run id.
 		 */
 		return (bool) apply_filters( 'wp_agent_workflow_branch_store_forget', false, $run_id );
+	}
+
+	/**
+	 * Normalize an array to string keys for static-analysis-safe public returns.
+	 *
+	 * @param array<mixed> $value Value to normalize.
+	 * @return array<string,mixed>
+	 */
+	private static function string_keyed_array( array $value ): array {
+		$normalized = array();
+		foreach ( $value as $key => $item ) {
+			if ( is_string( $key ) ) {
+				$normalized[ $key ] = $item;
+			}
+		}
+		return $normalized;
 	}
 }
