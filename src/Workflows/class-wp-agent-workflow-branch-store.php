@@ -73,12 +73,8 @@ final class WP_Agent_Workflow_Branch_Store {
 	 */
 	private const CONTEXT_PREFIX = 'agents_wf_branch_ctx_';
 
-	/**
-	 * Option-name prefix for terminal branch results awaiting reconciliation.
-	 *
-	 * @since 0.7.0
-	 */
-	private const RESULT_PREFIX = 'agents_wf_branch_result_';
+	/** Reconcile receipt key stored inside each branch descriptor. */
+	private const RECONCILE_RECEIPT_KEY = '_agents_reconcile_receipt';
 
 	/**
 	 * Option-name prefix for the per-run index of branch ref keys, so
@@ -197,76 +193,87 @@ final class WP_Agent_Workflow_Branch_Store {
 	}
 
 	/**
-	 * Persist a terminal branch result so reconciliation can be retried without
-	 * executing the branch again.
+	 * Persist a terminal branch result and opaque continuation state inside the
+	 * branch's existing descriptor row. Reusing that already-indexed per-branch
+	 * row avoids a concurrent shared-index append during branch completion.
 	 *
 	 * @since 0.7.0
 	 *
 	 * @param string              $run_id        Run the branch belongs to.
 	 * @param string              $handle_id     Branch handle id.
+	 * @param string              $store_ref     Existing branch descriptor ref.
+	 * @param string              $context_ref   Existing shared-context ref.
 	 * @param array<string,mixed> $branch_result Terminal BranchResult.
-	 * @return string Opaque result ref carried by the reconcile action.
+	 * @param array<string,mixed> $continuation  Opaque reconcile continuation state.
+	 * @return string|\WP_Error Durable receipt ref, or a hard persistence failure.
 	 */
-	public static function put_branch_result( string $run_id, string $handle_id, array $branch_result ): string {
-		if ( function_exists( 'apply_filters' ) ) {
-			/**
-			 * Filter terminal branch-result persistence. Return a non-empty string ref
-			 * to take over storage; return null to use the built-in option store.
-			 *
-			 * @since 0.7.0
-			 *
-			 * @param string|null         $ref           No override by default.
-			 * @param string              $run_id        Run id.
-			 * @param string              $handle_id     Branch handle id.
-			 * @param array<string,mixed> $branch_result Terminal BranchResult.
-			 */
-			$override = apply_filters( 'wp_agent_workflow_branch_store_put_result', null, $run_id, $handle_id, $branch_result );
-			if ( is_string( $override ) && '' !== $override ) {
-				return $override;
+	public static function put_reconcile_receipt( string $run_id, string $handle_id, string $store_ref, string $context_ref, array $branch_result, array $continuation = array() ) {
+		$receipt = array(
+			'branch_result' => $branch_result,
+			'continuation'  => $continuation,
+		);
+		$row = self::read_row( $store_ref );
+
+		if ( null !== $row && is_array( $row['descriptor'] ?? null ) ) {
+			$descriptor                                = $row['descriptor'];
+			$descriptor[ self::RECONCILE_RECEIPT_KEY ] = $receipt;
+			$row['descriptor']                          = $descriptor;
+			self::write_row( $store_ref, $row );
+
+			$persisted            = self::read_row( $store_ref );
+			$persisted_descriptor = null !== $persisted && is_array( $persisted['descriptor'] ?? null ) ? $persisted['descriptor'] : array();
+			if ( $receipt === ( $persisted_descriptor[ self::RECONCILE_RECEIPT_KEY ] ?? null ) ) {
+				return $store_ref;
 			}
+
+			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'Could not durably persist the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
 		}
 
-		$ref = self::RESULT_PREFIX . md5( $run_id . ':' . $handle_id );
-		self::write_row(
-			$ref,
-			array(
-				'run_id'       => $run_id,
-				'handle_id'    => $handle_id,
-				'branch_result' => $branch_result,
-				'expires'      => time() + self::TTL_SECONDS,
-			)
-		);
-		self::index_ref( $run_id, $ref );
-		return $ref;
+		// A non-local ref belongs to the consumer that supplied it through the
+		// existing branch-store filters. Require that same owner to persist and read
+		// the receipt; never fall back to an unexpected local option row.
+		$descriptor = self::filtered_get_branch( $store_ref, $context_ref );
+		if ( null === $descriptor ) {
+			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'The branch store that owns `%s` could not rehydrate it for terminal-result persistence.', $store_ref ) );
+		}
+		$descriptor[ self::RECONCILE_RECEIPT_KEY ] = $receipt;
+		$result_ref = self::filtered_put_branch( $run_id, $handle_id, self::strip_shared_context( $descriptor ) );
+		if ( null === $result_ref ) {
+			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'The branch store that owns `%s` did not persist the terminal result.', $store_ref ) );
+		}
+
+		$persisted = self::filtered_get_branch( $result_ref, $context_ref );
+		if ( null === $persisted || $receipt !== ( $persisted[ self::RECONCILE_RECEIPT_KEY ] ?? null ) ) {
+			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'The branch store could not verify the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
+		}
+
+		return $result_ref;
 	}
 
 	/**
-	 * Read a terminal branch result from its durable ref.
+	 * Read a durable reconcile receipt through the same built-in or custom store
+	 * that owns the branch descriptor.
 	 *
 	 * @since 0.7.0
 	 *
-	 * @param string $result_ref Opaque result ref.
-	 * @return array<string,mixed>|null Terminal BranchResult, or null when unavailable.
+	 * @param string $result_ref  Opaque receipt ref.
+	 * @param string $context_ref Existing shared-context ref.
+	 * @return array{branch_result:array<string,mixed>,continuation:array<string,mixed>}|null
 	 */
-	public static function get_branch_result( string $result_ref ): ?array {
-		if ( function_exists( 'apply_filters' ) ) {
-			/**
-			 * Filter terminal branch-result retrieval. Return an array to take over
-			 * retrieval; return null to use the built-in option store.
-			 *
-			 * @since 0.7.0
-			 *
-			 * @param array<string,mixed>|null $branch_result No override by default.
-			 * @param string                   $result_ref   Opaque result ref.
-			 */
-			$override = apply_filters( 'wp_agent_workflow_branch_store_get_result', null, $result_ref );
-			if ( is_array( $override ) ) {
-				return $override;
-			}
+	public static function get_reconcile_receipt( string $result_ref, string $context_ref ): ?array {
+		$row        = self::read_row( $result_ref );
+		$descriptor = null !== $row && is_array( $row['descriptor'] ?? null )
+			? $row['descriptor']
+			: self::filtered_get_branch( $result_ref, $context_ref );
+		$receipt    = is_array( $descriptor[ self::RECONCILE_RECEIPT_KEY ] ?? null ) ? $descriptor[ self::RECONCILE_RECEIPT_KEY ] : array();
+		if ( ! is_array( $receipt['branch_result'] ?? null ) ) {
+			return null;
 		}
 
-		$row = self::read_row( $result_ref );
-		return is_array( $row['branch_result'] ?? null ) ? self::string_keyed_array( $row['branch_result'] ) : null;
+		return array(
+			'branch_result' => self::string_keyed_array( $receipt['branch_result'] ),
+			'continuation'  => is_array( $receipt['continuation'] ?? null ) ? self::string_keyed_array( $receipt['continuation'] ) : array(),
+		);
 	}
 
 	/**
@@ -306,12 +313,13 @@ final class WP_Agent_Workflow_Branch_Store {
 	 *
 	 * @param string              $option Option name.
 	 * @param array<string,mixed> $value  Row value.
-	 * @return void
+	 * @return bool Whether WordPress reported that it changed the row.
 	 */
-	private static function write_row( string $option, array $value ): void {
+	private static function write_row( string $option, array $value ): bool {
 		if ( function_exists( 'update_option' ) ) {
-			update_option( $option, $value, false );
+			return update_option( $option, $value, false );
 		}
+		return false;
 	}
 
 	/**
@@ -468,5 +476,18 @@ final class WP_Agent_Workflow_Branch_Store {
 			}
 		}
 		return $normalized;
+	}
+
+	/**
+	 * Keep the existing custom-store put contract free of shared context copies.
+	 *
+	 * @param array<string,mixed> $descriptor Branch descriptor.
+	 * @return array<string,mixed>
+	 */
+	private static function strip_shared_context( array $descriptor ): array {
+		if ( is_array( $descriptor['branch_vars'] ?? null ) && array_key_exists( 'context', $descriptor['branch_vars'] ) ) {
+			unset( $descriptor['branch_vars']['context'] );
+		}
+		return $descriptor;
 	}
 }

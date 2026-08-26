@@ -82,7 +82,7 @@ add_action(
 add_action(
 	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK,
 	/**
-	 * @param array<string,mixed> $payload Action payload: { run_id, handle_id, result_ref }.
+	 * @param array<string,mixed> $payload Action payload: { run_id, handle_id, result_ref, context_ref }.
 	 */
 	static function ( $payload = array() ): void {
 		WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_reconcile_action( is_array( $payload ) ? $payload : array() );

@@ -73,6 +73,7 @@ if ( ! class_exists( 'WP_Ability' ) ) {
 $GLOBALS['__filters']   = array();
 $GLOBALS['__abilities'] = array();
 $GLOBALS['__options']   = array();
+$GLOBALS['__reject_option_write'] = '';
 
 if ( ! function_exists( 'add_filter' ) ) {
 	function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
@@ -134,6 +135,9 @@ if ( ! function_exists( 'get_option' ) ) {
 if ( ! function_exists( 'update_option' ) ) {
 	function update_option( string $option, $value, $autoload = null ): bool {
 		unset( $autoload );
+		if ( $option === $GLOBALS['__reject_option_write'] ) {
+			return false;
+		}
 		$GLOBALS['__options'][ $option ] = $value;
 		return true;
 	}
@@ -475,7 +479,7 @@ add_filter(
 	static function ( $override, string $run_id, callable $critical ) use ( &$lock_attempts ) {
 		unset( $override );
 		if ( 'as-A' === $run_id && 0 === $lock_attempts++ ) {
-			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended', array( 'reconcile_continuation' => array( 'phase' => 'commit' ) ) );
 		}
 		return $critical();
 	},
@@ -492,14 +496,27 @@ smoke_assert( 0, count( $recorder->find( 'as-A' )->get_suspension()['completed']
 $reconcile_actions = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK );
 smoke_assert( 1, count( $reconcile_actions ), 'lock contention: reconcile-only retry enqueued', $failures, $passes );
 $retry_action = $reconcile_actions[0];
+$retry_continuation = array();
+add_filter(
+	'wp_agent_workflow_reconcile_retry',
+	static function ( $result, string $run_id, string $handle_id, array $branch_result, array $continuation ) use ( &$retry_continuation ) {
+		unset( $run_id, $handle_id, $branch_result );
+		$retry_continuation = $continuation;
+		return $result;
+	},
+	10,
+	5
+);
 AS_Shim::fire( $retry_action['id'] );
 smoke_assert( 1, count( $recorder->find( 'as-A' )->get_suspension()['completed'] ?? array() ), 'lock contention: queued retry records completion', $failures, $passes );
 smoke_assert( $effect_count_before_retry + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'lock contention: reconcile retry does not repeat branch side effect', $failures, $passes );
+smoke_assert( array( 'phase' => 'commit' ), $retry_continuation, 'lock contention: retry carries opaque authoritative continuation state', $failures, $passes );
 $duplicate_retry_id = AS_Shim::enqueue( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK, $retry_action['args'], $retry_action['group'] );
 AS_Shim::fire( $duplicate_retry_id );
 smoke_assert( 1, count( $recorder->find( 'as-A' )->get_suspension()['completed'] ?? array() ), 'lock contention: duplicate reconcile delivery is an idempotent no-op', $failures, $passes );
 smoke_assert( $effect_count_before_retry + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'lock contention: duplicate reconcile delivery does not repeat the side effect', $failures, $passes );
 remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+remove_all_filters( 'wp_agent_workflow_reconcile_retry' );
 
 // TABLE-FREE: the frame lives in metadata._suspension, not a new table.
 smoke_assert_true( is_array( $recorder->find( 'as-A' )->get_suspension()['handles'] ?? null ), 'table-free: frame in metadata._suspension while suspended', $failures, $passes );
@@ -746,6 +763,42 @@ AS_Shim::fire( $resumes5[2]['id'] );
 $final5 = $recorder5->find( 'as-two' );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $final5->get_status(), 'multi-fanout: second resume reaches terminal success', $failures, $passes );
 smoke_assert( $group5, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' ), 'multi-fanout: terminal run retains the same deterministic group identity', $failures, $passes );
+
+// A terminal result must be durably readable before reconciliation begins. If
+// the branch-row update fails while the reconcile lock is also contended, the
+// original action fails loudly and no unrecoverable reconcile retry is queued.
+AS_Shim::reset();
+$recorder6 = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder6 ) { return $recorder6; } );
+$run6      = ( new WP_Agent_Workflow_Runner( $recorder6 ) )->run( as_smoke_roles_spec(), array(), array( 'run_id' => 'as-write-fail' ) );
+$branches6 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+$payload6  = $branches6[0]['args'][0] ?? array();
+$GLOBALS['__reject_option_write'] = (string) ( $payload6['store_ref'] ?? '' );
+$lock_attempts6 = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function () use ( &$lock_attempts6 ) {
+		++$lock_attempts6;
+		return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+	},
+	10,
+	3
+);
+$effect_before6 = (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 );
+$write_failed6  = false;
+try {
+	AS_Shim::fire( $branches6[0]['id'] );
+} catch ( \RuntimeException $error ) {
+	$write_failed6 = str_contains( $error->getMessage(), 'durably persist' );
+}
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $run6->get_status(), 'failed result write: fixture starts suspended', $failures, $passes );
+smoke_assert( true, $write_failed6, 'failed result write: branch action fails loudly before completing', $failures, $passes );
+smoke_assert( $effect_before6 + 1, (int) ( $GLOBALS['__role_worker_effects']['head'] ?? 0 ), 'failed result write: branch side effect ran exactly once', $failures, $passes );
+smoke_assert( 0, $lock_attempts6, 'failed result write: reconcile is not attempted with an unreadable result', $failures, $passes );
+smoke_assert( 0, count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK ) ), 'failed result write: no stranded reconcile-only retry is queued', $failures, $passes );
+$GLOBALS['__reject_option_write'] = '';
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );

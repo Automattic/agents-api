@@ -802,11 +802,16 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * @return void
 	 */
 	private static function persist_and_reconcile_branch_result( array $payload, array $branch_result ): void {
-		$run_id     = self::string_value( $payload['run_id'] ?? '' );
-		$handle_id  = self::string_value( $payload['handle_id'] ?? '' );
-		$result_ref = WP_Agent_Workflow_Branch_Store::put_branch_result( $run_id, $handle_id, $branch_result );
+		$run_id      = self::string_value( $payload['run_id'] ?? '' );
+		$handle_id   = self::string_value( $payload['handle_id'] ?? '' );
+		$store_ref   = self::string_value( $payload['store_ref'] ?? '' );
+		$context_ref = self::string_value( $payload['context_ref'] ?? '' );
+		$result_ref  = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $run_id, $handle_id, $store_ref, $context_ref, $branch_result );
+		if ( is_wp_error( $result_ref ) ) {
+			throw new \RuntimeException( $result_ref->get_error_message() );
+		}
 
-		self::reconcile_branch_result( $run_id, $handle_id, $result_ref, $branch_result );
+		self::reconcile_branch_result( $run_id, $handle_id, $result_ref, $context_ref, $branch_result, array(), false );
 	}
 
 	/**
@@ -815,23 +820,24 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 *
 	 * @since 0.7.0
 	 *
-	 * @param array<mixed> $payload Action payload: { run_id, handle_id, result_ref }.
+	 * @param array<mixed> $payload Action payload: { run_id, handle_id, result_ref, context_ref }.
 	 * @return void
 	 */
 	public static function run_reconcile_action( array $payload ): void {
-		$run_id     = self::string_value( $payload['run_id'] ?? '' );
-		$handle_id  = self::string_value( $payload['handle_id'] ?? '' );
-		$result_ref = self::string_value( $payload['result_ref'] ?? '' );
+		$run_id      = self::string_value( $payload['run_id'] ?? '' );
+		$handle_id   = self::string_value( $payload['handle_id'] ?? '' );
+		$result_ref  = self::string_value( $payload['result_ref'] ?? '' );
+		$context_ref = self::string_value( $payload['context_ref'] ?? '' );
 		if ( '' === $run_id || '' === $handle_id || '' === $result_ref ) {
 			return;
 		}
 
-		$branch_result = WP_Agent_Workflow_Branch_Store::get_branch_result( $result_ref );
-		if ( null === $branch_result ) {
+		$receipt = WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $result_ref, $context_ref );
+		if ( null === $receipt ) {
 			throw new \RuntimeException( sprintf( 'Could not rehydrate the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
 		}
 
-		self::reconcile_branch_result( $run_id, $handle_id, $result_ref, $branch_result );
+		self::reconcile_branch_result( $run_id, $handle_id, $result_ref, $context_ref, $receipt['branch_result'], $receipt['continuation'], true );
 	}
 
 	/**
@@ -841,23 +847,59 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * @param string              $run_id        Run id.
 	 * @param string              $handle_id     Branch handle id.
 	 * @param string              $result_ref    Durable terminal-result ref.
+	 * @param string              $context_ref   Shared-context ref for custom stores.
 	 * @param array<string,mixed> $branch_result Terminal BranchResult.
+	 * @param array<string,mixed> $continuation  Opaque reconcile continuation state.
+	 * @param bool                $is_retry      Whether this is a reconcile-only retry.
 	 * @return void
 	 */
-	private static function reconcile_branch_result( string $run_id, string $handle_id, string $result_ref, array $branch_result ): void {
-		$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
+	private static function reconcile_branch_result( string $run_id, string $handle_id, string $result_ref, string $context_ref, array $branch_result, array $continuation, bool $is_retry ): void {
+		$result = null;
+		if ( $is_retry ) {
+			/**
+			 * Filter a reconcile-only retry before completed-handle redelivery. A
+			 * reconcile implementation with a multi-phase authoritative continuation
+			 * may consume the persisted opaque state and return its result here.
+			 * Returning null falls back to idempotent branch-result redelivery.
+			 *
+			 * @since 0.7.0
+			 *
+			 * @param mixed               $result        No override by default.
+			 * @param string              $run_id        Run id.
+			 * @param string              $handle_id     Branch handle id.
+			 * @param array<string,mixed> $branch_result Terminal BranchResult.
+			 * @param array<string,mixed> $continuation  Opaque continuation state.
+			 */
+			$result = apply_filters( 'wp_agent_workflow_reconcile_retry', null, $run_id, $handle_id, $branch_result, $continuation );
+		}
+		if ( null === $result ) {
+			$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
+		}
 
 		if ( ! is_wp_error( $result ) || 'agents_reconcile_lock_unavailable' !== $result->get_error_code() ) {
 			return;
+		}
+
+		$error_data        = $result->get_error_data();
+		$next_continuation = is_array( $error_data ) && is_array( $error_data['reconcile_continuation'] ?? null )
+			? self::string_keyed_array( $error_data['reconcile_continuation'] )
+			: $continuation;
+		if ( $next_continuation !== $continuation ) {
+			$next_ref = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $run_id, $handle_id, $result_ref, $context_ref, $branch_result, $next_continuation );
+			if ( is_wp_error( $next_ref ) ) {
+				throw new \RuntimeException( $next_ref->get_error_message() );
+			}
+			$result_ref = $next_ref;
 		}
 
 		$action_id = self::enqueue_async_action(
 			self::RECONCILE_HOOK,
 			array(
 				array(
-					'run_id'     => $run_id,
-					'handle_id'  => $handle_id,
-					'result_ref' => $result_ref,
+					'run_id'      => $run_id,
+					'handle_id'   => $handle_id,
+					'result_ref'  => $result_ref,
+					'context_ref' => $context_ref,
 				),
 			),
 			self::group_for_run( $run_id )

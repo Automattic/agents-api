@@ -502,5 +502,75 @@ foreach ( array_keys( $GLOBALS['__options'] ) as $opt ) {
 }
 smoke_assert( 0, $leftover2, 'bug2: failed dispatch cleaned up its stored rows (no orphans)', $failures, $passes );
 
+// Concurrent terminal writers must not append separate refs through the shared
+// run index. Restore a stale pre-result index snapshot to model a lost concurrent
+// index update, then prove cleanup still removes every row because each receipt
+// lives in its already-indexed descriptor.
+$GLOBALS['__options'] = array();
+$cleanup_run = 'pay-concurrent-cleanup';
+$cleanup_a   = WP_Agent_Workflow_Branch_Store::put_branch( $cleanup_run, 'a', array( 'run_id' => $cleanup_run, 'handle_id' => 'a', 'key' => 'a' ) );
+$cleanup_b   = WP_Agent_Workflow_Branch_Store::put_branch( $cleanup_run, 'b', array( 'run_id' => $cleanup_run, 'handle_id' => 'b', 'key' => 'b' ) );
+$index_key   = 'agents_wf_branch_index_' . md5( $cleanup_run );
+$stale_index = $GLOBALS['__options'][ $index_key ] ?? array();
+$cleanup_result = array( 'key' => 'a', 'status' => 'succeeded', 'output' => array( 'ok' => true ) );
+WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $cleanup_run, 'a', $cleanup_a, '', $cleanup_result );
+$cleanup_result['key'] = 'b';
+WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $cleanup_run, 'b', $cleanup_b, '', $cleanup_result );
+$GLOBALS['__options'][ $index_key ] = $stale_index;
+WP_Agent_Workflow_Branch_Store::forget_run( $cleanup_run );
+$cleanup_leftover = array_filter(
+	array_keys( $GLOBALS['__options'] ),
+	static fn ( $option ): bool => str_starts_with( (string) $option, 'agents_wf_branch_' )
+);
+smoke_assert( array(), array_values( $cleanup_leftover ), 'concurrent cleanup: stale shared index cannot orphan terminal result rows', $failures, $passes );
+
+// A consumer-owned branch ref must keep terminal result persistence and cleanup
+// in that same custom store. No local option fallback is permitted.
+$GLOBALS['__options'] = array();
+$GLOBALS['__custom_branch_rows'] = array();
+add_filter(
+	'wp_agent_workflow_branch_store_put',
+	static function ( $ref, string $run_id, string $handle_id, array $descriptor ) {
+		unset( $ref );
+		$custom_ref = 'custom:' . md5( $run_id . ':' . $handle_id );
+		$GLOBALS['__custom_branch_rows'][ $custom_ref ] = $descriptor;
+		return $custom_ref;
+	},
+	10,
+	4
+);
+add_filter(
+	'wp_agent_workflow_branch_store_get',
+	static function ( $descriptor, string $store_ref ) {
+		unset( $descriptor );
+		return $GLOBALS['__custom_branch_rows'][ $store_ref ] ?? null;
+	},
+	10,
+	3
+);
+add_filter(
+	'wp_agent_workflow_branch_store_forget',
+	static function ( bool $handled, string $run_id ): bool {
+		unset( $handled, $run_id );
+		$GLOBALS['__custom_branch_rows'] = array();
+		return true;
+	},
+	10,
+	2
+);
+$custom_run = 'pay-custom-store';
+$custom_ref = WP_Agent_Workflow_Branch_Store::put_branch( $custom_run, 'custom-handle', array( 'run_id' => $custom_run, 'handle_id' => 'custom-handle', 'key' => 'custom' ) );
+$custom_result = array( 'key' => 'custom', 'status' => 'succeeded', 'output' => array( 'owned' => true ) );
+$custom_receipt_ref = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $custom_run, 'custom-handle', $custom_ref, '', $custom_result );
+$custom_receipt = is_wp_error( $custom_receipt_ref ) ? null : WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $custom_receipt_ref, '' );
+smoke_assert( $custom_ref, $custom_receipt_ref, 'custom store: existing put filter owns terminal result persistence', $failures, $passes );
+smoke_assert( $custom_result, $custom_receipt['branch_result'] ?? null, 'custom store: existing get filter rehydrates the terminal result', $failures, $passes );
+smoke_assert( array(), $GLOBALS['__options'], 'custom store: terminal persistence creates no local option fallback', $failures, $passes );
+WP_Agent_Workflow_Branch_Store::forget_run( $custom_run );
+smoke_assert( array(), $GLOBALS['__custom_branch_rows'], 'custom store: existing forget filter cleans terminal result state', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_branch_store_put' );
+remove_all_filters( 'wp_agent_workflow_branch_store_get' );
+remove_all_filters( 'wp_agent_workflow_branch_store_forget' );
+
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
