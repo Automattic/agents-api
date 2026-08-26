@@ -65,6 +65,8 @@ final class WP_Agent_Execution_Principal {
 	 * @param string|null                       $owner_type         Optional canonical transcript owner type.
 	 * @param string|null                       $owner_key          Optional opaque transcript owner key scoped to the owner type.
 	 * @param array<string,mixed>|null          $binding            Optional host-owned cryptographic binding claims.
+	 * @param string|null                       $actor_type         Optional opaque current-turn external actor type.
+	 * @param string|null                       $actor_key          Optional opaque current-turn external actor key scoped to the actor type.
 	 */
 	public function __construct(
 		public readonly int $acting_user_id,
@@ -82,6 +84,8 @@ final class WP_Agent_Execution_Principal {
 		public readonly ?string $owner_type = null,
 		public readonly ?string $owner_key = null,
 		private readonly ?array $binding = null,
+		public readonly ?string $actor_type = null,
+		public readonly ?string $actor_key = null,
 	) {
 		if ( $this->acting_user_id < 0 ) {
 			throw self::invalid( 'acting_user_id', 'must be zero or a positive integer' );
@@ -133,6 +137,18 @@ final class WP_Agent_Execution_Principal {
 
 		if ( null !== $this->owner_key && '' === trim( $this->owner_key ) ) {
 			throw self::invalid( 'owner_key', 'must be null or a non-empty string' );
+		}
+
+		if ( ( null === $this->actor_type ) !== ( null === $this->actor_key ) ) {
+			throw self::invalid( 'actor', 'type and key must both be present or both be null' );
+		}
+
+		if ( null !== $this->actor_type && '' === trim( $this->actor_type ) ) {
+			throw self::invalid( 'actor_type', 'must be null or a non-empty string' );
+		}
+
+		if ( null !== $this->actor_key && '' === trim( $this->actor_key ) ) {
+			throw self::invalid( 'actor_key', 'must be null or a non-empty string' );
 		}
 	}
 
@@ -298,7 +314,9 @@ final class WP_Agent_Execution_Principal {
 			self::assoc_array_field( $principal, 'audience_claims' ),
 			self::nullable_string_field( $principal, 'owner_type' ),
 			self::nullable_string_field( $principal, 'owner_key' ),
-			isset( $principal['binding'] ) && is_array( $principal['binding'] ) ? self::assoc_array( $principal['binding'] ) : null
+			isset( $principal['binding'] ) && is_array( $principal['binding'] ) ? self::assoc_array( $principal['binding'] ) : null,
+			self::nullable_string_field( $principal, 'actor_type' ),
+			self::nullable_string_field( $principal, 'actor_key' )
 		);
 	}
 
@@ -324,6 +342,8 @@ final class WP_Agent_Execution_Principal {
 			'owner_type'         => $this->owner_type,
 			'owner_key'          => $this->owner_key,
 			'binding'            => $this->binding,
+			'actor_type'         => $this->actor_type,
+			'actor_key'          => $this->actor_key,
 		);
 	}
 
@@ -340,6 +360,7 @@ final class WP_Agent_Execution_Principal {
 	 */
 	public function to_safe_metadata(): array {
 		$owner = $this->conversation_owner();
+		$actor = $this->turn_actor();
 
 		return array(
 			'schema_version'         => 1,
@@ -352,6 +373,8 @@ final class WP_Agent_Execution_Principal {
 			'audience_id'            => $this->audience_id,
 			'owner_type'             => is_array( $owner ) ? $owner['type'] : null,
 			'has_conversation_owner' => is_array( $owner ),
+			'actor_type'             => is_array( $actor ) ? $actor['type'] : null,
+			'has_turn_actor'         => is_array( $actor ),
 			'has_capability_ceiling' => $this->capability_ceiling instanceof \WP_Agent_Capability_Ceiling,
 			'has_caller_context'     => $this->caller_context instanceof \WP_Agent_Caller_Context,
 		);
@@ -395,6 +418,35 @@ final class WP_Agent_Execution_Principal {
 			return array(
 				'type' => self::OWNER_TYPE_TOKEN,
 				'key'  => (string) $this->token_id,
+			);
+		}
+
+		return null;
+	}
+
+	/**
+	 * Return the entity responsible for the current turn.
+	 *
+	 * Trusted channel integrations supply external actor references explicitly.
+	 * The reference is audit/context data only: it does not grant WordPress
+	 * capabilities, own a conversation, join an audience, or control a run.
+	 * Existing WordPress-user principals derive a user actor when no explicit
+	 * actor was supplied.
+	 *
+	 * @return array{type:string,key:string}|null Current-turn actor, or null when unknown.
+	 */
+	public function turn_actor(): ?array {
+		if ( null !== $this->actor_type && null !== $this->actor_key ) {
+			return array(
+				'type' => $this->actor_type,
+				'key'  => $this->actor_key,
+			);
+		}
+
+		if ( $this->acting_user_id > 0 ) {
+			return array(
+				'type' => self::OWNER_TYPE_USER,
+				'key'  => (string) $this->acting_user_id,
 			);
 		}
 
@@ -446,7 +498,9 @@ final class WP_Agent_Execution_Principal {
 			$this->audience_claims,
 			$this->owner_type,
 			$this->owner_key,
-			$this->binding
+			$this->binding,
+			$this->actor_type,
+			$this->actor_key
 		);
 	}
 

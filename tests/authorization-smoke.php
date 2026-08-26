@@ -235,6 +235,19 @@ $audience_principal = AgentsAPI\AI\WP_Agent_Execution_Principal::audience( 'audi
 agents_api_smoke_assert_equals( true, $audience_policy->can_access_agent( $audience_principal, 'viewer-agent', WP_Agent_Access_Grant::ROLE_VIEWER ), 'policy accepts principal-aware audience grant', $failures, $passes );
 agents_api_smoke_assert_equals( false, $audience_policy->can_access_agent( $audience_principal, 'viewer-agent', WP_Agent_Access_Grant::ROLE_OPERATOR ), 'policy rejects audience grant below operator level', $failures, $passes );
 
+$external_actor_only = AgentsAPI\AI\WP_Agent_Execution_Principal::from_array(
+	array(
+		'acting_user_id'     => 0,
+		'effective_agent_id' => 'external-agent',
+		'auth_source'        => AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_AUDIENCE,
+		'request_context'    => AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_CHAT,
+		'actor_type'         => 'person',
+		'actor_key'          => 'channel-user:privileged-user',
+	)
+);
+agents_api_smoke_assert_equals( false, $audience_policy->can( $external_actor_only, 'read' ), 'external actor does not become a WordPress capability identity', $failures, $passes );
+agents_api_smoke_assert_equals( false, $audience_policy->can_access_agent( $external_actor_only, 'viewer-agent', WP_Agent_Access_Grant::ROLE_VIEWER ), 'external actor does not become an audience access principal', $failures, $passes );
+
 echo "\n[autonomous deny-by-default] Agent-token principal without an allow-list cannot exercise content-mutating capabilities:\n";
 
 // Owner 7 is a privileged WordPress user that CAN publish/edit/delete/manage.

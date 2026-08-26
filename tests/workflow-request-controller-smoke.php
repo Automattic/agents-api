@@ -3,12 +3,17 @@
 defined( 'ABSPATH' ) || define( 'ABSPATH', __DIR__ . '/' );
 
 if ( ! class_exists( 'WP_Error' ) ) {
-	class WP_Error { public function __construct( public string $code = '', public string $message = '' ) {} }
+	class WP_Error {
+		public function __construct( public string $code = '', public string $message = '', public mixed $data = array() ) {}
+		public function get_error_data(): mixed { return $this->data; }
+	}
 }
 if ( ! function_exists( 'is_wp_error' ) ) { function is_wp_error( $value ): bool { return $value instanceof WP_Error; } }
 
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-run-control-store.php';
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-atomic-run-control-store.php';
+require_once __DIR__ . '/../src/Runtime/interface-wp-agent-exclusive-run-control-store.php';
+require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control-store-exception.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
@@ -32,7 +37,9 @@ if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
 }
 
 use AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store;
+use AgentsAPI\AI\WP_Agent_Exclusive_Run_Control_Store;
 use AgentsAPI\AI\WP_Agent_Run_Control;
+use AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Request_Controller;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Awaiter;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
@@ -40,11 +47,32 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Runner;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec;
 
-final class Controller_Memory_Store implements WP_Agent_Atomic_Run_Control_Store {
+class Controller_Memory_Store implements WP_Agent_Atomic_Run_Control_Store, WP_Agent_Exclusive_Run_Control_Store {
 	public array $states = array();
+	private array $claims = array();
 	public function get_state( string $key ): array { return $this->states[ $key ] ?? array( 'runs' => array(), 'queues' => array(), 'events' => array() ); }
 	public function save_state( string $key, array $state ): void { $this->states[ $key ] = $state; }
 	public function mutate_state( string $key, callable $mutation ): mixed { $out = $mutation( $this->get_state( $key ) ); $this->save_state( $key, $out['state'] ); return $out['result']; }
+	public function execute_claimed( string $key, callable $callback ): bool { if ( isset( $this->claims[ $key ] ) ) { return false; } $this->claims[ $key ] = true; try { $callback(); return true; } finally { unset( $this->claims[ $key ] ); } }
+}
+final class Controller_Failing_Store extends Controller_Memory_Store {
+	private string $failure = '';
+	private bool $after_commit = false;
+	private int $mutation_countdown = 0;
+	public function fail_next( string $failure = 'storage', bool $after_commit = false ): void { $this->failure = $failure; $this->after_commit = $after_commit; }
+	public function fail_on_mutation( int $countdown, string $failure = 'storage', bool $after_commit = false ): void { $this->mutation_countdown = $countdown; $this->failure = $failure; $this->after_commit = $after_commit; }
+	public function get_state( string $key ): array { if ( '' !== $this->failure ) { $this->fail(); } return parent::get_state( $key ); }
+	public function mutate_state( string $key, callable $mutation ): mixed {
+		if ( $this->mutation_countdown > 1 ) { --$this->mutation_countdown; $failure = $this->failure; $after_commit = $this->after_commit; $this->failure = ''; $this->after_commit = false; $result = parent::mutate_state( $key, $mutation ); $this->failure = $failure; $this->after_commit = $after_commit; return $result; }
+		$this->mutation_countdown = 0;
+		$failure = $this->failure; $after_commit = $this->after_commit; $this->failure = ''; $this->after_commit = false;
+		if ( '' === $failure ) { return parent::mutate_state( $key, $mutation ); }
+		if ( ! $after_commit ) { $this->throw_failure( $failure ); }
+		$result = parent::mutate_state( $key, $mutation );
+		$this->throw_failure( $failure );
+	}
+	private function fail(): never { $failure = $this->failure; $this->failure = ''; $this->after_commit = false; $this->throw_failure( $failure ); }
+	private function throw_failure( string $failure ): never { if ( 'programmer' === $failure ) { throw new RuntimeException( 'Injected programmer failure.' ); } throw new WP_Agent_Run_Control_Store_Exception( 'Injected secret storage detail.' ); }
 }
 final class Controller_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	public array $runs = array();
@@ -55,11 +83,14 @@ final class Controller_Recorder implements WP_Agent_Workflow_Run_Recorder {
 }
 final class Controller_Runner extends WP_Agent_Workflow_Runner {
 	public int $starts = 0;
+	public $after_run = null;
 	public function __construct( private Controller_Recorder $test_recorder ) {}
 	public function run( WP_Agent_Workflow_Spec $spec, array $inputs = array(), array $options = array() ): WP_Agent_Workflow_Run_Result {
 		++$this->starts; $status = $inputs['status'] ?? WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED;
 		$r = new WP_Agent_Workflow_Run_Result( $options['run_id'], $spec->get_id(), $status, $inputs, array(), array(), array(), 1, 'suspended' === $status ? 0 : 2, array() );
-		$this->test_recorder->start( $r ); return $r;
+		$this->test_recorder->start( $r );
+		if ( is_callable( $this->after_run ) ) { ( $this->after_run )(); }
+		return $r;
 	}
 }
 final class Controller_Awaiter extends WP_Agent_Workflow_Run_Awaiter {
@@ -101,7 +132,7 @@ controller_assert( $failed['terminal'] && $cancelled['terminal'], 'failed and ca
 controller_assert( in_array( 'failed', $cleaned, true ) && in_array( 'cancelled', $cleaned, true ), 'failed and cancelled runs release terminal cleanup' );
 controller_assert( array() === ( $controller->get( 'one' )['lease'] ?? null ), 'terminal lease is cleared' );
 $one_group_cleanup = array_filter( $GLOBALS['controller_unscheduled'], static function ( array $call ) use ( $one ): bool { return 'agents-api-run-' . md5( $one['run_id'] ) === $call[2]; } );
-controller_assert( 2 === count( $one_group_cleanup ), 'terminal cleanup removes only the run-scoped branch and resume actions' );
+controller_assert( 4 === count( $one_group_cleanup ), 'terminal cleanup removes only the run-scoped branch, reconcile, aggregate, and resume actions' );
 controller_assert( array() === array_filter( $one_group_cleanup, static fn ( array $call ): bool => null !== $call[1] ), 'terminal cleanup matches every argument shape in the run-scoped group' );
 $state = WP_Agent_Run_Control::state( 'controller-test' );
 $state['runs']['two']['lease'] = array( 'token' => 'other-worker', 'worker_id' => 'worker-a', 'expires_at' => time() + 60 );
@@ -115,6 +146,98 @@ $reclaimed = $controller->advance( 'two', array( 'worker_id' => 'worker-b' ) );
 controller_assert( false === $reclaimed['busy'], 'expired worker lane is reclaimed deterministically' );
 $cancelled_operation = $controller->cancel( 'two' );
 controller_assert( true === $cancelled_operation['terminal'] && 'cancelled' === $cancelled_operation['status'], 'public cancel atomically records a terminal disposition' );
-controller_assert( isset( WP_Agent_Run_Control::state( 'controller-test' )['idempotency']['two'] ), 'idempotency key and authoritative run identity are persisted together' );
+controller_assert( 'workflow_request_' . substr( hash( 'sha256', "controller-test\0two" ), 0, 32 ) === $cancelled_operation['run_id'], 'operation identity deterministically supplies idempotent run identity' );
+
+$failure_store = new Controller_Failing_Store();
+WP_Agent_Run_Control::set_store( $failure_store );
+$failure_recorder = new Controller_Recorder(); $failure_runner = new Controller_Runner( $failure_recorder ); $failure_awaiter = new Controller_Awaiter( $failure_recorder );
+$failure_controller = new WP_Agent_Workflow_Request_Controller( $failure_runner, $failure_recorder, $failure_awaiter, 'controller-failures' );
+
+$failure_store->fail_next( 'storage', true );
+$contended_start = $failure_controller->start( 'retry-start', $spec );
+$start_data = $contended_start instanceof WP_Error ? $contended_start->get_error_data() : array();
+controller_assert( $contended_start instanceof WP_Error && 'agents_workflow_run_control_unavailable' === $contended_start->code, 'post-commit start storage failure returns the typed public error' );
+controller_assert( array( 'start', 'reserve', true, 503 ) === array( $start_data['operation'] ?? '', $start_data['phase'] ?? '', $start_data['retryable'] ?? false, $start_data['status'] ?? 0 ), 'start error carries retryable operation and phase evidence' );
+controller_assert( ! str_contains( $contended_start->message, 'secret' ), 'storage error does not expose store details' );
+$retried_start = $failure_controller->start( 'retry-start', $spec );
+controller_assert( 1 === $failure_runner->starts && isset( $retried_start['run_id'] ), 'retry after uncertain reservation commit starts exactly one durable run' );
+
+$failure_store->fail_next();
+$reconnect_error = $failure_controller->reconnect( 'retry-start' );
+$reconnect_data = $reconnect_error instanceof WP_Error ? $reconnect_error->get_error_data() : array();
+controller_assert( array( 'reconnect', 'claim_lease' ) === array( $reconnect_data['operation'] ?? '', $reconnect_data['phase'] ?? '' ), 'reconnect normalizes lease contention with operation evidence' );
+$failure_store->fail_next();
+$status_error = $failure_controller->get_status( 'retry-start' );
+$status_data = $status_error instanceof WP_Error ? $status_error->get_error_data() : array();
+controller_assert( array( 'get_status', 'read' ) === array( $status_data['operation'] ?? '', $status_data['phase'] ?? '' ), 'status normalizes temporary read failure with operation evidence' );
+$failure_store->fail_next();
+$cancel_error = $failure_controller->cancel( 'retry-start' );
+$cancel_data = $cancel_error instanceof WP_Error ? $cancel_error->get_error_data() : array();
+controller_assert( array( 'cancel', 'read' ) === array( $cancel_data['operation'] ?? '', $cancel_data['phase'] ?? '' ), 'cancel normalizes temporary read failure with operation evidence' );
+$failure_store->fail_next();
+$advance_error = $failure_controller->advance( 'retry-start' );
+$advance_data = $advance_error instanceof WP_Error ? $advance_error->get_error_data() : array();
+controller_assert( array( 'advance', 'claim_lease' ) === array( $advance_data['operation'] ?? '', $advance_data['phase'] ?? '' ), 'advance normalizes lease contention with operation evidence' );
+
+$failure_store->fail_next( 'programmer' );
+$programmer_error_visible = false;
+try { $failure_controller->advance( 'retry-start' ); } catch ( RuntimeException $error ) { $programmer_error_visible = 'Injected programmer failure.' === $error->getMessage(); }
+controller_assert( $programmer_error_visible, 'unexpected programmer errors are not normalized' );
+
+$clock = 1000;
+$terminal_store = new Controller_Failing_Store();
+WP_Agent_Run_Control::set_store( $terminal_store );
+$terminal_recorder = new Controller_Recorder(); $terminal_runner = new Controller_Runner( $terminal_recorder ); $terminal_awaiter = new Controller_Awaiter( $terminal_recorder ); $terminal_deliveries = array(); $terminal_cleanups = array();
+$terminal_controller = new WP_Agent_Workflow_Request_Controller( $terminal_runner, $terminal_recorder, $terminal_awaiter, 'controller-terminal-recovery', static function ( $id ) use ( &$terminal_deliveries ) { $terminal_deliveries[] = $id; }, static function ( $id ) use ( &$terminal_cleanups ) { $terminal_cleanups[] = $id; }, static function () use ( &$clock ): int { return $clock; } );
+
+$terminal_runner->after_run = static function () use ( $terminal_store ): void { $terminal_store->fail_next( 'storage', true ); };
+$record_error = $terminal_controller->start( 'record-uncertain', $spec, array( 'status' => 'succeeded' ) );
+$terminal_runner->after_run = null;
+controller_assert( $record_error instanceof WP_Error && 'record_terminal' === ( $record_error->get_error_data()['phase'] ?? '' ), 'uncertain terminal-record commit returns a retryable public error' );
+$record_retry = $terminal_controller->reconnect( 'record-uncertain' );
+controller_assert( $record_retry['terminal'] && array( 'record-uncertain' ) === $terminal_deliveries && array( 'record-uncertain' ) === $terminal_cleanups, 'public retry resumes terminal delivery and cleanup from durable pending state' );
+
+$terminal_deliveries = array(); $terminal_cleanups = array();
+$terminal_runner->after_run = static function () use ( $terminal_store ): void { $terminal_store->fail_on_mutation( 2, 'storage', true ); };
+$claim_error = $terminal_controller->start( 'claim-uncertain', $spec, array( 'status' => 'succeeded' ) );
+$terminal_runner->after_run = null;
+controller_assert( $claim_error instanceof WP_Error && 'deliver_terminal' === ( $claim_error->get_error_data()['phase'] ?? '' ), 'uncertain delivery-claim commit returns a retryable public error' );
+$claim_retry = $terminal_controller->reconnect( 'claim-uncertain' );
+controller_assert( $claim_retry['terminal'] && array( 'claim-uncertain' ) === $terminal_deliveries && 'delivered' === ( $terminal_controller->get( 'claim-uncertain' )['disposition'] ?? '' ), 'delivery resumes after an interrupted worker releases its process-lifetime claim' );
+
+$terminal_deliveries = array(); $nested_delivery = null;
+$slow_controller = null;
+$slow_controller = new WP_Agent_Workflow_Request_Controller( $terminal_runner, $terminal_recorder, $terminal_awaiter, 'controller-slow-terminal', static function ( $id ) use ( &$terminal_deliveries, &$nested_delivery, &$slow_controller, &$clock ) { $terminal_deliveries[] = $id; $clock += 600; $nested_delivery = $slow_controller->reconnect( $id ); }, null, static function () use ( &$clock ): int { return $clock; } );
+$slow_result = $slow_controller->start( 'slow-callback', $spec, array( 'status' => 'succeeded' ) );
+controller_assert( $slow_result['terminal'] && is_array( $nested_delivery ) && array( 'slow-callback' ) === $terminal_deliveries, 'slow live terminal callback is not reclaimed after an arbitrary elapsed interval' );
+
+$legacy_state = $terminal_store->get_state( 'controller-slow-terminal' );
+$legacy_state['runs']['slow-callback']['disposition'] = 'delivering';
+$legacy_state['runs']['slow-callback']['delivery_expires_at'] = 1;
+$terminal_store->save_state( 'controller-slow-terminal', $legacy_state );
+$terminal_deliveries = array();
+$slow_controller->reconnect( 'slow-callback' );
+controller_assert( array() === $terminal_deliveries && 'delivering' === ( $slow_controller->get( 'slow-callback' )['disposition'] ?? '' ), 'pre-upgrade delivering records are not replayed without proof that the old worker died' );
+
+$stale_store = new Controller_Memory_Store();
+WP_Agent_Run_Control::set_store( $stale_store );
+$stale_recorder = new Controller_Recorder(); $stale_runner = new Controller_Runner( $stale_recorder ); $stale_awaiter = new Controller_Awaiter( $stale_recorder ); $stale_deliveries = array();
+$stale_controller = new WP_Agent_Workflow_Request_Controller( $stale_runner, $stale_recorder, $stale_awaiter, 'controller-stale-terminal', static function ( $id ) use ( &$stale_deliveries ) { $stale_deliveries[] = $id; }, null, static fn(): int => 2000 );
+$stale_runner->after_run = static function () use ( $stale_store ): void {
+	$state = $stale_store->get_state( 'controller-stale-terminal' );
+	$state['runs']['stale-worker']['lease'] = array( 'token' => 'replacement-worker', 'worker_id' => 'replacement-worker', 'expires_at' => 2100 );
+	$stale_store->save_state( 'controller-stale-terminal', $state );
+};
+$stale_result = $stale_controller->start( 'stale-worker', $spec, array( 'status' => 'succeeded' ) );
+controller_assert( ! $stale_result['terminal'] && $stale_result['busy'] && 'replacement-worker' === ( $stale_controller->get( 'stale-worker' )['lease']['token'] ?? '' ) && array() === $stale_deliveries, 'stale worker rejection reports the active replacement owner as busy' );
+
+$release_store = new Controller_Failing_Store();
+WP_Agent_Run_Control::set_store( $release_store );
+$release_recorder = new Controller_Recorder(); $release_runner = new Controller_Runner( $release_recorder ); $release_awaiter = new Controller_Awaiter( $release_recorder );
+$release_controller = new WP_Agent_Workflow_Request_Controller( $release_runner, $release_recorder, $release_awaiter, 'controller-release-primary' );
+$release_runner->after_run = static function () use ( $release_store ): void { $release_store->fail_next(); throw new RuntimeException( 'Primary programmer failure.' ); };
+$primary_visible = false;
+try { $release_controller->start( 'programmer-primary', $spec ); } catch ( RuntimeException $error ) { $primary_visible = 'Primary programmer failure.' === $error->getMessage(); }
+controller_assert( $primary_visible, 'lease-release storage failure does not replace an in-flight programmer exception' );
 echo "Passed: $passes, Failed: " . count( $fails ) . "\n";
 exit( empty( $fails ) ? 0 : 1 );

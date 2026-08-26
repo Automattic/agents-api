@@ -1,10 +1,10 @@
 <?php
 /**
- * Cross-process serialization lock for the branch-reconcile critical section.
+ * Cross-process serialization lock for branch-reconcile state transitions.
  *
  * WHY THIS EXISTS. {@see agents_reconcile_workflow_branch()} merges one finished
  * branch into the suspended run's `metadata._suspension.completed[]` map, then
- * decides whether EVERY branch is now terminal (and, if so, aggregates + resumes).
+ * decides whether EVERY branch is now terminal (and, if so, claims aggregation).
  * That merge is a read-modify-write on shared per-run state:
  *
  *     $frame     = load();          // read completed[]
@@ -22,8 +22,8 @@
  *
  * AS's atomic action-claim already de-duplicates the RESUME action, but it does
  * NOT guard THIS write — a different write, on the frame, not the resume action.
- * This lock closes that gap by serializing the reconcile critical section per
- * run so each reconcile reads the frame AFTER the previous one committed.
+ * This lock closes that gap by serializing each short reconcile state transition
+ * per run so each reconcile reads the frame AFTER the previous one committed.
  *
  * TABLE-FREE. Under the substrate's no-new-tables constraint the lock uses
  * `add_option()` as the atomic compare-and-set — `add_option()` performs an
@@ -49,10 +49,10 @@ defined( 'ABSPATH' ) || exit;
  * Default `add_option()`-CAS per-run reconcile lock.
  *
  * A held lock stores an expiry so a crashed holder's lock is reclaimable after
- * its TTL (a process that dies mid-critical-section must not strand every future
- * reconcile for the run). Acquisition blocks with bounded retries because a
- * reconcile critical section is short (an in-memory merge + a recorder write),
- * so a waiter reliably wins within a few spins rather than dropping the branch.
+ * its TTL (a process that dies mid-transition must not strand every future
+ * reconcile for the run). Unbounded aggregation and resume work must never run
+ * under this lock; the suspension frame carries the generation-bound ownership
+ * claim that fences those operations.
  */
 final class WP_Agent_Workflow_Reconcile_Lock {
 
@@ -66,9 +66,8 @@ final class WP_Agent_Workflow_Reconcile_Lock {
 
 	/**
 	 * Lock time-to-live (seconds). After this a stale lock (crashed holder) is
-	 * reclaimable. Generous relative to a reconcile's real duration so a healthy
-	 * holder is never evicted mid-section, yet short enough that a crash does not
-	 * strand the run for long.
+	 * reclaimable. Reconcile holds the lock only around recorder state transitions,
+	 * never while running an aggregator or resumed workflow steps.
 	 *
 	 * @since 0.5.0
 	 */
