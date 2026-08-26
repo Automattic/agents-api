@@ -10,7 +10,7 @@
  * reachable uniformly via REST / abilities, mirroring the existing
  * `agents/*-workflow-run` control abilities.
  *
- * Core owns the state machine (merge → all-terminal? → aggregate → resume);
+ * Core owns the state machine (merge → claim → aggregate → fenced commit → resume);
  * the executor owns only the mechanism that runs branches and calls back here.
  *
  * @package AgentsAPI
@@ -100,23 +100,21 @@ function agents_reconcile_workflow_branch_ability( array $input ) {
  *   2. Merge the branch result into `metadata._suspension.completed[handle_id]`
  *      and flip that handle's status. Persist.
  *   3. If NOT all handles terminal → return the still-suspended run.
- *   4. If all terminal → run the aggregate plan, splice the parallel step's
- *      final output into that step's record, then resume the step loop from
- *      `step_index + 1`.
+ *   4. If all terminal → claim this suspension generation under the lock, release
+ *      the lock, run the aggregate plan, then reacquire the lock to fence its
+ *      recorder commit before resuming from `step_index + 1`.
  *
  * CONCURRENCY. Steps 1–3 are a read-modify-write on the shared per-run frame's
  * `completed[]` map. When N branches finish CONCURRENTLY in N separate processes
  * (the async Action Scheduler path), two reconciles reading the frame before
  * either writes would lose an update — the later write clobbers the earlier
  * merge, the frame never reaches all-terminal, and the run hangs SUSPENDED
- * forever (observed in a real MySQL fanout A/B). So the whole load → merge →
- * all-terminal? → aggregate → resume-dispatch section runs under a per-run
- * cross-process lock ({@see agents_workflow_reconcile_with_lock()}), serializing
- * concurrent reconciles so each reads the frame AFTER the previous one committed.
- * The lock is table-free (`add_option()` CAS) and pluggable via the
- * `wp_agent_workflow_reconcile_lock` filter. AS's atomic action-claim remains the
- * resume-DEDUP guard; the lock closes the completed[]-ACCOUNTING gap it never
- * covered.
+ * forever (observed in a real MySQL fanout A/B). Short recorder transitions run
+ * under a per-run cross-process lock ({@see agents_workflow_reconcile_with_lock()}).
+ * Once all branches are terminal, a durable claim in the suspension frame elects
+ * exactly one aggregation/resume owner for that generation. Aggregation runs
+ * outside the expiring lock, and its result is committed only after a fresh read
+ * proves the same claim still owns the same generation.
  *
  * @since 0.5.0
  *
@@ -131,24 +129,55 @@ function agents_reconcile_workflow_branch( string $run_id, string $handle_id, ar
 		return new \WP_Error( 'agents_reconcile_workflow_branch_no_recorder', 'A recorder is required to reconcile a suspended run. Register one via the `wp_agent_workflow_run_recorder` filter.' );
 	}
 
-	// Serialize the merge → all-terminal? → aggregate → resume-dispatch section
-	// per run so concurrent reconciles from separate processes cannot lose a
-	// completion. Every recorder read below happens INSIDE the lock, so each
-	// reconcile observes the previous one's committed frame.
-	return agents_workflow_reconcile_with_lock(
+	$transition = agents_workflow_reconcile_with_lock(
 		$run_id,
 		static function () use ( $recorder, $run_id, $handle_id, $branch_result ) {
 			return agents_reconcile_workflow_branch_locked( $recorder, $run_id, $handle_id, $branch_result );
 		}
 	);
+	if ( is_wp_error( $transition ) || $transition instanceof WP_Agent_Workflow_Run_Result ) {
+		return $transition;
+	}
+
+	$required_failed = ! empty( $transition['required_failed'] );
+	if ( $required_failed ) {
+		$step_output = new \WP_Error( 'workflow_parallel_required_branch_failed', 'A required parallel branch failed during out-of-band execution.' );
+	} else {
+		$handlers    = agents_workflow_resolve_step_handlers();
+		$step_output = WP_Agent_Workflow_Runner::aggregate_branch_results( $transition['aggregate'], $transition['branch_results'], $handlers );
+	}
+
+	$commit = agents_workflow_reconcile_with_lock(
+		$run_id,
+		static function () use ( $recorder, $run_id, $transition, $step_output ) {
+			return agents_workflow_commit_reconcile_claim(
+				$recorder,
+				$run_id,
+				$transition['claim_token'],
+				$transition['generation'],
+				$transition['step_index'],
+				$step_output
+			);
+		}
+	);
+	if ( is_wp_error( $commit ) || $commit instanceof WP_Agent_Workflow_Run_Result ) {
+		return $commit;
+	}
+
+	$result = $commit['result'];
+	if ( agents_workflow_defer_resume( $run_id, $result ) ) {
+		return $result;
+	}
+
+	$runner = agents_workflow_resolve_runner( $recorder );
+	return $runner->resume( $run_id );
 }
 
 /**
- * The reconcile critical section, run under the per-run lock. Loads the run FRESH
- * (inside the lock), merges the branch, decides all-terminal, and aggregates +
- * dispatches resume when it was the last branch. Extracted from
- * {@see agents_reconcile_workflow_branch()} so the lock wraps exactly the
- * load-modify-decide window and nothing more.
+ * The reconcile state transition run under the per-run lock. It loads the run,
+ * merges one branch, and claims aggregation for the suspension generation when
+ * all branches are terminal. Aggregation itself runs after this function returns
+ * and the lock has been released.
  *
  * @since 0.5.0
  *
@@ -156,7 +185,7 @@ function agents_reconcile_workflow_branch( string $run_id, string $handle_id, ar
  * @param string                         $run_id        Suspended run id.
  * @param string                         $handle_id     The completed branch's handle id.
  * @param array<string,mixed>            $branch_result BranchResult.
- * @return WP_Agent_Workflow_Run_Result|\WP_Error
+ * @return WP_Agent_Workflow_Run_Result|array{claim_token:string,generation:string,step_index:int,aggregate:array<string,mixed>,branch_results:array<string,mixed>,required_failed:bool}|\WP_Error
  */
 function agents_reconcile_workflow_branch_locked( WP_Agent_Workflow_Run_Recorder $recorder, string $run_id, string $handle_id, array $branch_result ) {
 	$result = $recorder->find( $run_id );
@@ -251,6 +280,23 @@ function agents_reconcile_workflow_branch_locked( WP_Agent_Workflow_Run_Recorder
 		return $result;
 	}
 
+	// A durable claim, rather than the expiring option lock, owns unbounded
+	// aggregation and resume dispatch. A duplicate reconciler for this exact
+	// suspension generation observes the claim and cannot execute either effect.
+	if ( is_array( $suspension['reconcile_claim'] ?? null ) ) {
+		return $result;
+	}
+
+	$generation  = agents_workflow_suspension_generation( $suspension );
+	$claim_token = agents_workflow_reconcile_claim_token();
+	$suspension['reconcile_claim'] = array(
+		'token'      => $claim_token,
+		'generation' => $generation,
+	);
+	$metadata['_suspension'] = $suspension;
+	$result = $result->with( array( 'metadata' => $metadata ) );
+	$recorder->update( $result );
+
 	// All branches terminal. Was a REQUIRED branch failed? A required-branch
 	// failure fails the parallel step, which re-enters the failure path on
 	// resume (mirrors the sync `run_role_branch()` required-branch rule).
@@ -259,40 +305,91 @@ function agents_reconcile_workflow_branch_locked( WP_Agent_Workflow_Run_Recorder
 
 	$step_index = is_numeric( $suspension['step_index'] ?? null ) ? (int) $suspension['step_index'] : 0;
 	$aggregate  = is_array( $suspension['aggregate'] ?? null ) ? \AgentsAPI\AI\WP_Agent_Run_Control::string_keyed_array( $suspension['aggregate'] ) : array();
-	$handlers   = agents_workflow_resolve_step_handlers();
+	return array(
+		'claim_token'     => $claim_token,
+		'generation'      => $generation,
+		'step_index'      => $step_index,
+		'aggregate'       => $aggregate,
+		'branch_results'  => $branch_results,
+		'required_failed' => $required_failed,
+	);
+}
 
-	if ( $required_failed ) {
-		$step_output = new \WP_Error( 'workflow_parallel_required_branch_failed', 'A required parallel branch failed during out-of-band execution.' );
-	} else {
-		$step_output = WP_Agent_Workflow_Runner::aggregate_branch_results( $aggregate, $branch_results, $handlers );
+/**
+ * Commit an aggregate result only while its generation-bound claim still owns
+ * the suspended run. The fresh read is the fence that prevents an expired former
+ * option-lock holder from overwriting newer recorder state.
+ *
+ * @since 0.5.0
+ *
+ * @param WP_Agent_Workflow_Run_Recorder $recorder    Resolved recorder.
+ * @param string                         $run_id      Suspended run id.
+ * @param string                         $claim_token Claim token elected before aggregation.
+ * @param string                         $generation Suspension generation identity.
+ * @param int                            $step_index  Suspended parallel step index.
+ * @param array<mixed>|\WP_Error          $step_output Aggregated output or failure.
+ * @return WP_Agent_Workflow_Run_Result|array{result:WP_Agent_Workflow_Run_Result}|\WP_Error
+ */
+function agents_workflow_commit_reconcile_claim( WP_Agent_Workflow_Run_Recorder $recorder, string $run_id, string $claim_token, string $generation, int $step_index, $step_output ) {
+	$result = $recorder->find( $run_id );
+	if ( null === $result || ! $result->is_suspended() ) {
+		return null === $result
+			? new \WP_Error( 'agents_reconcile_workflow_branch_not_found', sprintf( 'No suspended run was found for run_id `%s`.', $run_id ) )
+			: $result;
 	}
 
-	// Splice the parallel step's final output (or failure) into its record so
-	// resume sees a terminal step and downstream `${steps.<id>.output}`
-	// bindings resolve against the aggregated result. The run is still
-	// SUSPENDED at this point (the frame is intact); resume() is what clears it.
-	$result = agents_workflow_splice_step_output( $result, $step_index, $step_output );
-	$recorder->update( $result );
-
-	// The "all terminal → resume" transition is the ONE place two branches
-	// finishing near-simultaneously in separate processes can race. Rather than
-	// hand-roll a cross-process lock (unsafe / forbidden), the transition is
-	// pluggable: the owning executor may DEFER resume to an atomically-claimed
-	// out-of-band action so exactly one resume runs. The default (Phase 1, and
-	// any synchronous / in-process executor) resumes inline right here.
-	//
-	// A deferring handler enqueues its claimed resume action and returns true;
-	// reconcile then returns the aggregate-spliced-but-still-SUSPENDED run. The
-	// deferred handler, when its claimed action fires, re-checks the run is
-	// still SUSPENDED and calls resume() exactly once (§3.4, §4.3).
-	if ( agents_workflow_defer_resume( $run_id, $result ) ) {
+	$suspension = $result->get_suspension();
+	$claim      = is_array( $suspension['reconcile_claim'] ?? null ) ? $suspension['reconcile_claim'] : array();
+	if (
+		! hash_equals( $claim_token, agents_workflow_string( $claim['token'] ?? '' ) ) ||
+		! hash_equals( $generation, agents_workflow_string( $claim['generation'] ?? '' ) ) ||
+		! hash_equals( $generation, agents_workflow_suspension_generation( $suspension ) )
+	) {
 		return $result;
 	}
 
-	// Resume the step loop from step_index + 1 inline. resume() clears the
-	// suspension frame and continues (or fails) from the aggregated output.
-	$runner = agents_workflow_resolve_runner( $recorder );
-	return $runner->resume( $run_id );
+	$result = agents_workflow_splice_step_output( $result, $step_index, $step_output );
+	$recorder->update( $result );
+	return array( 'result' => $result );
+}
+
+/**
+ * Derive the stable identity of one suspension generation.
+ *
+ * @param array<string,mixed> $suspension Suspension frame.
+ */
+function agents_workflow_suspension_generation( array $suspension ): string {
+	$handles = is_array( $suspension['handles'] ?? null ) ? $suspension['handles'] : array();
+	$ids     = array();
+	foreach ( $handles as $handle ) {
+		if ( is_array( $handle ) ) {
+			$ids[] = agents_workflow_string( $handle['id'] ?? '' );
+		}
+	}
+
+	return hash(
+		'sha256',
+		serialize(
+			array(
+				'step_index' => is_numeric( $suspension['step_index'] ?? null ) ? (int) $suspension['step_index'] : 0,
+				'step_id'    => agents_workflow_string( $suspension['step_id'] ?? '' ),
+				'handles'    => $ids,
+			)
+		)
+	);
+}
+
+/** Mint an opaque owner token for one reconcile claim. */
+function agents_workflow_reconcile_claim_token(): string {
+	if ( function_exists( 'wp_generate_uuid4' ) ) {
+		return wp_generate_uuid4();
+	}
+	try {
+		return bin2hex( random_bytes( 16 ) );
+	} catch ( \Throwable $error ) {
+		unset( $error );
+		return uniqid( 'reconcile_', true );
+	}
 }
 
 /**

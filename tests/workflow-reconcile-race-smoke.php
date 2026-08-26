@@ -236,10 +236,14 @@ final class Race_Recorder implements WP_Agent_Workflow_Run_Recorder {
 		return true;
 	}
 	public function find( string $run_id ): ?WP_Agent_Workflow_Run_Result {
-		// Serve the stale pre-merge snapshot only in the unlocked window; a held
-		// reconcile lock means a real second process would have blocked and read
-		// fresh, so honor that ordering here too.
-		if ( null !== $this->frozen && isset( $this->frozen[ $run_id ] ) && ! self::reconcile_lock_held( $run_id ) ) {
+		// Serve the stale pre-merge snapshot only before serialization or durable
+		// generation ownership establishes the fresh state ordering.
+		if (
+			null !== $this->frozen &&
+			isset( $this->frozen[ $run_id ] ) &&
+			! self::reconcile_lock_held( $run_id ) &&
+			! $this->reconcile_claim_held( $run_id )
+		) {
 			return WP_Agent_Workflow_Run_Result::from_array( $this->frozen[ $run_id ] );
 		}
 		return isset( $this->rows[ $run_id ] )
@@ -265,6 +269,13 @@ final class Race_Recorder implements WP_Agent_Workflow_Run_Recorder {
 		$option = 'agents_wf_reconcile_lock_' . md5( $run_id );
 		return array_key_exists( $option, $GLOBALS['__options'] );
 	}
+
+	/** Whether the current suspension generation has elected its effect owner. */
+	private function reconcile_claim_held( string $run_id ): bool {
+		$metadata   = $this->rows[ $run_id ]['metadata'] ?? array();
+		$suspension = is_array( $metadata ) && is_array( $metadata['_suspension'] ?? null ) ? $metadata['_suspension'] : array();
+		return is_array( $suspension['reconcile_claim'] ?? null );
+	}
 }
 
 function race_register_ability( string $name, \Closure $handler ): void {
@@ -280,6 +291,10 @@ race_register_ability(
 race_register_ability(
 	'demo/aggregate',
 	static function ( array $input ): array {
+		++$GLOBALS['__aggregate_calls'];
+		if ( is_callable( $GLOBALS['__during_aggregate'] ?? null ) ) {
+			call_user_func( $GLOBALS['__during_aggregate'] );
+		}
 		// Fuse ALL sibling fragments; a lost completion shows up as a blank slot.
 		return array( 'final_bundle' => 'FUSED[' . (string) ( $input['a'] ?? '' ) . '|' . (string) ( $input['b'] ?? '' ) . '|' . (string) ( $input['c'] ?? '' ) . ']' );
 	}
@@ -409,6 +424,8 @@ function race_execute_branch( array $descriptor ): array {
 // ═════════════════════════════════════════════════════════════════════════════
 
 $GLOBALS['__options'] = array();
+$GLOBALS['__aggregate_calls'] = 0;
+$GLOBALS['__during_aggregate'] = null;
 $recorder = new Race_Recorder();
 remove_all_filters( 'wp_agent_workflow_run_recorder' );
 remove_all_filters( 'wp_agent_workflow_step_executor' );
@@ -420,6 +437,13 @@ add_filter( 'wp_agent_workflow_step_executor', static function () { return new R
 // the bug is the completed[] accounting, not the resume-dedup guard: even with a
 // perfectly working resume path, a lost completion means resume is never reached.
 $GLOBALS['__resume_dispatch_calls'] = 0;
+add_filter(
+	'wp_agent_workflow_resume_dispatch',
+	static function ( bool $deferred ): bool {
+		++$GLOBALS['__resume_dispatch_calls'];
+		return $deferred;
+	}
+);
 
 $run = ( new WP_Agent_Workflow_Runner( $recorder ) )->run( race_roles_spec(), array(), array( 'run_id' => 'race-1' ) );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $run->get_status(), 'race: run SUSPENDED after dispatch', $failures, $passes );
@@ -451,6 +475,48 @@ smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $final->get_status
 
 $bundle = $final->get_output()['steps']['scatter']['final']['final_bundle'] ?? '';
 smoke_assert( 'FUSED[A|B|C]', $bundle, 'race: aggregate fused ALL branch outputs — no completion lost', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__aggregate_calls'], 'race: aggregator executes exactly once', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__resume_dispatch_calls'], 'race: resume dispatch executes exactly once', $failures, $passes );
+
+// ── TTL OVERRUN: aggregation runs outside the short option lock and remains
+// generation-fenced after more than the old 60-second TTL. The callback installs
+// an expired lock row (representing the former holder after 61 seconds), then a
+// duplicate reconciler reclaims it. The durable claim must keep that reconciler
+// from aggregating or dispatching a competing resume.
+$GLOBALS['__options'] = array();
+$GLOBALS['__aggregate_calls'] = 0;
+$GLOBALS['__resume_dispatch_calls'] = 0;
+$recorder = new Race_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder ) { return $recorder; } );
+
+$run = ( new WP_Agent_Workflow_Runner( $recorder ) )->run( race_roles_spec(), array(), array( 'run_id' => 'ttl-1' ) );
+$descriptors = Race_Executor::$dispatched;
+foreach ( array( 0, 1 ) as $index ) {
+	$branch = race_execute_branch( $descriptors[ $index ] );
+	agents_reconcile_workflow_branch( 'ttl-1', (string) $descriptors[ $index ]['handle_id'], $branch );
+}
+$last_result = race_execute_branch( $descriptors[2] );
+$GLOBALS['__aggregation_started_unlocked'] = false;
+$GLOBALS['__during_aggregate'] = static function () use ( $descriptors, $last_result ): void {
+	$GLOBALS['__during_aggregate'] = null;
+	$option = 'agents_wf_reconcile_lock_' . md5( 'ttl-1' );
+	$GLOBALS['__aggregation_started_unlocked'] = ! array_key_exists( $option, $GLOBALS['__options'] );
+
+	// Advance the lock boundary beyond the former 60-second TTL without sleeping.
+	$GLOBALS['__options'][ $option ] = array(
+		'token'   => 'expired-former-holder',
+		'expires' => time() - 1,
+	);
+	agents_reconcile_workflow_branch( 'ttl-1', (string) $descriptors[2]['handle_id'], $last_result );
+};
+
+agents_reconcile_workflow_branch( 'ttl-1', (string) $descriptors[2]['handle_id'], $last_result );
+$final = $recorder->find( 'ttl-1' );
+smoke_assert( true, $GLOBALS['__aggregation_started_unlocked'], 'ttl: aggregation starts after the short option lock is released', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__aggregate_calls'], 'ttl: one aggregator executes after a competing reconciler reclaims the expired lock', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__resume_dispatch_calls'], 'ttl: one resume dispatches for the claimed suspension generation', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $final->get_status(), 'ttl: claimed owner commits and resumes successfully', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
