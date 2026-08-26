@@ -143,18 +143,6 @@ class WP_Agent_Conversation_Loop {
 		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
 		self::emit_tool_declaration_diagnostics( $on_event, $rejected_declarations, $tool_declarations, $tool_executor );
 		$messages = self::normalize_messages( $messages );
-		if ( '' !== $run_id && '' !== $lock_session_id ) {
-			$conversation_store = ( $context['conversation_store'] ?? null ) instanceof \AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store ? $context['conversation_store'] : null;
-			$run_metadata       = array( 'source' => 'conversation_loop', '_claim_token' => WP_Agent_Run_Control::string_value( $context['_agents_run_claim_token'] ?? '' ) );
-			if ( $principal instanceof WP_Agent_Execution_Principal ) {
-				$run_metadata['principal'] = $principal->to_safe_metadata();
-			}
-			$started            = WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, $run_metadata, $run_workspace, $run_owner, $conversation_store );
-			if ( is_wp_error( $started ) ) {
-				self::emit_event( $on_event, 'failed', array( 'error' => $started->get_error_message() ) );
-				return self::run_control_failure_result( $messages, $started );
-			}
-		}
 		$turn_runner           = self::resolve_turn_runner( $turn_runner, $options, $tool_declarations, $run_id, $lock_session_id, $request, $budgets );
 		$events                = array();
 		$tool_results          = array();
@@ -208,6 +196,19 @@ class WP_Agent_Conversation_Loop {
 		$loop_contract_error = null;
 
 		try {
+			if ( '' !== $run_id && '' !== $lock_session_id ) {
+				$conversation_store = ( $context['conversation_store'] ?? null ) instanceof \AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store ? $context['conversation_store'] : null;
+				$run_metadata       = array( 'source' => 'conversation_loop', '_claim_token' => WP_Agent_Run_Control::string_value( $context['_agents_run_claim_token'] ?? '' ) );
+				if ( $principal instanceof WP_Agent_Execution_Principal ) {
+					$run_metadata['principal'] = $principal->to_safe_metadata();
+				}
+				$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, $run_metadata, $run_workspace, $run_owner, $conversation_store );
+				if ( is_wp_error( $started ) ) {
+					self::emit_event( $on_event, 'failed', array( 'error' => $started->get_error_message() ) );
+					return self::run_control_failure_result( $messages, $started );
+				}
+			}
+
 			for ( $turn = 1; $turn <= $max_turns; ++$turn ) {
 				$wall_clock_exceeded = self::check_wall_clock_budget( $budgets, $wall_clock_started_at, $wall_clock_initial, $on_event );
 				if ( null !== $wall_clock_exceeded ) {
@@ -595,12 +596,29 @@ class WP_Agent_Conversation_Loop {
 			}
 
 			$final_result = self::normalize_conversation_result( $final_result_data );
+			$persistence_error = self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
+			if ( null !== $persistence_error ) {
+				self::emit_event( $on_event, 'failed', array(
+					'turn'  => $turns_run,
+					'error' => $persistence_error->getMessage(),
+				) );
+				try {
+					if ( '' !== $run_id && '' !== $lock_session_id ) {
+						self::finish_run_or_throw( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_workspace );
+					}
+				} catch ( WP_Agent_Run_Control_Store_Exception $finalization_error ) {
+					throw new WP_Agent_Run_Control_Store_Exception( $finalization_error->getMessage(), 0, $persistence_error );
+				}
+				throw new WP_Agent_Run_Control_Store_Exception(
+					'Transcript persistence failed while finalizing the conversation run.',
+					0,
+					$persistence_error
+				);
+			}
 
 			if ( '' !== $run_id && '' !== $lock_session_id ) {
 				self::finish_run_or_throw( $run_id, WP_Agent_Run_Outcome::run_control_status( $final_result ), $run_workspace );
 			}
-
-			self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
 
 			self::emit_event( $on_event, 'completed', array(
 				'turn'          => $turns_run,

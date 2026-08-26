@@ -456,4 +456,55 @@ agents_api_smoke_assert_equals( true, $persistence_error instanceof AgentsAPI\AI
 agents_api_smoke_assert_equals( 'transcript store unavailable', $persistence_error?->getPrevious()?->getMessage(), 'retryable diagnostics preserve the underlying persistence error', $failures, $passes );
 agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-transcript-store' )['status'] ?? '', 'transcript storage failure still leaves an observable durable failed run', $failures, $passes );
 
+echo "\n[11] Successful execution cannot publish completion when transcript persistence fails:\n";
+AgentsAPI\AI\WP_Agent_Run_Control::set_store( new Agents_API_Memory_Atomic_Run_Control_Store() );
+$success_events = array();
+$success_turns  = 0;
+$success_result = null;
+$success_persistence_error = null;
+try {
+	$success_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+		array( array( 'role' => 'user', 'content' => 'complete once' ) ),
+		static function ( array $messages ) use ( &$success_turns ): array {
+			++$success_turns;
+			$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'completed once' );
+			return array( 'messages' => $messages, 'tool_execution_results' => array() );
+		},
+		array(
+			'run_id'                => 'fail-closed-success-transcript-store',
+			'transcript_session_id' => 'fail-closed-success-transcript-store-session',
+			'transcript_persister'  => $throwing_persister,
+			'on_event'              => static function ( string $event ) use ( &$success_events ): void { $success_events[] = $event; },
+		)
+	);
+} catch ( AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception $error ) {
+	$success_persistence_error = $error;
+}
+agents_api_smoke_assert_equals( null, $success_result, 'success transcript failure returns no false completed result', $failures, $passes );
+agents_api_smoke_assert_equals( 1, $success_turns, 'success transcript failure does not repeat provider execution', $failures, $passes );
+agents_api_smoke_assert_equals( 'transcript store unavailable', $success_persistence_error?->getPrevious()?->getMessage(), 'success transcript failure preserves retryable storage diagnostics', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-success-transcript-store' )['status'] ?? '', 'success transcript failure durably records failed run control', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( array_filter( $success_events, static fn( string $event ): bool => 'completed' === $event ) ), 'success transcript failure emits no completed event', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( array_filter( $success_events, static fn( string $event ): bool => 'failed' === $event ) ), 'success transcript failure emits one failed event', $failures, $passes );
+
+echo "\n[12] Transcript lock contention creates no running run-control record:\n";
+AgentsAPI\AI\WP_Agent_Run_Control::set_store( new Agents_API_Memory_Atomic_Run_Control_Store() );
+$contended_lock = new class() implements AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Lock {
+	public function acquire_session_lock( string $session_id, int $ttl_seconds = 300 ): ?string { unset( $session_id, $ttl_seconds ); return null; }
+	public function release_session_lock( string $session_id, string $lock_token ): bool { unset( $session_id, $lock_token ); return false; }
+};
+$contention_turns = 0;
+$contention_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'contended' ) ),
+	static function () use ( &$contention_turns ): array { ++$contention_turns; return array(); },
+	array(
+		'run_id'                => 'fail-closed-lock-contention',
+		'transcript_session_id' => 'fail-closed-lock-contention-session',
+		'transcript_lock'       => $contended_lock,
+	)
+);
+agents_api_smoke_assert_equals( 'transcript_lock_contention', $contention_result['status'] ?? '', 'lock contention returns the canonical busy result', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $contention_turns, 'lock contention starts no provider execution', $failures, $passes );
+agents_api_smoke_assert_equals( null, AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-lock-contention' ), 'lock contention creates no running run-control zombie', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API conversation loop fail-closed', $failures, $passes );
