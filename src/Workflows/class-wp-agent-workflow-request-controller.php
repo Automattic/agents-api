@@ -430,7 +430,7 @@ final class WP_Agent_Workflow_Request_Controller {
 		} );
 	}
 
-	/** Remove only this run's AS branch/resume actions; no shared group is touched. */
+	/** Remove only this run's AS branch/reconcile/resume actions; no shared group is touched. */
 	private function cleanup_operation_actions( string $run_id ): void {
 		if ( '' === $run_id || ! function_exists( 'as_unschedule_all_actions' ) ) {
 			return;
