@@ -208,6 +208,47 @@ $gate_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 'failed', $gate_result['status'] ?? '', 'throwing policy filter fails the run closed', $failures, $passes );
 agents_api_smoke_assert_equals( 0, $policy_executor->calls, 'throwing policy filter never executes the tool', $failures, $passes );
 
+echo "\n[3b] Malformed pending and replacement policy payloads fail closed:\n";
+$policy_executor->calls = 0;
+$persist_log            = array();
+$malformed_pending      = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'malformed pending' ) ),
+	$tool_turn,
+	array(
+		'run_id'                => 'fail-closed-malformed-pending',
+		'transcript_session_id' => 'fail-closed-malformed-pending-session',
+		'tool_executor'         => $policy_executor,
+		'tool_declarations'     => $policy_tools,
+		'pre_tool_mediator'     => static fn(): array => array(
+			'action'               => 'pending',
+			'runtime_tool_request' => array( 'tool_name' => array( 'invalid' ) ),
+		),
+		'transcript_persister'  => $persister,
+	)
+);
+agents_api_smoke_assert_equals( 'failed', $malformed_pending['status'] ?? '', 'malformed pending decision fails the loop', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $policy_executor->calls, 'malformed pending decision executes no tool effect', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-malformed-pending' )['status'] ?? '', 'malformed pending decision durably fails run control', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $persist_log[0]['status'] ?? '', 'malformed pending decision persists failed audit state', $failures, $passes );
+
+$persist_log       = array();
+$malformed_replace = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'malformed replacement' ) ),
+	$tool_turn,
+	array(
+		'run_id'                => 'fail-closed-malformed-replace',
+		'transcript_session_id' => 'fail-closed-malformed-replace-session',
+		'tool_executor'         => $policy_executor,
+		'tool_declarations'     => $policy_tools,
+		'pre_tool_mediator'     => static fn(): array => array( 'action' => 'replace_result', 'result' => 'invalid' ),
+		'transcript_persister'  => $persister,
+	)
+);
+agents_api_smoke_assert_equals( 'failed', $malformed_replace['status'] ?? '', 'malformed replace_result decision fails the loop', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $policy_executor->calls, 'malformed replace_result decision executes no tool effect', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-malformed-replace' )['status'] ?? '', 'malformed replace_result decision durably fails run control', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $persist_log[0]['status'] ?? '', 'malformed replace_result decision persists failed audit state', $failures, $passes );
+
 echo "\n[4] Runtime-tool store exceptions fail the run and persist the transcript:\n";
 $runtime_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
 	public function create( array $request ): void { unset( $request ); throw new RuntimeException( 'runtime store unavailable' ); }
@@ -503,7 +544,9 @@ $contention_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 		'transcript_lock'       => $contended_lock,
 	)
 );
-agents_api_smoke_assert_equals( 'transcript_lock_contention', $contention_result['status'] ?? '', 'lock contention returns the canonical busy result', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $contention_result['status'] ?? '', 'lock contention returns a terminal failed result', $failures, $passes );
+agents_api_smoke_assert_equals( 'transcript_lock_contention', $contention_result['failure']['type'] ?? '', 'lock contention retains busy diagnostics', $failures, $passes );
+agents_api_smoke_assert_equals( true, $contention_result['failure']['retryable'] ?? false, 'lock contention remains retryable', $failures, $passes );
 agents_api_smoke_assert_equals( 0, $contention_turns, 'lock contention starts no provider execution', $failures, $passes );
 agents_api_smoke_assert_equals( null, AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-lock-contention' ), 'lock contention creates no running run-control zombie', $failures, $passes );
 

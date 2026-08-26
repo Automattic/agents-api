@@ -184,7 +184,19 @@ class WP_Agent_Conversation_Loop {
 					'messages'               => $messages,
 					'tool_execution_results' => array(),
 					'events'                 => array(),
-					'status'                 => 'transcript_lock_contention',
+					'status'                 => 'failed',
+					'completed'              => false,
+					'failure'                => array(
+						'type'        => 'transcript_lock_contention',
+						'message'     => 'Transcript session is busy with another active conversation run.',
+						'code'        => 'transcript_lock_contention',
+						'turn_count'  => 0,
+						'retryable'   => true,
+						'diagnostics' => array(
+							'reason'     => 'transcript_lock_busy',
+							'session_id' => $lock_session_id,
+						),
+					),
 				) );
 			}
 		}
@@ -1685,8 +1697,7 @@ class WP_Agent_Conversation_Loop {
 					)
 				) );
 			} catch ( \Throwable $error ) {
-				unset( $error );
-				return $fallback;
+				throw new \InvalidArgumentException( 'invalid_agent_pre_tool_mediation_decision: pending decision contains an invalid runtime tool request', 0, $error );
 			}
 
 			$metadata['status'] = WP_Agent_Runtime_Tool_Request::STATUS_PENDING;
@@ -1702,14 +1713,13 @@ class WP_Agent_Conversation_Loop {
 		} else {
 			$raw_result = $decision['result'] ?? null;
 			if ( ! is_array( $raw_result ) ) {
-				return $fallback;
+				throw new \InvalidArgumentException( 'invalid_agent_pre_tool_mediation_decision: replace_result decision must contain a result array' );
 			}
 			$raw_result['tool_name'] = is_string( $raw_result['tool_name'] ?? null ) && '' !== $raw_result['tool_name'] ? $raw_result['tool_name'] : $tool_name;
 			try {
 				$result = WP_Agent_Tool_Result::normalize( $raw_result );
 			} catch ( \Throwable $error ) {
-				unset( $error );
-				return $fallback;
+				throw new \InvalidArgumentException( 'invalid_agent_pre_tool_mediation_decision: replace_result decision contains an invalid tool result', 0, $error );
 			}
 		}
 

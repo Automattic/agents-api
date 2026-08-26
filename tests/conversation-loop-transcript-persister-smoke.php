@@ -301,7 +301,9 @@ $result7 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	)
 );
 
-agents_api_smoke_assert_equals( 'transcript_lock_contention', $result7['status'] ?? '', 'contention result is explicit', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $result7['status'] ?? '', 'contention result is terminally failed', $failures, $passes );
+agents_api_smoke_assert_equals( 'transcript_lock_contention', $result7['failure']['type'] ?? '', 'contention failure type is explicit', $failures, $passes );
+agents_api_smoke_assert_equals( true, $result7['failure']['retryable'] ?? false, 'contention failure is retryable', $failures, $passes );
 agents_api_smoke_assert_equals( 0, $contention_runs, 'turn runner is skipped on lock contention', $failures, $passes );
 agents_api_smoke_assert_equals( 0, count( $persister_log ), 'persister is skipped on lock contention', $failures, $passes );
 
