@@ -236,13 +236,7 @@ function agents_runtime_tool_terminal_request( array $input, bool $cancelled ) {
  * @return WP_Agent_Runtime_Tool_Request_Store|\WP_Error
  */
 function agents_runtime_tool_request_store( array $input ) {
-	/**
-	 * Filters the runtime-tool request store used by lifecycle abilities.
-	 *
-	 * @param WP_Agent_Runtime_Tool_Request_Store|null $store Current store, or null.
-	 * @param array<string, mixed>                     $input Ability input.
-	 */
-	$store = apply_filters( 'wp_agent_runtime_tool_request_store', null, $input );
+	$store = agents_runtime_tool_request_store_optional( $input );
 
 	if ( $store instanceof WP_Agent_Runtime_Tool_Request_Store ) {
 		return $store;
@@ -252,6 +246,27 @@ function agents_runtime_tool_request_store( array $input ) {
 		'agents_runtime_tool_request_store_unavailable',
 		'No runtime-tool request store is registered. Add a WP_Agent_Runtime_Tool_Request_Store through the wp_agent_runtime_tool_request_store filter.'
 	);
+}
+
+/**
+ * Resolve an optional host-provided runtime-tool request store.
+ *
+ * Runtimes can use this when durable lifecycle support is available without
+ * making a store mandatory for an otherwise stateless pending result.
+ *
+ * @param array<string, mixed> $input Host runtime or ability context.
+ * @return WP_Agent_Runtime_Tool_Request_Store|null
+ */
+function agents_runtime_tool_request_store_optional( array $input ): ?WP_Agent_Runtime_Tool_Request_Store {
+	/**
+	 * Filters the runtime-tool request store used by lifecycle abilities and runtimes.
+	 *
+	 * @param WP_Agent_Runtime_Tool_Request_Store|null $store Current store, or null.
+	 * @param array<string, mixed>                     $input Host runtime or ability context.
+	 */
+	$store = apply_filters( 'wp_agent_runtime_tool_request_store', null, $input );
+
+	return $store instanceof WP_Agent_Runtime_Tool_Request_Store ? $store : null;
 }
 
 /**

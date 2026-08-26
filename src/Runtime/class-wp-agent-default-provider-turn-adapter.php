@@ -38,12 +38,15 @@ defined( 'ABSPATH' ) || exit;
  * authenticated, transport-tuned, cached, model-config-aware, or vision-capable
  * request cannot influence the bare builder this adapter constructs by default.
  * For that case the adapter exposes a second injectable "dispatch provider"
- * strategy, symmetric with the prompt-input one. When a dispatcher is injected,
- * the adapter still owns the generic mapping (provider/model/system/messages/
+ * strategy, symmetric with the prompt-input one. An explicitly injected
+ * dispatcher takes precedence; otherwise a host can discover one through the
+ * `wp_agent_provider_turn_dispatch` filter. The adapter still owns the generic
+ * mapping (provider/model/system/messages/
  * declarations) and the generic tail (tool-call extraction, text/usage
  * normalization, result-shape assembly); the consumer owns only request
  * construction and dispatch, returning a wp-ai-client `GenerativeAiResult`. When
- * no dispatcher is injected the adapter builds and dispatches the bare
+ * no explicit or host-discovered dispatcher is available, the adapter builds and
+ * dispatches the bare
  * `wp_ai_client_prompt()` builder exactly as before — the seam is a pure
  * addition with no behavior change on the default path.
  */
@@ -130,7 +133,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	/** @var callable|null Injectable prompt-input strategy, defaulting to identity. */
 	private $prompt_input_provider;
 
-	/** @var callable|null Injectable dispatch strategy, defaulting to the bare builder. */
+	/** @var callable|null Explicit dispatch strategy, taking precedence over host discovery. */
 	private $dispatch_provider;
 
 	/** @var callable|null Injectable sleep strategy, defaulting to usleep(). Replaced in tests with a non-sleeping spy. */
@@ -210,7 +213,8 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 * transport tuning, caching, model-config, multimodal parts, and the actual
 	 * dispatch call.
 	 *
-	 * Passing `null` restores the default bare-builder dispatch.
+	 * Passing `null` removes the explicit dispatcher, allowing host discovery and,
+	 * when none is discovered, the default bare-builder dispatch.
 	 *
 	 * The provider is called as `$dispatcher( array $payload )` and receives a
 	 * single associative array with these keys (the mapped builder inputs, not a
@@ -261,23 +265,25 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 		$prompt_context        = self::split_prompt_context( $messages );
 		$function_declarations = self::function_declarations( $request->toolDeclarations() );
 
-		if ( null !== $this->dispatch_provider ) {
-			$dispatch = function () use ( $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations ) {
-				return $this->dispatch_via_provider( $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations );
+		$dispatcher = $this->resolve_dispatch_provider( $request, $provider_id, $model_id );
+		$structured_output = $request->structuredOutput();
+		if ( null !== $dispatcher ) {
+			$dispatch = function () use ( $dispatcher, $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations ) {
+				return $this->dispatch_via_provider( $dispatcher, $request, $provider_id, $model_id, $system_prompt, $messages, $prompt_context, $function_declarations );
 			};
 		} else {
-			$dispatch = function () use ( $provider_id, $model_id, $system_prompt, $prompt_context, $function_declarations ) {
-				return $this->dispatch_via_bare_builder( $provider_id, $model_id, $system_prompt, $prompt_context, $function_declarations );
+			$dispatch = function () use ( $provider_id, $model_id, $system_prompt, $prompt_context, $function_declarations, $structured_output ) {
+				return $this->dispatch_via_bare_builder( $provider_id, $model_id, $system_prompt, $prompt_context, $function_declarations, $structured_output );
 			};
 		}
 
-		$result = $this->dispatch_with_retry( $dispatch, $provider_id, $model_id );
+		$result = $this->dispatch_with_retry( $dispatch, $provider_id, $model_id, array( $request, 'hasEmittedDeltas' ) );
 
 		if ( function_exists( 'is_wp_error' ) && is_wp_error( $result ) ) {
 			throw new \RuntimeException( 'wp-ai-client request failed: ' . $result->get_error_message() );
 		}
 
-		return array(
+		$normalized = array(
 			'content'          => WP_Agent_Provider_Turn_Result::result_text( $result ),
 			'tool_calls'       => WP_Agent_Provider_Turn_Result::extract_tool_calls( $result ),
 			'usage'            => WP_Agent_Provider_Turn_Result::result_usage( $result ),
@@ -286,12 +292,30 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 				'model_id'    => $model_id,
 			),
 		);
+		if ( null !== $structured_output ) {
+			$parsed = self::parse_structured_output( WP_Agent_Provider_Turn_Result::result_text( $result ) );
+			if ( ! $parsed['valid'] ) {
+				return array(
+					'failure' => array( 'type' => 'structured_output_invalid_json', 'message' => 'Provider returned invalid JSON for the requested structured output.' ),
+					'provider_diagnostics' => array( 'structured_output' => array( 'status' => 'invalid_json' ) ),
+				);
+			}
+			$validation_failure = $structured_output->strict() ? $structured_output->validate( $parsed['value'] ) : null;
+			if ( null !== $validation_failure ) {
+				return array(
+					'failure' => array( 'type' => 'structured_output_schema_mismatch', 'message' => 'Provider structured output does not match the requested schema.' ),
+					'provider_diagnostics' => array( 'structured_output' => array( 'status' => 'schema_mismatch', 'code' => $validation_failure ) ),
+				);
+			}
+			$normalized['structured_output'] = array( 'parsed' => $parsed['value'], 'diagnostics' => array( 'status' => 'parsed' ) );
+		}
+		return $normalized;
 	}
 
 	/**
 	 * Dispatch one provider request with deterministic retry-on-transient backoff.
 	 *
-	 * Wraps the single provider-dispatch call (bare builder or injected dispatcher)
+	 * Wraps the single provider-dispatch call (bare builder or explicit/discovered dispatcher)
 	 * — NOT the whole loop turn — so a retry never re-runs the loop's mediated tool
 	 * execution and never duplicates tool side effects. The adapter's own turn has
 	 * no side effects beyond the model request, so re-dispatching is safe.
@@ -319,9 +343,10 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 *                                 GenerativeAiResult or WP_Error (or throwing).
 	 * @param string      $provider_id Resolved provider id (retry policy context + event).
 	 * @param string      $model_id    Resolved model id (retry policy context + event).
+	 * @param callable|null $has_emitted_deltas Reports whether the current attempt emitted client-visible deltas.
 	 * @return mixed The successful result, or the last non-retryable / exhausted WP_Error.
 	 */
-	private function dispatch_with_retry( callable $dispatch, string $provider_id, string $model_id ) {
+	private function dispatch_with_retry( callable $dispatch, string $provider_id, string $model_id, ?callable $has_emitted_deltas = null ) {
 		$policy       = $this->resolve_retry_policy( $provider_id, $model_id );
 		$max_attempts = $policy['max_attempts'];
 		$attempt      = 1;
@@ -354,7 +379,9 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 				}
 			}
 
-			if ( $attempt >= $max_attempts ) {
+			// Retrying after exposing a partial response would duplicate or reorder
+			// client-visible content. Surface that attempt's failure unchanged.
+			if ( ( null !== $has_emitted_deltas && true === call_user_func( $has_emitted_deltas ) ) || $attempt >= $max_attempts ) {
 				// Budget exhausted: surface the original transient failure unchanged.
 				if ( null !== $caught ) {
 					throw $caught;
@@ -621,7 +648,8 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 *
 	 * This is the original, unmodified dispatch: it constructs a
 	 * `wp_ai_client_prompt()` builder from the mapped inputs and calls
-	 * `generate_text_result()`. It runs only when no dispatch provider is injected.
+	 * `generate_text_result()`. It runs only when neither an explicit nor a
+	 * host-discovered dispatch provider is available.
 	 *
 	 * @param string                                                          $provider_id           Resolved provider id.
 	 * @param string                                                          $model_id              Resolved model id.
@@ -630,7 +658,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 * @param array<int,object>                                               $function_declarations Mapped function declarations.
 	 * @return mixed wp-ai-client GenerativeAiResult or WP_Error.
 	 */
-	private function dispatch_via_bare_builder( string $provider_id, string $model_id, string $system_prompt, array $prompt_context, array $function_declarations ) {
+	private function dispatch_via_bare_builder( string $provider_id, string $model_id, string $system_prompt, array $prompt_context, array $function_declarations, ?WP_Agent_Structured_Output_Request $structured_output = null ) {
 		if ( ! function_exists( 'wp_ai_client_prompt' ) ) {
 			throw new \RuntimeException( 'wp-ai-client is unavailable: wp_ai_client_prompt() is not defined.' );
 		}
@@ -686,9 +714,28 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			$builder = $builder->using_function_declarations( ...$function_declarations );
 		}
 
+		if ( null !== $structured_output ) {
+			if ( ! is_callable( array( $builder, 'as_output_mime_type' ) ) || ! is_callable( array( $builder, 'as_output_schema' ) ) ) {
+				throw new WP_Agent_Structured_Output_Capability_Exception( 'The installed wp-ai-client does not support JSON Schema output. Upgrade wp-ai-client or provide a host provider-turn dispatcher.' );
+			}
+			// The public wp-ai-client builder is fluent; keep the original typed builder
+			// reference so its magic proxy remains compatible across client versions.
+			$builder->as_output_mime_type( 'application/json' );
+			$builder->as_output_schema( $structured_output->schema() );
+		}
+
 		$builder = $this->apply_request_timeout( $builder );
 
 		return $builder->generate_text_result();
+	}
+
+	/** @return array{valid:bool,value:mixed} */
+	private static function parse_structured_output( string $text ): array {
+		try {
+			return array( 'valid' => true, 'value' => json_decode( $text, false, 512, JSON_THROW_ON_ERROR ) );
+		} catch ( \JsonException $error ) {
+			return array( 'valid' => false, 'value' => null );
+		}
 	}
 
 	/**
@@ -823,7 +870,46 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	}
 
 	/**
-	 * Delegate request construction and dispatch to the injected dispatch provider.
+	 * Resolve an explicit or host-discovered dispatch provider.
+	 *
+	 * Explicit constructor/setter injection is authoritative. When none exists,
+	 * hosts may provide a callable through `wp_agent_provider_turn_dispatch`.
+	 * Returning null or a non-callable preserves the bare-builder default.
+	 *
+	 * @param WP_Agent_Provider_Turn_Request $request     Provider-turn request passed to host discovery.
+	 * @param string                         $provider_id Effective provider identifier.
+	 * @param string                         $model_id    Effective model identifier.
+	 * @return callable|null Dispatch provider, when available.
+	 */
+	private function resolve_dispatch_provider( WP_Agent_Provider_Turn_Request $request, string $provider_id, string $model_id ): ?callable {
+		if ( null !== $this->dispatch_provider ) {
+			return $this->dispatch_provider;
+		}
+
+		if ( ! function_exists( 'apply_filters' ) ) {
+			return null;
+		}
+
+		/**
+		 * Filters the host provider-turn dispatcher for the default adapter.
+		 *
+		 * Explicit `dispatch_provider` constructor/setter injection takes precedence,
+		 * so this filter runs only when no explicit dispatcher exists. Return a
+		 * callable that accepts the documented normalized dispatch payload, or return
+		 * the incoming null to retain the default wp-ai-client builder path.
+		 *
+		 * @param callable|null                   $dispatcher Host dispatch provider, or null for the default path.
+		 * @param WP_Agent_Provider_Turn_Request $request    Full provider-turn request for host routing context.
+		 * @param string                          $provider_id Effective provider identifier after request/default resolution.
+		 * @param string                          $model_id    Effective model identifier after request/default resolution.
+		 */
+		$dispatcher = apply_filters( 'wp_agent_provider_turn_dispatch', null, $request, $provider_id, $model_id );
+
+		return is_callable( $dispatcher ) ? $dispatcher : null;
+	}
+
+	/**
+	 * Delegate request construction and dispatch to an explicit or discovered provider.
 	 *
 	 * The provider receives the mapped builder inputs (see {@see self::set_dispatch_provider()}
 	 * for the exact payload contract) and returns a wp-ai-client GenerativeAiResult
@@ -839,12 +925,7 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 	 * @param array<int,object>                                               $function_declarations Mapped function declarations.
 	 * @return mixed wp-ai-client GenerativeAiResult or WP_Error.
 	 */
-	private function dispatch_via_provider( WP_Agent_Provider_Turn_Request $request, string $provider_id, string $model_id, string $system_prompt, array $messages, array $prompt_context, array $function_declarations ) {
-		$dispatcher = $this->dispatch_provider;
-		if ( ! is_callable( $dispatcher ) ) {
-			throw new \RuntimeException( 'Dispatch provider is unavailable.' );
-		}
-
+	private function dispatch_via_provider( callable $dispatcher, WP_Agent_Provider_Turn_Request $request, string $provider_id, string $model_id, string $system_prompt, array $messages, array $prompt_context, array $function_declarations ) {
 		$payload = array(
 			'provider_id'           => $provider_id,
 			'model_id'              => $model_id,
@@ -856,6 +937,9 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 			'options'               => $this->options,
 			'request'               => $request,
 		);
+		if ( null !== $request->structuredOutput() ) {
+			$payload['structured_output'] = $request->structuredOutput()->to_array();
+		}
 
 		return call_user_func( $dispatcher, $payload );
 	}
@@ -1151,10 +1235,29 @@ class WP_Agent_Default_Provider_Turn_Adapter implements WP_Agent_Provider_Turn_A
 
 		$declarations = array();
 		foreach ( $tool_declarations as $name => $tool ) {
-			$tool_name = is_string( $tool['name'] ?? null ) && '' !== $tool['name'] ? $tool['name'] : (string) $name;
-			if ( '' === $tool_name ) {
+			$canonical_name = is_string( $tool['name'] ?? null ) && '' !== $tool['name'] ? $tool['name'] : (string) $name;
+			if ( '' === $canonical_name ) {
 				continue;
 			}
+
+			/*
+			 * Send the provider-safe alias, not the canonical name.
+			 *
+			 * Canonical tool names are namespaced (`namespace/tool`), and provider
+			 * tool-name validation rejects the slash — the same constraint #320
+			 * addressed for client runtime tool declarations. Host tools derived
+			 * from abilities cannot avoid it: the Abilities API requires a
+			 * namespaced name, so every ability-backed declaration carries one.
+			 *
+			 * `normalizeForConversationRequest()` already records the alias on any
+			 * declaration that needs one, and WP_Agent_Tool_Execution_Core maps the
+			 * provider's emitted name back through
+			 * `canonicalNameForProviderToolName()`, so mediation still resolves the
+			 * canonical declaration.
+			 */
+			$tool_name = is_string( $tool['provider_safe_name'] ?? null ) && '' !== $tool['provider_safe_name']
+				? $tool['provider_safe_name']
+				: $canonical_name;
 
 			$description = is_string( $tool['description'] ?? null ) ? $tool['description'] : '';
 			$parameters  = is_array( $tool['parameters'] ?? null ) ? $tool['parameters'] : array();

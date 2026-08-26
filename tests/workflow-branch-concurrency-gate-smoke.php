@@ -165,6 +165,8 @@ require_once __DIR__ . '/../src/Workflows/register-workflow-branch-executor.php'
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Branch_Executor;
 
 $branch_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK;
+$reconcile_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK;
+$aggregate_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK;
 $resume_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK;
 $max         = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::MAX_BRANCH_CONCURRENCY;
 
@@ -183,6 +185,7 @@ $batch_size = static function (): int {
 
 AS_Query_Shim::reset();
 smoke_assert( 0, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count(), 'inflight=0 when no branch actions exist', $failures, $passes );
+smoke_assert( 0, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::reconcile_inflight_count(), 'reconcile_inflight=0 when no retries exist', $failures, $passes );
 smoke_assert( 1, $concurrent_batches(), 'no fan-out: concurrent_batches passes through AS default (1)', $failures, $passes );
 smoke_assert( 25, $batch_size(), 'no fan-out: batch_size passes through AS default (25)', $failures, $passes );
 
@@ -320,6 +323,50 @@ smoke_assert( 25, $batch_size(), 'resume-only: batch_size stays at AS default (r
 AS_Query_Shim::reset();
 smoke_assert( 0, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::resume_inflight_count(), 'no fan-out: resume_inflight=0', $failures, $passes );
 smoke_assert( 1, $concurrent_batches(), 'no fan-out: no resume slot added, stock ceiling (1)', $failures, $passes );
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 10. RECONCILE-RETRY STARVATION. The original branch action is complete, so its
+//     inflight count is zero. One unrelated long-lived claim would close AS's
+//     default ceiling of 1; the pending reconcile retry needs one additive slot.
+// ═════════════════════════════════════════════════════════════════════════════
+
+AS_Query_Shim::reset();
+AS_Query_Shim::add( 'unrelated_long_action', ActionScheduler_Store::STATUS_RUNNING, 1 );
+AS_Query_Shim::add( $reconcile_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+$unrelated_claims = 1;
+smoke_assert( 0, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count(), 'reconcile starvation: original branch is no longer in flight', $failures, $passes );
+smoke_assert( 1, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::reconcile_inflight_count(), 'reconcile starvation: pending retry counts as in flight', $failures, $passes );
+smoke_assert( 2, $concurrent_batches(), 'reconcile starvation: ceiling adds one retry slot above the default', $failures, $passes );
+smoke_assert( true, $concurrent_batches() > $unrelated_claims, 'reconcile starvation: unrelated long claim cannot block retry until reaping', $failures, $passes );
+smoke_assert( 25, $batch_size(), 'reconcile-only retry does not pin branch batch size', $failures, $passes );
+
+AS_Query_Shim::reset();
+AS_Query_Shim::add( $reconcile_hook, ActionScheduler_Store::STATUS_PENDING, $max + 5 );
+AS_Query_Shim::add( $reconcile_hook, ActionScheduler_Store::STATUS_RUNNING, $max + 5 );
+smoke_assert( $max, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::reconcile_inflight_count(), 'reconcile headroom count is bounded by MAX_BRANCH_CONCURRENCY', $failures, $passes );
+smoke_assert( $max + 1, $concurrent_batches(), 'reconcile headroom raise remains bounded', $failures, $passes );
+
+// Durable aggregate actions are long-running effects: they need additive claim
+// headroom and batch-size 1, but both counts remain bounded.
+AS_Query_Shim::reset();
+AS_Query_Shim::add( 'unrelated_long_action', ActionScheduler_Store::STATUS_RUNNING, 1 );
+AS_Query_Shim::add( $aggregate_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+smoke_assert( 1, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::aggregate_inflight_count(), 'aggregate starvation: pending continuation counts as in flight', $failures, $passes );
+smoke_assert( 2, $concurrent_batches(), 'aggregate starvation: ceiling adds one continuation slot', $failures, $passes );
+smoke_assert( 1, $batch_size(), 'aggregate continuation pins batch size while effects run', $failures, $passes );
+
+AS_Query_Shim::reset();
+AS_Query_Shim::add( $aggregate_hook, ActionScheduler_Store::STATUS_PENDING, $max + 5 );
+AS_Query_Shim::add( $aggregate_hook, ActionScheduler_Store::STATUS_RUNNING, $max + 5 );
+smoke_assert( $max, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::aggregate_inflight_count(), 'aggregate headroom count is bounded by MAX_BRANCH_CONCURRENCY', $failures, $passes );
+smoke_assert( $max + 1, $concurrent_batches(), 'aggregate headroom raise remains bounded', $failures, $passes );
+
+AS_Query_Shim::reset();
+AS_Query_Shim::add( $branch_hook, ActionScheduler_Store::STATUS_RUNNING, 2 );
+AS_Query_Shim::add( $reconcile_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+AS_Query_Shim::add( $aggregate_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+AS_Query_Shim::add( $resume_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+smoke_assert( 5, $concurrent_batches(), 'combined headroom: branch, reconcile, aggregate, and resume slots are additive', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );

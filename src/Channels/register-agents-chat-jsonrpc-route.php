@@ -120,16 +120,15 @@ function agents_chat_jsonrpc_permission( \WP_REST_Request $request ): bool|\WP_E
 		);
 	}
 
-	$input   = array( 'agent' => $agent );
-	$allowed = agents_chat_permission( $input );
-
-	if ( ! $allowed ) {
-		$allowed = \WP_Agent_Access::can_current_principal_access_agent(
-			$agent,
-			\WP_Agent_Access_Grant::ROLE_OPERATOR,
-			agents_chat_jsonrpc_scope( $request )
+	$input = agents_chat_jsonrpc_request_input( $request );
+	if ( is_wp_error( $input ) ) {
+		$input = array(
+			'agent'        => $agent,
+			'workspace_id' => $request->get_param( 'workspace_id' ),
+			'client_id'    => $request->get_param( 'client_id' ),
 		);
 	}
+	$allowed = agents_chat_permission( $input );
 
 	/**
 	 * Filter the JSON-RPC chat permission decision.
@@ -138,7 +137,7 @@ function agents_chat_jsonrpc_permission( \WP_REST_Request $request ): bool|\WP_E
 	 * @param string           $agent   Agent slug from the URL.
 	 * @param \WP_REST_Request $request REST request.
 	 */
-	$allowed = (bool) apply_filters( 'agents_chat_jsonrpc_permission', $allowed, $agent, $request );
+	$allowed = $allowed && (bool) apply_filters( 'agents_chat_jsonrpc_permission', $allowed, $agent, $request );
 
 	if ( $allowed ) {
 		return true;
@@ -171,7 +170,7 @@ function agents_chat_jsonrpc_dispatch( \WP_REST_Request $request ): \WP_REST_Res
 		);
 	}
 
-	$input = agents_chat_jsonrpc_input_from_params( $params, $agent, $body );
+	$input = agents_chat_jsonrpc_request_input( $request );
 	if ( is_wp_error( $input ) ) {
 		return rest_ensure_response(
 			agents_chat_jsonrpc_error_frame( $rpc_id, AGENTS_CHAT_JSONRPC_ERR_INVALID_PARAMS, $input->get_error_message() )
@@ -198,8 +197,47 @@ function agents_chat_jsonrpc_dispatch( \WP_REST_Request $request ): \WP_REST_Res
 	}
 
 	return rest_ensure_response(
-		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ) )
+		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ), $output )
 	);
+}
+
+/**
+ * Build and cache the canonical JSON-RPC input for one REST request.
+ *
+ * Permission and dispatch must observe one filtered input so stateful host
+ * filters cannot authorize one context and execute another.
+ *
+ * @param \WP_REST_Request $request REST request.
+ * @return array<string,mixed>|\WP_Error
+ */
+function agents_chat_jsonrpc_request_input( \WP_REST_Request $request ) {
+	static $cache = null;
+
+	if ( ! $cache instanceof \SplObjectStorage ) {
+		$cache = new \SplObjectStorage();
+	}
+	if ( $cache->offsetExists( $request ) ) {
+		$cached = $cache[ $request ];
+		if ( is_array( $cached ) ) {
+			return \AgentsAPI\AI\agents_api_string_keyed_array( $cached );
+		}
+		if ( is_wp_error( $cached ) ) {
+			return $cached;
+		}
+		return new \WP_Error( 'agents_chat_jsonrpc_invalid_params', 'The cached JSON-RPC chat input is invalid.' );
+	}
+
+	$agent  = sanitize_title( \AgentsAPI\AI\agents_api_scalar_to_string( $request->get_param( 'agent_id' ) ) );
+	$body   = $request->get_json_params();
+	$params = isset( $body['params'] ) && is_array( $body['params'] ) ? $body['params'] : array();
+	$input  = agents_chat_jsonrpc_input_from_params( $params, $agent, $body );
+	if ( is_array( $input ) ) {
+		$input['workspace_id'] = $request->get_param( 'workspace_id' );
+		$input['client_id']    = $request->get_param( 'client_id' );
+	}
+
+	$cache[ $request ] = $input;
+	return $input;
 }
 
 /**
@@ -303,7 +341,7 @@ function agents_chat_jsonrpc_stream( $rpc_id, array $input ): void {
 	}
 
 	\AgentsAPI\AI\agents_api_emit_sse_json_frame(
-		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ) )
+		agents_chat_jsonrpc_result_frame( $rpc_id, agents_chat_jsonrpc_task_from_output( $output ), $output )
 	);
 }
 
@@ -321,9 +359,13 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	}
 
 	$message = isset( $params['message'] ) && is_array( $params['message'] ) ? $params['message'] : array();
-	$text    = agents_chat_jsonrpc_extract_text( $message );
-	if ( '' === trim( $text ) ) {
-		return new \WP_Error( 'agents_chat_jsonrpc_invalid_params', 'params.message must contain non-empty text.' );
+	$text           = agents_chat_jsonrpc_extract_text( $message );
+	$input_messages = agents_chat_jsonrpc_input_messages( $message );
+	if ( is_wp_error( $input_messages ) ) {
+		return $input_messages;
+	}
+	if ( '' === trim( $text ) && array() === $input_messages ) {
+		return new \WP_Error( 'agents_chat_jsonrpc_invalid_params', 'params.message must contain non-empty text or paired tool call/results.' );
 	}
 
 	$session_id = \AgentsAPI\AI\agents_api_scalar_to_string( $params['sessionId'] ?? null );
@@ -344,11 +386,15 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	$input = array(
 		'agent'          => $agent,
 		'message'        => $text,
+		'history'        => agents_chat_jsonrpc_history( $message ),
 		'session_id'     => '' !== $session_id ? $session_id : null,
 		'run_id'         => '' !== $run_id ? $run_id : null,
 		'attachments'    => agents_chat_jsonrpc_attachments( $message ),
 		'client_context' => $client_context,
 	);
+	if ( array() !== $input_messages ) {
+		$input['input_messages'] = $input_messages;
+	}
 
 	if ( array_key_exists( 'tokenStreaming', $body ) ) {
 		$input['token_streaming'] = (bool) $body['tokenStreaming'];
@@ -360,9 +406,10 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	 * @param array<string,mixed> $input  Canonical agents/chat input.
 	 * @param array<mixed>        $params JSON-RPC params.
 	 * @param string              $agent  Agent slug.
+	 * @param array<mixed>        $body   Full JSON-RPC request body.
 	 */
 	/** @var mixed $filtered Hosts may return invalid values from this filter. */
-	$filtered = apply_filters( 'agents_chat_jsonrpc_input', $input, $params, $agent );
+	$filtered = apply_filters( 'agents_chat_jsonrpc_input', $input, $params, $agent, $body );
 
 	if ( ! is_array( $filtered ) ) {
 		return $input;
@@ -374,6 +421,94 @@ function agents_chat_jsonrpc_input_from_params( array $params, string $agent, ar
 	}
 
 	return $input;
+}
+
+/**
+ * Map paired A2A tool call/result data parts to canonical inbound messages.
+ *
+ * @param array<mixed> $message JSON-RPC Message.
+ * @return array<int,array<string,mixed>>|\WP_Error
+ */
+function agents_chat_jsonrpc_input_messages( array $message ) {
+	$parts   = is_array( $message['parts'] ?? null ) ? $message['parts'] : array();
+	$calls   = array();
+	$results = array();
+	foreach ( $parts as $part ) {
+		$data = is_array( $part ) && 'data' === ( $part['type'] ?? null ) && is_array( $part['data'] ?? null ) ? $part['data'] : array();
+		$id   = \AgentsAPI\AI\agents_api_scalar_to_string( $data['toolCallId'] ?? null );
+		if ( '' === $id ) {
+			continue;
+		}
+		if ( array_key_exists( 'result', $data ) ) {
+			if ( isset( $results[ $id ] ) ) {
+				return new \WP_Error( 'agents_chat_jsonrpc_duplicate_tool_result', 'Inbound tool results must have unique toolCallId values.', array( 'status' => 400 ) );
+			}
+			$results[ $id ] = $data;
+		} else {
+			if ( isset( $calls[ $id ] ) ) {
+				return new \WP_Error( 'agents_chat_jsonrpc_duplicate_tool_call', 'Inbound tool calls must have unique toolCallId values.', array( 'status' => 400 ) );
+			}
+			$calls[ $id ] = $data;
+		}
+	}
+
+	if ( array() === $calls && array() === $results ) {
+		return array();
+	}
+	if ( array_diff_key( $calls, $results ) || array_diff_key( $results, $calls ) ) {
+		return new \WP_Error( 'agents_chat_jsonrpc_tool_call_mismatch', 'Every inbound tool call must have one matching result.', array( 'status' => 400 ) );
+	}
+
+	$messages = array();
+	foreach ( $calls as $id => $call ) {
+		$tool_name  = \AgentsAPI\AI\agents_api_scalar_to_string( $call['toolId'] ?? null );
+		$parameters = is_array( $call['arguments'] ?? null ) ? $call['arguments'] : array();
+		if ( '' === $tool_name ) {
+			return new \WP_Error( 'agents_chat_jsonrpc_invalid_tool_call', 'Inbound tool calls require toolId.', array( 'status' => 400 ) );
+		}
+		$result_tool_name = \AgentsAPI\AI\agents_api_scalar_to_string( $results[ $id ]['toolId'] ?? null );
+		if ( '' !== $result_tool_name && $result_tool_name !== $tool_name ) {
+			return new \WP_Error( 'agents_chat_jsonrpc_tool_name_mismatch', 'Inbound tool call and result toolId values must match.', array( 'status' => 400 ) );
+		}
+		$messages[] = \AgentsAPI\AI\WP_Agent_Message::toolCall( '', $tool_name, $parameters, 0, array( 'tool_call_id' => $id ) );
+		$result_json = wp_json_encode( $results[ $id ]['result'] );
+		$messages[]  = \AgentsAPI\AI\WP_Agent_Message::toolResult(
+			false === $result_json ? '' : $result_json,
+			$tool_name,
+			array( 'result' => $results[ $id ]['result'] ),
+			array( 'tool_call_id' => $id )
+		);
+	}
+
+	return $messages;
+}
+
+/**
+ * Map client-supplied text backscroll into canonical stateless chat history.
+ *
+ * @param array<mixed> $message JSON-RPC Message.
+ * @return array<int,array{role:string,content:string}>
+ */
+function agents_chat_jsonrpc_history( array $message ): array {
+	$parts   = is_array( $message['parts'] ?? null ) ? $message['parts'] : array();
+	$history = array();
+	$roles   = array( 'user' => 'user', 'agent' => 'assistant' );
+
+	foreach ( $parts as $part ) {
+		if ( ! is_array( $part ) || 'data' !== ( $part['type'] ?? null ) || ! is_array( $part['data'] ?? null ) ) {
+			continue;
+		}
+
+		$role    = is_string( $part['data']['role'] ?? null ) ? $part['data']['role'] : '';
+		$content = is_string( $part['data']['text'] ?? null ) ? $part['data']['text'] : '';
+		if ( ! isset( $roles[ $role ] ) || '' === trim( $content ) ) {
+			continue;
+		}
+
+		$history[] = array( 'role' => $roles[ $role ], 'content' => $content );
+	}
+
+	return $history;
 }
 
 /**
@@ -458,14 +593,32 @@ function agents_chat_jsonrpc_agent_message( string $text, string $run_id ): arra
  *
  * @param string|int|null     $rpc_id JSON-RPC request id.
  * @param array<string,mixed> $task   Task object.
+ * @param array<string,mixed> $output Original canonical agents/chat output.
  * @return array<string,mixed>
  */
-function agents_chat_jsonrpc_result_frame( $rpc_id, array $task ): array {
-	return array(
+function agents_chat_jsonrpc_result_frame( $rpc_id, array $task, array $output = array() ): array {
+	$frame = array(
 		'jsonrpc' => AGENTS_CHAT_JSONRPC_VERSION,
 		'id'      => $rpc_id,
 		'result'  => $task,
 	);
+
+	/**
+	 * Filters the complete terminal JSON-RPC frame.
+	 *
+	 * Hosts can preserve an established A2A envelope by projecting canonical
+	 * output metadata without replacing input mapping, execution, or streaming.
+	 * Invalid filter values retain the canonical default frame.
+	 *
+	 * @param array<string,mixed> $frame  Default terminal frame.
+	 * @param array<string,mixed> $task   Default Task projection.
+	 * @param array<string,mixed> $output Original canonical agents/chat output.
+	 * @param string|int|null     $rpc_id JSON-RPC request id.
+	 */
+	/** @var mixed $filtered Hosts may return invalid values from this filter. */
+	$filtered = apply_filters( 'agents_chat_jsonrpc_terminal_frame', $frame, $task, $output, $rpc_id );
+
+	return is_array( $filtered ) ? \AgentsAPI\AI\agents_api_string_keyed_array( $filtered ) : $frame;
 }
 
 /**

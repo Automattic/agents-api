@@ -59,6 +59,14 @@ agents_api_smoke_assert_equals(
 	$failures,
 	$passes
 );
+agents_api_smoke_assert_equals( 'principal', WP_Agent_Memory_Layer::normalize( 'principal' ), 'principal memory is a canonical additive layer', $failures, $passes );
+agents_api_smoke_assert_equals(
+	array( 'workspace', 'agent', 'user', 'principal', 'network', 'shared' ),
+	WP_Agent_Memory_Layer::values(),
+	'layer vocabulary preserves existing values and adds principal scope',
+	$failures,
+	$passes
+);
 
 echo "\n[3] Conversation requests carry workspace identity for transcript persisters:\n";
 
