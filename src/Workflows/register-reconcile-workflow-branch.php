@@ -592,14 +592,29 @@ function agents_workflow_update_reconcile_state( WP_Agent_Workflow_Run_Recorder 
 /**
  * Resume a durably committed continuation without rerunning aggregation.
  *
- * @return WP_Agent_Workflow_Run_Result
+ * @return WP_Agent_Workflow_Run_Result|\WP_Error
  */
 function agents_workflow_resume_reconcile_continuation( WP_Agent_Workflow_Run_Recorder $recorder, string $run_id, WP_Agent_Workflow_Run_Result $result ) {
-	if ( agents_workflow_defer_resume( $run_id, $result ) ) {
-		return $result;
+	$dispatch = agents_workflow_reconcile_with_lock(
+		$run_id,
+		static function () use ( $recorder, $run_id, $result ) {
+			$current = $recorder->find( $run_id );
+			if ( null === $current || ! $current->is_suspended() ) {
+				return null !== $current ? $current : $result;
+			}
+			if ( agents_workflow_defer_resume( $run_id, $current ) ) {
+				return $current;
+			}
+
+			// Legacy/unavailable unique-action surfaces fall back inline while the
+			// per-run lock is still held, so duplicate dispatchers cannot overlap.
+			return agents_workflow_resolve_runner( $recorder )->resume( $run_id );
+		}
+	);
+	if ( is_wp_error( $dispatch ) ) {
+		return $dispatch;
 	}
-	$runner = agents_workflow_resolve_runner( $recorder );
-	return $runner->resume( $run_id );
+	return $dispatch;
 }
 
 /**

@@ -1413,20 +1413,41 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$suspension = is_object( $result ) && method_exists( $result, 'get_suspension' )
 			? self::string_keyed_array( (array) $result->get_suspension() )
 			: array();
+		$args = array(
+			array(
+				'run_id'        => $run_id,
+				'suspension_id' => self::suspension_id( $suspension ),
+			),
+		);
+		$group = self::group_for_run( $run_id );
+		if ( self::has_scheduled_action( self::RESUME_HOOK, $args, $group ) ) {
+			return true;
+		}
+
+		$unique = self::supports_unique_enqueue();
+		$query  = self::supports_scheduled_action_query();
+		if ( ! $unique && ! $query ) {
+			// The caller holds the per-run lock and will perform the inline fallback
+			// there. Do not enqueue a non-unique action that could race it.
+			return false;
+		}
 		$action_id = self::enqueue_async_action(
 			self::RESUME_HOOK,
-			array(
-				array(
-					'run_id'        => $run_id,
-					'suspension_id' => self::suspension_id( $suspension ),
-				),
-			),
-			self::group_for_run( $run_id )
+			$args,
+			$group,
+			$unique
 		);
 
-		// If durable enqueue fails, return false so reconcile resumes inline rather
-		// than stranding a suspended run with no resume action.
-		return $action_id > 0;
+		// A unique duplicate returns 0. It is still successful deferral when the
+		// identical pending/running action is durably discoverable.
+		if ( $action_id > 0 || self::has_scheduled_action( self::RESUME_HOOK, $args, $group ) ) {
+			return true;
+		}
+
+		// Unique enqueue without a query helper cannot distinguish duplicate 0
+		// from failure. Conservatively remain deferred rather than race an existing
+		// action with inline resume.
+		return $unique && ! $query;
 	}
 
 	/**
@@ -1522,6 +1543,44 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			unset( $error );
 			return 0;
 		}
+	}
+
+	/** Whether this Action Scheduler version exposes the unique enqueue argument. */
+	private static function supports_unique_enqueue(): bool {
+		if ( ! function_exists( 'as_enqueue_async_action' ) ) {
+			return false;
+		}
+		try {
+			return ( new \ReflectionFunction( 'as_enqueue_async_action' ) )->getNumberOfParameters() >= 4;
+		} catch ( \ReflectionException $error ) {
+			unset( $error );
+			return false;
+		}
+	}
+
+	/** Whether this Action Scheduler version can query an identical action. */
+	private static function supports_scheduled_action_query(): bool {
+		return function_exists( 'as_has_scheduled_action' ) || function_exists( 'as_next_scheduled_action' );
+	}
+
+	/**
+	 * Whether an identical pending/running action already owns this continuation.
+	 *
+	 * @phpstan-impure Action Scheduler state may change after an enqueue attempt.
+	 * @param array<mixed> $args Action arguments.
+	 */
+	private static function has_scheduled_action( string $hook, array $args, string $group ): bool {
+		try {
+			if ( function_exists( 'as_has_scheduled_action' ) ) {
+				return (bool) as_has_scheduled_action( $hook, $args, $group );
+			}
+			if ( function_exists( 'as_next_scheduled_action' ) ) {
+				return false !== as_next_scheduled_action( $hook, $args, $group );
+			}
+		} catch ( \Throwable $error ) {
+			unset( $error );
+		}
+		return false;
 	}
 
 	/**

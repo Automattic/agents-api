@@ -275,6 +275,21 @@ if ( ! function_exists( 'as_enqueue_async_action' ) ) {
 		return AS_Shim::enqueue( $hook, $args, $group, $unique );
 	}
 }
+if ( ! function_exists( 'as_has_scheduled_action' ) ) {
+	function as_has_scheduled_action( string $hook, ?array $args = null, string $group = '' ): bool {
+		foreach ( AS_Shim::$queue as $action ) {
+			if (
+				$hook === $action['hook'] &&
+				( null === $args || $args === $action['args'] ) &&
+				$group === $action['group'] &&
+				empty( AS_Shim::$claimed[ $action['id'] ] )
+			) {
+				return true;
+			}
+		}
+		return false;
+	}
+}
 
 function as_smoke_fire_aggregate_actions(): void {
 	foreach ( AS_Shim::actions_for( \AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK ) as $action ) {
@@ -408,6 +423,7 @@ as_smoke_register_ability(
 as_smoke_register_ability(
 	'demo/consume',
 	static function ( array $input ): array {
+		$GLOBALS['__consume_effects'] = (int) ( $GLOBALS['__consume_effects'] ?? 0 ) + 1;
 		return array( 'consumed' => 'GOT:' . (string) ( $input['bundle'] ?? '' ) );
 	}
 );
@@ -664,15 +680,8 @@ $branch_actions2 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Bran
 // Fire the first branch normally.
 AS_Shim::fire( $branch_actions2[0]['id'] );
 
-// Now simulate TWO processes both finishing the LAST branch "at once". We drive
-// the reconcile for the last branch directly TWICE from a frame state where the
-// last handle is still outstanding — but the second call is a genuine duplicate.
-// The real guard we prove: even if TWO resume actions are enqueued, AS's claim +
-// the SUSPENDED re-check make exactly one resume effective.
-//
-// To create two enqueued RESUME actions we reconcile the last branch, then
-// hand-enqueue a SECOND identical resume (as a lagging duplicate process would),
-// mirroring "N branches each enqueue a resume action" from the design.
+// Complete aggregation, then invoke two duplicate dispatchers before any resume
+// worker executes. Both observe the same committed, still-SUSPENDED generation.
 $payload2      = $branch_actions2[1]['args'][0] ?? array();
 $last_handle_id = (string) ( $payload2['handle_id'] ?? '' );
 AS_Shim::fire( $branch_actions2[1]['id'] ); // last branch → reconcile all-terminal → enqueues resume #1
@@ -680,34 +689,32 @@ as_smoke_fire_aggregate_actions();
 
 $resume_actions2 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
 smoke_assert( 1, count( $resume_actions2 ), 'race: last branch enqueued resume #1', $failures, $passes );
-
-// A second, lagging finisher for the SAME run enqueues resume #2 (the race:
-// both observed all-terminal before either resumed). Enqueue it directly to
-// model the second process, then drive BOTH resume actions through AS's claim.
-$resume_id_2 = AS_Shim::enqueue(
-	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK,
-	array( array( 'run_id' => 'as-race' ) ),
-	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::GROUP
+$GLOBALS['__consume_effects'] = 0;
+$race_completions = 0;
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( $result, string $run_id ) use ( &$race_completions ): void {
+		unset( $result );
+		if ( 'as-race' === $run_id ) {
+			++$race_completions;
+		}
+	},
+	10,
+	2
 );
+$committed2 = $recorder2->find( 'as-race' );
+\AgentsAPI\AI\Workflows\agents_workflow_resume_reconcile_continuation( $recorder2, 'as-race', $committed2 );
+\AgentsAPI\AI\Workflows\agents_workflow_resume_reconcile_continuation( $recorder2, 'as-race', $committed2 );
 $resume_actions2 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
-smoke_assert( 2, count( $resume_actions2 ), 'race: two RESUME actions are enqueued (simultaneous finish)', $failures, $passes );
-
-// Drive AS's claim: fire both. Exactly one claims-and-runs the effective resume;
-// the other is either a claimed no-op OR runs against an already-resumed run and
-// bails on the SUSPENDED re-check. Count how many actually resumed the run.
-$fired_first  = AS_Shim::fire( $resume_actions2[0]['id'] );
-$status_after_first = $recorder2->find( 'as-race' )->get_status();
-$fired_second = AS_Shim::fire( $resume_actions2[1]['id'] );
-$status_after_second = $recorder2->find( 'as-race' )->get_status();
-
-smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $status_after_first, 'race: first claimed resume runs the run to SUCCEEDED', $failures, $passes );
-smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $status_after_second, 'race: run stays SUCCEEDED after the second resume (no corruption / no double-run)', $failures, $passes );
-
-// The second resume must be a NO-OP: its handler re-checked SUSPENDED and bailed
-// (the run already resumed). We prove exactly-once by asserting the sequential
-// `after` step ran exactly once with the correct output.
+smoke_assert( 1, count( $resume_actions2 ), 'race: simultaneous duplicate dispatchers retain one unique resume action', $failures, $passes );
+AS_Shim::fire( $resume_actions2[0]['id'] );
+$status_after_resume = $recorder2->find( 'as-race' )->get_status();
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $status_after_resume, 'race: unique claimed resume reaches success', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__consume_effects'], 'race: downstream resume effect executes exactly once', $failures, $passes );
+smoke_assert( 1, $race_completions, 'race: completion hook fires exactly once', $failures, $passes );
 $race_out = $recorder2->find( 'as-race' )->get_output()['steps'] ?? array();
 smoke_assert( 'GOT:FUSED[HEAD|BODY]', $race_out['after']['consumed'] ?? '', 'race: exactly-once resume — sequential step ran once with the aggregated output', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_run_completed' );
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 3. CRASH-RESUME DURABILITY
