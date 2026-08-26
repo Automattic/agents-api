@@ -229,7 +229,7 @@ class WP_Agent_Run_Control {
 	}
 
 	/**
-	 * Start or update an addressable run in the selected store.
+	 * Start an addressable run in the selected store.
 	 *
 	 * @param string              $store_key Option key used by the backing store.
 	 * @param string              $run_id    Run ID.
@@ -257,7 +257,7 @@ class WP_Agent_Run_Control {
 					$current                    = self::normalize_cancellation_state( $current );
 					$state['runs'][ $run_id ] = $current;
 				}
-				if ( is_array( $current ) && ( self::is_terminal_status( $current['status'] ?? null ) || self::is_cancellation_requested( $current ) ) ) {
+				if ( is_array( $current ) ) {
 					return array( 'state' => $state, 'result' => $current );
 				}
 
