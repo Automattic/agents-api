@@ -321,12 +321,14 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Branch_Executor;
 final class AS_Smoke_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	/** @var array<string,array<string,mixed>> */
 	public array $rows = array();
+	public int $updates = 0;
 
 	public function start( WP_Agent_Workflow_Run_Result $result ) {
 		$this->rows[ $result->get_run_id() ] = $result->to_array();
 		return $result->get_run_id();
 	}
 	public function update( WP_Agent_Workflow_Run_Result $result ) {
+		++$this->updates;
 		$this->rows[ $result->get_run_id() ] = $result->to_array();
 		return true;
 	}
@@ -1226,6 +1228,62 @@ remove_all_filters( 'wp_agent_workflow_branch_receipt_locate' );
 remove_all_filters( 'wp_agent_workflow_branch_receipt_delete' );
 remove_all_filters( 'wp_agent_workflow_branch_store_forget' );
 remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+
+// A tokenless branch action can fail before writing a receipt. Effects are
+// uncertain, so recovery terminalizes without rerunning the branch. A duplicate
+// failure callback arriving during completion publication must lose the locked
+// terminal election and emit no second completion or cleanup.
+AS_Shim::reset();
+$GLOBALS['__options'] = array();
+$recorder_legacy_failure = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder_legacy_failure ) { return $recorder_legacy_failure; } );
+( new WP_Agent_Workflow_Runner( $recorder_legacy_failure ) )->run( as_smoke_single_branch_spec( 'legacy-failure' ), array(), array( 'run_id' => 'as-legacy-failure' ) );
+$legacy_failure_branches = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+$legacy_failure_action_id = $legacy_failure_branches[0]['id'];
+foreach ( AS_Shim::$queue as $index => $queued_legacy_failure ) {
+	if ( $queued_legacy_failure['id'] === $legacy_failure_action_id ) {
+		unset( AS_Shim::$queue[ $index ]['args'][0]['store_backend'], AS_Shim::$queue[ $index ]['args'][0]['admission_token'] );
+	}
+}
+$legacy_failure_completions = 0;
+$legacy_failure_cleanups = 0;
+$legacy_duplicate_sent = false;
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( $result, string $run_id ) use ( &$legacy_failure_completions, &$legacy_duplicate_sent, $legacy_failure_action_id ): void {
+		unset( $result );
+		if ( 'as-legacy-failure' !== $run_id ) {
+			return;
+		}
+		++$legacy_failure_completions;
+		if ( ! $legacy_duplicate_sent ) {
+			$legacy_duplicate_sent = true;
+			do_action( 'action_scheduler_failed_execution', $legacy_failure_action_id, new RuntimeException( 'concurrent duplicate failure' ), 'test' );
+		}
+	},
+	10,
+	2
+);
+add_filter(
+	'wp_agent_workflow_branch_store_forget',
+	static function ( bool $handled ) use ( &$legacy_failure_cleanups ): bool {
+		++$legacy_failure_cleanups;
+		return $handled;
+	}
+);
+$legacy_failure_updates_before = $recorder_legacy_failure->updates;
+$legacy_failure_effect_before = (int) ( $GLOBALS['__role_worker_effects']['legacy-failure'] ?? 0 );
+do_action( 'action_scheduler_failed_execution', $legacy_failure_action_id, new RuntimeException( 'worker outcome unknown' ), 'test' );
+$legacy_failure_final = $recorder_legacy_failure->find( 'as-legacy-failure' );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $legacy_failure_final->get_status(), 'legacy failed action: receipt-less failure terminalizes honestly', $failures, $passes );
+smoke_assert( 'workflow_branch_execution_uncertain', $legacy_failure_final->get_error()['code'] ?? '', 'legacy failed action: terminal error records uncertain execution', $failures, $passes );
+smoke_assert( $legacy_failure_effect_before, (int) ( $GLOBALS['__role_worker_effects']['legacy-failure'] ?? 0 ), 'legacy failed action: recovery never reruns branch effects', $failures, $passes );
+smoke_assert( 1, $recorder_legacy_failure->updates - $legacy_failure_updates_before, 'duplicate failure race: one locked recorder terminal transition wins', $failures, $passes );
+smoke_assert( 1, $legacy_failure_completions, 'duplicate failure race: completion funnel fires once', $failures, $passes );
+smoke_assert( 1, $legacy_failure_cleanups, 'duplicate failure race: run-scoped cleanup executes once', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_run_completed' );
+remove_all_filters( 'wp_agent_workflow_branch_store_forget' );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );

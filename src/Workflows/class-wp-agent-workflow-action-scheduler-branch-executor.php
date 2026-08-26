@@ -1042,10 +1042,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			return;
 		}
 		if ( null === $receipt ) {
-			if ( WP_Agent_Workflow_Branch_Store::BACKEND_LEGACY !== $store_backend ) {
-				$failure_message = $failure instanceof \Throwable ? $failure->getMessage() : 'The branch failed before a durable reconcile continuation could be established.';
-				self::fail_reconcile_recovery( $run_id, $handle_id, $failure_message );
-			}
+			$failure_message = $failure instanceof \Throwable ? $failure->getMessage() : 'The branch failed before a durable reconcile continuation could be established.';
+			$failure_code    = self::BRANCH_HOOK === $failed_hook ? 'workflow_branch_execution_uncertain' : 'workflow_branch_reconcile_recovery_failed';
+			self::fail_reconcile_recovery( $run_id, $handle_id, $failure_message, $failure_code );
 			return;
 		}
 
@@ -1072,30 +1071,46 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		self::fail_reconcile_recovery( $run_id, $handle_id, isset( $message ) ? $message : 'No durable reconcile continuation could be established.' );
 	}
 
-	/** Mark a stranded suspended run terminal when every recovery path failed. */
-	private static function fail_reconcile_recovery( string $run_id, string $handle_id, string $message ): void {
+	/** Elect and publish one terminal failure when every recovery path failed. */
+	private static function fail_reconcile_recovery( string $run_id, string $handle_id, string $message, string $code = 'workflow_branch_reconcile_recovery_failed' ): bool {
 		$recorder = agents_workflow_resolve_recorder();
-		$result   = null !== $recorder ? $recorder->find( $run_id ) : null;
-		if ( null === $recorder || null === $result || ! $result->is_suspended() ) {
-			return;
+		if ( null === $recorder ) {
+			return false;
 		}
-		$metadata = $result->get_metadata();
-		unset( $metadata['_suspension'] );
-		$terminal = $result->with(
-			array(
-				'status'   => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
-				'error'    => array(
-					'code'    => 'workflow_branch_reconcile_recovery_failed',
-					'message' => sprintf( 'Could not recover reconciliation for branch `%s`: %s', $handle_id, $message ),
-				),
-				'ended_at' => time(),
-				'metadata' => $metadata,
-			)
+
+		$transition = WP_Agent_Workflow_Reconcile_Lock::with_lock(
+			$run_id,
+			static function () use ( $recorder, $run_id, $handle_id, $message, $code ) {
+				$result = $recorder->find( $run_id );
+				if ( null === $result || ! $result->is_suspended() ) {
+					return array( 'won' => false, 'terminal' => null );
+				}
+				$metadata = $result->get_metadata();
+				unset( $metadata['_suspension'] );
+				$terminal = $result->with(
+					array(
+						'status'   => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
+						'error'    => array(
+							'code'    => $code,
+							'message' => sprintf( 'Could not recover branch `%s`: %s', $handle_id, $message ),
+						),
+						'ended_at' => time(),
+						'metadata' => $metadata,
+					)
+				);
+				$updated = $recorder->update( $terminal );
+				return is_wp_error( $updated ) ? $updated : array( 'won' => true, 'terminal' => $terminal );
+			},
 		);
-		$recorder->update( $terminal );
+
+		if ( ! is_array( $transition ) || empty( $transition['won'] ) ) {
+			return false;
+		}
+		$terminal = $transition['terminal'];
 		\AgentsAPI\AI\WP_Agent_Run_Control::finish_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, $run_id, \AgentsAPI\AI\WP_Agent_Run_Control::STATUS_FAILED );
 		do_action( 'wp_agent_workflow_run_completed', $terminal, $run_id );
 		WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
+		return true;
 	}
 
 	/**
