@@ -220,6 +220,46 @@ require_once __DIR__ . '/../src/Abilities/functions-ability-dispatch.php';
 
 use AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Request;
 use AgentsAPI\AI\WP_Agent_Runtime_Package_Run_Result;
+use AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store;
+use AgentsAPI\AI\WP_Agent_Run_Control;
+
+final class Runtime_Package_Late_Cancel_Store implements WP_Agent_Atomic_Run_Control_Store {
+	public bool $cancel_before_next_mutation = false;
+	public ?string $terminal_before_next_mutation = null;
+	/** @var array<string,array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}> */
+	private array $states = array();
+
+	public function get_state( string $store_key ): array {
+		return $this->states[ $store_key ] ?? array( 'runs' => array(), 'queues' => array(), 'events' => array() );
+	}
+
+	public function save_state( string $store_key, array $state ): void {
+		$this->states[ $store_key ] = $state;
+	}
+
+	public function mutate_state( string $store_key, callable $mutation ): mixed {
+		$state = $this->get_state( $store_key );
+		if ( null !== $this->terminal_before_next_mutation ) {
+			$status                              = $this->terminal_before_next_mutation;
+			$this->terminal_before_next_mutation = null;
+			foreach ( $state['runs'] as &$run ) {
+				$run['status']    = $status;
+				$run['cancelled'] = WP_Agent_Run_Control::STATUS_CANCELLED === $status;
+			}
+			unset( $run );
+		} elseif ( $this->cancel_before_next_mutation ) {
+			$this->cancel_before_next_mutation = false;
+			foreach ( $state['runs'] as &$run ) {
+				$run['status']    = WP_Agent_Run_Control::STATUS_CANCELLING;
+				$run['cancelled'] = true;
+			}
+			unset( $run );
+		}
+		$mutated                    = $mutation( $state );
+		$this->states[ $store_key ] = $mutated['state'];
+		return $mutated['result'];
+	}
+}
 
 echo "\n[0] Runtime package ability resolves in normal and late Abilities API lifecycles:\n";
 do_action( 'init' );
@@ -384,5 +424,208 @@ $helper_dispatch = wp_agent_run_runtime_package(
 agents_api_smoke_assert_equals( false, is_wp_error( $helper_dispatch ), 'public helper returns handler output', $failures, $passes );
 agents_api_smoke_assert_equals( 'succeeded', is_array( $helper_dispatch ) ? $helper_dispatch['status'] ?? '' : '', 'public helper preserves result status', $failures, $passes );
 agents_api_smoke_assert_equals( 'build-site', is_array( $helper_dispatch ) ? $helper_dispatch['result']['workflow_id'] ?? '' : '', 'public helper passes workflow to handler', $failures, $passes );
+
+echo "\n[5] Reused run IDs are exact-once and terminal-idempotent:\n";
+$GLOBALS['__agents_api_smoke_actions']['wp_agent_runtime_package_run_handler'] = array();
+$reuse_store   = new Runtime_Package_Late_Cancel_Store();
+$reuse_effects = 0;
+WP_Agent_Run_Control::set_store( $reuse_store );
+add_filter(
+	'wp_agent_runtime_package_run_handler',
+	static function () use ( &$reuse_effects ): callable {
+		return static function () use ( &$reuse_effects ): array {
+			++$reuse_effects;
+			return array( 'status' => WP_Agent_Runtime_Package_Run_Result::STATUS_SUCCEEDED );
+		};
+	}
+);
+
+foreach (
+	array(
+		WP_Agent_Run_Control::STATUS_SUCCEEDED => WP_Agent_Runtime_Package_Run_Result::STATUS_SUCCEEDED,
+		WP_Agent_Run_Control::STATUS_FAILED    => WP_Agent_Runtime_Package_Run_Result::STATUS_FAILED,
+		WP_Agent_Run_Control::STATUS_CANCELLED => WP_Agent_Runtime_Package_Run_Result::STATUS_CANCELLED,
+		WP_Agent_Run_Control::STATUS_SKIPPED   => WP_Agent_Runtime_Package_Run_Result::STATUS_SKIPPED,
+	) as $stored_status => $response_status
+) {
+	$reused_run_id = 'runtime-reused-' . $stored_status;
+	WP_Agent_Run_Control::save_run(
+		AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE,
+		array(
+			'run_id'   => $reused_run_id,
+			'status'   => $stored_status,
+			'metadata' => array(
+				'package'  => array( 'slug' => 'site-builder' ),
+				'workflow' => array( 'id' => 'reused-terminal' ),
+			),
+		)
+	);
+	$effects_before = $reuse_effects;
+	$reused         = AgentsAPI\AI\agents_runtime_package_run_dispatch(
+		array(
+			'run_id'   => $reused_run_id,
+			'package'  => array( 'slug' => 'site-builder' ),
+			'workflow' => array( 'id' => 'duplicate-must-not-run' ),
+		)
+	);
+	$reused_stored  = WP_Agent_Run_Control::get_run( AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, $reused_run_id );
+	agents_api_smoke_assert_equals( $effects_before, $reuse_effects, "reused {$stored_status} run skips duplicate handler effects", $failures, $passes );
+	agents_api_smoke_assert_equals( $response_status, is_array( $reused ) ? $reused['status'] ?? '' : '', "reused {$stored_status} run returns its authoritative status", $failures, $passes );
+	agents_api_smoke_assert_equals( $stored_status, $reused_stored['status'] ?? '', "reused {$stored_status} response leaves stored winner unchanged", $failures, $passes );
+	agents_api_smoke_assert_equals( $reused_run_id, is_array( $reused ) ? $reused['run_id'] ?? '' : '', "reused {$stored_status} response preserves run identity", $failures, $passes );
+}
+
+WP_Agent_Run_Control::start_run( AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, 'runtime-reused-running' );
+$effects_before_active = $reuse_effects;
+$active_reuse          = AgentsAPI\AI\agents_runtime_package_run_dispatch(
+	array(
+		'run_id'   => 'runtime-reused-running',
+		'package'  => array( 'slug' => 'site-builder' ),
+		'workflow' => array( 'id' => 'duplicate-must-not-run' ),
+	)
+);
+$active_stored         = WP_Agent_Run_Control::get_run( AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, 'runtime-reused-running' );
+agents_api_smoke_assert_equals( true, is_wp_error( $active_reuse ), 'active duplicate run is rejected before handler execution', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_runtime_package_run_already_started', is_wp_error( $active_reuse ) ? $active_reuse->get_error_code() : '', 'active duplicate uses the exact-once already-started error', $failures, $passes );
+agents_api_smoke_assert_equals( $effects_before_active, $reuse_effects, 'active duplicate run causes no handler effects', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_RUNNING, $active_stored['status'] ?? '', 'active duplicate leaves the stored running owner unchanged', $failures, $passes );
+
+echo "\n[6] Atomic cancellation wins after the handler returns success:\n";
+$GLOBALS['__agents_api_smoke_actions']['wp_agent_runtime_package_run_handler'] = array();
+$late_cancel_store = new Runtime_Package_Late_Cancel_Store();
+WP_Agent_Run_Control::set_store( $late_cancel_store );
+add_filter(
+	'wp_agent_runtime_package_run_handler',
+	static function () use ( $late_cancel_store ): callable {
+		return static function () use ( $late_cancel_store ): array {
+			$late_cancel_store->cancel_before_next_mutation = true;
+			return array(
+				'status' => WP_Agent_Runtime_Package_Run_Result::STATUS_SUCCEEDED,
+				'result' => array( 'candidate' => 'handler-success' ),
+			);
+		};
+	}
+);
+$late_cancel_dispatch = AgentsAPI\AI\agents_runtime_package_run_dispatch(
+	array(
+		'run_id'   => 'runtime-late-cancel',
+		'package'  => array( 'slug' => 'site-builder' ),
+		'workflow' => array( 'id' => 'late-cancel' ),
+	)
+);
+$late_cancel_run = WP_Agent_Run_Control::get_run( AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, 'runtime-late-cancel' );
+agents_api_smoke_assert_equals( WP_Agent_Runtime_Package_Run_Result::STATUS_CANCELLED, is_array( $late_cancel_dispatch ) ? $late_cancel_dispatch['status'] ?? '' : '', 'dispatcher returns the authoritative cancellation winner', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_CANCELLED, $late_cancel_run['status'] ?? '', 'runtime package run-control stores the cancellation winner', $failures, $passes );
+agents_api_smoke_assert_equals( 'cancel_requested', is_array( $late_cancel_dispatch ) ? $late_cancel_dispatch['error']['code'] ?? '' : '', 'dispatcher projects the canonical cancellation error', $failures, $passes );
+agents_api_smoke_assert_equals( 'handler-success', is_array( $late_cancel_dispatch ) ? $late_cancel_dispatch['result']['candidate'] ?? '' : '', 'cancellation projection preserves handler evidence', $failures, $passes );
+WP_Agent_Run_Control::reset_store();
+
+echo "\n[7] Post-handler projection follows non-cancellation terminal winners:\n";
+$GLOBALS['__agents_api_smoke_actions']['wp_agent_runtime_package_run_handler'] = array();
+$late_failure_store = new Runtime_Package_Late_Cancel_Store();
+WP_Agent_Run_Control::set_store( $late_failure_store );
+add_filter(
+	'wp_agent_runtime_package_run_handler',
+	static function () use ( $late_failure_store ): callable {
+		return static function () use ( $late_failure_store ): array {
+			$late_failure_store->terminal_before_next_mutation = WP_Agent_Run_Control::STATUS_FAILED;
+			return array( 'status' => WP_Agent_Runtime_Package_Run_Result::STATUS_SUCCEEDED );
+		};
+	}
+);
+$late_failure_dispatch = AgentsAPI\AI\agents_runtime_package_run_dispatch(
+	array(
+		'run_id'   => 'runtime-late-failure',
+		'package'  => array( 'slug' => 'site-builder' ),
+		'workflow' => array( 'id' => 'late-failure' ),
+	)
+);
+$late_failure_run = WP_Agent_Run_Control::get_run( AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, 'runtime-late-failure' );
+agents_api_smoke_assert_equals( WP_Agent_Runtime_Package_Run_Result::STATUS_FAILED, is_array( $late_failure_dispatch ) ? $late_failure_dispatch['status'] ?? '' : '', 'dispatcher projects an authoritative failed winner after handler success', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_FAILED, $late_failure_run['status'] ?? '', 'late failed winner remains authoritative in storage', $failures, $passes );
+agents_api_smoke_assert_equals( 'agents_runtime_package_run_failed', is_array( $late_failure_dispatch ) ? $late_failure_dispatch['error']['code'] ?? '' : '', 'late failed winner receives a stable projected error', $failures, $passes );
+WP_Agent_Run_Control::reset_store();
+
+echo "\n[8] Every error exit projects a concurrent cancellation winner:\n";
+foreach ( array( 'no_handler', 'handler_error', 'invalid_result' ) as $error_exit ) {
+	$GLOBALS['__agents_api_smoke_actions']['wp_agent_runtime_package_run_handler'] = array();
+	$error_store = new Runtime_Package_Late_Cancel_Store();
+	WP_Agent_Run_Control::set_store( $error_store );
+	if ( 'no_handler' === $error_exit ) {
+		add_filter(
+			'wp_agent_runtime_package_run_handler',
+			static function ( $handler ) use ( $error_store ) {
+				$error_store->cancel_before_next_mutation = true;
+				return $handler;
+			}
+		);
+	} elseif ( 'handler_error' === $error_exit ) {
+		add_filter(
+			'wp_agent_runtime_package_run_handler',
+			static function () use ( $error_store ): callable {
+				return static function () use ( $error_store ): WP_Error {
+					$error_store->cancel_before_next_mutation = true;
+					return new WP_Error( 'runtime_handler_failed', 'handler failed' );
+				};
+			}
+		);
+	} else {
+		add_filter(
+			'wp_agent_runtime_package_run_handler',
+			static function () use ( $error_store ): callable {
+				return static function () use ( $error_store ): string {
+					$error_store->cancel_before_next_mutation = true;
+					return 'invalid';
+				};
+			}
+		);
+	}
+
+	$error_run_id = 'runtime-cancel-' . $error_exit;
+	$error_result = AgentsAPI\AI\agents_runtime_package_run_dispatch(
+		array(
+			'run_id'   => $error_run_id,
+			'package'  => array( 'slug' => 'site-builder' ),
+			'workflow' => array( 'id' => $error_exit ),
+		)
+	);
+	$error_stored = WP_Agent_Run_Control::get_run( AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, $error_run_id );
+	agents_api_smoke_assert_equals( WP_Agent_Runtime_Package_Run_Result::STATUS_CANCELLED, is_array( $error_result ) ? $error_result['status'] ?? '' : '', "{$error_exit} exit returns the concurrent cancellation winner", $failures, $passes );
+	agents_api_smoke_assert_equals( 'cancel_requested', is_array( $error_result ) ? $error_result['error']['code'] ?? '' : '', "{$error_exit} exit projects the canonical cancellation error", $failures, $passes );
+	agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_CANCELLED, $error_stored['status'] ?? '', "{$error_exit} exit matches authoritative storage", $failures, $passes );
+}
+WP_Agent_Run_Control::reset_store();
+
+echo "\n[9] Skipped handler outcomes are terminal and replay-safe:\n";
+$GLOBALS['__agents_api_smoke_actions']['wp_agent_runtime_package_run_handler'] = array();
+$skipped_store   = new Runtime_Package_Late_Cancel_Store();
+$skipped_effects = 0;
+WP_Agent_Run_Control::set_store( $skipped_store );
+add_filter(
+	'wp_agent_runtime_package_run_handler',
+	static function () use ( &$skipped_effects ): callable {
+		return static function () use ( &$skipped_effects ): array {
+			++$skipped_effects;
+			return array(
+				'status' => WP_Agent_Runtime_Package_Run_Result::STATUS_SKIPPED,
+				'result' => array( 'reason' => 'not_applicable' ),
+			);
+		};
+	}
+);
+$skipped_input = array(
+	'run_id'   => 'runtime-skipped-terminal',
+	'package'  => array( 'slug' => 'site-builder' ),
+	'workflow' => array( 'id' => 'skip' ),
+);
+$skipped_first  = AgentsAPI\AI\agents_runtime_package_run_dispatch( $skipped_input );
+$skipped_replay = AgentsAPI\AI\agents_runtime_package_run_dispatch( $skipped_input );
+$skipped_run    = WP_Agent_Run_Control::get_run( AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, 'runtime-skipped-terminal' );
+agents_api_smoke_assert_equals( WP_Agent_Runtime_Package_Run_Result::STATUS_SKIPPED, is_array( $skipped_first ) ? $skipped_first['status'] ?? '' : '', 'handler skipped result remains skipped', $failures, $passes );
+agents_api_smoke_assert_equals( 'not_applicable', is_array( $skipped_first ) ? $skipped_first['result']['reason'] ?? '' : '', 'initial skipped result preserves handler payload', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_SKIPPED, $skipped_run['status'] ?? '', 'skipped is terminal in authoritative run-control storage', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Runtime_Package_Run_Result::STATUS_SKIPPED, is_array( $skipped_replay ) ? $skipped_replay['status'] ?? '' : '', 'skipped duplicate returns the stored terminal winner', $failures, $passes );
+agents_api_smoke_assert_equals( 1, $skipped_effects, 'skipped duplicate does not re-execute handler effects', $failures, $passes );
+WP_Agent_Run_Control::reset_store();
 
 agents_api_smoke_finish( 'Agents API runtime package run contract', $failures, $passes );

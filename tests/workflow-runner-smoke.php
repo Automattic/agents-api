@@ -191,6 +191,7 @@ require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-executor.
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-runner.php';
 
 use AgentsAPI\AI\WP_Agent_Run_Control;
+use AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store;
 use AgentsAPI\AI\WP_Agent_Run_Control_Store;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result;
@@ -241,6 +242,50 @@ class Memory_Run_Control_Store implements WP_Agent_Run_Control_Store {
 	}
 }
 
+class Workflow_Late_Cancel_Store implements WP_Agent_Atomic_Run_Control_Store {
+	public bool $cancel_before_next_mutation = false;
+	public int $mutations_until_cancel = 0;
+	public ?string $terminal_before_next_mutation = null;
+	/** @var array<string,array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}> */
+	private array $states = array();
+
+	public function get_state( string $store_key ): array {
+		return $this->states[ $store_key ] ?? array( 'runs' => array(), 'queues' => array(), 'events' => array() );
+	}
+
+	public function save_state( string $store_key, array $state ): void {
+		$this->states[ $store_key ] = $state;
+	}
+
+	public function mutate_state( string $store_key, callable $mutation ): mixed {
+		$state = $this->get_state( $store_key );
+		$cancel = $this->cancel_before_next_mutation;
+		if ( $this->mutations_until_cancel > 0 ) {
+			--$this->mutations_until_cancel;
+			$cancel = 0 === $this->mutations_until_cancel;
+		}
+		if ( null !== $this->terminal_before_next_mutation ) {
+			$status                              = $this->terminal_before_next_mutation;
+			$this->terminal_before_next_mutation = null;
+			foreach ( $state['runs'] as &$run ) {
+				$run['status']    = $status;
+				$run['cancelled'] = false;
+			}
+			unset( $run );
+		} elseif ( $cancel ) {
+			$this->cancel_before_next_mutation = false;
+			foreach ( $state['runs'] as &$run ) {
+				$run['status']    = WP_Agent_Run_Control::STATUS_CANCELLING;
+				$run['cancelled'] = true;
+			}
+			unset( $run );
+		}
+		$mutated                   = $mutation( $state );
+		$this->states[ $store_key ] = $mutated['state'];
+		return $mutated['result'];
+	}
+}
+
 // ─── Happy path: 2 sequential ability steps with bindings between them ───
 
 workflow_runner_smoke_register_ability(
@@ -276,6 +321,26 @@ workflow_runner_smoke_register_ability(
 	static function ( array $input ): array {
 		WP_Agent_Run_Control::request_cancel( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, (string) ( $input['run_id'] ?? '' ) );
 		return array( 'cancel_requested' => true );
+	}
+);
+workflow_runner_smoke_register_ability(
+	'demo/arm-late-cancel',
+	static function (): array {
+		$store = $GLOBALS['__workflow_late_cancel_store'] ?? null;
+		if ( $store instanceof Workflow_Late_Cancel_Store ) {
+			$store->cancel_before_next_mutation = true;
+		}
+		return array( 'completed' => true );
+	}
+);
+workflow_runner_smoke_register_ability(
+	'demo/arm-terminal-winner',
+	static function (): array {
+		$store = $GLOBALS['__workflow_terminal_store'] ?? null;
+		if ( $store instanceof Workflow_Late_Cancel_Store ) {
+			$store->terminal_before_next_mutation = (string) ( $GLOBALS['__workflow_terminal_status'] ?? '' );
+		}
+		return array( 'completed' => true );
 	}
 );
 workflow_runner_smoke_register_ability(
@@ -352,6 +417,85 @@ smoke_assert( 1, $result->get_replay_metadata()['run_record_schema_version'] ?? 
 smoke_assert( '1.2.3', $result->get_replay_metadata()['workflow_spec_version'] ?? '', 'replay metadata includes workflow spec version', $failures, $passes );
 smoke_assert( true, 64 === strlen( $result->get_replay_metadata()['workflow_spec_hash'] ?? '' ), 'replay metadata includes sha256 spec hash', $failures, $passes );
 smoke_assert( $spec->to_array(), $result->get_replay_metadata()['workflow_spec_snapshot'] ?? array(), 'replay metadata includes workflow spec snapshot', $failures, $passes );
+
+// ─── Cancellation committed inside finish wins every terminal projection ─
+
+$late_cancel_spec = WP_Agent_Workflow_Spec::from_array(
+	array(
+		'id'    => 'demo/late-cancel',
+		'steps' => array(
+			array( 'id' => 'arm', 'type' => 'ability', 'ability' => 'demo/arm-late-cancel' ),
+		),
+	)
+);
+$late_cancel_store                         = new Workflow_Late_Cancel_Store();
+$GLOBALS['__workflow_late_cancel_store']  = $late_cancel_store;
+$late_cancel_hook_result                  = null;
+WP_Agent_Run_Control::set_store( $late_cancel_store );
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( WP_Agent_Workflow_Run_Result $completed, string $run_id ) use ( &$late_cancel_hook_result ): void {
+		if ( 'late-cancel-run' === $run_id ) {
+			$late_cancel_hook_result = $completed;
+		}
+	},
+	10,
+	2
+);
+$late_cancel_recorder = new Capture_Recorder();
+$late_cancel_result   = ( new WP_Agent_Workflow_Runner( $late_cancel_recorder ) )->run( $late_cancel_spec, array(), array( 'run_id' => 'late-cancel-run' ) );
+$late_cancel_record   = end( $late_cancel_recorder->writes );
+$late_cancel_stored   = WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, 'late-cancel-run' );
+
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $late_cancel_result->get_status(), 'late atomic cancellation replaces the runner candidate return', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $late_cancel_record['status'] ?? '', 'late atomic cancellation reaches the recorder terminal update', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $late_cancel_hook_result instanceof WP_Agent_Workflow_Run_Result ? $late_cancel_hook_result->get_status() : '', 'late atomic cancellation reaches the completion hook', $failures, $passes );
+smoke_assert( WP_Agent_Run_Control::STATUS_CANCELLED, $late_cancel_stored['status'] ?? '', 'late atomic cancellation is the run-control winner', $failures, $passes );
+smoke_assert( 'cancel_requested', $late_cancel_result->get_error()['code'] ?? '', 'late atomic cancellation returns the canonical cancellation error', $failures, $passes );
+WP_Agent_Run_Control::reset_store();
+unset( $GLOBALS['__workflow_late_cancel_store'] );
+
+$terminal_winner_spec = WP_Agent_Workflow_Spec::from_array(
+	array(
+		'id'    => 'demo/generic-terminal-winner',
+		'steps' => array( array( 'id' => 'arm', 'type' => 'ability', 'ability' => 'demo/arm-terminal-winner' ) ),
+	)
+);
+foreach (
+	array(
+		WP_Agent_Run_Control::STATUS_BUDGET_EXCEEDED => 'workflow_run_budget_exceeded',
+		WP_Agent_Run_Control::STATUS_STALLED         => 'workflow_run_stalled',
+		WP_Agent_Run_Control::STATUS_INTERRUPTED     => 'workflow_run_interrupted',
+	) as $generic_status => $workflow_error
+) {
+	$terminal_store                             = new Workflow_Late_Cancel_Store();
+	$GLOBALS['__workflow_terminal_store']       = $terminal_store;
+	$GLOBALS['__workflow_terminal_status']      = $generic_status;
+	$terminal_hook                              = null;
+	$terminal_run_id                            = 'workflow-' . $generic_status;
+	WP_Agent_Run_Control::set_store( $terminal_store );
+	add_action(
+		'wp_agent_workflow_run_completed',
+		static function ( WP_Agent_Workflow_Run_Result $completed, string $run_id ) use ( &$terminal_hook, $terminal_run_id ): void {
+			if ( $terminal_run_id === $run_id ) {
+				$terminal_hook = $completed;
+			}
+		},
+		10,
+		2
+	);
+	$terminal_recorder = new Capture_Recorder();
+	$terminal_result   = ( new WP_Agent_Workflow_Runner( $terminal_recorder ) )->run( $terminal_winner_spec, array(), array( 'run_id' => $terminal_run_id ) );
+	$terminal_record   = end( $terminal_recorder->writes );
+	$terminal_stored   = WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, $terminal_run_id );
+	smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $terminal_result->get_status(), "{$generic_status} winner returns an honest failed workflow result", $failures, $passes );
+	smoke_assert( $workflow_error, $terminal_result->get_error()['code'] ?? '', "{$generic_status} winner uses a stable workflow error", $failures, $passes );
+	smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $terminal_record['status'] ?? '', "{$generic_status} winner reaches recorder projection", $failures, $passes );
+	smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $terminal_hook instanceof WP_Agent_Workflow_Run_Result ? $terminal_hook->get_status() : '', "{$generic_status} winner reaches completion projection", $failures, $passes );
+	smoke_assert( $generic_status, $terminal_stored['status'] ?? '', "{$generic_status} workflow projection matches authoritative storage", $failures, $passes );
+}
+WP_Agent_Run_Control::reset_store();
+unset( $GLOBALS['__workflow_terminal_store'], $GLOBALS['__workflow_terminal_status'] );
 
 // ─── Generic run-control cancellation stops before the next step ──────
 
@@ -556,6 +700,30 @@ smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $result4->get_status(
 smoke_assert( 'missing_required_input', $result4->get_error()['code'], 'input error has expected code', $failures, $passes );
 smoke_assert( 0, count( $result4->get_steps() ), 'no steps run when input validation fails', $failures, $passes );
 
+$input_cancel_store                       = new Workflow_Late_Cancel_Store();
+$input_cancel_store->mutations_until_cancel = 2;
+$input_cancel_hook                        = null;
+WP_Agent_Run_Control::set_store( $input_cancel_store );
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( WP_Agent_Workflow_Run_Result $completed, string $run_id ) use ( &$input_cancel_hook ): void {
+		if ( 'input-cancel-run' === $run_id ) {
+			$input_cancel_hook = $completed;
+		}
+	},
+	10,
+	2
+);
+$input_cancel_recorder = new Capture_Recorder();
+$input_cancel_result   = ( new WP_Agent_Workflow_Runner( $input_cancel_recorder ) )->run( $spec, array(), array( 'run_id' => 'input-cancel-run' ) );
+$input_cancel_record   = end( $input_cancel_recorder->writes );
+$input_cancel_stored   = WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, 'input-cancel-run' );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $input_cancel_result->get_status(), 'input-validation finish returns a concurrent cancellation winner', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $input_cancel_record['status'] ?? '', 'input-validation recorder receives the cancellation winner', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $input_cancel_hook instanceof WP_Agent_Workflow_Run_Result ? $input_cancel_hook->get_status() : '', 'input-validation completion hook receives the cancellation winner', $failures, $passes );
+smoke_assert( WP_Agent_Run_Control::STATUS_CANCELLED, $input_cancel_stored['status'] ?? '', 'input-validation response matches authoritative storage', $failures, $passes );
+WP_Agent_Run_Control::reset_store();
+
 // ─── Unknown step type with no handler ───────────────────────────────
 
 $martian = WP_Agent_Workflow_Spec::from_array(
@@ -601,12 +769,27 @@ class Failing_Start_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	public function recent( array $args = array() ): array { return array(); }
 }
 
+$recorder_start_completions = 0;
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( WP_Agent_Workflow_Run_Result $completed, string $run_id ) use ( &$recorder_start_completions ): void {
+		unset( $completed );
+		if ( 'recorder-start-fail' === $run_id ) {
+			++$recorder_start_completions;
+		}
+	},
+	10,
+	2
+);
 $recorder3 = new Failing_Start_Recorder();
-$result6   = ( new WP_Agent_Workflow_Runner( $recorder3 ) )->run( $spec, array( 'text' => 'hi' ) );
+$result6   = ( new WP_Agent_Workflow_Runner( $recorder3 ) )->run( $spec, array( 'text' => 'hi' ), array( 'run_id' => 'recorder-start-fail' ) );
+$recorder_start_stored = WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, 'recorder-start-fail' );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $result6->get_status(), 'recorder start failure => failed run', $failures, $passes );
 smoke_assert( 'recorder_start_failed', $result6->get_error()['code'], 'recorder start failure has expected code', $failures, $passes );
 smoke_assert( 0, count( $result6->get_steps() ), 'no steps run when recorder start fails', $failures, $passes );
 smoke_assert( 0, $recorder3->update_calls, 'no update fired when start failed', $failures, $passes );
+smoke_assert( 1, $recorder_start_completions, 'recorder start failure fires completion exactly once', $failures, $passes );
+smoke_assert( WP_Agent_Run_Control::STATUS_FAILED, $recorder_start_stored['status'] ?? '', 'recorder start failure terminalizes run-control', $failures, $passes );
 
 // ─── Input-validation failure goes through start → update lifecycle ───
 
@@ -631,6 +814,55 @@ smoke_assert( 'start', $tracker->events[0]['op'] ?? '', 'recorder sees start fir
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_RUNNING, $tracker->events[0]['status'] ?? '', 'start is called with RUNNING', $failures, $passes );
 smoke_assert( 'update', $tracker->events[1]['op'] ?? '', 'recorder sees update second', $failures, $passes );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $tracker->events[1]['status'] ?? '', 'update flips status to FAILED', $failures, $passes );
+
+class Resume_Failure_Recorder implements WP_Agent_Workflow_Run_Recorder {
+	public int $updates = 0;
+	public function __construct( private WP_Agent_Workflow_Run_Result $result ) {}
+	public function start( WP_Agent_Workflow_Run_Result $result ) { unset( $result ); return ''; }
+	public function update( WP_Agent_Workflow_Run_Result $result ) { ++$this->updates; $this->result = $result; return true; }
+	public function find( string $run_id ): ?WP_Agent_Workflow_Run_Result { return $run_id === $this->result->get_run_id() ? $this->result : null; }
+	public function recent( array $args = array() ): array { unset( $args ); return array( $this->result ); }
+}
+
+$resume_source = new WP_Agent_Workflow_Run_Result(
+	'resume-spec-missing',
+	'demo/missing-replay',
+	WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED,
+	array(),
+	array(),
+	array(),
+	array(),
+	time(),
+	0,
+	array( '_suspension' => array( 'step_index' => 0 ) ),
+	array(),
+	array()
+);
+$resume_recorder    = new Resume_Failure_Recorder( $resume_source );
+$resume_completions = 0;
+WP_Agent_Run_Control::start_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, 'resume-spec-missing', array( 'workflow_id' => 'demo/missing-replay' ) );
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( WP_Agent_Workflow_Run_Result $completed, string $run_id ) use ( &$resume_completions ): void {
+		unset( $completed );
+		if ( 'resume-spec-missing' === $run_id ) {
+			++$resume_completions;
+		}
+	},
+	10,
+	2
+);
+$resume_runner = new WP_Agent_Workflow_Runner( $resume_recorder );
+$resume_failed = $resume_runner->resume( 'resume-spec-missing' );
+$resume_stored = WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, 'resume-spec-missing' );
+$resume_replay = $resume_runner->resume( 'resume-spec-missing' );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $resume_failed->get_status(), 'missing resume spec returns terminal failure', $failures, $passes );
+smoke_assert( 'workflow_resume_spec_unavailable', $resume_failed->get_error()['code'] ?? '', 'missing resume spec keeps checked failure code', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $resume_recorder->find( 'resume-spec-missing' )->get_status(), 'missing resume spec updates recorder terminal state', $failures, $passes );
+smoke_assert( WP_Agent_Run_Control::STATUS_FAILED, $resume_stored['status'] ?? '', 'missing resume spec terminalizes run-control', $failures, $passes );
+smoke_assert( 1, $resume_completions, 'missing resume spec publishes completion exactly once', $failures, $passes );
+smoke_assert( 1, $resume_recorder->updates, 'duplicate failed resume does not update recorder again', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $resume_replay->get_status(), 'duplicate failed resume is idempotent', $failures, $passes );
 
 // ─── foreach step iterates over bound arrays with scoped vars ────────
 
