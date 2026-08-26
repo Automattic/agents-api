@@ -244,6 +244,7 @@ class Memory_Run_Control_Store implements WP_Agent_Run_Control_Store {
 
 class Workflow_Late_Cancel_Store implements WP_Agent_Atomic_Run_Control_Store {
 	public bool $cancel_before_next_mutation = false;
+	public int $mutations_until_cancel = 0;
 	/** @var array<string,array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}> */
 	private array $states = array();
 
@@ -257,7 +258,12 @@ class Workflow_Late_Cancel_Store implements WP_Agent_Atomic_Run_Control_Store {
 
 	public function mutate_state( string $store_key, callable $mutation ): mixed {
 		$state = $this->get_state( $store_key );
-		if ( $this->cancel_before_next_mutation ) {
+		$cancel = $this->cancel_before_next_mutation;
+		if ( $this->mutations_until_cancel > 0 ) {
+			--$this->mutations_until_cancel;
+			$cancel = 0 === $this->mutations_until_cancel;
+		}
+		if ( $cancel ) {
 			$this->cancel_before_next_mutation = false;
 			foreach ( $state['runs'] as &$run ) {
 				$run['status']    = WP_Agent_Run_Control::STATUS_CANCELLING;
@@ -632,6 +638,30 @@ $result4 = ( new WP_Agent_Workflow_Runner( null ) )->run( $spec /* missing text 
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $result4->get_status(), 'missing required input fails fast', $failures, $passes );
 smoke_assert( 'missing_required_input', $result4->get_error()['code'], 'input error has expected code', $failures, $passes );
 smoke_assert( 0, count( $result4->get_steps() ), 'no steps run when input validation fails', $failures, $passes );
+
+$input_cancel_store                       = new Workflow_Late_Cancel_Store();
+$input_cancel_store->mutations_until_cancel = 2;
+$input_cancel_hook                        = null;
+WP_Agent_Run_Control::set_store( $input_cancel_store );
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( WP_Agent_Workflow_Run_Result $completed, string $run_id ) use ( &$input_cancel_hook ): void {
+		if ( 'input-cancel-run' === $run_id ) {
+			$input_cancel_hook = $completed;
+		}
+	},
+	10,
+	2
+);
+$input_cancel_recorder = new Capture_Recorder();
+$input_cancel_result   = ( new WP_Agent_Workflow_Runner( $input_cancel_recorder ) )->run( $spec, array(), array( 'run_id' => 'input-cancel-run' ) );
+$input_cancel_record   = end( $input_cancel_recorder->writes );
+$input_cancel_stored   = WP_Agent_Run_Control::get_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, 'input-cancel-run' );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $input_cancel_result->get_status(), 'input-validation finish returns a concurrent cancellation winner', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $input_cancel_record['status'] ?? '', 'input-validation recorder receives the cancellation winner', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_CANCELLED, $input_cancel_hook instanceof WP_Agent_Workflow_Run_Result ? $input_cancel_hook->get_status() : '', 'input-validation completion hook receives the cancellation winner', $failures, $passes );
+smoke_assert( WP_Agent_Run_Control::STATUS_CANCELLED, $input_cancel_stored['status'] ?? '', 'input-validation response matches authoritative storage', $failures, $passes );
+WP_Agent_Run_Control::reset_store();
 
 // ─── Unknown step type with no handler ───────────────────────────────
 

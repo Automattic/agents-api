@@ -545,4 +545,54 @@ agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_FAILED, $late_failu
 agents_api_smoke_assert_equals( 'agents_runtime_package_run_failed', is_array( $late_failure_dispatch ) ? $late_failure_dispatch['error']['code'] ?? '' : '', 'late failed winner receives a stable projected error', $failures, $passes );
 WP_Agent_Run_Control::reset_store();
 
+echo "\n[8] Every error exit projects a concurrent cancellation winner:\n";
+foreach ( array( 'no_handler', 'handler_error', 'invalid_result' ) as $error_exit ) {
+	$GLOBALS['__agents_api_smoke_actions']['wp_agent_runtime_package_run_handler'] = array();
+	$error_store = new Runtime_Package_Late_Cancel_Store();
+	WP_Agent_Run_Control::set_store( $error_store );
+	if ( 'no_handler' === $error_exit ) {
+		add_filter(
+			'wp_agent_runtime_package_run_handler',
+			static function ( $handler ) use ( $error_store ) {
+				$error_store->cancel_before_next_mutation = true;
+				return $handler;
+			}
+		);
+	} elseif ( 'handler_error' === $error_exit ) {
+		add_filter(
+			'wp_agent_runtime_package_run_handler',
+			static function () use ( $error_store ): callable {
+				return static function () use ( $error_store ): WP_Error {
+					$error_store->cancel_before_next_mutation = true;
+					return new WP_Error( 'runtime_handler_failed', 'handler failed' );
+				};
+			}
+		);
+	} else {
+		add_filter(
+			'wp_agent_runtime_package_run_handler',
+			static function () use ( $error_store ): callable {
+				return static function () use ( $error_store ): string {
+					$error_store->cancel_before_next_mutation = true;
+					return 'invalid';
+				};
+			}
+		);
+	}
+
+	$error_run_id = 'runtime-cancel-' . $error_exit;
+	$error_result = AgentsAPI\AI\agents_runtime_package_run_dispatch(
+		array(
+			'run_id'   => $error_run_id,
+			'package'  => array( 'slug' => 'site-builder' ),
+			'workflow' => array( 'id' => $error_exit ),
+		)
+	);
+	$error_stored = WP_Agent_Run_Control::get_run( AgentsAPI\AI\AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, $error_run_id );
+	agents_api_smoke_assert_equals( WP_Agent_Runtime_Package_Run_Result::STATUS_CANCELLED, is_array( $error_result ) ? $error_result['status'] ?? '' : '', "{$error_exit} exit returns the concurrent cancellation winner", $failures, $passes );
+	agents_api_smoke_assert_equals( 'cancel_requested', is_array( $error_result ) ? $error_result['error']['code'] ?? '' : '', "{$error_exit} exit projects the canonical cancellation error", $failures, $passes );
+	agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_CANCELLED, $error_stored['status'] ?? '', "{$error_exit} exit matches authoritative storage", $failures, $passes );
+}
+WP_Agent_Run_Control::reset_store();
+
 agents_api_smoke_finish( 'Agents API runtime package run contract', $failures, $passes );

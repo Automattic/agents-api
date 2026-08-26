@@ -218,30 +218,27 @@ function agents_runtime_package_run_dispatch( array $input ) {
 	 */
 	$handler = apply_filters( 'wp_agent_runtime_package_run_handler', null, $request, $input );
 	if ( ! is_callable( $handler ) ) {
-		WP_Agent_Run_Control::finish_run( AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, $run_id, WP_Agent_Run_Control::STATUS_FAILED );
 		do_action( 'agents_runtime_package_run_dispatch_failed', 'no_handler', $input );
-		return new \WP_Error(
+		return agents_runtime_package_run_finalize_failure( $run_id, new \WP_Error(
 			'agents_runtime_package_run_no_handler',
 			'No agents/run-runtime-package handler is registered. Install a consumer runtime or add a callable to the wp_agent_runtime_package_run_handler filter.'
-		);
+		) );
 	}
 
 	$result = call_user_func( $handler, $request, $input );
 	if ( is_wp_error( $result ) ) {
-		WP_Agent_Run_Control::finish_run( AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, $run_id, WP_Agent_Run_Control::STATUS_FAILED );
 		do_action( 'agents_runtime_package_run_dispatch_failed', $result->get_error_code(), $input );
-		return $result;
+		return agents_runtime_package_run_finalize_failure( $run_id, $result );
 	}
 
 	if ( $result instanceof WP_Agent_Runtime_Package_Run_Result ) {
 		$result = $result->to_array();
 	} elseif ( ! is_array( $result ) ) {
-		WP_Agent_Run_Control::finish_run( AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, $run_id, WP_Agent_Run_Control::STATUS_FAILED );
 		do_action( 'agents_runtime_package_run_dispatch_failed', 'invalid_result', $input );
-		return new \WP_Error(
+		return agents_runtime_package_run_finalize_failure( $run_id, new \WP_Error(
 			'agents_runtime_package_run_invalid_result',
 			'agents/run-runtime-package handlers must return an array, WP_Agent_Runtime_Package_Run_Result, or WP_Error.'
-		);
+		) );
 	}
 
 	$result           = agents_runtime_package_run_string_keyed_array( $result );
@@ -277,6 +274,16 @@ function agents_runtime_package_run_is_terminal_status( mixed $status ): bool {
 		),
 		true
 	);
+}
+
+/** @return array<string,mixed>|\WP_Error */
+function agents_runtime_package_run_finalize_failure( string $run_id, \WP_Error $failure ) {
+	$authoritative = WP_Agent_Run_Control::finish_run( AGENTS_RUNTIME_PACKAGE_RUN_CONTROL_STORE, $run_id, WP_Agent_Run_Control::STATUS_FAILED );
+	if ( null === $authoritative || WP_Agent_Run_Control::STATUS_FAILED === ( $authoritative['status'] ?? '' ) ) {
+		return $failure;
+	}
+
+	return agents_runtime_package_run_project_authoritative( $authoritative );
 }
 
 /**

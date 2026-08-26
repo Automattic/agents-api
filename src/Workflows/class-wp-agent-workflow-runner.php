@@ -185,10 +185,11 @@ class WP_Agent_Workflow_Runner {
 					'ended_at' => time(),
 				)
 			);
+			$terminal = self::authoritative_terminal_result( $terminal );
 			if ( $this->recorder ) {
 				$this->recorder->update( $terminal );
 			}
-			WP_Agent_Run_Control::finish_run( self::RUN_CONTROL_STORE, $result->get_run_id(), WP_Agent_Run_Control::STATUS_FAILED );
+			do_action( 'wp_agent_workflow_run_completed', $terminal, $terminal->get_run_id() );
 			return $terminal;
 		}
 
@@ -314,10 +315,11 @@ class WP_Agent_Workflow_Runner {
 			$step = $steps[ $step_index ];
 
 			if ( self::is_cancel_requested( $result->get_run_id() ) ) {
-				$result = self::cancelled_result( $result, $step_records );
+				$result = self::authoritative_terminal_result( self::cancelled_result( $result, $step_records ) );
 				if ( $this->recorder ) {
 					$this->recorder->update( $result );
 				}
+				do_action( 'wp_agent_workflow_run_completed', $result, $result->get_run_id() );
 				return $result;
 			}
 
@@ -325,10 +327,11 @@ class WP_Agent_Workflow_Runner {
 			$step_records[] = $record;
 
 			if ( self::is_cancel_requested( $result->get_run_id() ) ) {
-				$result = self::cancelled_result( $result, $step_records );
+				$result = self::authoritative_terminal_result( self::cancelled_result( $result, $step_records ) );
 				if ( $this->recorder ) {
 					$this->recorder->update( $result );
 				}
+				do_action( 'wp_agent_workflow_run_completed', $result, $result->get_run_id() );
 				return $result;
 			}
 
@@ -400,12 +403,7 @@ class WP_Agent_Workflow_Runner {
 			)
 		);
 
-		$authoritative = WP_Agent_Run_Control::finish_run(
-			self::RUN_CONTROL_STORE,
-			$result->get_run_id(),
-			$failed ? WP_Agent_Run_Control::STATUS_FAILED : WP_Agent_Run_Control::STATUS_SUCCEEDED
-		);
-		$result        = self::project_authoritative_terminal( $result, $authoritative );
+		$result = self::authoritative_terminal_result( $result );
 
 		if ( $this->recorder ) {
 			$this->recorder->update( $result );
@@ -517,19 +515,39 @@ class WP_Agent_Workflow_Runner {
 	 * @param array<mixed> $step_records Step records completed before cancellation was observed.
 	 */
 	private static function cancelled_result( WP_Agent_Workflow_Run_Result $result, array $step_records ): WP_Agent_Workflow_Run_Result {
-		WP_Agent_Run_Control::finish_run( self::RUN_CONTROL_STORE, $result->get_run_id(), WP_Agent_Run_Control::STATUS_CANCELLED );
-
 		return self::project_cancelled_result( $result, $step_records );
 	}
 
 	/**
-	 * Project the serialized run-control winner into the workflow result.
-	 *
-	 * @param array<string,mixed>|null $authoritative Authoritative run-control row.
+	 * Commit and project one authoritative terminal workflow outcome.
 	 */
-	private static function project_authoritative_terminal( WP_Agent_Workflow_Run_Result $result, ?array $authoritative ): WP_Agent_Workflow_Run_Result {
-		if ( null !== $authoritative && WP_Agent_Run_Control::STATUS_CANCELLED === ( $authoritative['status'] ?? '' ) ) {
+	public static function authoritative_terminal_result( WP_Agent_Workflow_Run_Result $result ): WP_Agent_Workflow_Run_Result {
+		$status = WP_Agent_Workflow_Run_Result::STATUS_CANCELLED === $result->get_status()
+			? WP_Agent_Run_Control::STATUS_CANCELLED
+			: ( WP_Agent_Workflow_Run_Result::STATUS_FAILED === $result->get_status() ? WP_Agent_Run_Control::STATUS_FAILED : WP_Agent_Run_Control::STATUS_SUCCEEDED );
+		$authoritative = WP_Agent_Run_Control::finish_run( self::RUN_CONTROL_STORE, $result->get_run_id(), $status );
+		if ( null === $authoritative ) {
+			return $result;
+		}
+
+		$stored_status = WP_Agent_Run_Control::normalize_status( $authoritative['status'] ?? '' );
+		if ( WP_Agent_Run_Control::STATUS_CANCELLED === $stored_status ) {
 			return self::project_cancelled_result( $result, $result->get_steps() );
+		}
+		if ( WP_Agent_Run_Control::STATUS_FAILED === $stored_status ) {
+			$error = $result->get_error();
+			return $result->with(
+				array(
+					'status' => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
+					'error'  => array() !== $error ? $error : array(
+						'code'    => 'workflow_run_failed',
+						'message' => 'The workflow run failed.',
+					),
+				)
+			);
+		}
+		if ( in_array( $stored_status, array( WP_Agent_Run_Control::STATUS_SUCCEEDED, WP_Agent_Run_Control::STATUS_COMPLETED ), true ) ) {
+			return $result->with( array( 'status' => WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, 'error' => array() ) );
 		}
 
 		return $result;
