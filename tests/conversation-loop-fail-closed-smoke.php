@@ -30,6 +30,8 @@ echo "agents-api-conversation-loop-fail-closed-smoke\n";
 
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
+require_once __DIR__ . '/class-agents-api-memory-atomic-run-control-store.php';
+AgentsAPI\AI\WP_Agent_Run_Control::set_store( new Agents_API_Memory_Atomic_Run_Control_Store() );
 
 // A transcript persister that records whether it was called and with what status.
 $persist_log = array();
@@ -46,6 +48,7 @@ $persister   = new class( $persist_log ) implements AgentsAPI\AI\WP_Agent_Transc
 		$this->log[] = array(
 			'message_count' => count( $messages ),
 			'status'        => $result['status'] ?? '',
+			'result'        => $result,
 		);
 
 		return 'transcript-' . count( $this->log );
@@ -101,6 +104,7 @@ agents_api_smoke_assert_equals( 'continuation policy exploded', $result['failure
 agents_api_smoke_assert_equals( 1, count( $failed_events ), 'a failed lifecycle event is emitted', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $persist_log ), 'transcript persister is called on the fail-closed path', $failures, $passes );
 agents_api_smoke_assert_equals( 'failed', $persist_log[0]['status'] ?? '', 'persister receives the failed result', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( $loop_id )['status'] ?? '', 'should_continue failure durably finalizes run control', $failures, $passes );
 
 echo "\n[2] The normal (non-throwing) continuation path still completes cleanly:\n";
 $persist_log = array();
@@ -134,18 +138,200 @@ agents_api_smoke_assert_equals( 0, count( $ok_failed_events ), 'no failed event 
 agents_api_smoke_assert_equals( 1, count( $ok_completed_events ), 'a completed event is emitted on the normal path', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $persist_log ), 'persister is called once on the normal path', $failures, $passes );
 
-echo "\n[3] The turn-runner contract violation (non-array return) still escapes to the caller:\n";
+echo "\n[3] Policy exceptions fail closed before tool execution:\n";
+$policy_executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
+	public int $calls = 0;
+	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
+		unset( $tool_definition, $context );
+		++$this->calls;
+		return array( 'success' => true, 'tool_name' => $tool_call['tool_name'], 'result' => array( 'ok' => true ) );
+	}
+};
+$policy_tools = array(
+	'write/item' => array(
+		'name'        => 'write/item',
+		'source'      => 'test',
+		'description' => 'Write one item.',
+		'parameters'  => array( 'type' => 'object', 'properties' => array() ),
+		'executor'    => 'test',
+	),
+);
+$tool_turn = static function ( array $messages ): array {
+	return array(
+		'messages'   => $messages,
+		'tool_calls' => array( array( 'id' => 'policy-call', 'name' => 'write/item', 'parameters' => array() ) ),
+	);
+};
+
+$persist_log    = array();
+$mediator_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'write' ) ),
+	$tool_turn,
+	array(
+		'run_id'                => 'fail-closed-mediator',
+		'transcript_session_id' => 'fail-closed-mediator-session',
+		'tool_executor'         => $policy_executor,
+		'tool_declarations'     => $policy_tools,
+		'pre_tool_mediator'     => static function (): array {
+			throw new RuntimeException( 'mediator unavailable' );
+		},
+		'transcript_persister'  => $persister,
+	)
+);
+agents_api_smoke_assert_equals( 'failed', $mediator_result['status'] ?? '', 'throwing mediator fails the run closed', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $policy_executor->calls, 'throwing mediator never substitutes proceed', $failures, $passes );
+
+add_filter(
+	'agents_api_pre_tool_call_decision',
+	static function ( array $decision, array $context ): array {
+		if ( 'gate-call' === ( $context['tool_call_id'] ?? '' ) ) {
+			throw new RuntimeException( 'gate unavailable' );
+		}
+		return $decision;
+	},
+	10,
+	2
+);
+$gate_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'write' ) ),
+	static function ( array $messages ): array {
+		return array( 'messages' => $messages, 'tool_calls' => array( array( 'id' => 'gate-call', 'name' => 'write/item', 'parameters' => array() ) ) );
+	},
+	array(
+		'run_id'                => 'fail-closed-gate',
+		'transcript_session_id' => 'fail-closed-gate-session',
+		'tool_executor'         => $policy_executor,
+		'tool_declarations'     => $policy_tools,
+		'transcript_persister'  => $persister,
+	)
+);
+agents_api_smoke_assert_equals( 'failed', $gate_result['status'] ?? '', 'throwing policy filter fails the run closed', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $policy_executor->calls, 'throwing policy filter never executes the tool', $failures, $passes );
+
+echo "\n[4] Runtime-tool store exceptions fail the run and persist the transcript:\n";
+$runtime_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
+	public function create( array $request ): void { unset( $request ); throw new RuntimeException( 'runtime store unavailable' ); }
+	public function get( string $request_id ): ?array { unset( $request_id ); return null; }
+	public function complete( string $request_id, array $result ): void { unset( $request_id, $result ); }
+	public function timeout( string $request_id ): void { unset( $request_id ); }
+	public function recent_pending( array $query = array() ): array { unset( $query ); return array(); }
+};
+$pending_executor = new class() implements AgentsAPI\AI\Tools\WP_Agent_Tool_Executor {
+	public function executeWP_Agent_Tool_Call( array $tool_call, array $tool_definition, array $context = array() ): array {
+		unset( $tool_definition, $context );
+		return array(
+			'success'              => false,
+			'tool_name'            => $tool_call['tool_name'],
+			'status'               => AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING,
+			'runtime_tool_request' => array( 'tool_name' => $tool_call['tool_name'], 'tool_call_id' => $tool_call['id'], 'parameters' => array() ),
+		);
+	}
+};
+$persist_log = array();
+$runtime_store_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'external tool' ) ),
+	$tool_turn,
+	array(
+		'run_id'                    => 'fail-closed-runtime-store',
+		'transcript_session_id'     => 'fail-closed-runtime-store-session',
+		'tool_executor'             => $pending_executor,
+		'tool_declarations'         => $policy_tools,
+		'runtime_tool_request_store' => $runtime_store,
+		'transcript_persister'      => $persister,
+	)
+);
+agents_api_smoke_assert_equals( 'failed', $runtime_store_result['status'] ?? '', 'runtime-tool storage throw returns a failed result', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-runtime-store' )['status'] ?? '', 'runtime-tool storage throw durably finalizes run control', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $persist_log ), 'runtime-tool storage throw persists the failed transcript', $failures, $passes );
+
+echo "\n[5] Completed tool effects remain in the failed audit when later policy throws:\n";
+$policy_executor->calls = 0;
+$persist_log            = array();
+$throwing_policy        = new class() implements AgentsAPI\AI\WP_Agent_Conversation_Completion_Policy {
+	public function recordToolResult( string $tool_name, ?array $tool_def, array $tool_result, array $runtime_context, int $turn_count ): AgentsAPI\AI\WP_Agent_Conversation_Completion_Decision {
+		unset( $tool_name, $tool_def, $tool_result, $runtime_context, $turn_count );
+		throw new RuntimeException( 'completion policy unavailable' );
+	}
+};
+$post_tool_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'write once' ) ),
+	$tool_turn,
+	array(
+		'run_id'                => 'fail-closed-post-tool',
+		'transcript_session_id' => 'fail-closed-post-tool-session',
+		'tool_executor'         => $policy_executor,
+		'tool_declarations'     => $policy_tools,
+		'completion_policy'     => $throwing_policy,
+		'transcript_persister'  => $persister,
+	)
+);
+agents_api_smoke_assert_equals( 1, $policy_executor->calls, 'side-effecting tool executes exactly once', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $post_tool_result['status'] ?? '', 'later completion-policy throw produces a terminal failure', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $post_tool_result['tool_execution_results'] ?? array() ), 'failed result retains completed tool execution', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $post_tool_result['tool_audit_events'] ?? array() ), 'failed result retains completed tool audit event', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $persist_log[0]['result']['tool_execution_results'] ?? array() ), 'persisted transcript retains completed tool effect', $failures, $passes );
+
+echo "\n[6] The turn-runner contract violation finalizes run control and still escapes:\n";
 $threw = false;
+$persist_log = array();
 try {
 	AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 		array( array( 'role' => 'user', 'content' => 'hello' ) ),
 		static function (): string {
 			return 'not an array';
-		}
+		},
+		array(
+			'run_id'                => 'fail-closed-contract',
+			'transcript_session_id' => 'fail-closed-contract-session',
+			'transcript_persister'  => $persister,
+		)
 	);
 } catch ( InvalidArgumentException $e ) {
 	$threw = str_starts_with( $e->getMessage(), 'invalid_agent_conversation_loop:' );
 }
 agents_api_smoke_assert_equals( true, $threw, 'deliberate contract violation is not swallowed by the fail-closed guard', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-contract' )['status'] ?? '', 'contract violation does not strand running run control', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $persist_log[0]['status'] ?? '', 'contract violation persists a canonical failed result', $failures, $passes );
+
+echo "\n[7] Run-control finalization storage failures remain retryable and visible:\n";
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $code = '', private string $message = '' ) {}
+		public function get_error_code(): string { return $this->code; }
+		public function get_error_message(): string { return $this->message; }
+	}
+}
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {}
+}
+$failing_store = new class() implements AgentsAPI\AI\WP_Agent_Atomic_Run_Control_Store {
+	public array $state = array( 'runs' => array(), 'queues' => array(), 'events' => array() );
+	public function get_state( string $store_key ): array { unset( $store_key ); return $this->state; }
+	public function save_state( string $store_key, array $state ): void { unset( $store_key ); $this->state = $state; }
+	public function mutate_state( string $store_key, callable $mutation ): mixed {
+		unset( $store_key );
+		$mutated = $mutation( $this->state );
+		foreach ( $mutated['state']['runs'] ?? array() as $run ) {
+			if ( is_array( $run ) && 'running' !== ( $run['status'] ?? 'running' ) ) {
+				throw new AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception( 'terminal state write unavailable' );
+			}
+		}
+		$this->state = $mutated['state'];
+		return $mutated['result'];
+	}
+};
+AgentsAPI\AI\WP_Agent_Run_Control::set_store( $failing_store );
+$finalization_error = null;
+try {
+	AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+		array( array( 'role' => 'user', 'content' => 'finish' ) ),
+		$turn_runner,
+		array( 'run_id' => 'fail-closed-finalization', 'transcript_session_id' => 'fail-closed-finalization-session' )
+	);
+} catch ( AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception $error ) {
+	$finalization_error = $error;
+}
+agents_api_smoke_assert_equals( true, $finalization_error instanceof AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception, 'terminal storage failure escapes as the canonical retryable exception', $failures, $passes );
+agents_api_smoke_assert_equals( 'running', $failing_store->state['runs']['fail-closed-finalization']['status'] ?? '', 'failed terminal write remains visibly retryable instead of pretending completion', $failures, $passes );
 
 agents_api_smoke_finish( 'Agents API conversation loop fail-closed', $failures, $passes );

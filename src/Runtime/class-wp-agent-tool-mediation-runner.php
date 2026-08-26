@@ -26,9 +26,10 @@ class WP_Agent_Tool_Mediation_Runner {
 	 * @param WP_Agent_Tool_Executor                      $executor     Tool executor adapter.
 	 * @param array<string, array<string, mixed>>         $declarations Tool declarations keyed by name.
 	 * @param array<string, mixed>                        $options      Execution policy and observers.
+	 * @param array<string,mixed>|null                    $checkpoint   Out: latest canonical mediation state.
 	 * @return array{messages: array<int, array<string, mixed>>, tool_execution_results: array<int, array<string, mixed>>, tool_events: array<int, array<string, mixed>>, tool_audit_events: array<int, array<string, mixed>>, events: array<int, array<string, mixed>>, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, runtime_tool_pending: array<string, mixed>|null, spin_signatures: array<int, WP_Agent_Spin_Signature>}
 	 */
-	public static function run( array $transcript, array $turn_result, WP_Agent_Tool_Executor $executor, array $declarations, array $options = array() ): array {
+	public static function run( array $transcript, array $turn_result, WP_Agent_Tool_Executor $executor, array $declarations, array $options = array(), ?array &$checkpoint = null ): array {
 		$turn_context       = isset( $options['turn_context'] ) && is_array( $options['turn_context'] ) ? self::normalize_assoc_array( $options['turn_context'] ) : array();
 		$turn               = isset( $options['turn'] ) && is_int( $options['turn'] ) ? $options['turn'] : 1;
 		$completion_policy  = $options['completion_policy'] ?? null;
@@ -52,7 +53,8 @@ class WP_Agent_Tool_Mediation_Runner {
 			is_callable( $options['pre_tool_mediator'] ?? null ) ? $options['pre_tool_mediator'] : null,
 			isset( $options['prior_tool_results'] ) && is_array( $options['prior_tool_results'] ) ? self::normalize_array_list( $options['prior_tool_results'] ) : array(),
 			is_callable( $options['post_tool_result_diagnostics'] ?? null ) ? $options['post_tool_result_diagnostics'] : null,
-			$runtime_tool_store instanceof WP_Agent_Runtime_Tool_Request_Store ? $runtime_tool_store : null
+			$runtime_tool_store instanceof WP_Agent_Runtime_Tool_Request_Store ? $runtime_tool_store : null,
+			$checkpoint
 		);
 	}
 
