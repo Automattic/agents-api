@@ -274,5 +274,11 @@ agents_api_smoke_assert_equals( 'approval_required', $loop_result['status'] ?? '
 agents_api_smoke_assert_equals( false, (bool) ( $loop_result['completed'] ?? true ), 'loop result is not marked completed', $failures, $passes );
 agents_api_smoke_assert_equals( WP_Agent_Message::TYPE_APPROVAL_REQUIRED, $loop_result['approval_required']['type'] ?? '', 'loop carries the approval envelope through', $failures, $passes );
 agents_api_smoke_assert_equals( 'pa-smoke-001', $loop_result['approval_required']['payload']['action_id'] ?? '', 'approval envelope action_id preserved', $failures, $passes );
+$approval_messages = array_values( array_filter( $loop_result['messages'] ?? array(), static fn( array $message ): bool => WP_Agent_Message::TYPE_APPROVAL_REQUIRED === ( $message['type'] ?? '' ) ) );
+$tool_result_messages = array_values( array_filter( $loop_result['messages'] ?? array(), static fn( array $message ): bool => WP_Agent_Message::TYPE_TOOL_RESULT === ( $message['type'] ?? '' ) ) );
+agents_api_smoke_assert_equals( 1, count( $approval_messages ), 'approval path persists exactly one approval response', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $tool_result_messages ), 'approval path does not persist a provisional raw tool response', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $loop_result['tool_execution_results'] ?? array() ), 'approval path exposes no misleading raw execution response', $failures, $passes );
+agents_api_smoke_assert_equals( 'tool_effect_completed', $loop_result['tool_audit_events'][0]['type'] ?? '', 'approval path retains the non-provider-facing effect receipt', $failures, $passes );
 
 agents_api_smoke_finish( 'pre-execute approval smoke', $failures, $passes );

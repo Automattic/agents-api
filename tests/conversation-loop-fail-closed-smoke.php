@@ -247,6 +247,8 @@ agents_api_smoke_assert_equals( 'failed', AgentsAPI\AI\WP_Agent_Chat_Run_Control
 agents_api_smoke_assert_equals( 1, count( $persist_log ), 'runtime-tool storage throw persists the failed transcript', $failures, $passes );
 agents_api_smoke_assert_equals( 1, $pending_executor->calls, 'runtime-tool storage throw does not repeat the effect', $failures, $passes );
 agents_api_smoke_assert_equals( true, $runtime_store_result['tool_audit_events'][0]['effect_occurred'] ?? false, 'runtime-tool storage failure audit records the completed effect', $failures, $passes );
+agents_api_smoke_assert_equals( 'tool_effect_completed', $runtime_store_result['tool_audit_events'][0]['type'] ?? '', 'runtime-tool storage failure retains the explicit effect receipt', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $runtime_store_result['tool_execution_results'] ?? array() ), 'runtime-tool storage failure does not invent an outward response', $failures, $passes );
 
 echo "\n[5] Completed tool effects remain in the failed audit when later policy throws:\n";
 $policy_executor->calls = 0;
@@ -271,9 +273,11 @@ $post_tool_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 );
 agents_api_smoke_assert_equals( 1, $policy_executor->calls, 'side-effecting tool executes exactly once', $failures, $passes );
 agents_api_smoke_assert_equals( 'failed', $post_tool_result['status'] ?? '', 'later completion-policy throw produces a terminal failure', $failures, $passes );
-agents_api_smoke_assert_equals( 1, count( $post_tool_result['tool_execution_results'] ?? array() ), 'failed result retains completed tool execution', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $post_tool_result['tool_execution_results'] ?? array() ), 'failed result retains the single normalized mediation response', $failures, $passes );
 agents_api_smoke_assert_equals( 1, count( $post_tool_result['tool_audit_events'] ?? array() ), 'failed result retains completed tool audit event', $failures, $passes );
-agents_api_smoke_assert_equals( 1, count( $persist_log[0]['result']['tool_execution_results'] ?? array() ), 'persisted transcript retains completed tool effect', $failures, $passes );
+agents_api_smoke_assert_equals( 'tool_call', $post_tool_result['tool_audit_events'][0]['type'] ?? '', 'completed mediation refines the effect receipt into the canonical audit event', $failures, $passes );
+agents_api_smoke_assert_equals( true, str_starts_with( $post_tool_result['tool_audit_events'][0]['result_sha256'] ?? '', 'sha256:' ), 'effect receipt safely hashes the raw diagnostic', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $persist_log[0]['result']['tool_audit_events'] ?? array() ), 'persisted transcript retains completed tool effect receipt', $failures, $passes );
 
 echo "\n[6] Hook and truncator throws retain the immediate effect checkpoint:\n";
 $hook_store = new class() implements AgentsAPI\AI\WP_Agent_Runtime_Tool_Request_Store {
@@ -304,6 +308,7 @@ $hook_result             = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 1, $pending_executor->calls, 'post-effect hook throw executes the tool exactly once', $failures, $passes );
 agents_api_smoke_assert_equals( 'failed', $hook_result['status'] ?? '', 'post-effect hook throw fails the run', $failures, $passes );
 agents_api_smoke_assert_equals( true, $hook_result['tool_audit_events'][0]['effect_occurred'] ?? false, 'post-effect hook failure audit records the completed effect', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $hook_result['tool_execution_results'] ?? array() ), 'post-effect hook failure retains no unresolved outward response', $failures, $passes );
 
 $throwing_truncator = new class() implements AgentsAPI\AI\WP_Agent_Tool_Result_Truncator {
 	public function truncate_result( array $result, string $tool_name, array $context = array() ): array {
@@ -326,6 +331,7 @@ $truncator_result       = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 agents_api_smoke_assert_equals( 1, $policy_executor->calls, 'truncator throw executes the tool exactly once', $failures, $passes );
 agents_api_smoke_assert_equals( 'failed', $truncator_result['status'] ?? '', 'truncator throw fails the run', $failures, $passes );
 agents_api_smoke_assert_equals( true, $truncator_result['tool_audit_events'][0]['effect_occurred'] ?? false, 'truncator failure audit records the completed effect', $failures, $passes );
+agents_api_smoke_assert_equals( 0, count( $truncator_result['tool_execution_results'] ?? array() ), 'truncator failure retains no unresolved outward response', $failures, $passes );
 
 echo "\n[7] The turn-runner contract violation finalizes run control and still escapes:\n";
 $threw = false;

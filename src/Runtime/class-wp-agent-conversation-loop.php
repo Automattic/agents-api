@@ -866,11 +866,8 @@ class WP_Agent_Conversation_Loop {
 				$pre_tool_mediator,
 				$mediation_context
 			);
-			$effect_result_index     = null;
-			$effect_event_index      = null;
-			$effect_audit_index      = null;
-			$effect_message_index    = null;
-			$effect_occurred         = false;
+			$effect_audit_index = null;
+			$effect_occurred    = false;
 
 			if ( 'reject' === $mediator_decision['action'] ) {
 				$exec_result       = $mediator_decision['result'];
@@ -893,51 +890,18 @@ class WP_Agent_Conversation_Loop {
 				);
 				$effect_occurred = true;
 
-				// The executor returning is the audit commit point. Record its raw
-				// completed result before stores, hooks, truncators, or policies run.
-				$effect_result_index = count( $tool_execution_results );
-				$tool_execution_results[] = self::tool_execution_result(
-					$tool_name,
-					$tool_call_id,
-					$exec_result,
-					$parameter_exposure,
-					$turn,
-					true
-				);
-				$effect_event_index = count( $tool_events );
-				$tool_events[]      = self::tool_event(
-					'tool_result',
-					$tool_name,
-					$tool_call_id,
-					$turn,
+				// The executor returning is the audit commit point. Record a safe,
+				// non-provider-facing receipt before stores, hooks, truncators, or
+				// policies run. Mediation will append the single outward response.
+				$effect_audit_index = count( $tool_audit_events );
+				$effect_receipt      = array_merge(
+					self::tool_audit_event( $tool_name, $tool_call_id, $parameters_for_policy, $exec_result, $tool_definition, $turn_context, $turn ),
 					array(
-						'status'          => ! empty( $exec_result['success'] ) ? 'success' : 'error',
-						'success'         => (bool) ( $exec_result['success'] ?? false ),
+						'type'            => 'tool_effect_completed',
 						'effect_occurred' => true,
 					)
 				);
-				$effect_audit_index = count( $tool_audit_events );
-				$tool_audit_events[] = array_merge(
-					self::tool_audit_event( $tool_name, $tool_call_id, $parameters_for_policy, $exec_result, $tool_definition, $turn_context, $turn ),
-					array( 'effect_occurred' => true )
-				);
-				$checkpoint = self::mediation_checkpoint(
-					$messages,
-					$tool_execution_results,
-					$tool_events,
-					$tool_audit_events,
-					$events
-				);
-				$raw_result_content = ! empty( $exec_result['success'] )
-					? self::json_encode_safe( $exec_result['result'] ?? array() )
-					: ( $exec_result['error'] ?? 'Tool execution failed.' );
-				$effect_message_index = count( $messages );
-				$messages[]            = WP_Agent_Message::toolResult(
-					is_string( $raw_result_content ) ? $raw_result_content : '',
-					$tool_name,
-					$exec_result,
-					array( 'tool_call_id' => $tool_call_id )
-				);
+				$tool_audit_events[] = $effect_receipt;
 				$checkpoint = self::mediation_checkpoint(
 					$messages,
 					$tool_execution_results,
@@ -977,11 +941,7 @@ class WP_Agent_Conversation_Loop {
 					),
 					array( 'tool_call_id' => $tool_call_id )
 				);
-				if ( null !== $effect_message_index ) {
-					$messages[ $effect_message_index ] = $pending_message;
-				} else {
-					$messages[] = $pending_message;
-				}
+				$messages[] = $pending_message;
 
 				self::emit_event( $on_event, WP_Agent_Runtime_Tool_Request::STATUS_PENDING, array(
 					'turn'         => $turn,
@@ -999,16 +959,9 @@ class WP_Agent_Conversation_Loop {
 						'request_id' => $pending_request['request_id'],
 					)
 				);
-				if ( null !== $effect_event_index ) {
-					$tool_events[ $effect_event_index ] = $pending_event;
-				} else {
-					$tool_events[] = $pending_event;
-				}
-				if ( null !== $effect_result_index ) {
-					$exec_result['runtime_tool_request']                    = $pending_request;
-					$tool_execution_results[ $effect_result_index ]['result'] = $exec_result;
-				}
+				$tool_events[] = $pending_event;
 				if ( null !== $effect_audit_index ) {
+					$exec_result['runtime_tool_request'] = $pending_request;
 					$tool_audit_events[ $effect_audit_index ] = array_merge(
 						self::tool_audit_event( $tool_name, $tool_call_id, $parameters_for_policy, $exec_result, $tool_definition, $turn_context, $turn ),
 						array( 'effect_occurred' => true )
@@ -1080,11 +1033,7 @@ class WP_Agent_Conversation_Loop {
 					'effect_occurred' => $effect_occurred,
 				)
 			);
-			if ( null !== $effect_event_index ) {
-				$tool_events[ $effect_event_index ] = $normalized_tool_event;
-			} else {
-				$tool_events[] = $normalized_tool_event;
-			}
+			$tool_events[] = $normalized_tool_event;
 
 			// Build the tool_execution_results entry.
 			$execution_result = self::tool_execution_result( $tool_name, $tool_call_id, $exec_result, $parameter_exposure, $turn, $effect_occurred );
@@ -1119,11 +1068,7 @@ class WP_Agent_Conversation_Loop {
 				self::emit_event( $on_event, 'tool_result_diagnostics', $diagnostics_metadata );
 			}
 
-			if ( null !== $effect_result_index ) {
-				$tool_execution_results[ $effect_result_index ] = $execution_result;
-			} else {
-				$tool_execution_results[] = $execution_result;
-			}
+			$tool_execution_results[] = $execution_result;
 
 			$audit_event = self::tool_audit_event(
 				$tool_name,
@@ -1154,11 +1099,7 @@ class WP_Agent_Conversation_Loop {
 				$exec_result,
 				array( 'tool_call_id' => $tool_call_id )
 			);
-			if ( null !== $effect_message_index ) {
-				$messages[ $effect_message_index ] = $tool_result_message;
-			} else {
-				$messages[] = $tool_result_message;
-			}
+			$messages[] = $tool_result_message;
 			$checkpoint = self::mediation_checkpoint(
 				$messages,
 				$tool_execution_results,
