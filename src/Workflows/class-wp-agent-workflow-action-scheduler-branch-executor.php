@@ -57,6 +57,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 */
 	public const BRANCH_HOOK = 'wp_agent_workflow_branch_run';
 
+	/** Durable, atomically claimed aggregate continuation hook. */
+	public const AGGREGATE_HOOK = 'wp_agent_workflow_run_aggregate';
+
 	/**
 	 * Reconcile-only retry hook. Its payload references a persisted terminal
 	 * BranchResult, so this callback never executes branch steps.
@@ -447,6 +450,27 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$ids = as_get_scheduled_actions(
 			array(
 				'hook'     => self::RECONCILE_HOOK,
+				'status'   => array(
+					\ActionScheduler_Store::STATUS_PENDING,
+					\ActionScheduler_Store::STATUS_RUNNING,
+				),
+				'per_page' => self::MAX_BRANCH_CONCURRENCY,
+			),
+			'ids'
+		);
+
+		return is_array( $ids ) ? count( $ids ) : 0;
+	}
+
+	/** Count durable aggregate continuations still pending or in progress. */
+	public static function aggregate_inflight_count(): int {
+		if ( ! function_exists( 'as_get_scheduled_actions' ) || ! class_exists( '\ActionScheduler_Store' ) ) {
+			return 0;
+		}
+
+		$ids = as_get_scheduled_actions(
+			array(
+				'hook'     => self::AGGREGATE_HOOK,
 				'status'   => array(
 					\ActionScheduler_Store::STATUS_PENDING,
 					\ActionScheduler_Store::STATUS_RUNNING,
@@ -875,6 +899,84 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$branch_result = self::execute_branch( $descriptor, $key );
 
 		self::reconcile_branch_action_result( $payload, $branch_result );
+	}
+
+	/** Enqueue the unique aggregate continuation for one suspension generation. */
+	public static function enqueue_aggregate_action( string $run_id, string $generation, string $owner_token, bool $recover_failure = false ): int {
+		return self::enqueue_async_action(
+			self::AGGREGATE_HOOK,
+			array(
+				array(
+					'run_id'      => $run_id,
+					'generation'  => $generation,
+					'owner_token' => $owner_token,
+					'recover_failure' => $recover_failure,
+				),
+			),
+			self::group_for_run( $run_id ),
+			true
+		);
+	}
+
+	/**
+	 * Run the claimed aggregate action and fail loudly into AS lifecycle hooks.
+	 *
+	 * @param array<mixed> $payload Aggregate action payload.
+	 */
+	public static function run_aggregate_action( array $payload ): void {
+		$run_id      = self::string_value( $payload['run_id'] ?? '' );
+		$generation  = self::string_value( $payload['generation'] ?? '' );
+		$owner_token = self::string_value( $payload['owner_token'] ?? '' );
+		if ( '' === $run_id || '' === $generation || '' === $owner_token ) {
+			return;
+		}
+		$recorder = agents_workflow_resolve_recorder();
+		if ( null === $recorder ) {
+			throw new \RuntimeException( 'A recorder is required to run an aggregate continuation.' );
+		}
+		$result = ! empty( $payload['recover_failure'] )
+			? agents_workflow_fail_aggregate_continuation( $recorder, $run_id, $generation, $owner_token, true )
+			: agents_workflow_run_aggregate_continuation( $recorder, $run_id, $generation, $owner_token );
+		if ( is_wp_error( $result ) ) {
+			throw new \RuntimeException( $result->get_error_message() );
+		}
+	}
+
+	/**
+	 * Apply AS failed-action recovery to a known aggregate payload.
+	 *
+	 * @param array<mixed> $payload Aggregate action payload.
+	 */
+	public static function run_aggregate_action_failure( array $payload ): void {
+		$run_id      = self::string_value( $payload['run_id'] ?? '' );
+		$generation  = self::string_value( $payload['generation'] ?? '' );
+		$owner_token = self::string_value( $payload['owner_token'] ?? '' );
+		$recorder    = agents_workflow_resolve_recorder();
+		if ( '' === $run_id || '' === $generation || '' === $owner_token || null === $recorder ) {
+			return;
+		}
+		$result = agents_workflow_fail_aggregate_continuation( $recorder, $run_id, $generation, $owner_token );
+		if ( is_wp_error( $result ) ) {
+			self::enqueue_aggregate_action( $run_id, $generation, $owner_token, true );
+		}
+	}
+
+	/** Resolve and recover an aggregate action reported failed by Action Scheduler. */
+	public static function handle_failed_action( int $action_id ): void {
+		if ( $action_id <= 0 || ! class_exists( 'ActionScheduler_Store' ) ) {
+			return;
+		}
+		try {
+			$action = \ActionScheduler_Store::instance()->fetch_action( $action_id );
+			if ( self::AGGREGATE_HOOK !== $action->get_hook() ) {
+				return;
+			}
+			$args = $action->get_args();
+			$payload = is_array( $args[0] ?? null ) ? $args[0] : array();
+			self::run_aggregate_action_failure( $payload );
+		} catch ( \Throwable $error ) {
+			unset( $error );
+		}
 	}
 
 	/**
@@ -1311,20 +1413,41 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$suspension = is_object( $result ) && method_exists( $result, 'get_suspension' )
 			? self::string_keyed_array( (array) $result->get_suspension() )
 			: array();
+		$args = array(
+			array(
+				'run_id'        => $run_id,
+				'suspension_id' => self::suspension_id( $suspension ),
+			),
+		);
+		$group = self::group_for_run( $run_id );
+		if ( self::has_scheduled_action( self::RESUME_HOOK, $args, $group ) ) {
+			return true;
+		}
+
+		$unique = self::supports_unique_enqueue();
+		$query  = self::supports_scheduled_action_query();
+		if ( ! $unique && ! $query ) {
+			// The caller holds the per-run lock and will perform the inline fallback
+			// there. Do not enqueue a non-unique action that could race it.
+			return false;
+		}
 		$action_id = self::enqueue_async_action(
 			self::RESUME_HOOK,
-			array(
-				array(
-					'run_id'        => $run_id,
-					'suspension_id' => self::suspension_id( $suspension ),
-				),
-			),
-			self::group_for_run( $run_id )
+			$args,
+			$group,
+			$unique
 		);
 
-		// If durable enqueue fails, return false so reconcile resumes inline rather
-		// than stranding a suspended run with no resume action.
-		return $action_id > 0;
+		// A unique duplicate returns 0. It is still successful deferral when the
+		// identical pending/running action is durably discoverable.
+		if ( $action_id > 0 || self::has_scheduled_action( self::RESUME_HOOK, $args, $group ) ) {
+			return true;
+		}
+
+		// Unique enqueue without a query helper cannot distinguish duplicate 0
+		// from failure. Conservatively remain deferred rather than race an existing
+		// action with inline resume.
+		return $unique && ! $query;
 	}
 
 	/**
@@ -1405,14 +1528,14 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * @param string       $group Action group.
 	 * @return int Action id, or 0 when the enqueue failed (threw or returned no id).
 	 */
-	private static function enqueue_async_action( string $hook, array $args, string $group ): int {
+	private static function enqueue_async_action( string $hook, array $args, string $group, bool $unique = false ): int {
 		if ( ! function_exists( 'as_enqueue_async_action' ) ) {
 			return 0;
 		}
 		try {
 			// AS returns the new action id (a positive int) on success. dispatch()
 			// treats a non-positive return as a hard failure.
-			return (int) as_enqueue_async_action( $hook, $args, $group );
+			return (int) as_enqueue_async_action( $hook, $args, $group, $unique );
 		} catch ( \Throwable $error ) {
 			// AS rejected the enqueue (e.g. args too long / queue unavailable).
 			// Normalize to 0 so dispatch() surfaces a clean WP_Error rather than
@@ -1420,6 +1543,44 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			unset( $error );
 			return 0;
 		}
+	}
+
+	/** Whether this Action Scheduler version exposes the unique enqueue argument. */
+	private static function supports_unique_enqueue(): bool {
+		if ( ! function_exists( 'as_enqueue_async_action' ) ) {
+			return false;
+		}
+		try {
+			return ( new \ReflectionFunction( 'as_enqueue_async_action' ) )->getNumberOfParameters() >= 4;
+		} catch ( \ReflectionException $error ) {
+			unset( $error );
+			return false;
+		}
+	}
+
+	/** Whether this Action Scheduler version can query an identical action. */
+	private static function supports_scheduled_action_query(): bool {
+		return function_exists( 'as_has_scheduled_action' ) || function_exists( 'as_next_scheduled_action' );
+	}
+
+	/**
+	 * Whether an identical pending/running action already owns this continuation.
+	 *
+	 * @phpstan-impure Action Scheduler state may change after an enqueue attempt.
+	 * @param array<mixed> $args Action arguments.
+	 */
+	private static function has_scheduled_action( string $hook, array $args, string $group ): bool {
+		try {
+			if ( function_exists( 'as_has_scheduled_action' ) ) {
+				return (bool) as_has_scheduled_action( $hook, $args, $group );
+			}
+			if ( function_exists( 'as_next_scheduled_action' ) ) {
+				return false !== as_next_scheduled_action( $hook, $args, $group );
+			}
+		} catch ( \Throwable $error ) {
+			unset( $error );
+		}
+		return false;
 	}
 
 	/**

@@ -166,6 +166,7 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Branch_Executor;
 
 $branch_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK;
 $reconcile_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK;
+$aggregate_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK;
 $resume_hook = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK;
 $max         = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::MAX_BRANCH_CONCURRENCY;
 
@@ -344,6 +345,28 @@ AS_Query_Shim::add( $reconcile_hook, ActionScheduler_Store::STATUS_PENDING, $max
 AS_Query_Shim::add( $reconcile_hook, ActionScheduler_Store::STATUS_RUNNING, $max + 5 );
 smoke_assert( $max, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::reconcile_inflight_count(), 'reconcile headroom count is bounded by MAX_BRANCH_CONCURRENCY', $failures, $passes );
 smoke_assert( $max + 1, $concurrent_batches(), 'reconcile headroom raise remains bounded', $failures, $passes );
+
+// Durable aggregate actions are long-running effects: they need additive claim
+// headroom and batch-size 1, but both counts remain bounded.
+AS_Query_Shim::reset();
+AS_Query_Shim::add( 'unrelated_long_action', ActionScheduler_Store::STATUS_RUNNING, 1 );
+AS_Query_Shim::add( $aggregate_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+smoke_assert( 1, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::aggregate_inflight_count(), 'aggregate starvation: pending continuation counts as in flight', $failures, $passes );
+smoke_assert( 2, $concurrent_batches(), 'aggregate starvation: ceiling adds one continuation slot', $failures, $passes );
+smoke_assert( 1, $batch_size(), 'aggregate continuation pins batch size while effects run', $failures, $passes );
+
+AS_Query_Shim::reset();
+AS_Query_Shim::add( $aggregate_hook, ActionScheduler_Store::STATUS_PENDING, $max + 5 );
+AS_Query_Shim::add( $aggregate_hook, ActionScheduler_Store::STATUS_RUNNING, $max + 5 );
+smoke_assert( $max, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::aggregate_inflight_count(), 'aggregate headroom count is bounded by MAX_BRANCH_CONCURRENCY', $failures, $passes );
+smoke_assert( $max + 1, $concurrent_batches(), 'aggregate headroom raise remains bounded', $failures, $passes );
+
+AS_Query_Shim::reset();
+AS_Query_Shim::add( $branch_hook, ActionScheduler_Store::STATUS_RUNNING, 2 );
+AS_Query_Shim::add( $reconcile_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+AS_Query_Shim::add( $aggregate_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+AS_Query_Shim::add( $resume_hook, ActionScheduler_Store::STATUS_PENDING, 1 );
+smoke_assert( 5, $concurrent_batches(), 'combined headroom: branch, reconcile, aggregate, and resume slots are additive', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
