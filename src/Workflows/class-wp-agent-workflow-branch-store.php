@@ -83,6 +83,11 @@ final class WP_Agent_Workflow_Branch_Store {
 	private const INDEX_PREFIX = 'agents_wf_branch_index_';
 
 	/**
+	 * Option-name prefix for dispatch admission fences.
+	 */
+	private const ADMISSION_PREFIX = 'agents_wf_branch_admission_';
+
+	/**
 	 * Payload time-to-live (seconds). After this a row belonging to a run that
 	 * never resolved is treated as expired and returns nothing on read. Generous
 	 * (2 hours) so a slow-but-live fanout is never evicted mid-flight, yet
@@ -91,6 +96,72 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @since 0.5.0
 	 */
 	private const TTL_SECONDS = 7200;
+
+	/**
+	 * Begin a fenced fan-out admission generation.
+	 *
+	 * Branch callbacks may be claimed while their siblings are still being
+	 * enqueued, so they must not begin effects until this generation is admitted.
+	 *
+	 * @param string $run_id Run being admitted.
+	 * @return string Opaque admission token, or an empty string on persistence failure.
+	 */
+	public static function begin_admission( string $run_id ): string {
+		if ( '' === $run_id ) {
+			return '';
+		}
+
+		$token = self::ADMISSION_PREFIX . md5( $run_id . ':' . uniqid( '', true ) );
+		self::write_row(
+			$token,
+			array(
+				'run_id'  => $run_id,
+				'status'  => 'pending',
+				'expires' => time() + self::TTL_SECONDS,
+			)
+		);
+		self::index_ref( $run_id, $token );
+
+		return 'pending' === self::admission_status( $token ) ? $token : '';
+	}
+
+	/**
+	 * Open an admission fence after every sibling is durably enqueued.
+	 */
+	public static function admit( string $token ): bool {
+		$row = self::read_row( $token );
+		if ( null === $row || 'pending' !== ( $row['status'] ?? '' ) ) {
+			return false;
+		}
+
+		$row['status'] = 'admitted';
+		self::write_row( $token, $row );
+		return 'admitted' === self::admission_status( $token );
+	}
+
+	/**
+	 * Close an admission fence before compensating a partial enqueue.
+	 */
+	public static function reject_admission( string $token ): void {
+		$row = self::read_row( $token );
+		if ( null === $row ) {
+			return;
+		}
+
+		$row['status'] = 'rejected';
+		self::write_row( $token, $row );
+	}
+
+	/**
+	 * Read an admission generation's state. A missing or expired fence is closed.
+	 *
+	 * @return string pending, admitted, or rejected.
+	 */
+	public static function admission_status( string $token ): string {
+		$row    = '' !== $token ? self::read_row( $token ) : null;
+		$status = is_array( $row ) && is_string( $row['status'] ?? null ) ? $row['status'] : '';
+		return in_array( $status, array( 'pending', 'admitted' ), true ) ? $status : 'rejected';
+	}
 
 	/**
 	 * Persist one branch descriptor under a per-(run_id, handle_id) key and

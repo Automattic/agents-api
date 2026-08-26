@@ -169,15 +169,29 @@ final class AS_Limit_Shim {
 	private static int $seq = 0;
 	/** When true, every enqueue "fails" the way AS's runner swallows — throws. */
 	public static bool $force_fail = false;
+	public static int $fail_on_attempt = 0;
+	private static int $enqueue_attempt = 0;
+	/** @var array<int,bool> */
+	public static array $cancelled = array();
 
 	public static function reset(): void {
-		self::$queue      = array();
-		self::$claimed    = array();
-		self::$seq        = 0;
-		self::$force_fail = false;
+		self::$queue           = array();
+		self::$claimed         = array();
+		self::$seq             = 0;
+		self::$force_fail      = false;
+		self::$fail_on_attempt = 0;
+		self::$enqueue_attempt = 0;
+		self::$cancelled       = array();
 	}
 
 	public static function enqueue( string $hook, array $args, string $group ): int {
+		++self::$enqueue_attempt;
+		if ( self::$fail_on_attempt === self::$enqueue_attempt ) {
+			if ( isset( self::$queue[0] ) ) {
+				self::fire( self::$queue[0]['id'] );
+			}
+			throw new \RuntimeException( 'Later enqueue failed (simulated).' );
+		}
 		if ( self::$force_fail ) {
 			throw new \RuntimeException( 'ActionScheduler queue is unavailable (simulated).' );
 		}
@@ -223,6 +237,9 @@ final class AS_Limit_Shim {
 	}
 
 	public static function fire( int $id ): bool {
+		if ( ! empty( self::$cancelled[ $id ] ) ) {
+			return false;
+		}
 		if ( ! self::claim( $id ) ) {
 			return false;
 		}
@@ -234,6 +251,25 @@ final class AS_Limit_Shim {
 		}
 		return false;
 	}
+
+	public static function cancel( string $hook, array $args, string $group ): void {
+		foreach ( self::$queue as $action ) {
+			if ( $hook === $action['hook'] && $group === $action['group'] && $args === $action['args'] ) {
+				self::$cancelled[ $action['id'] ] = true;
+			}
+		}
+	}
+
+	public static function runnable_count(): int {
+		return count(
+			array_filter(
+				self::$queue,
+				static function ( array $action ): bool {
+					return empty( self::$cancelled[ $action['id'] ] ) && empty( self::$claimed[ $action['id'] ] );
+				}
+			)
+		);
+	}
 }
 
 function wp_json_encode_shim( $value ): string {
@@ -244,6 +280,17 @@ function wp_json_encode_shim( $value ): string {
 if ( ! function_exists( 'as_enqueue_async_action' ) ) {
 	function as_enqueue_async_action( string $hook, array $args = array(), string $group = '' ) {
 		return AS_Limit_Shim::enqueue( $hook, $args, $group );
+	}
+}
+if ( ! function_exists( 'as_schedule_single_action' ) ) {
+	function as_schedule_single_action( int $timestamp, string $hook, array $args = array(), string $group = '' ) {
+		unset( $timestamp );
+		return AS_Limit_Shim::enqueue( $hook, $args, $group );
+	}
+}
+if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
+	function as_unschedule_all_actions( string $hook, ?array $args = array(), string $group = '' ): void {
+		AS_Limit_Shim::cancel( $hook, is_array( $args ) ? $args : array(), $group );
 	}
 }
 
@@ -325,9 +372,11 @@ function payload_register_ability( string $name, \Closure $handler ): void {
 payload_register_ability(
 	'demo/role-worker',
 	static function ( array $input ): array {
+		++$GLOBALS['__branch_effects'];
 		return array( 'fragment' => strtoupper( (string) ( $input['label'] ?? 'X' ) ) );
 	}
 );
+$GLOBALS['__branch_effects'] = 0;
 payload_register_ability(
 	'demo/aggregate',
 	static function ( array $input ): array {
@@ -501,6 +550,31 @@ foreach ( array_keys( $GLOBALS['__options'] ) as $opt ) {
 	}
 }
 smoke_assert( 0, $leftover2, 'bug2: failed dispatch cleaned up its stored rows (no orphans)', $failures, $passes );
+
+// A later enqueue failure fences a worker racing compensation, cancels every
+// pending sibling/retry, and only then releases branch payload storage.
+AS_Limit_Shim::reset();
+$GLOBALS['__options']             = array();
+$GLOBALS['__branch_effects']      = 0;
+AS_Limit_Shim::$fail_on_attempt   = 2;
+$partial = $executor->dispatch(
+	array(
+		array( 'key' => 'first', 'run_id' => 'pay-partial', 'step_id' => 'scatter', 'required' => true, 'steps' => array( array( 'id' => 'first', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'first' ) ) ), 'branch_vars' => array( 'context' => array() ) ),
+		array( 'key' => 'second', 'run_id' => 'pay-partial', 'step_id' => 'scatter', 'required' => true, 'steps' => array( array( 'id' => 'second', 'type' => 'ability', 'ability' => 'demo/role-worker', 'args' => array( 'label' => 'second' ) ) ), 'branch_vars' => array( 'context' => array() ) ),
+	),
+	array( '_workflow_run_id' => 'pay-partial', '_workflow_step_id' => 'scatter', 'shared_context' => array() )
+);
+smoke_assert( 'workflow_branch_dispatch_enqueue_failed', is_wp_error( $partial ) ? $partial->get_error_code() : '', 'atomic admission: later enqueue failure fails the whole dispatch', $failures, $passes );
+smoke_assert( 0, $GLOBALS['__branch_effects'], 'atomic admission: a worker racing compensation begins no branch effects', $failures, $passes );
+smoke_assert( 0, AS_Limit_Shim::runnable_count(), 'atomic admission: no earlier sibling or deferred retry remains runnable', $failures, $passes );
+
+$leftover3 = 0;
+foreach ( array_keys( $GLOBALS['__options'] ) as $opt ) {
+	if ( str_starts_with( (string) $opt, 'agents_wf_branch_' ) ) {
+		++$leftover3;
+	}
+}
+smoke_assert( 0, $leftover3, 'atomic admission: fenced compensation cleans branch-store rows', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );
