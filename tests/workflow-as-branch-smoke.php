@@ -973,10 +973,15 @@ remove_all_filters( 'wp_agent_workflow_run_recorder' );
 add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder8 ) { return $recorder8; } );
 ( new WP_Agent_Workflow_Runner( $recorder8 ) )->run( as_smoke_roles_spec(), array(), array( 'run_id' => 'as-recovery-terminal' ) );
 $branches8 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+$recovery_lock_attempts8 = 0;
 add_filter(
 	'wp_agent_workflow_reconcile_lock',
-	static function () {
-		return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+	static function ( $override, string $run_id, callable $critical ) use ( &$recovery_lock_attempts8 ) {
+		unset( $override );
+		if ( 'as-recovery-terminal' === $run_id && $recovery_lock_attempts8++ < 2 ) {
+			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+		}
+		return $critical();
 	},
 	10,
 	3
@@ -1096,7 +1101,19 @@ foreach ( AS_Shim::$queue as $index => $queued10 ) {
 		unset( AS_Shim::$queue[ $index ]['args'][0]['store_backend'] );
 	}
 }
-add_filter( 'wp_agent_workflow_reconcile_lock', static function () { return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' ); }, 10, 3 );
+$transition_lock_attempts10 = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function ( $override, string $run_id, callable $critical ) use ( &$transition_lock_attempts10 ) {
+		unset( $override );
+		if ( 'as-transition-fail' === $run_id && $transition_lock_attempts10++ < 4 ) {
+			return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+		}
+		return $critical();
+	},
+	10,
+	3
+);
 $transition_effect_before10 = (int) ( $GLOBALS['__role_worker_effects']['transition-fail'] ?? 0 );
 AS_Shim::fire( $branches10[0]['id'] );
 $transition_final10 = $recorder10->find( 'as-transition-fail' );
@@ -1227,6 +1244,67 @@ remove_all_filters( 'wp_agent_workflow_branch_receipt_get' );
 remove_all_filters( 'wp_agent_workflow_branch_receipt_locate' );
 remove_all_filters( 'wp_agent_workflow_branch_receipt_delete' );
 remove_all_filters( 'wp_agent_workflow_branch_store_forget' );
+remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+
+// A late failed callback can arrive after reconciliation removed the receipt but
+// before the queued resume runs. The authoritative completed handle wins.
+AS_Shim::reset();
+$GLOBALS['__options'] = array();
+$recorder_late_failure = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder_late_failure ) { return $recorder_late_failure; } );
+( new WP_Agent_Workflow_Runner( $recorder_late_failure ) )->run( as_smoke_single_branch_spec( 'late-failure' ), array(), array( 'run_id' => 'as-late-failure' ) );
+$late_failure_branches = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+$late_failure_completions = 0;
+add_action(
+	'wp_agent_workflow_run_completed',
+	static function ( $result, string $run_id ) use ( &$late_failure_completions ): void {
+		unset( $result );
+		if ( 'as-late-failure' === $run_id ) {
+			++$late_failure_completions;
+		}
+	},
+	10,
+	2
+);
+AS_Shim::fire( $late_failure_branches[0]['id'] );
+$late_failure_resumes = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
+do_action( 'action_scheduler_failed_execution', $late_failure_branches[0]['id'], new RuntimeException( 'late timeout callback' ), 'test' );
+$late_failure_mid = $recorder_late_failure->find( 'as-late-failure' );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $late_failure_mid->get_status(), 'late failed callback: reconciled handle preserves suspended run for queued resume', $failures, $passes );
+smoke_assert( 1, count( $late_failure_resumes ), 'late failed callback: queued resume remains authoritative', $failures, $passes );
+AS_Shim::fire( $late_failure_resumes[0]['id'] );
+$late_failure_final = $recorder_late_failure->find( 'as-late-failure' );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $late_failure_final->get_status(), 'late failed callback: queued resume reaches success', $failures, $passes );
+smoke_assert( 1, $late_failure_completions, 'late failed callback: completion funnel fires once', $failures, $passes );
+remove_all_filters( 'wp_agent_workflow_run_completed' );
+
+// Forced terminal election must use the pluggable reconcile-lock contract.
+AS_Shim::reset();
+$GLOBALS['__options'] = array();
+$recorder_custom_terminal_lock = new AS_Smoke_Recorder();
+remove_all_filters( 'wp_agent_workflow_run_recorder' );
+add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder_custom_terminal_lock ) { return $recorder_custom_terminal_lock; } );
+( new WP_Agent_Workflow_Runner( $recorder_custom_terminal_lock ) )->run( as_smoke_single_branch_spec( 'custom-terminal-lock' ), array(), array( 'run_id' => 'as-custom-terminal-lock' ) );
+$custom_terminal_lock_branches = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+$custom_terminal_lock_calls = 0;
+add_filter(
+	'wp_agent_workflow_reconcile_lock',
+	static function ( $override, string $run_id, callable $critical ) use ( &$custom_terminal_lock_calls ) {
+		unset( $override );
+		if ( 'as-custom-terminal-lock' === $run_id ) {
+			++$custom_terminal_lock_calls;
+			return $critical();
+		}
+		return null;
+	},
+	10,
+	3
+);
+do_action( 'action_scheduler_failed_execution', $custom_terminal_lock_branches[0]['id'], new RuntimeException( 'uncertain worker outcome' ), 'test' );
+$custom_terminal_lock_final = $recorder_custom_terminal_lock->find( 'as-custom-terminal-lock' );
+smoke_assert( 1, $custom_terminal_lock_calls, 'custom terminal lock: pluggable reconcile lock serializes election', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $custom_terminal_lock_final->get_status(), 'custom terminal lock: winner commits terminal failure', $failures, $passes );
 remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
 
 // A tokenless branch action can fail before writing a receipt. Effects are

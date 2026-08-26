@@ -1042,6 +1042,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			return;
 		}
 		if ( null === $receipt ) {
+			if ( self::is_branch_reconciled( $run_id, $handle_id ) ) {
+				return;
+			}
 			$failure_message = $failure instanceof \Throwable ? $failure->getMessage() : 'The branch failed before a durable reconcile continuation could be established.';
 			$failure_code    = self::BRANCH_HOOK === $failed_hook ? 'workflow_branch_execution_uncertain' : 'workflow_branch_reconcile_recovery_failed';
 			self::fail_reconcile_recovery( $run_id, $handle_id, $failure_message, $failure_code );
@@ -1078,7 +1081,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			return false;
 		}
 
-		$transition = WP_Agent_Workflow_Reconcile_Lock::with_lock(
+		$transition = agents_workflow_reconcile_with_lock(
 			$run_id,
 			static function () use ( $recorder, $run_id, $handle_id, $message, $code ) {
 				$result = $recorder->find( $run_id );
