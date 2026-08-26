@@ -1,13 +1,6 @@
 <?php
 /**
- * Pure-PHP smoke test proving generic run-control lifecycle mutations use the
- * store's atomic read-modify-write path instead of a non-atomic
- * state() -> mutate -> save_state() sequence.
- *
- * A non-atomic read-modify-write leaves a lost-update window: a workflow
- * request_cancel that reads state, then a runner finish_run that also reads the
- * same base state, will each overwrite the other on save. Routing every
- * lifecycle mutation through the store's atomic mutate_state closes that window.
+ * Pure-PHP smoke test for atomic generic run-control lifecycle mutations.
  *
  * Run with: php tests/run-control-atomic-mutations-smoke.php
  *
@@ -16,11 +9,10 @@
 
 use AgentsAPI\AI\WP_Agent_Atomic_Workspace_Run_Control_Store;
 use AgentsAPI\AI\WP_Agent_Run_Control;
+use AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception;
 use AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope;
 
-if ( ! defined( 'ABSPATH' ) ) {
-	define( 'ABSPATH', __DIR__ . '/' );
-}
+defined( 'ABSPATH' ) || define( 'ABSPATH', __DIR__ . '/' );
 
 $failures = array();
 $passes   = 0;
@@ -40,66 +32,74 @@ if ( ! class_exists( 'WP_Error' ) ) {
 
 agents_api_smoke_require_module();
 
-/**
- * Store spy that separates the atomic mutate path from the non-atomic
- * save_state path so a test can assert which one a lifecycle mutation took.
- * Its mutate_state deliberately does NOT call save_state, so the two counters
- * never overlap.
- */
 final class Run_Control_Atomic_Spy_Store implements WP_Agent_Atomic_Workspace_Run_Control_Store {
 
 	public int $mutate_calls           = 0;
 	public int $mutate_workspace_calls = 0;
 	public int $save_calls             = 0;
 	public int $save_workspace_calls   = 0;
-
-	/** @var callable|null Runs inside mutate_state before the mutation, to simulate a concurrent committed write. */
+	public ?WP_Agent_Run_Control_Store_Exception $site_failure      = null;
+	public ?WP_Agent_Run_Control_Store_Exception $workspace_failure = null;
+	/** @var callable|null */
 	public $before_mutation = null;
 
 	/** @var array<string,array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}> */
 	private array $states = array();
 
 	public function get_state( string $store_key ): array {
-		return $this->states[ 'site:' . $store_key ] ?? $this->empty_state();
+		return $this->states[ $this->state_key( $store_key ) ] ?? $this->empty_state();
 	}
 
 	public function save_state( string $store_key, array $state ): void {
 		++$this->save_calls;
-		$this->states[ 'site:' . $store_key ] = $state;
+		$this->states[ $this->state_key( $store_key ) ] = $state;
 	}
 
 	public function mutate_state( string $store_key, callable $mutation ): mixed {
 		++$this->mutate_calls;
-		if ( is_callable( $this->before_mutation ) ) {
-			( $this->before_mutation )( $this, $store_key );
+		if ( $this->site_failure instanceof WP_Agent_Run_Control_Store_Exception ) {
+			throw $this->site_failure;
 		}
-		$mutated                              = $mutation( $this->states[ 'site:' . $store_key ] ?? $this->empty_state() );
-		$this->states[ 'site:' . $store_key ] = $mutated['state'];
-		return $mutated['result'];
+		return $this->mutate( $store_key, $mutation );
 	}
 
 	public function get_workspace_state( string $store_key, WP_Agent_Workspace_Scope $workspace ): array {
-		return $this->states[ 'workspace:' . $workspace->key() . ':' . $store_key ] ?? $this->empty_state();
+		return $this->states[ $this->state_key( $store_key, $workspace ) ] ?? $this->empty_state();
 	}
 
 	public function save_workspace_state( string $store_key, WP_Agent_Workspace_Scope $workspace, array $state ): void {
 		++$this->save_workspace_calls;
-		$this->states[ 'workspace:' . $workspace->key() . ':' . $store_key ] = $state;
+		$this->states[ $this->state_key( $store_key, $workspace ) ] = $state;
 	}
 
 	public function mutate_workspace_state( string $store_key, WP_Agent_Workspace_Scope $workspace, callable $mutation ): mixed {
 		++$this->mutate_workspace_calls;
-		$key                  = 'workspace:' . $workspace->key() . ':' . $store_key;
+		if ( $this->workspace_failure instanceof WP_Agent_Run_Control_Store_Exception ) {
+			throw $this->workspace_failure;
+		}
+		return $this->mutate( $store_key, $mutation, $workspace );
+	}
+
+	/** @param array<string,mixed> $run */
+	public function inject_run( string $store_key, string $run_id, array $run, ?WP_Agent_Workspace_Scope $workspace = null ): void {
+		$key                       = $this->state_key( $store_key, $workspace );
+		$state                     = $this->states[ $key ] ?? $this->empty_state();
+		$state['runs'][ $run_id ]  = $run;
+		$this->states[ $key ]      = $state;
+	}
+
+	private function mutate( string $store_key, callable $mutation, ?WP_Agent_Workspace_Scope $workspace = null ): mixed {
+		if ( is_callable( $this->before_mutation ) ) {
+			( $this->before_mutation )( $this, $store_key, $workspace );
+		}
+		$key                  = $this->state_key( $store_key, $workspace );
 		$mutated              = $mutation( $this->states[ $key ] ?? $this->empty_state() );
 		$this->states[ $key ] = $mutated['state'];
 		return $mutated['result'];
 	}
 
-	/** Inject a run directly into stored state, bypassing the counters. */
-	public function inject_run( string $store_key, string $run_id, array $run ): void {
-		$state                      = $this->states[ 'site:' . $store_key ] ?? $this->empty_state();
-		$state['runs'][ $run_id ]   = $run;
-		$this->states[ 'site:' . $store_key ] = $state;
+	private function state_key( string $store_key, ?WP_Agent_Workspace_Scope $workspace = null ): string {
+		return null === $workspace ? 'site:' . $store_key : 'workspace:' . $workspace->key() . ':' . $store_key;
 	}
 
 	/** @return array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} */
@@ -108,49 +108,104 @@ final class Run_Control_Atomic_Spy_Store implements WP_Agent_Atomic_Workspace_Ru
 	}
 }
 
-// --- Section A: site-local lifecycle mutations route through mutate_state ---
-$spy = new Run_Control_Atomic_Spy_Store();
-WP_Agent_Run_Control::set_store( $spy );
+/** @return array<string,mixed> */
+function atomic_get_run( string $store_key, string $run_id, ?WP_Agent_Workspace_Scope $workspace ): array {
+	return WP_Agent_Run_Control::get_run( $store_key, $run_id, $workspace ) ?? array();
+}
 
-WP_Agent_Run_Control::start_run( 'atomic-store', 'run-a' );
-WP_Agent_Run_Control::save_run( 'atomic-store', array( 'run_id' => 'run-a', 'status' => 'running' ) );
-WP_Agent_Run_Control::finish_run( 'atomic-store', 'run-a', WP_Agent_Run_Control::STATUS_COMPLETED );
-WP_Agent_Run_Control::request_cancel( 'atomic-store', 'run-a' );
+function atomic_start( string $store_key, string $run_id, ?WP_Agent_Workspace_Scope $workspace ): void {
+	WP_Agent_Run_Control::start_run( $store_key, $run_id, array(), $workspace );
+}
 
-agents_api_smoke_assert_equals( 4, $spy->mutate_calls, 'start/save/finish/cancel all route through the atomic mutate_state path', $failures, $passes );
-agents_api_smoke_assert_equals( 0, $spy->save_calls, 'lifecycle mutations never use the non-atomic save_state path', $failures, $passes );
+function atomic_save( string $store_key, string $run_id, string $status, ?WP_Agent_Workspace_Scope $workspace ): array {
+	return WP_Agent_Run_Control::save_run( $store_key, array( 'run_id' => $run_id, 'status' => $status ), $workspace );
+}
 
-// --- Section B: workspace lifecycle mutations route through mutate_workspace_state ---
+$site_spy = new Run_Control_Atomic_Spy_Store();
+WP_Agent_Run_Control::set_store( $site_spy );
+atomic_start( 'atomic-site', 'run-site', null );
+atomic_save( 'atomic-site', 'run-site', WP_Agent_Run_Control::STATUS_RUNNING, null );
+WP_Agent_Run_Control::finish_run( 'atomic-site', 'run-site' );
+WP_Agent_Run_Control::request_cancel( 'atomic-site', 'run-site' );
+agents_api_smoke_assert_equals( 4, $site_spy->mutate_calls, 'all site lifecycle writes use mutate_state', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $site_spy->save_calls, 'site lifecycle writes never use unlocked save_state', $failures, $passes );
+
 $workspace_spy = new Run_Control_Atomic_Spy_Store();
+$workspace     = WP_Agent_Workspace_Scope::from_parts( 'site', 'atomic-ws' );
 WP_Agent_Run_Control::set_store( $workspace_spy );
-$workspace = WP_Agent_Workspace_Scope::from_parts( 'site', 'atomic-ws' );
+atomic_start( 'atomic-workspace', 'run-workspace', $workspace );
+atomic_save( 'atomic-workspace', 'run-workspace', WP_Agent_Run_Control::STATUS_RUNNING, $workspace );
+WP_Agent_Run_Control::finish_run( 'atomic-workspace', 'run-workspace', WP_Agent_Run_Control::STATUS_COMPLETED, $workspace );
+WP_Agent_Run_Control::request_cancel( 'atomic-workspace', 'run-workspace', $workspace );
+agents_api_smoke_assert_equals( 4, $workspace_spy->mutate_workspace_calls, 'all workspace lifecycle writes use mutate_workspace_state', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $workspace_spy->save_workspace_calls, 'workspace lifecycle writes never use unlocked save_workspace_state', $failures, $passes );
 
-WP_Agent_Run_Control::start_run( 'atomic-store', 'run-w', array(), $workspace );
-WP_Agent_Run_Control::finish_run( 'atomic-store', 'run-w', WP_Agent_Run_Control::STATUS_COMPLETED, $workspace );
-WP_Agent_Run_Control::request_cancel( 'atomic-store', 'run-w', $workspace );
+foreach ( array( null, $workspace ) as $scope ) {
+	$scope_name = null === $scope ? 'site' : 'workspace';
+	$race_spy   = new Run_Control_Atomic_Spy_Store();
+	WP_Agent_Run_Control::set_store( $race_spy );
+	atomic_start( 'unrelated-race', 'runner-run', $scope );
+	$race_spy->before_mutation = static function ( Run_Control_Atomic_Spy_Store $store, string $store_key, ?WP_Agent_Workspace_Scope $active_scope ): void {
+		$store->before_mutation = null;
+		$store->inject_run( $store_key, 'concurrent-run', array( 'run_id' => 'concurrent-run', 'status' => 'running' ), $active_scope );
+	};
+	WP_Agent_Run_Control::finish_run( 'unrelated-race', 'runner-run', WP_Agent_Run_Control::STATUS_COMPLETED, $scope );
+	agents_api_smoke_assert_equals( 'running', atomic_get_run( 'unrelated-race', 'concurrent-run', $scope )['status'] ?? null, "{$scope_name} atomic mutation preserves an unrelated concurrent run", $failures, $passes );
 
-agents_api_smoke_assert_equals( 3, $workspace_spy->mutate_workspace_calls, 'workspace lifecycle mutations route through the atomic mutate_workspace_state path', $failures, $passes );
-agents_api_smoke_assert_equals( 0, $workspace_spy->save_workspace_calls, 'workspace lifecycle mutations never use the non-atomic save_workspace_state path', $failures, $passes );
+	$cancel_first = new Run_Control_Atomic_Spy_Store();
+	WP_Agent_Run_Control::set_store( $cancel_first );
+	atomic_start( 'cancel-first', 'same-run', $scope );
+	WP_Agent_Run_Control::request_cancel( 'cancel-first', 'same-run', $scope );
+	$cancelled = WP_Agent_Run_Control::finish_run( 'cancel-first', 'same-run', WP_Agent_Run_Control::STATUS_SUCCEEDED, $scope );
+	agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_CANCELLED, $cancelled['status'] ?? null, "{$scope_name} committed cancellation wins a later successful finish", $failures, $passes );
+	agents_api_smoke_assert_equals( true, $cancelled['cancelled'] ?? null, "{$scope_name} cancelled terminal state remains internally consistent", $failures, $passes );
+	$saved_after_cancel = atomic_save( 'cancel-first', 'same-run', WP_Agent_Run_Control::STATUS_SUCCEEDED, $scope );
+	agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_CANCELLED, $saved_after_cancel['status'] ?? null, "{$scope_name} save_run cannot replace a cancelled terminal state", $failures, $passes );
 
-// --- Section C: an interleaved concurrent write is not lost ---
-// Simulate a second writer that commits a different run between our read and
-// write. A non-atomic read-modify-write would clobber it; the atomic path reads
-// current state inside the mutation and preserves it.
-$race_spy = new Run_Control_Atomic_Spy_Store();
-WP_Agent_Run_Control::set_store( $race_spy );
+	$finish_first = new Run_Control_Atomic_Spy_Store();
+	WP_Agent_Run_Control::set_store( $finish_first );
+	atomic_start( 'finish-first', 'same-run', $scope );
+	$finished = WP_Agent_Run_Control::finish_run( 'finish-first', 'same-run', WP_Agent_Run_Control::STATUS_SUCCEEDED, $scope );
+	$events_before_noops = count( $finish_first->get_workspace_state( 'finish-first', $workspace )['events']['same-run'] ?? array() );
+	if ( null === $scope ) {
+		$events_before_noops = count( $finish_first->get_state( 'finish-first' )['events']['same-run'] ?? array() );
+	}
+	WP_Agent_Run_Control::request_cancel( 'finish-first', 'same-run', $scope );
+	atomic_save( 'finish-first', 'same-run', WP_Agent_Run_Control::STATUS_RUNNING, $scope );
+	atomic_start( 'finish-first', 'same-run', $scope );
+	$terminal = WP_Agent_Run_Control::finish_run( 'finish-first', 'same-run', WP_Agent_Run_Control::STATUS_FAILED, $scope );
+	agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_SUCCEEDED, $finished['status'] ?? null, "{$scope_name} finish commits success before a later cancellation", $failures, $passes );
+	agents_api_smoke_assert_equals( WP_Agent_Run_Control::STATUS_SUCCEEDED, $terminal['status'] ?? null, "{$scope_name} terminal state is monotonic across every lifecycle writer", $failures, $passes );
+	agents_api_smoke_assert_equals( false, $terminal['cancelled'] ?? false, "{$scope_name} cancellation after terminal does not create a contradictory flag", $failures, $passes );
+	$events_after_noops = count( $finish_first->get_workspace_state( 'finish-first', $workspace )['events']['same-run'] ?? array() );
+	if ( null === $scope ) {
+		$events_after_noops = count( $finish_first->get_state( 'finish-first' )['events']['same-run'] ?? array() );
+	}
+	agents_api_smoke_assert_equals( $events_before_noops, $events_after_noops, "{$scope_name} post-terminal lifecycle requests are event-free no-ops", $failures, $passes );
+}
 
-WP_Agent_Run_Control::start_run( 'race-store', 'runner-run' );
-$race_spy->before_mutation = static function ( Run_Control_Atomic_Spy_Store $store, string $store_key ): void {
-	$store->before_mutation = null; // Fire exactly once.
-	$store->inject_run( $store_key, 'concurrent-run', array( 'run_id' => 'concurrent-run', 'status' => 'running' ) );
-};
+$failure_spy               = new Run_Control_Atomic_Spy_Store();
+$failure_spy->site_failure = new WP_Agent_Run_Control_Store_Exception( 'retry site mutation' );
+WP_Agent_Run_Control::set_store( $failure_spy );
+try {
+	atomic_start( 'failed-site', 'run', null );
+	$site_failure_propagated = false;
+} catch ( WP_Agent_Run_Control_Store_Exception $error ) {
+	$site_failure_propagated = 'retry site mutation' === $error->getMessage();
+}
+agents_api_smoke_assert_equals( true, $site_failure_propagated, 'typed site atomic failure propagates without fallback', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $failure_spy->save_calls, 'site atomic failure never falls back to unlocked save_state', $failures, $passes );
 
-$finished = WP_Agent_Run_Control::finish_run( 'race-store', 'runner-run', WP_Agent_Run_Control::STATUS_COMPLETED );
+$failure_spy->site_failure      = null;
+$failure_spy->workspace_failure = new WP_Agent_Run_Control_Store_Exception( 'retry workspace mutation' );
+try {
+	atomic_start( 'failed-workspace', 'run', $workspace );
+	$workspace_failure_propagated = false;
+} catch ( WP_Agent_Run_Control_Store_Exception $error ) {
+	$workspace_failure_propagated = 'retry workspace mutation' === $error->getMessage();
+}
+agents_api_smoke_assert_equals( true, $workspace_failure_propagated, 'typed workspace atomic failure propagates without fallback', $failures, $passes );
+agents_api_smoke_assert_equals( 0, $failure_spy->save_workspace_calls, 'workspace atomic failure never falls back to unlocked save_workspace_state', $failures, $passes );
 
-agents_api_smoke_assert_equals( 'completed', $finished['status'] ?? null, 'finish_run still commits its own terminal status', $failures, $passes );
-$concurrent = WP_Agent_Run_Control::get_run( 'race-store', 'concurrent-run' );
-agents_api_smoke_assert_equals( 'running', $concurrent['status'] ?? null, 'a concurrently committed run survives an interleaved lifecycle mutation', $failures, $passes );
-$runner = WP_Agent_Run_Control::get_run( 'race-store', 'runner-run' );
-agents_api_smoke_assert_equals( 'completed', $runner['status'] ?? null, 'the mutated run keeps its committed status alongside the concurrent run', $failures, $passes );
-
+WP_Agent_Run_Control::reset_store();
 agents_api_smoke_finish( 'run-control atomic mutations', $failures, $passes );

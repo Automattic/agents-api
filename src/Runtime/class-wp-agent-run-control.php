@@ -238,7 +238,7 @@ class WP_Agent_Run_Control {
 	 */
 	public static function start_run( string $store_key, string $run_id, array $run = array(), ?WP_Agent_Workspace_Scope $workspace = null ): array {
 		$now = self::now();
-		$run = array_merge(
+		$run = self::normalize_cancellation_state( array_merge(
 			$run,
 			array(
 				'run_id'     => $run_id,
@@ -247,19 +247,24 @@ class WP_Agent_Run_Control {
 				'updated_at' => $now,
 				'metadata'   => isset( $run['metadata'] ) && is_array( $run['metadata'] ) ? $run['metadata'] : array(),
 			)
-		);
+		) );
 
-		self::mutate_run_state(
+		$result = self::mutate_run_state(
 			$store_key,
 			static function ( array $state ) use ( $run_id, $run ): array {
+				$current = $state['runs'][ $run_id ] ?? null;
+				if ( is_array( $current ) && ( self::is_terminal_status( $current['status'] ?? null ) || self::is_cancellation_requested( $current ) ) ) {
+					return array( 'state' => $state, 'result' => $current );
+				}
+
 				$state['runs'][ $run_id ] = $run;
 				$state                    = self::record_event_in_state( $state, $run_id, 'run_started', array( 'status' => self::STATUS_RUNNING ) );
-				return array( 'state' => $state, 'result' => null );
+				return array( 'state' => $state, 'result' => $run );
 			},
 			$workspace
 		);
 
-		return self::normalize_run( $run );
+		return is_array( $result ) ? self::normalize_run( self::string_keyed_array( $result ) ) : self::normalize_run( $run );
 	}
 
 	/**
@@ -267,23 +272,37 @@ class WP_Agent_Run_Control {
 	 *
 	 * @param string              $store_key Option key used by the backing store.
 	 * @param array<string,mixed> $run       Run payload.
+	 * @param WP_Agent_Workspace_Scope|null $workspace Explicit workspace scope.
 	 * @return array<string,mixed>
 	 */
-	public static function save_run( string $store_key, array $run ): array {
+	public static function save_run( string $store_key, array $run, ?WP_Agent_Workspace_Scope $workspace = null ): array {
 		$normalized               = self::normalize_run( $run );
 		$normalized['updated_at'] = '' !== $normalized['updated_at'] ? $normalized['updated_at'] : self::now();
+		$normalized               = self::normalize_cancellation_state( $normalized );
 		$run_id                   = self::string_value( $normalized['run_id'] );
 
-		self::mutate_run_state(
+		$result = self::mutate_run_state(
 			$store_key,
 			static function ( array $state ) use ( $run_id, $normalized ): array {
-				$state['runs'][ $run_id ] = $normalized;
-				$state                    = self::record_event_in_state( $state, $run_id, 'run_updated', array( 'status' => $normalized['status'] ) );
-				return array( 'state' => $state, 'result' => null );
-			}
+				$current = $state['runs'][ $run_id ] ?? null;
+				if ( is_array( $current ) && self::is_terminal_status( $current['status'] ?? null ) ) {
+					return array( 'state' => $state, 'result' => $current );
+				}
+
+				$next = $normalized;
+				if ( is_array( $current ) && self::is_cancellation_requested( $current ) ) {
+					$next['status']    = self::is_terminal_status( $normalized['status'] ?? null ) ? self::STATUS_CANCELLED : self::STATUS_CANCELLING;
+					$next['cancelled'] = true;
+				}
+
+				$state['runs'][ $run_id ] = $next;
+				$state                    = self::record_event_in_state( $state, $run_id, 'run_updated', array( 'status' => $next['status'] ) );
+				return array( 'state' => $state, 'result' => $next );
+			},
+			$workspace
 		);
 
-		return $normalized;
+		return is_array( $result ) ? self::normalize_run( self::string_keyed_array( $result ) ) : $normalized;
 	}
 
 	/**
@@ -302,12 +321,14 @@ class WP_Agent_Run_Control {
 					return array( 'state' => $state, 'result' => null );
 				}
 
-				$run               = $state['runs'][ $run_id ];
-				$run['status']     = self::normalize_status( $status );
-				$run['updated_at'] = self::now();
-				if ( self::STATUS_CANCELLED === $run['status'] ) {
-					$run['cancelled'] = true;
+				$run = $state['runs'][ $run_id ];
+				if ( self::is_terminal_status( $run['status'] ?? null ) ) {
+					return array( 'state' => $state, 'result' => $run );
 				}
+
+				$run['status']     = self::is_cancellation_requested( $run ) ? self::STATUS_CANCELLED : self::normalize_status( $status );
+				$run['updated_at'] = self::now();
+				$run               = self::normalize_cancellation_state( $run );
 
 				$state['runs'][ $run_id ] = $run;
 				$state                    = self::record_event_in_state( $state, $run_id, 'run_finished', array( 'status' => $run['status'] ) );
@@ -343,10 +364,13 @@ class WP_Agent_Run_Control {
 					return array( 'state' => $state, 'result' => null );
 				}
 
-				$run               = $state['runs'][ $run_id ];
-				$terminal          = in_array( self::normalize_status( $run['status'] ?? '' ), array( self::STATUS_COMPLETED, self::STATUS_SUCCEEDED, self::STATUS_FAILED, self::STATUS_CANCELLED, self::STATUS_BUDGET_EXCEEDED, self::STATUS_STALLED, self::STATUS_INTERRUPTED ), true );
-				$run['status']     = $terminal ? self::normalize_status( $run['status'] ?? '' ) : self::STATUS_CANCELLING;
-				$run['cancelled']  = ! $terminal;
+				$run = $state['runs'][ $run_id ];
+				if ( self::is_terminal_status( $run['status'] ?? null ) ) {
+					return array( 'state' => $state, 'result' => $run );
+				}
+
+				$run['status']     = self::STATUS_CANCELLING;
+				$run['cancelled']  = true;
 				$run['updated_at'] = self::now();
 
 				$state['runs'][ $run_id ] = $run;
@@ -467,47 +491,62 @@ class WP_Agent_Run_Control {
 	 * read-modify-write path so concurrent mutations on the same run_id (for
 	 * example a workflow cancel racing its runner's finish) cannot lose updates.
 	 * Stores that do not advertise the atomic capability keep their historical
-	 * non-atomic read-modify-write behavior.
+	 * non-atomic read-modify-write behavior. Atomic-store failures always
+	 * propagate so callers can retry without an unlocked fallback write.
 	 *
 	 * @param callable(array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>}):array{state:array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>},result:mixed} $mutation State mutation.
 	 * @return mixed Mutation result.
 	 */
 	private static function mutate_run_state( string $store_key, callable $mutation, ?WP_Agent_Workspace_Scope $workspace = null ): mixed {
 		$store = self::store();
-		if ( null === $workspace && $store instanceof WP_Agent_Atomic_Run_Control_Store ) {
-			try {
-				return $store->mutate_state( $store_key, $mutation );
-			} catch ( \RuntimeException $error ) {
-				self::rethrow_if_database_available( $error );
-			}
-		} elseif ( $workspace instanceof WP_Agent_Workspace_Scope && $store instanceof WP_Agent_Atomic_Workspace_Run_Control_Store ) {
-			try {
-				return $store->mutate_workspace_state( $store_key, $workspace, $mutation );
-			} catch ( \RuntimeException $error ) {
-				self::rethrow_if_database_available( $error );
-			}
+		$default_store_without_wordpress = $store instanceof WP_Agent_Option_Run_Control_Store && ! class_exists( '\wpdb' );
+		if ( null === $workspace && $store instanceof WP_Agent_Atomic_Run_Control_Store && ! $default_store_without_wordpress ) {
+			return $store->mutate_state( $store_key, $mutation );
+		} elseif ( $workspace instanceof WP_Agent_Workspace_Scope && $store instanceof WP_Agent_Atomic_Workspace_Run_Control_Store && ! $default_store_without_wordpress ) {
+			return $store->mutate_workspace_state( $store_key, $workspace, $mutation );
 		}
 
-		// Stores without atomic support, or environments without a database
-		// connection (for example pure-PHP execution before WordPress boots),
-		// keep the historical non-atomic read-modify-write.
+		// Custom non-atomic stores and the default store before WordPress boots keep
+		// their historical mutation path. Attempted atomic mutations never fall back.
 		$mutated = $mutation( self::state( $store_key, $workspace ) );
 		self::save_state( $store_key, $mutated['state'], $workspace );
 		return $mutated['result'];
 	}
 
+	private static function is_terminal_status( mixed $status ): bool {
+		return in_array(
+			self::normalize_status( $status ),
+			array(
+				self::STATUS_COMPLETED,
+				self::STATUS_SUCCEEDED,
+				self::STATUS_FAILED,
+				self::STATUS_CANCELLED,
+				self::STATUS_BUDGET_EXCEEDED,
+				self::STATUS_STALLED,
+				self::STATUS_INTERRUPTED,
+			),
+			true
+		);
+	}
+
+	/** @param array<string,mixed> $run */
+	private static function is_cancellation_requested( array $run ): bool {
+		return self::STATUS_CANCELLING === self::normalize_status( $run['status'] ?? null ) || true === ( $run['cancelled'] ?? false );
+	}
+
 	/**
-	 * Rethrow an atomic-mutation failure when a real database is available.
-	 *
-	 * A booted WordPress always defines the wpdb class, so a genuine atomic
-	 * failure there is never swallowed. Without wpdb the only possible failure
-	 * is the missing database connection, which safely degrades to the
-	 * non-atomic read-modify-write path.
+	 * @param array<string,mixed> $run Run state.
+	 * @return array<string,mixed>
 	 */
-	private static function rethrow_if_database_available( \RuntimeException $error ): void {
-		if ( class_exists( '\wpdb' ) ) {
-			throw $error;
+	private static function normalize_cancellation_state( array $run ): array {
+		$status = self::normalize_status( $run['status'] ?? null );
+		if ( in_array( $status, array( self::STATUS_CANCELLING, self::STATUS_CANCELLED ), true ) ) {
+			$run['cancelled'] = true;
+		} elseif ( isset( $run['cancelled'] ) ) {
+			$run['cancelled'] = false;
 		}
+
+		return $run;
 	}
 
 	public static function now(): string {
