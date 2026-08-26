@@ -608,7 +608,11 @@ function agents_workflow_resume_reconcile_continuation( WP_Agent_Workflow_Run_Re
 
 			// Legacy/unavailable unique-action surfaces fall back inline while the
 			// per-run lock is still held, so duplicate dispatchers cannot overlap.
-			return agents_workflow_resolve_runner( $recorder )->resume( $run_id );
+			$resumed = agents_workflow_resolve_runner( $recorder )->resume( $run_id );
+			if ( ! $resumed->is_suspended() && class_exists( WP_Agent_Workflow_Branch_Store::class ) ) {
+				WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
+			}
+			return $resumed;
 		}
 	);
 	if ( is_wp_error( $dispatch ) ) {
