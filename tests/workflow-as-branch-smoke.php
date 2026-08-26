@@ -800,5 +800,57 @@ smoke_assert( 0, count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler
 $GLOBALS['__reject_option_write'] = '';
 remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
 
+// Missing and expired descriptors still reconcile a durable terminal failure.
+// The fallback receipt uses the deterministic descriptor ref itself, survives
+// one contended attempt, and is deleted immediately after the retry records it.
+foreach ( array( 'missing', 'expired' ) as $descriptor_state ) {
+	AS_Shim::reset();
+	$GLOBALS['__options'] = array();
+	$edge_run_id = 'as-descriptor-' . $descriptor_state;
+	$edge_recorder = new AS_Smoke_Recorder();
+	remove_all_filters( 'wp_agent_workflow_run_recorder' );
+	add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $edge_recorder ) { return $edge_recorder; } );
+	$edge_run      = ( new WP_Agent_Workflow_Runner( $edge_recorder ) )->run( as_smoke_failing_spec(), array(), array( 'run_id' => $edge_run_id ) );
+	$edge_branches = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
+	$edge_payload  = $edge_branches[0]['args'][0] ?? array();
+	$edge_store_ref = (string) ( $edge_payload['store_ref'] ?? '' );
+	if ( 'missing' === $descriptor_state ) {
+		delete_option( $edge_store_ref );
+	} else {
+		$GLOBALS['__options'][ $edge_store_ref ]['expires'] = time() - 1;
+		$expired_descriptor = \AgentsAPI\AI\Workflows\WP_Agent_Workflow_Branch_Store::get_branch( $edge_store_ref, (string) ( $edge_payload['context_ref'] ?? '' ) );
+		smoke_assert( null, $expired_descriptor, 'expired descriptor: expired payload is unavailable', $failures, $passes );
+		smoke_assert( false, array_key_exists( $edge_store_ref, $GLOBALS['__options'] ), 'expired descriptor: expired option deletes itself on read', $failures, $passes );
+	}
+
+	$edge_lock_attempts = 0;
+	add_filter(
+		'wp_agent_workflow_reconcile_lock',
+		static function ( $override, string $run_id, callable $critical ) use ( &$edge_lock_attempts, $edge_run_id ) {
+			unset( $override );
+			if ( $edge_run_id === $run_id && 0 === $edge_lock_attempts++ ) {
+				return new WP_Error( 'agents_reconcile_lock_unavailable', 'contended' );
+			}
+			return $critical();
+		},
+		10,
+		3
+	);
+	AS_Shim::fire( $edge_branches[0]['id'] );
+	$edge_retries = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RECONCILE_HOOK );
+	$edge_receipt  = \AgentsAPI\AI\Workflows\WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $edge_store_ref, (string) ( $edge_payload['context_ref'] ?? '' ) );
+	smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $edge_run->get_status(), $descriptor_state . ' descriptor: fixture starts suspended', $failures, $passes );
+	smoke_assert( 1, count( $edge_retries ), $descriptor_state . ' descriptor: lock contention queues reconcile-only retry', $failures, $passes );
+	smoke_assert( 'workflow_branch_descriptor_missing', $edge_receipt['branch_result']['error']['code'] ?? '', $descriptor_state . ' descriptor: receipt durably carries terminal missing-descriptor failure', $failures, $passes );
+	AS_Shim::fire( $edge_retries[0]['id'] );
+	smoke_assert( false, array_key_exists( $edge_store_ref, $GLOBALS['__options'] ), $descriptor_state . ' descriptor: successful reconcile deletes exact receipt-only row', $failures, $passes );
+	$edge_resumes = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
+	AS_Shim::fire( $edge_resumes[0]['id'] );
+	$edge_final = $edge_recorder->find( $edge_run_id );
+	smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $edge_final->get_status(), $descriptor_state . ' descriptor: reconcile-only retry reaches terminal workflow failure', $failures, $passes );
+	smoke_assert( 'workflow_parallel_required_branch_failed', $edge_final->get_error()['code'] ?? '', $descriptor_state . ' descriptor: terminal failure preserves required-branch semantics', $failures, $passes );
+	remove_all_filters( 'wp_agent_workflow_reconcile_lock' );
+}
+
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );

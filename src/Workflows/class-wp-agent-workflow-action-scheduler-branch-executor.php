@@ -834,6 +834,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 
 		$receipt = WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $result_ref, $context_ref );
 		if ( null === $receipt ) {
+			if ( self::is_branch_reconciled( $run_id, $handle_id ) ) {
+				return;
+			}
 			throw new \RuntimeException( sprintf( 'Could not rehydrate the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
 		}
 
@@ -876,7 +879,11 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
 		}
 
-		if ( ! is_wp_error( $result ) || 'agents_reconcile_lock_unavailable' !== $result->get_error_code() ) {
+		if ( ! is_wp_error( $result ) ) {
+			WP_Agent_Workflow_Branch_Store::forget_reconcile_receipt( $run_id, $handle_id, $result_ref, $context_ref );
+			return;
+		}
+		if ( 'agents_reconcile_lock_unavailable' !== $result->get_error_code() ) {
 			return;
 		}
 
@@ -907,6 +914,25 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		if ( $action_id <= 0 ) {
 			throw new \RuntimeException( sprintf( 'Could not enqueue a reconcile retry for branch `%s` in run `%s` after lock contention.', $handle_id, $run_id ) );
 		}
+	}
+
+	/** Whether the authoritative run already recorded this branch completion. */
+	private static function is_branch_reconciled( string $run_id, string $handle_id ): bool {
+		$recorder = agents_workflow_resolve_recorder();
+		if ( null === $recorder ) {
+			return false;
+		}
+		$result = $recorder->find( $run_id );
+		if ( null === $result ) {
+			return false;
+		}
+		if ( ! $result->is_suspended() ) {
+			return true;
+		}
+
+		$suspension = $result->get_suspension();
+		$completed  = is_array( $suspension['completed'] ?? null ) ? $suspension['completed'] : array();
+		return isset( $completed[ $handle_id ] );
 	}
 
 	/**

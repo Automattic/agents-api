@@ -115,7 +115,7 @@ final class WP_Agent_Workflow_Branch_Store {
 			return $override;
 		}
 
-		$ref = self::BRANCH_PREFIX . md5( $run_id . ':' . $handle_id );
+		$ref = self::branch_ref( $run_id, $handle_id );
 		self::write_row(
 			$ref,
 			array(
@@ -229,12 +229,36 @@ final class WP_Agent_Workflow_Branch_Store {
 			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'Could not durably persist the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
 		}
 
+		// A missing or expired built-in descriptor still has a deterministic ref.
+		// Persist a receipt-only row at that exact ref: no shared-index append, and
+		// successful reconciliation can delete the row directly.
+		if ( self::branch_ref( $run_id, $handle_id ) === $store_ref ) {
+			self::write_row(
+				$store_ref,
+				array(
+					'run_id'                       => $run_id,
+					'handle_id'                    => $handle_id,
+					self::RECONCILE_RECEIPT_KEY    => $receipt,
+					'expires'                      => time() + self::TTL_SECONDS,
+				)
+			);
+			$persisted = self::read_row( $store_ref );
+			if ( $receipt === ( $persisted[ self::RECONCILE_RECEIPT_KEY ] ?? null ) ) {
+				return $store_ref;
+			}
+
+			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'Could not durably persist the terminal result for missing branch `%s` in run `%s`.', $handle_id, $run_id ) );
+		}
+
 		// A non-local ref belongs to the consumer that supplied it through the
 		// existing branch-store filters. Require that same owner to persist and read
 		// the receipt; never fall back to an unexpected local option row.
 		$descriptor = self::filtered_get_branch( $store_ref, $context_ref );
 		if ( null === $descriptor ) {
-			return new \WP_Error( 'workflow_branch_result_persistence_failed', sprintf( 'The branch store that owns `%s` could not rehydrate it for terminal-result persistence.', $store_ref ) );
+			$descriptor = array(
+				'run_id'    => $run_id,
+				'handle_id' => $handle_id,
+			);
 		}
 		$descriptor[ self::RECONCILE_RECEIPT_KEY ] = $receipt;
 		$result_ref = self::filtered_put_branch( $run_id, $handle_id, self::strip_shared_context( $descriptor ) );
@@ -261,11 +285,15 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @return array{branch_result:array<string,mixed>,continuation:array<string,mixed>}|null
 	 */
 	public static function get_reconcile_receipt( string $result_ref, string $context_ref ): ?array {
-		$row        = self::read_row( $result_ref );
-		$descriptor = null !== $row && is_array( $row['descriptor'] ?? null )
+		$row = self::read_row( $result_ref );
+		if ( null !== $row && is_array( $row[ self::RECONCILE_RECEIPT_KEY ] ?? null ) ) {
+			$receipt = $row[ self::RECONCILE_RECEIPT_KEY ];
+		} else {
+			$descriptor = null !== $row && is_array( $row['descriptor'] ?? null )
 			? $row['descriptor']
 			: self::filtered_get_branch( $result_ref, $context_ref );
-		$receipt    = is_array( $descriptor[ self::RECONCILE_RECEIPT_KEY ] ?? null ) ? $descriptor[ self::RECONCILE_RECEIPT_KEY ] : array();
+			$receipt = is_array( $descriptor[ self::RECONCILE_RECEIPT_KEY ] ?? null ) ? $descriptor[ self::RECONCILE_RECEIPT_KEY ] : array();
+		}
 		if ( ! is_array( $receipt['branch_result'] ?? null ) ) {
 			return null;
 		}
@@ -274,6 +302,39 @@ final class WP_Agent_Workflow_Branch_Store {
 			'branch_result' => self::string_keyed_array( $receipt['branch_result'] ),
 			'continuation'  => is_array( $receipt['continuation'] ?? null ) ? self::string_keyed_array( $receipt['continuation'] ) : array(),
 		);
+	}
+
+	/**
+	 * Delete one successfully reconciled receipt without touching sibling refs.
+	 *
+	 * @since 0.7.0
+	 *
+	 * @param string $run_id      Run id.
+	 * @param string $handle_id   Branch handle id.
+	 * @param string $result_ref  Receipt ref.
+	 * @param string $context_ref Shared-context ref for custom stores.
+	 * @return void
+	 */
+	public static function forget_reconcile_receipt( string $run_id, string $handle_id, string $result_ref, string $context_ref ): void {
+		$row = self::read_row( $result_ref );
+		if ( null !== $row ) {
+			if ( is_array( $row['descriptor'] ?? null ) ) {
+				$descriptor = $row['descriptor'];
+				unset( $descriptor[ self::RECONCILE_RECEIPT_KEY ] );
+				$row['descriptor'] = $descriptor;
+				self::write_row( $result_ref, $row );
+			} elseif ( self::branch_ref( $run_id, $handle_id ) === $result_ref && function_exists( 'delete_option' ) ) {
+				delete_option( $result_ref );
+			}
+			return;
+		}
+
+		$descriptor = self::filtered_get_branch( $result_ref, $context_ref );
+		if ( null === $descriptor ) {
+			return;
+		}
+		unset( $descriptor[ self::RECONCILE_RECEIPT_KEY ] );
+		self::filtered_put_branch( $run_id, $handle_id, self::strip_shared_context( $descriptor ) );
 	}
 
 	/**
@@ -340,6 +401,9 @@ final class WP_Agent_Workflow_Branch_Store {
 		}
 		$expires = is_numeric( $row['expires'] ?? null ) ? (int) $row['expires'] : 0;
 		if ( $expires > 0 && $expires <= time() ) {
+			if ( function_exists( 'delete_option' ) ) {
+				delete_option( $option );
+			}
 			return null;
 		}
 
@@ -375,6 +439,11 @@ final class WP_Agent_Workflow_Branch_Store {
 			$index[] = $ref;
 			update_option( $option, $index, false );
 		}
+	}
+
+	/** Return the deterministic built-in descriptor ref for one branch. */
+	private static function branch_ref( string $run_id, string $handle_id ): string {
+		return self::BRANCH_PREFIX . md5( $run_id . ':' . $handle_id );
 	}
 
 	/**
