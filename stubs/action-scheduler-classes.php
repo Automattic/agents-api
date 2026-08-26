@@ -52,6 +52,9 @@ abstract class ActionScheduler_Store {
 	}
 
 	public function release_claim( ActionScheduler_ActionClaim $claim ): void {}
+
+	/** @param int|string $action_id Action id. */
+	public function cancel_action( $action_id ): void {}
 }
 
 /**

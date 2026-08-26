@@ -154,19 +154,27 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	public function dispatch( array $branches, array $context ) {
 		$context_run_id  = self::string_value( $context['_workflow_run_id'] ?? '' );
 		$context_step_id = self::string_value( $context['_workflow_step_id'] ?? '' );
+		$run_id_for_ctx  = '' !== $context_run_id ? $context_run_id : self::first_branch_run_id( $branches );
+		$admission_token = WP_Agent_Workflow_Branch_Store::begin_admission( $run_id_for_ctx );
+		if ( '' === $admission_token ) {
+			return new \WP_Error(
+				'workflow_branch_dispatch_admission_failed',
+				sprintf( 'Could not persist the async branch admission fence for run `%s`.', $run_id_for_ctx )
+			);
+		}
 
 		// The shared immutable context is identical for every branch, so store it
 		// ONCE per run and reference it from each branch — never duplicate a
 		// multi-KB context into N branch payloads. Its ref rides in every branch's
 		// AS args (a short option name), and the branch action re-seats it into the
 		// descriptor's branch_vars.context on rehydrate.
-		$run_id_for_ctx = '' !== $context_run_id ? $context_run_id : self::first_branch_run_id( $branches );
 		$shared_context = is_array( $context['shared_context'] ?? null ) ? self::string_keyed_array( $context['shared_context'] ) : array();
 		$context_ref    = '' !== $run_id_for_ctx
 			? WP_Agent_Workflow_Branch_Store::put_shared_context( $run_id_for_ctx, $shared_context )
 			: '';
 
-		$handles = array();
+		$handles          = array();
+		$enqueued_actions = array();
 		foreach ( $branches as $index => $branch ) {
 			$key = self::string_value( $branch['key'] ?? (string) $index );
 
@@ -201,10 +209,11 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			$store_ref = WP_Agent_Workflow_Branch_Store::put_branch( $run_id, $handle_id, $descriptor );
 
 			$payload = array(
-				'run_id'      => $run_id,
-				'handle_id'   => $handle_id,
-				'store_ref'   => $store_ref,
-				'context_ref' => $context_ref,
+				'run_id'          => $run_id,
+				'handle_id'       => $handle_id,
+				'store_ref'       => $store_ref,
+				'context_ref'     => $context_ref,
+				'admission_token' => $admission_token,
 			);
 
 			$group     = self::group_for_run( $run_id );
@@ -217,6 +226,8 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			// dispatch instead — clean up what we already stored so no orphan rows
 			// linger, and surface a descriptive WP_Error.
 			if ( $action_id <= 0 ) {
+				WP_Agent_Workflow_Branch_Store::reject_admission( $admission_token );
+				self::cancel_enqueued_actions( $enqueued_actions );
 				if ( '' !== $run_id ) {
 					WP_Agent_Workflow_Branch_Store::forget_run( $run_id );
 				}
@@ -230,6 +241,12 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 				);
 			}
 
+			$enqueued_actions[] = array(
+				'id'      => $action_id,
+				'payload' => $payload,
+				'group'   => $group,
+			);
+
 			$handles[] = array(
 				'id'       => $handle_id,
 				'key'      => $key,
@@ -237,6 +254,16 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 				'status'   => 'dispatched',
 				'required' => ! empty( $branch['required'] ),
 				'ref'      => $action_id,
+			);
+		}
+
+		if ( ! WP_Agent_Workflow_Branch_Store::admit( $admission_token ) ) {
+			WP_Agent_Workflow_Branch_Store::reject_admission( $admission_token );
+			self::cancel_enqueued_actions( $enqueued_actions );
+			WP_Agent_Workflow_Branch_Store::forget_run( $run_id_for_ctx );
+			return new \WP_Error(
+				'workflow_branch_dispatch_admission_failed',
+				sprintf( 'Could not commit async branch admission for run `%s`.', $run_id_for_ctx )
 			);
 		}
 
@@ -736,17 +763,32 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 *
 	 * @since 0.5.0
 	 *
-	 * @param array<mixed> $payload Action payload: { run_id, handle_id, store_ref, context_ref }.
+	 * @param array<mixed> $payload Action payload: { run_id, handle_id, store_ref, context_ref, admission_token }.
 	 * @return void
 	 */
 	public static function run_branch_action( array $payload ): void {
-		$run_id      = self::string_value( $payload['run_id'] ?? '' );
-		$handle_id   = self::string_value( $payload['handle_id'] ?? '' );
-		$store_ref   = self::string_value( $payload['store_ref'] ?? '' );
-		$context_ref = self::string_value( $payload['context_ref'] ?? '' );
+		$run_id          = self::string_value( $payload['run_id'] ?? '' );
+		$handle_id       = self::string_value( $payload['handle_id'] ?? '' );
+		$store_ref       = self::string_value( $payload['store_ref'] ?? '' );
+		$context_ref     = self::string_value( $payload['context_ref'] ?? '' );
+		$admission_token = self::string_value( $payload['admission_token'] ?? '' );
 
 		if ( '' === $run_id || '' === $handle_id ) {
 			return;
+		}
+
+		// Payloads queued before admission fencing shipped have no token and must
+		// retain their original execution behavior across an upgrade.
+		if ( array_key_exists( 'admission_token', $payload ) ) {
+			$admission_status = WP_Agent_Workflow_Branch_Store::admission_status( $admission_token );
+			if ( 'pending' === $admission_status ) {
+				self::defer_pending_branch( $payload, $run_id, $admission_token );
+				return;
+			}
+			if ( 'admitted' !== $admission_status ) {
+				self::cancel_matching_actions( $payload, $run_id );
+				return;
+			}
 		}
 
 		// Rehydrate the full self-contained descriptor from the branch store using
@@ -1048,6 +1090,70 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			// letting the throw be swallowed by AS's queue runner into a hang.
 			unset( $error );
 			return 0;
+		}
+	}
+
+	/**
+	 * Cancel every action inserted before a sibling enqueue failed.
+	 *
+	 * The rejected admission fence closes the running-worker race; exact-argument
+	 * unscheduling removes pending originals and any callback deferred while the
+	 * generation was still pending.
+	 *
+	 * @param array<int,array{id:int,payload:array<mixed>,group:string}> $actions Enqueued actions.
+	 */
+	private static function cancel_enqueued_actions( array $actions ): void {
+		foreach ( $actions as $action ) {
+			if ( function_exists( 'as_unschedule_all_actions' ) ) {
+				as_unschedule_all_actions( self::BRANCH_HOOK, array( $action['payload'] ), $action['group'] );
+			}
+
+			if ( class_exists( '\ActionScheduler_Store' ) ) {
+				try {
+					\ActionScheduler_Store::instance()->cancel_action( $action['id'] );
+				} catch ( \Throwable $error ) {
+					unset( $error );
+				}
+			}
+		}
+	}
+
+	/**
+	 * Remove pending copies of one exact branch payload.
+	 *
+	 * @param array<mixed> $payload Branch payload.
+	 */
+	private static function cancel_matching_actions( array $payload, string $run_id ): void {
+		if ( function_exists( 'as_unschedule_all_actions' ) ) {
+			as_unschedule_all_actions( self::BRANCH_HOOK, array( $payload ), self::group_for_run( $run_id ) );
+		}
+	}
+
+	/**
+	 * Requeue a branch claimed before its dispatch generation is committed.
+	 *
+	 * @param array<mixed> $payload Branch payload.
+	 */
+	private static function defer_pending_branch( array $payload, string $run_id, string $admission_token ): void {
+		$group = self::group_for_run( $run_id );
+		if ( ! function_exists( 'as_schedule_single_action' ) ) {
+			throw new \RuntimeException( sprintf( 'Could not defer branch for run `%s`: delayed Action Scheduler enqueue is unavailable.', $run_id ) );
+		}
+
+		try {
+			$action_id = (int) as_schedule_single_action( time() + 1, self::BRANCH_HOOK, array( $payload ), $group );
+		} catch ( \Throwable $error ) {
+			unset( $error );
+			$action_id = 0;
+		}
+		if ( $action_id <= 0 ) {
+			throw new \RuntimeException( sprintf( 'Could not defer branch for run `%s` while fan-out admission was pending.', $run_id ) );
+		}
+
+		// Compensation may have scanned while this worker was scheduling its copy.
+		// Re-check after enqueue so rejection closes that final insertion race.
+		if ( 'rejected' === WP_Agent_Workflow_Branch_Store::admission_status( $admission_token ) ) {
+			self::cancel_matching_actions( $payload, $run_id );
 		}
 	}
 
