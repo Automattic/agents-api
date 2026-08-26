@@ -64,6 +64,7 @@ if ( ! class_exists( 'WP_Ability' ) ) {
 $GLOBALS['__filters']   = array();
 $GLOBALS['__abilities'] = array();
 $GLOBALS['__options']   = array();
+$GLOBALS['__get_option_after_read'] = null;
 
 if ( ! function_exists( 'add_filter' ) ) {
 	function add_filter( string $hook, callable $cb, int $priority = 10, int $accepted_args = 1 ): void {
@@ -121,7 +122,11 @@ if ( ! function_exists( 'current_user_can' ) ) {
 }
 if ( ! function_exists( 'get_option' ) ) {
 	function get_option( string $option, $default = false ) {
-		return array_key_exists( $option, $GLOBALS['__options'] ) ? $GLOBALS['__options'][ $option ] : $default;
+		$value = array_key_exists( $option, $GLOBALS['__options'] ) ? $GLOBALS['__options'][ $option ] : $default;
+		if ( is_callable( $GLOBALS['__get_option_after_read'] ) ) {
+			call_user_func( $GLOBALS['__get_option_after_read'], $option );
+		}
+		return $value;
 	}
 }
 if ( ! function_exists( 'add_option' ) ) {
@@ -580,6 +585,27 @@ $cleanup_leftover = array_filter(
 );
 smoke_assert( array(), array_values( $cleanup_leftover ), 'concurrent cleanup: stale shared index cannot orphan terminal result rows', $failures, $passes );
 
+// Terminal run cleanup can interleave after receipt cleanup reads a descriptor.
+// The per-receipt path must never write that stale row back and resurrect it.
+$GLOBALS['__options'] = array();
+$resurrection_run = 'pay-cleanup-interleave';
+$resurrection_ref = WP_Agent_Workflow_Branch_Store::put_branch( $resurrection_run, 'branch', array( 'run_id' => $resurrection_run, 'handle_id' => 'branch', 'key' => 'branch' ) );
+$resurrection_result = array( 'key' => 'branch', 'status' => 'succeeded', 'output' => array( 'ok' => true ) );
+WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $resurrection_run, 'branch', $resurrection_ref, '', $resurrection_result );
+$GLOBALS['__get_option_after_read'] = static function ( string $option ) use ( $resurrection_run, $resurrection_ref ): void {
+	if ( $resurrection_ref !== $option ) {
+		return;
+	}
+	$GLOBALS['__get_option_after_read'] = null;
+	WP_Agent_Workflow_Branch_Store::forget_run( $resurrection_run );
+};
+WP_Agent_Workflow_Branch_Store::forget_reconcile_receipt( $resurrection_run, 'branch', $resurrection_ref, '' );
+$resurrection_leftover = array_filter(
+	array_keys( $GLOBALS['__options'] ),
+	static fn ( $option ): bool => str_starts_with( (string) $option, 'agents_wf_branch_' )
+);
+smoke_assert( array(), array_values( $resurrection_leftover ), 'receipt cleanup race: terminal forget cannot be followed by descriptor resurrection', $failures, $passes );
+
 // A consumer-owned branch ref must keep terminal result persistence and cleanup
 // in that same custom store. No local option fallback is permitted.
 $GLOBALS['__options'] = array();
@@ -635,8 +661,8 @@ smoke_assert( 'workflow_branch_descriptor_missing', $custom_missing_receipt['bra
 smoke_assert( array(), $GLOBALS['__options'], 'custom store: missing-descriptor receipt still creates no local fallback', $failures, $passes );
 WP_Agent_Workflow_Branch_Store::forget_reconcile_receipt( $custom_missing_run, 'missing-handle', $custom_missing_ref, '' );
 $custom_missing_after_reconcile = WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $custom_missing_ref, '' );
-smoke_assert( null, $custom_missing_after_reconcile, 'custom store: successful reconcile removes the exact receipt through owner filters', $failures, $passes );
-smoke_assert( array(), $GLOBALS['__options'], 'custom store: exact receipt cleanup creates no local option fallback', $failures, $passes );
+smoke_assert( $custom_missing_result, $custom_missing_after_reconcile['branch_result'] ?? null, 'custom store: run-level owner cleanup retains receipt until terminal forget', $failures, $passes );
+smoke_assert( array(), $GLOBALS['__options'], 'custom store: deferred receipt cleanup creates no local option fallback', $failures, $passes );
 WP_Agent_Workflow_Branch_Store::forget_run( $custom_missing_run );
 smoke_assert( array(), $GLOBALS['__custom_branch_rows'], 'custom store: forget filter cleans receipt-only missing descriptor', $failures, $passes );
 remove_all_filters( 'wp_agent_workflow_branch_store_put' );

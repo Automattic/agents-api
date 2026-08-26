@@ -399,25 +399,24 @@ final class WP_Agent_Workflow_Branch_Store {
 	 * @return void
 	 */
 	public static function forget_reconcile_receipt( string $run_id, string $handle_id, string $result_ref, string $context_ref ): void {
+		unset( $context_ref );
 		$row = self::read_row( $result_ref );
-		if ( null !== $row ) {
-			if ( is_array( $row['descriptor'] ?? null ) ) {
-				$descriptor = $row['descriptor'];
-				unset( $descriptor[ self::RECONCILE_RECEIPT_KEY ] );
-				$row['descriptor'] = $descriptor;
-				self::write_row( $result_ref, $row );
-			} elseif ( self::branch_ref( $run_id, $handle_id ) === $result_ref && function_exists( 'delete_option' ) ) {
-				delete_option( $result_ref );
-			}
+		if ( null === $row ) {
 			return;
 		}
 
-		$descriptor = self::filtered_get_branch( $result_ref, $context_ref );
-		if ( null === $descriptor ) {
+		// Descriptor-backed and consumer-owned receipts belong to run-level cleanup.
+		// Never rewrite them here: a resume may have already called forget_run()
+		// after this read, and a write would resurrect the terminal run's storage.
+		if ( is_array( $row['descriptor'] ?? null ) ) {
 			return;
 		}
-		unset( $descriptor[ self::RECONCILE_RECEIPT_KEY ] );
-		self::filtered_put_branch( $run_id, $handle_id, self::strip_shared_context( $descriptor ) );
+
+		// Receipt-only missing-descriptor rows are safe to delete exactly. Deletion
+		// remains harmless if terminal cleanup won the race first.
+		if ( self::branch_ref( $run_id, $handle_id ) === $result_ref && function_exists( 'delete_option' ) ) {
+			delete_option( $result_ref );
+		}
 	}
 
 	/**

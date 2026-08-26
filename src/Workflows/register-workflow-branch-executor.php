@@ -243,10 +243,11 @@ add_filter(
 	 * @return int
 	 */
 	static function ( $batches ) {
-		$incoming = is_numeric( $batches ) ? (int) $batches : 1;
-		$branches = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count();
-		$resumes  = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::resume_inflight_count();
-		if ( $branches < 1 && $resumes < 1 ) {
+		$incoming   = is_numeric( $batches ) ? (int) $batches : 1;
+		$branches   = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::branch_inflight_count();
+		$resumes    = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::resume_inflight_count();
+		$reconciles = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::reconcile_inflight_count();
+		if ( $branches < 1 && $resumes < 1 && $reconciles < 1 ) {
 			return $incoming;
 		}
 
@@ -257,18 +258,17 @@ add_filter(
 		// parallel-branch behavior.
 		$branch_ceiling = max( $incoming, min( $branches, $max ) );
 
-		// Resume headroom is ADDITIVE on top of the branch ceiling — the resume needs
-		// a slot BEYOND the branches and beyond any UNRELATED claims that are already
+		// Continuation headroom is ADDITIVE on top of the branch ceiling — resume and
+		// reconcile-only actions need slots BEYOND branches and UNRELATED claims already
 		// consuming the branch ceiling. If it merely matched the ceiling it would be
-		// starved: AS's has_maximum_concurrent_batches() compares the GLOBAL claim
-		// count against the ceiling, so a lone due resume with even one unrelated claim
+		// starved: AS's has_maximum_concurrent_batches() compares the GLOBAL claim count
+		// against the ceiling, so a lone due continuation with one unrelated claim
 		// outstanding would sit at claim_count >= ceiling and never be admitted. Adding
-		// the resume count lifts the ceiling above the outstanding claims so the WP-Cron
-		// runner is admitted and claims the resume. Bounded (a fan-out has one resume;
-		// concurrent fan-outs are bounded by MAX) so the raise stays sane.
-		$resume_headroom = min( $resumes, $max );
+		// each bounded count lifts the ceiling so the WP-Cron runner can claim it.
+		$resume_headroom    = min( $resumes, $max );
+		$reconcile_headroom = min( $reconciles, $max );
 
-		return $branch_ceiling + $resume_headroom;
+		return $branch_ceiling + $resume_headroom + $reconcile_headroom;
 	},
 	100
 );

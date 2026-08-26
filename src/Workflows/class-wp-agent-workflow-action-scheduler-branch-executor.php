@@ -427,6 +427,36 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	}
 
 	/**
+	 * Count reconcile-only retries still pending or in progress. These quick
+	 * continuation actions need additive claim headroom for the same reason as a
+	 * resume: once the original branch action completes, branch inflight can be
+	 * zero while an unrelated long-lived claim keeps AS's default gate closed.
+	 *
+	 * @since 0.7.0
+	 *
+	 * @return int In-flight reconcile-action count.
+	 */
+	public static function reconcile_inflight_count(): int {
+		if ( ! function_exists( 'as_get_scheduled_actions' ) || ! class_exists( '\ActionScheduler_Store' ) ) {
+			return 0;
+		}
+
+		$ids = as_get_scheduled_actions(
+			array(
+				'hook'     => self::RECONCILE_HOOK,
+				'status'   => array(
+					\ActionScheduler_Store::STATUS_PENDING,
+					\ActionScheduler_Store::STATUS_RUNNING,
+				),
+				'per_page' => self::MAX_BRANCH_CONCURRENCY,
+			),
+			'ids'
+		);
+
+		return is_array( $ids ) ? count( $ids ) : 0;
+	}
+
+	/**
 	 * Trigger Action Scheduler's async-request queue runner: fire N CONCURRENT
 	 * loopback HTTP requests to admin-ajax.php so AS spawns N separate native-PHP
 	 * worker processes, each of which runs a queue batch. This is the mechanism that
