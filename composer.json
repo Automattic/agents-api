@@ -17,6 +17,9 @@
   "autoload": {
     "files": [
       "agents-api.php"
+    ],
+    "classmap": [
+      "src/"
     ]
   },
   "suggest": {
@@ -24,8 +27,10 @@
   },
   "scripts": {
     "phpstan": "phpstan analyse --no-progress --memory-limit=2G",
+    "phpstan-consumer": "phpstan analyse --no-progress --memory-limit=1G -c tests/fixtures/phpstan-consumer.neon",
     "smoke": [
       "php tests/composer-autoload-smoke.php",
+      "@phpstan-consumer",
       "php tests/bootstrap-version-skew-smoke.php",
       "php tests/bootstrap-smoke.php",
       "php tests/message-envelope-smoke.php",
@@ -91,6 +96,7 @@
       "php tests/provider-turn-adapter-smoke.php",
       "php tests/default-provider-turn-adapter-smoke.php",
       "php tests/agents-chat-ability-smoke.php",
+      "php tests/chat-permission-parity-smoke.php",
       "php tests/default-agents-chat-handler-smoke.php",
       "php tests/tool-observability-smoke.php",
       "php tests/ability-tool-executor-smoke.php",
@@ -110,6 +116,7 @@
       "php tests/conversation-loop-budgets-smoke.php",
       "php tests/runtime-package-run-contract-smoke.php",
       "php tests/run-control-normalization-smoke.php",
+      "php tests/run-control-option-store-failures-smoke.php",
       "php tests/canonical-run-lifecycle-smoke.php",
       "php tests/channels-smoke.php",
       "php tests/chat-run-control-smoke.php",

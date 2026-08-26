@@ -206,7 +206,7 @@ function agents_chat_dispatch( array $input ) {
  *                                            claim token are injected before `$run` executes.
  * @param callable(array<mixed>):mixed $run   Runtime callable. Receives the claimed input and
  *                                            returns canonical output array or WP_Error.
- * @param array{workspace:?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope,owner:?array{type:string,key:string},conversation_store:?\AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store}|null $run_context
+	 * @param array{workspace:?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope,owner:?array{type:string,key:string},principal:?WP_Agent_Execution_Principal,conversation_store:?\AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store}|null $run_context
  *                                            Pre-resolved context when the caller must validate before handler selection.
  * @return array<string,mixed>|\WP_Error Canonical output, or WP_Error when the run cannot be claimed
  *                                       (e.g. a replayed run_id) or the runtime fails.
@@ -228,9 +228,13 @@ function agents_chat_run_claimed( array $input, callable $run, ?array $run_conte
 
 	$session_id = agents_chat_optional_string( $input['session_id'] ?? null );
 	$agent      = agents_chat_optional_string( $input['agent'] ?? null ) ?? '';
+	$metadata   = array( 'agent' => $agent );
+	if ( $run_context['principal'] instanceof WP_Agent_Execution_Principal ) {
+		$metadata['principal'] = $run_context['principal']->to_safe_metadata();
+	}
 	if ( null !== $session_id ) {
 		try {
-			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $session_id, array( 'agent' => $agent, '_claim_token' => $run_claim_token ), $run_context['workspace'], $run_context['owner'], $run_context['conversation_store'] );
+			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $session_id, $metadata + array( '_claim_token' => $run_claim_token ), $run_context['workspace'], $run_context['owner'], $run_context['conversation_store'] );
 		} catch ( \RuntimeException $error ) {
 			return new \WP_Error( 'agents_chat_run_workspace_unsupported', $error->getMessage() );
 		}
@@ -239,7 +243,7 @@ function agents_chat_run_claimed( array $input, callable $run, ?array $run_conte
 			return $started;
 		}
 	} else {
-		$pending = WP_Agent_Chat_Run_Control::claim_pending_run( $run_id, $run_claim_token, $run_context['workspace'], $run_context['owner'] );
+		$pending = WP_Agent_Chat_Run_Control::claim_pending_run( $run_id, $run_claim_token, $run_context['workspace'], $run_context['owner'], $metadata );
 		if ( is_wp_error( $pending ) ) {
 			do_action( 'agents_chat_dispatch_failed', $pending->get_error_code(), $input );
 			return $pending;
@@ -283,7 +287,7 @@ function agents_chat_run_claimed( array $input, callable $run, ?array $run_conte
 	$resolved_session_id = agents_chat_optional_string( $result['session_id'] ?? null ) ?? $session_id;
 	if ( null !== $resolved_session_id ) {
 		if ( null === $session_id ) {
-			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $resolved_session_id, array( 'agent' => $agent, '_claim_token' => $run_claim_token ), $run_context['workspace'], $run_context['owner'], $run_context['conversation_store'] );
+			$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $resolved_session_id, $metadata + array( '_claim_token' => $run_claim_token ), $run_context['workspace'], $run_context['owner'], $run_context['conversation_store'] );
 			if ( is_wp_error( $started ) ) {
 				WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_context['workspace'] );
 				do_action( 'agents_chat_dispatch_failed', $started->get_error_code(), $input );
@@ -326,9 +330,11 @@ function agents_chat_string_keyed_array( array $data ): array {
 }
 
 /**
- * Permission gate for `agents/chat`. Defaults to `manage_options`; consumers
- * with their own auth model (HMAC-signed webhook, OAuth bearer, etc.) can
- * widen the gate per-request via the `agents_chat_permission` filter.
+ * Permission gate for `agents/chat`.
+ *
+ * Administrators and principals with an operator grant for the requested agent
+ * can chat. Consumers with their own auth model (HMAC-signed webhook, OAuth
+ * bearer, etc.) can widen the gate per-request via the filters below.
  *
  * @since 0.103.0
  *
@@ -357,10 +363,19 @@ function agents_chat_permission( array $input ): bool {
 		$allowed = (bool) apply_filters( 'agents_chat_runtime_principal_permission', $allowed, $principal, $input );
 	}
 
+	$agent = sanitize_title( agents_chat_optional_string( $input['agent'] ?? null ) ?? '' );
+	if ( ! $allowed && null === $principal && '' !== $agent && class_exists( '\WP_Agent_Access' ) && class_exists( '\WP_Agent_Access_Grant' ) ) {
+		$allowed = \WP_Agent_Access::can_current_principal_access_agent(
+			$agent,
+			\WP_Agent_Access_Grant::ROLE_OPERATOR,
+			agents_chat_access_scope( $input )
+		);
+	}
+
 	/**
 	 * Filter the permission decision for the canonical chat ability.
 	 *
-	 * @param bool  $allowed Default: current_user_can( 'manage_options' ).
+	 * @param bool  $allowed Administrator, operator-grant, or runtime-principal decision.
 	 * @param array<mixed> $input   The canonical input being authorized.
 	 */
 	return (bool) apply_filters(
@@ -368,6 +383,24 @@ function agents_chat_permission( array $input ): bool {
 		$allowed,
 		$input
 	);
+}
+
+/**
+ * Build the canonical access scope used by every agents/chat transport.
+ *
+ * @param array<mixed> $input Canonical chat input.
+ * @return array<string,mixed>
+ */
+function agents_chat_access_scope( array $input ): array {
+	$input = agents_chat_string_keyed_array( $input );
+	$scope = \AgentsAPI\AI\Auth\agents_access_request_scope( $input );
+	if ( is_array( $input['client_context'] ?? null ) ) {
+		$client_context            = agents_chat_strip_runtime_tool_declaration_fields( agents_chat_string_keyed_array( $input['client_context'] ) );
+		$scope['client_context']   = $client_context;
+		$scope['request_metadata'] = array( 'client_context' => $client_context );
+	}
+
+	return $scope;
 }
 
 /**
@@ -411,16 +444,43 @@ function agents_chat_principal_from_input( array $input ) {
 function agents_chat_input_schema(): array {
 	return array(
 		'type'       => 'object',
-		'required'   => array( 'agent', 'message' ),
+		'required'   => array( 'agent' ),
 		'properties' => array(
 			'workspace'             => agents_chat_workspace_schema(),
+			'workspace_id'          => array(
+				'type'        => array( 'string', 'null' ),
+				'description' => 'Optional host access-scope identifier. This narrows agent grant resolution and does not replace the canonical conversation workspace.',
+			),
+			'client_id'             => array(
+				'type'        => array( 'string', 'null' ),
+				'description' => 'Optional host client identifier used when resolving scoped agent grants.',
+			),
 			'agent'                 => array(
 				'type'        => 'string',
 				'description' => 'Slug or ID of the registered agent that should handle this turn.',
 			),
 			'message'               => array(
 				'type'        => 'string',
-				'description' => 'User-side text for the agent to respond to.',
+				'description' => 'User-side text shorthand for the agent to respond to. Required when input_messages is empty.',
+			),
+			'input_messages'        => array(
+				'type'        => 'array',
+				'description' => 'Canonical inbound message envelopes. Used for typed continuations such as paired client tool call/results when no new user text exists.',
+				'default'     => array(),
+				'items'       => array( 'type' => 'object' ),
+			),
+			'history'               => array(
+				'type'        => 'array',
+				'description' => 'Optional caller-supplied text backscroll for stateless execution. An authoritative conversation store takes precedence when configured.',
+				'default'     => array(),
+				'items'       => array(
+					'type'       => 'object',
+					'required'   => array( 'role', 'content' ),
+					'properties' => array(
+						'role'    => array( 'type' => 'string', 'enum' => array( 'user', 'assistant' ) ),
+						'content' => array( 'type' => 'string' ),
+					),
+				),
 			),
 			'session_id'            => array(
 				'type'        => array( 'string', 'null' ),
@@ -429,6 +489,21 @@ function agents_chat_input_schema(): array {
 			'run_id'                => array(
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Optional client-supplied idempotency/run key. If omitted, the dispatcher provides an opaque run ID to the runtime and response.',
+			),
+			'token_streaming'       => array(
+				'type'        => 'boolean',
+				'description' => 'Whether a streaming transport should expose provider-token deltas when the selected provider dispatcher supports them.',
+				'default'     => false,
+			),
+			'structured_output'     => array(
+				'type'        => array( 'object', 'null' ),
+				'description' => 'Optional JSON Schema structured-output request. Structured turns run without tools or token streaming.',
+				'properties'  => array(
+					'format' => array( 'type' => 'string', 'enum' => array( 'json_schema' ) ),
+					'name'   => array( 'type' => array( 'string', 'null' ) ),
+					'schema' => array( 'type' => 'object' ),
+					'strict' => array( 'type' => 'boolean' ),
+				),
 			),
 			'principal'             => agents_chat_principal_schema(),
 			'session_owner'         => agents_chat_session_owner_schema(),
@@ -579,6 +654,8 @@ function agents_chat_principal_schema(): array {
 			'audience_claims'    => array( 'type' => 'object' ),
 			'owner_type'         => array( 'type' => array( 'string', 'null' ) ),
 			'owner_key'          => array( 'type' => array( 'string', 'null' ) ),
+			'actor_type'         => array( 'type' => array( 'string', 'null' ), 'description' => 'Optional opaque current-turn actor type supplied by a trusted channel integration. It is distinct from conversation ownership and audience.' ),
+			'actor_key'          => array( 'type' => array( 'string', 'null' ), 'description' => 'Optional opaque current-turn actor key. Must be supplied with actor_type; Agents API does not expose it in safe metadata.' ),
 			'binding'            => array( 'type' => array( 'object', 'null' ) ),
 		),
 	);
@@ -658,6 +735,13 @@ function agents_chat_output_schema(): array {
 				'type'        => 'boolean',
 				'description' => 'Whether the agent considers this turn complete (true) or expects further work (false, e.g. tool approvals pending).',
 			),
+			'structured_output' => array(
+				'type'        => array( 'object', 'array', 'string', 'number', 'integer', 'boolean', 'null' ),
+				'description' => 'Parsed JSON value returned for a structured-output request. The key is present even when the valid value is null.',
+			),
+			'status'     => agents_chat_status_schema(),
+			'runtime_tool_pending' => agents_chat_runtime_tool_pending_schema(),
+			'run_outcome' => agents_chat_run_outcome_schema(),
 			'metadata'   => array(
 				'type'        => 'object',
 				'description' => 'Runtime metadata. The default handler exposes `agents_api.tool_observability`, a content-redacted v1 tool lifecycle contract.',
@@ -708,6 +792,68 @@ function agents_chat_output_schema(): array {
 					),
 				),
 			),
+		),
+	);
+}
+
+/**
+ * Canonical terminal or suspended chat status.
+ *
+ * @return array<string,mixed>
+ */
+function agents_chat_status_schema(): array {
+	return array(
+		'type'        => 'string',
+		'enum'        => \AgentsAPI\AI\WP_Agent_Run_Outcome::statuses(),
+		'description' => 'Canonical result status. Omitted only when a legacy handler does not report a status.',
+	);
+}
+
+/**
+ * Canonical pending external runtime-tool request.
+ *
+ * @return array<string,mixed>
+ */
+function agents_chat_runtime_tool_pending_schema(): array {
+	return array(
+		'type'        => 'object',
+		'description' => 'Present when status is runtime_tool_pending. The request is inline for stateless turns and may also be persisted by a host runtime-tool request store.',
+		'required'    => array( 'status', 'request_id', 'tool_name', 'tool_call_id', 'parameters', 'run_id', 'timeout_at', 'runtime', 'metadata' ),
+		'properties'  => array(
+			'status'       => array( 'type' => 'string', 'enum' => array( \AgentsAPI\AI\WP_Agent_Runtime_Tool_Request::STATUS_PENDING ) ),
+			'request_id'   => array( 'type' => 'string' ),
+			'tool_name'    => array( 'type' => 'string' ),
+			'tool_call_id' => array( 'type' => 'string' ),
+			'parameters'   => array( 'type' => 'object' ),
+			'run_id'       => array( 'type' => 'string' ),
+			'timeout_at'   => array( 'type' => 'string' ),
+			'runtime'      => array( 'type' => 'object' ),
+			'metadata'     => array( 'type' => 'object' ),
+		),
+	);
+}
+
+/**
+ * Canonical outcome envelope for this chat run.
+ *
+ * @return array<string,mixed>
+ */
+function agents_chat_run_outcome_schema(): array {
+	return array(
+		'type'        => 'object',
+		'description' => 'Versioned, runtime-neutral outcome envelope for the chat run.',
+		'required'    => array( 'schema', 'version', 'status', 'completed', 'stop_reason', 'retryable' ),
+		'properties'  => array(
+			'schema'         => array( 'type' => 'string', 'enum' => array( \AgentsAPI\AI\WP_Agent_Run_Outcome::SCHEMA ) ),
+			'version'        => array( 'type' => 'integer', 'enum' => array( \AgentsAPI\AI\WP_Agent_Run_Outcome::VERSION ) ),
+			'status'         => agents_chat_status_schema(),
+			'completed'      => array( 'type' => 'boolean' ),
+			'stop_reason'    => array( 'type' => 'string' ),
+			'retryable'      => array( 'type' => 'boolean' ),
+			'failure'        => array( 'type' => 'object' ),
+			'assertions'     => array( 'type' => 'object' ),
+			'provider_error' => array( 'type' => 'object' ),
+			'metadata'       => array( 'type' => 'object' ),
 		),
 	);
 }

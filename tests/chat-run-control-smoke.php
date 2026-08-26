@@ -186,6 +186,27 @@ agents_api_smoke_assert_equals( $captured_chat_input['run_id'], $chat['run_id'] 
 $stored = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-1', 'run_id' => $chat['run_id'] ) );
 agents_api_smoke_assert_equals( 'completed', $stored['status'] ?? null, 'chat dispatch records completed run by default', $failures, $passes );
 
+$actor_chat = AgentsAPI\AI\Channels\agents_chat_dispatch(
+	array(
+		'agent'      => 'demo-agent',
+		'message'    => 'Hello from an external speaker',
+		'session_id' => 'session-1',
+		'principal'  => array(
+			'acting_user_id'     => 123,
+			'effective_agent_id' => 'demo-agent',
+			'auth_source'        => AgentsAPI\AI\WP_Agent_Execution_Principal::AUTH_SOURCE_USER,
+			'request_context'    => AgentsAPI\AI\WP_Agent_Execution_Principal::REQUEST_CONTEXT_CHAT,
+			'actor_type'         => 'person',
+			'actor_key'          => 'channel-user:alice',
+		),
+	)
+);
+$actor_run = AgentsAPI\AI\Channels\agents_get_chat_run( array( 'session_id' => 'session-1', 'run_id' => $actor_chat['run_id'] ) );
+agents_api_smoke_assert_equals( 'person', $captured_chat_input['principal']['actor_type'] ?? null, 'canonical chat forwards explicit turn actor', $failures, $passes );
+agents_api_smoke_assert_equals( 'channel-user:alice', $captured_chat_input['principal']['actor_key'] ?? null, 'canonical chat preserves opaque turn actor key for the runtime', $failures, $passes );
+agents_api_smoke_assert_equals( 'person', $actor_run['metadata']['principal']['actor_type'] ?? null, 'run envelope preserves actor type for audit', $failures, $passes );
+agents_api_smoke_assert_equals( false, array_key_exists( 'actor_key', $actor_run['metadata']['principal'] ?? array() ), 'run envelope redacts opaque actor key', $failures, $passes );
+
 add_filter(
 	'wp_agent_chat_handler',
 	static fn() => static fn( array $runtime_input ): array => array(

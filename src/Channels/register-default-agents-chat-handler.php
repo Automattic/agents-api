@@ -40,7 +40,10 @@ namespace AgentsAPI\AI\Channels;
 use AgentsAPI\AI\WP_Agent_Conversation_Loop;
 use AgentsAPI\AI\WP_Agent_Execution_Principal;
 use AgentsAPI\AI\WP_Agent_Message;
+use AgentsAPI\AI\WP_Agent_Runtime_Profile;
+use AgentsAPI\AI\WP_Agent_Tool_Pair_Validator;
 use AgentsAPI\AI\Tools\WP_Agent_Ability_Tool_Executor;
+use AgentsAPI\AI\Tools\WP_Agent_Default_Chat_Tool_Executor;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Declaration;
 use AgentsAPI\AI\Tools\WP_Agent_Tool_Executor_Registry;
 use AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Sessions;
@@ -80,6 +83,29 @@ class WP_Agent_Default_Chat_Handler {
 	 */
 	public static function register(): void {
 		register_chat_handler( array( self::class, 'execute' ), self::FALLBACK_PRIORITY );
+		add_filter(
+			'wp_agent_chat_stream_handler',
+			static function ( $existing, array $input ) {
+				unset( $input );
+				return null === $existing ? array( self::class, 'execute_stream' ) : $existing;
+			},
+			self::FALLBACK_PRIORITY,
+			2
+		);
+	}
+
+	/**
+	 * Execute one canonical streaming chat turn through the native runtime.
+	 *
+	 * Provider deltas are emitted only when canonical input explicitly requests
+	 * token streaming. The terminal output always matches execute().
+	 *
+	 * @param array<string,mixed> $input Canonical agents/chat input.
+	 * @param callable            $emit  Canonical provider delta sink.
+	 * @return array<string,mixed>|\WP_Error Canonical agents/chat output, or WP_Error.
+	 */
+	public static function execute_stream( array $input, callable $emit ) {
+		return self::execute_native( $input, true === ( $input['token_streaming'] ?? false ) ? $emit : null );
 	}
 
 	/**
@@ -89,9 +115,20 @@ class WP_Agent_Default_Chat_Handler {
 	 * @return array<string,mixed>|\WP_Error Canonical agents/chat output, or WP_Error.
 	 */
 	public static function execute( array $input ) {
-		$message = is_string( $input['message'] ?? null ) ? trim( $input['message'] ) : '';
-		if ( '' === $message ) {
-			return new \WP_Error( 'agents_chat_empty_message', 'Message cannot be empty.', array( 'status' => 400 ) );
+		return self::execute_native( $input );
+	}
+
+	/**
+	 * Execute one canonical chat turn with an optional provider delta sink.
+	 *
+	 * @param array<string,mixed> $input      Canonical agents/chat input.
+	 * @param callable|null       $delta_sink Request-scoped provider delta sink.
+	 * @return array<string,mixed>|\WP_Error Canonical agents/chat output, or WP_Error.
+	 */
+	private static function execute_native( array $input, ?callable $delta_sink = null ) {
+		$input_messages = self::input_messages( $input );
+		if ( is_wp_error( $input_messages ) ) {
+			return $input_messages;
 		}
 
 		$agent_slug = is_string( $input['agent'] ?? null ) ? trim( $input['agent'] ) : '';
@@ -100,10 +137,15 @@ class WP_Agent_Default_Chat_Handler {
 			return $agent;
 		}
 
-		$config = ( $agent instanceof \WP_Agent ) ? $agent->get_default_config() : array();
+		$config = self::resolve_runtime_config( $agent, $input );
+		if ( is_wp_error( $config ) ) {
+			return $config;
+		}
+		$runtime_profile = self::resolve_runtime_profile( $agent, $input, $config );
 
 		$provider = self::first_non_empty(
 			is_string( $input['provider'] ?? null ) ? $input['provider'] : '',
+			$runtime_profile instanceof WP_Agent_Runtime_Profile ? $runtime_profile->provider_id() : '',
 			is_string( $config['provider'] ?? null ) ? $config['provider'] : '',
 			is_string( $config['provider_id'] ?? null ) ? $config['provider_id'] : ''
 		);
@@ -117,6 +159,7 @@ class WP_Agent_Default_Chat_Handler {
 
 		$model = self::first_non_empty(
 			is_string( $input['model'] ?? null ) ? $input['model'] : '',
+			$runtime_profile instanceof WP_Agent_Runtime_Profile ? $runtime_profile->model_id() : '',
 			is_string( $config['model'] ?? null ) ? $config['model'] : '',
 			is_string( $config['model_id'] ?? null ) ? $config['model_id'] : ''
 		);
@@ -131,6 +174,14 @@ class WP_Agent_Default_Chat_Handler {
 		$system_prompt   = self::resolve_system_prompt( $config );
 		$max_turns       = self::resolve_max_turns( $input, $config );
 		$tool_call_rules = self::resolve_tool_call_rules( $config );
+		$structured_output = $input['structured_output'] ?? $config['structured_output'] ?? null;
+		if ( null !== $structured_output ) {
+			try {
+				$structured_output = $structured_output instanceof \AgentsAPI\AI\WP_Agent_Structured_Output_Request ? $structured_output : \AgentsAPI\AI\WP_Agent_Structured_Output_Request::from_array( $structured_output );
+			} catch ( \InvalidArgumentException $error ) {
+				return new \WP_Error( 'agents_chat_invalid_structured_output', $error->getMessage(), array( 'status' => 400 ) );
+			}
+		}
 
 		$store      = WP_Agent_Conversation_Sessions::get_store( $input );
 		$session_id = is_string( $input['session_id'] ?? null ) ? trim( $input['session_id'] ) : '';
@@ -147,22 +198,34 @@ class WP_Agent_Default_Chat_Handler {
 				}
 			}
 		}
+		if ( ! $store instanceof WP_Agent_Conversation_Store && is_array( $input['history'] ?? null ) ) {
+			$messages = self::stateless_history( $input['history'] );
+		}
 
 		if ( '' === $session_id ) {
 			$session_id = self::generate_session_id();
 		}
 
 		$runtime_context = array(
-			'agent'      => $agent,
-			'agent_slug' => $agent_slug,
-			'session_id' => $session_id,
-			'run_id'     => is_string( $input['run_id'] ?? null ) ? trim( $input['run_id'] ) : '',
+			'agent'           => $agent,
+			'agent_slug'      => $agent_slug,
+			'session_id'      => $session_id,
+			'run_id'          => is_string( $input['run_id'] ?? null ) ? trim( $input['run_id'] ) : '',
+			'principal'       => $input['principal'] ?? null,
+			'runtime_profile' => $runtime_profile instanceof WP_Agent_Runtime_Profile ? $runtime_profile->to_array() : null,
+			'client_context'  => self::runtime_client_context( $input ),
 		);
 		$executor_registry = WP_Agent_Tool_Executor_Registry::fromFilters( $runtime_context );
 		$tool_declarations = self::resolve_tool_declarations( $config, self::runtime_tool_declarations( $agent, $runtime_context ), $executor_registry );
 		if ( is_wp_error( $tool_declarations ) ) {
 			return $tool_declarations;
 		}
+		$trusted_runtime_tools = array_keys(
+			array_filter(
+				$tool_declarations,
+				static fn( array $declaration ): bool => WP_Agent_Tool_Declaration::EXECUTOR_CLIENT === ( $declaration['executor'] ?? null )
+			)
+		);
 		$tool_declarations = ( new \WP_Agent_Tool_Policy() )->resolve(
 			$tool_declarations,
 			array(
@@ -170,10 +233,16 @@ class WP_Agent_Default_Chat_Handler {
 				'allow_only'   => is_array( $input['allow_only'] ?? null ) ? $input['allow_only'] : array(),
 				'tool_policy'  => is_array( $input['tool_policy'] ?? null ) ? $input['tool_policy'] : array(),
 				'principal'    => $input['principal'] ?? null,
+				// These client tools were added by the server-only declaration filter,
+				// not supplied by the caller, so they are trusted policy opt-ins.
+				'runtime_tools' => $trusted_runtime_tools,
 			)
 		);
+		if ( null !== $structured_output && ( ! empty( $tool_declarations ) || null !== $delta_sink ) ) {
+			return new \WP_Error( 'agents_chat_structured_output_incompatible', 'Structured output requires a no-tools, non-streaming turn.', array( 'status' => 400 ) );
+		}
 
-		$messages[] = WP_Agent_Message::text( 'user', $message );
+		$messages   = array_merge( $messages, $input_messages );
 		$messages   = WP_Agent_Message::normalize_many( $messages );
 
 		$loop_options = array(
@@ -189,14 +258,22 @@ class WP_Agent_Default_Chat_Handler {
 				'principal'              => $input['principal'] ?? null,
 				'conversation_store'     => $store,
 				'tool_executor_registry' => $executor_registry,
+				'runtime_profile'        => $runtime_context['runtime_profile'],
 			),
 		);
+		if ( null !== $structured_output ) {
+			$loop_options['structured_output'] = $structured_output;
+		}
 		if ( ! empty( $tool_declarations ) ) {
 			// Default executor: dispatch tool calls through registered abilities.
 			// The loop also consults the #377 per-target executor registry
 			// (`agents_api_tool_executors`) for declarations that select another
 			// execution environment, so consumers can override per tool target.
-			$loop_options['tool_executor'] = new WP_Agent_Ability_Tool_Executor();
+			$loop_options['tool_executor'] = new WP_Agent_Default_Chat_Tool_Executor( new WP_Agent_Ability_Tool_Executor() );
+		}
+		$runtime_tool_store = \AgentsAPI\AI\agents_runtime_tool_request_store_optional( $runtime_context );
+		if ( null !== $runtime_tool_store ) {
+			$loop_options['runtime_tool_request_store'] = $runtime_tool_store;
 		}
 		if ( ! empty( $tool_call_rules ) ) {
 			// Declarative deterministic tool-call gating. The loop enforces these
@@ -204,6 +281,9 @@ class WP_Agent_Default_Chat_Handler {
 			// before a required commit, and a completion block until the commit
 			// tool runs — so the guarantee is the runtime's, not a prompt's.
 			$loop_options['tool_call_rules'] = $tool_call_rules;
+		}
+		if ( null !== $delta_sink ) {
+			$loop_options['on_provider_delta'] = $delta_sink;
 		}
 
 		$result = WP_Agent_Conversation_Loop::run_conversation(
@@ -225,7 +305,131 @@ class WP_Agent_Default_Chat_Handler {
 			);
 		}
 
-		return self::to_canonical_output( $session_id, $result );
+		return self::to_canonical_output( $session_id, $result, $runtime_profile );
+	}
+
+	/**
+	 * Resolve canonical inbound messages while preserving the text shorthand.
+	 *
+	 * @param array<string,mixed> $input Canonical chat input.
+	 * @return array<int,array<string,mixed>>|\WP_Error
+	 */
+	private static function input_messages( array $input ) {
+		$messages = array();
+		$message  = is_string( $input['message'] ?? null ) ? trim( $input['message'] ) : '';
+		if ( '' !== $message ) {
+			$messages[] = WP_Agent_Message::text( 'user', $message );
+		}
+
+		if ( is_array( $input['input_messages'] ?? null ) && array() !== $input['input_messages'] ) {
+			try {
+				$typed_messages = WP_Agent_Message::normalize_many( array_values( $input['input_messages'] ) );
+			} catch ( \InvalidArgumentException $error ) {
+				return new \WP_Error( 'agents_chat_invalid_input_messages', $error->getMessage(), array( 'status' => 400 ) );
+			}
+			foreach ( $typed_messages as $typed_message ) {
+				if ( ! in_array( $typed_message['type'], array( WP_Agent_Message::TYPE_TOOL_CALL, WP_Agent_Message::TYPE_TOOL_RESULT ), true ) ) {
+					return new \WP_Error( 'agents_chat_invalid_input_message_type', 'Canonical input_messages may contain only tool call/result continuations.', array( 'status' => 400 ) );
+				}
+			}
+			if ( ! WP_Agent_Tool_Pair_Validator::is_paired( $typed_messages ) ) {
+				return new \WP_Error( 'agents_chat_unpaired_input_messages', 'Canonical tool call/result input_messages must be paired.', array( 'status' => 400 ) );
+			}
+			$messages = array_merge( $messages, $typed_messages );
+		}
+
+		if ( array() === $messages ) {
+			return new \WP_Error( 'agents_chat_empty_message', 'Message or input_messages must contain at least one message.', array( 'status' => 400 ) );
+		}
+
+		return $messages;
+	}
+
+	/**
+	 * Resolve the effective registered-agent config for one chat request.
+	 *
+	 * Hosts can derive trusted runtime values from canonical input without
+	 * mutating the registered agent or leaking one request's config into another.
+	 *
+	 * @param \WP_Agent|null      $agent Selected registered agent, or null.
+	 * @param array<string,mixed> $input Canonical agents/chat input.
+	 * @return array<string,mixed>|\WP_Error Effective request config, or error.
+	 */
+	private static function resolve_runtime_config( ?\WP_Agent $agent, array $input ) {
+		$config = $agent instanceof \WP_Agent ? $agent->get_default_config() : array();
+		if ( ! $agent instanceof \WP_Agent ) {
+			return $config;
+		}
+
+		/**
+		 * Filters a registered agent's effective config for one chat request.
+		 *
+		 * @param array<string,mixed> $config Registered agent default config.
+		 * @param \WP_Agent           $agent  Selected registered agent.
+		 * @param array<string,mixed> $input  Canonical agents/chat input.
+		 */
+		$resolved = self::apply_runtime_config_filters( $config, $agent, $input );
+		if ( is_wp_error( $resolved ) ) {
+			return $resolved;
+		}
+		if ( ! is_array( $resolved ) ) {
+			return new \WP_Error(
+				'agents_chat_invalid_runtime_agent_config',
+				'The runtime agent config must be an array or WP_Error.',
+				array( 'status' => 500 )
+			);
+		}
+
+		return \AgentsAPI\AI\agents_api_string_keyed_array( $resolved );
+	}
+
+	/**
+	 * Invoke the host runtime-config boundary without assuming filter output type.
+	 *
+	 * @param array<string,mixed> $config Registered agent default config.
+	 * @param \WP_Agent           $agent  Selected registered agent.
+	 * @param array<string,mixed> $input  Canonical agents/chat input.
+	 * @return mixed Filtered runtime config.
+	 */
+	private static function apply_runtime_config_filters( array $config, \WP_Agent $agent, array $input ) {
+		return apply_filters( 'agents_api_runtime_agent_config', $config, $agent, $input );
+	}
+
+	/**
+	 * Resolve the registered agent's provider/model binding for this chat turn.
+	 *
+	 * Only canonical, normalized request context is forwarded. Runtime overrides
+	 * remain server-owned through the agent and resolver contracts.
+	 *
+	 * @param \WP_Agent|null      $agent  Selected agent, or null for an agent-less turn.
+	 * @param array<string,mixed> $input  Canonical agents/chat input.
+	 * @param array<string,mixed> $config Agent default config.
+	 * @return WP_Agent_Runtime_Profile|null Resolved profile, or null without an agent/binding.
+	 */
+	private static function resolve_runtime_profile( ?\WP_Agent $agent, array $input, array $config ): ?WP_Agent_Runtime_Profile {
+		if ( ! $agent instanceof \WP_Agent || ! function_exists( 'wp_resolve_agent_runtime_profile' ) ) {
+			return null;
+		}
+
+		$context = array(
+			'mode'           => 'chat',
+			'agent_config'   => $config,
+			'principal'      => $input['principal'] ?? null,
+			'workspace'      => self::workspace_from_input( $input ),
+			'workspace_id'   => is_string( $input['workspace_id'] ?? null ) ? trim( $input['workspace_id'] ) : '',
+			'client_id'      => is_string( $input['client_id'] ?? null ) ? trim( $input['client_id'] ) : '',
+			'client_context' => is_array( $input['client_context'] ?? null ) ? $input['client_context'] : array(),
+		);
+
+		if ( is_string( $input['provider'] ?? null ) ) {
+			$context['provider_id'] = trim( $input['provider'] );
+		}
+		if ( is_string( $input['model'] ?? null ) ) {
+			$context['model_id'] = trim( $input['model'] );
+		}
+
+		$profile = wp_resolve_agent_runtime_profile( $agent, $context );
+		return $profile instanceof WP_Agent_Runtime_Profile ? $profile : null;
 	}
 
 	/**
@@ -301,8 +505,10 @@ class WP_Agent_Default_Chat_Handler {
 	 * Runtime overlays come only from the server-side
 	 * `agents_api_runtime_tool_declarations` filter after the agent, generated
 	 * session id, and run id are resolved. Each entry must name an existing
-	 * canonical enabled tool. Overlays can replace only model-facing description,
-	 * parameters, and runtime execution metadata.
+	 * canonical enabled tool. Host overlays can replace only model-facing
+	 * description, parameters, and runtime execution metadata. Client overlays
+	 * are additional, request-scoped declarations and suspend at the runtime-tool
+	 * continuation boundary instead of being dispatched as abilities.
 	 *
 	 * @param array<string,mixed> $config Agent default config.
 	 * @param array<mixed>        $overlays Server-provided declaration overlays.
@@ -359,6 +565,10 @@ class WP_Agent_Default_Chat_Handler {
 		$executor_registry = $executor_registry ?? new WP_Agent_Tool_Executor_Registry();
 		$seen_names        = array();
 		$seen_aliases      = array();
+		$reserved_aliases  = array();
+		foreach ( $declarations as $name => $declaration ) {
+			$reserved_aliases[ WP_Agent_Tool_Declaration::providerSafeName( $name ) ] = true;
+		}
 		foreach ( $overlays as $map_name => $overlay ) {
 			if ( ! is_string( $map_name ) || ! is_array( $overlay ) ) {
 				return self::runtime_tool_declaration_error( 'declaration' );
@@ -370,17 +580,26 @@ class WP_Agent_Default_Chat_Handler {
 				return self::runtime_tool_declaration_error( $error->getMessage() );
 			}
 
-			$name = $normalized['name'] ?? '';
-			if ( ! is_string( $name ) || $map_name !== $name || ! isset( $declarations[ $name ] ) || isset( $seen_names[ $name ] ) ) {
+			$name      = $normalized['name'] ?? '';
+			$is_client = WP_Agent_Tool_Declaration::EXECUTOR_CLIENT === ( $normalized['executor'] ?? null );
+			if ( ! is_string( $name ) || $map_name !== $name || isset( $seen_names[ $name ] ) || ( ! $is_client && ! isset( $declarations[ $name ] ) ) || ( $is_client && isset( $declarations[ $name ] ) ) ) {
 				return self::runtime_tool_declaration_error( 'name' );
 			}
 			$seen_names[ $name ] = true;
 
 			$alias = $normalized['provider_safe_name'] ?? WP_Agent_Tool_Declaration::providerSafeName( $name );
-			if ( ! is_string( $alias ) || isset( $seen_aliases[ $alias ] ) ) {
+			if ( ! is_string( $alias ) || isset( $seen_aliases[ $alias ] ) || ( $is_client && isset( $reserved_aliases[ $alias ] ) ) ) {
 				return self::runtime_tool_declaration_error( 'provider_safe_name' );
 			}
 			$seen_aliases[ $alias ] = true;
+
+			if ( $is_client ) {
+				if ( '' !== WP_Agent_Tool_Executor_Registry::targetIdFromDeclaration( $normalized ) ) {
+					return self::runtime_tool_declaration_error( 'executor_target' );
+				}
+				$declarations[ $name ] = $normalized;
+				continue;
+			}
 
 			$target_id      = WP_Agent_Tool_Executor_Registry::targetIdFromDeclaration( $normalized );
 			$runtime        = is_array( $normalized['runtime'] ?? null ) ? $normalized['runtime'] : array();
@@ -410,6 +629,22 @@ class WP_Agent_Default_Chat_Handler {
 	private static function runtime_tool_declarations( ?\WP_Agent $agent, array $runtime_context ): array {
 		$overlays = apply_filters( 'agents_api_runtime_tool_declarations', array(), $agent, $runtime_context );
 		return is_array( $overlays ) ? $overlays : array( '__invalid__' => $overlays );
+	}
+
+	/**
+	 * Provide trusted filters sanitized client-supplied context data.
+	 *
+	 * This context is not an authorization signal. A runtime declaration filter
+	 * must establish authorization from a server-authenticated principal or its
+	 * own trusted transport binding before it exposes a client tool.
+	 *
+	 * @param array<string,mixed> $input Canonical chat input.
+	 * @return array<string,mixed>
+	 */
+	private static function runtime_client_context( array $input ): array {
+		$client_context = is_array( $input['client_context'] ?? null ) ? \AgentsAPI\AI\agents_api_string_keyed_array( $input['client_context'] ) : array();
+
+		return agents_chat_strip_runtime_tool_declaration_fields( $client_context );
 	}
 
 	/**
@@ -602,11 +837,12 @@ class WP_Agent_Default_Chat_Handler {
 	/**
 	 * Project the loop result to the canonical `agents/chat` output shape.
 	 *
-	 * @param string              $session_id Session id to thread further turns under.
-	 * @param array<string,mixed> $result     Conversation loop result.
+	 * @param string                        $session_id      Session id to thread further turns under.
+	 * @param array<string,mixed>           $result          Conversation loop result.
+	 * @param WP_Agent_Runtime_Profile|null $runtime_profile Resolved runtime profile.
 	 * @return array<string,mixed>
 	 */
-	private static function to_canonical_output( string $session_id, array $result ): array {
+	private static function to_canonical_output( string $session_id, array $result, ?WP_Agent_Runtime_Profile $runtime_profile = null ): array {
 		$metadata = array_filter(
 			array(
 				'status'             => is_string( $result['status'] ?? null ) ? $result['status'] : null,
@@ -614,16 +850,86 @@ class WP_Agent_Default_Chat_Handler {
 				'usage'              => is_array( $result['usage'] ?? null ) ? $result['usage'] : null,
 				'run_outcome'        => is_array( $result['run_outcome'] ?? null ) ? $result['run_outcome'] : null,
 				'tool_observability' => is_array( $result['tool_observability'] ?? null ) ? $result['tool_observability'] : null,
+				'runtime_profile'    => $runtime_profile instanceof WP_Agent_Runtime_Profile ? self::runtime_profile_metadata( $runtime_profile ) : null,
 			),
 			static fn( $value ): bool => null !== $value
 		);
 
-		return array(
+		$output = array(
 			'session_id' => $session_id,
 			'reply'      => is_string( $result['final_content'] ?? null ) ? $result['final_content'] : '',
 			'messages'   => self::to_canonical_messages( is_array( $result['messages'] ?? null ) ? array_values( $result['messages'] ) : array() ),
 			'completed'  => (bool) ( $result['completed'] ?? true ),
 			'metadata'   => array( 'agents_api' => $metadata ),
+		);
+		$run_outcome_status = is_array( $result['run_outcome'] ?? null ) && is_string( $result['run_outcome']['status'] ?? null ) ? $result['run_outcome']['status'] : null;
+		if ( null !== $run_outcome_status ) {
+			$output['status'] = $run_outcome_status;
+		}
+		if ( is_array( $result['runtime_tool_pending'] ?? null ) ) {
+			$output['runtime_tool_pending'] = $result['runtime_tool_pending'];
+		}
+		if ( is_array( $result['run_outcome'] ?? null ) ) {
+			$output['run_outcome'] = $result['run_outcome'];
+		}
+		if ( array_key_exists( 'structured_output', $result ) ) {
+			$output['structured_output'] = $result['structured_output'];
+			if ( ! empty( $result['structured_output_diagnostics'] ) && is_array( $result['structured_output_diagnostics'] ) ) {
+				$output['metadata']['agents_api']['structured_output'] = $result['structured_output_diagnostics'];
+			}
+		}
+
+		return $output;
+	}
+
+	/**
+	 * Project a runtime profile to public diagnostics without identity payloads.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function runtime_profile_metadata( WP_Agent_Runtime_Profile $profile ): array {
+		return array(
+			'agent_slug'  => $profile->agent_slug(),
+			'provider_id' => $profile->provider_id(),
+			'model_id'    => $profile->model_id(),
+			'provenance'  => self::runtime_profile_provenance_metadata( $profile->provenance() ),
+		);
+	}
+
+	/**
+	 * Restrict public provenance to its documented source/path diagnostics.
+	 *
+	 * @param array<string,mixed> $provenance Internal profile provenance.
+	 * @return array<string,mixed>
+	 */
+	private static function runtime_profile_provenance_metadata( array $provenance ): array {
+		$public = array();
+		foreach ( array( 'provider_id', 'model_id' ) as $field ) {
+			if ( is_array( $provenance[ $field ] ?? null ) ) {
+				$public[ $field ] = self::runtime_profile_provenance_entry( $provenance[ $field ] );
+			}
+		}
+
+		if ( is_array( $provenance['config_sources'] ?? null ) ) {
+			$public['config_sources'] = array_values(
+				array_map(
+					static fn( array $entry ): array => self::runtime_profile_provenance_entry( $entry ),
+					array_filter( $provenance['config_sources'], 'is_array' )
+				)
+			);
+		}
+
+		return $public;
+	}
+
+	/**
+	 * @param array<mixed> $entry Internal provenance entry.
+	 * @return array{source:string,path:string}
+	 */
+	private static function runtime_profile_provenance_entry( array $entry ): array {
+		return array(
+			'source' => is_string( $entry['source'] ?? null ) ? $entry['source'] : '',
+			'path'   => is_string( $entry['path'] ?? null ) ? $entry['path'] : '',
 		);
 	}
 
@@ -707,6 +1013,29 @@ class WP_Agent_Default_Chat_Handler {
 		}
 
 		return vsprintf( '%s%s-%s-%s-%s-%s%s%s', str_split( bin2hex( $bytes ), 4 ) );
+	}
+
+	/**
+	 * Normalize caller history for a store-less turn.
+	 *
+	 * @param array<mixed> $history Raw caller history.
+	 * @return array<int,array<string,mixed>> Canonical text messages.
+	 */
+	private static function stateless_history( array $history ): array {
+		$messages = array();
+		foreach ( $history as $message ) {
+			if ( ! is_array( $message ) ) {
+				continue;
+			}
+			$role    = is_string( $message['role'] ?? null ) ? $message['role'] : '';
+			$content = is_string( $message['content'] ?? null ) ? $message['content'] : '';
+			if ( ! in_array( $role, array( 'user', 'assistant' ), true ) || '' === trim( $content ) ) {
+				continue;
+			}
+			$messages[] = WP_Agent_Message::text( $role, $content );
+		}
+
+		return $messages;
 	}
 }
 

@@ -54,7 +54,7 @@ class WP_Agent_Chat_Run_Control {
 	 * Resolve canonical workspace, principal, and conversation store context.
 	 *
 	 * @param array<mixed> $input Ability input.
-	 * @return array{workspace:?WP_Agent_Workspace_Scope,owner:?array{type:string,key:string},conversation_store:?WP_Agent_Conversation_Store}|\WP_Error
+	 * @return array{workspace:?WP_Agent_Workspace_Scope,owner:?array{type:string,key:string},principal:?WP_Agent_Execution_Principal,conversation_store:?WP_Agent_Conversation_Store}|\WP_Error
 	 */
 	public static function context_from_input( array $input ) {
 		$workspace = null;
@@ -118,6 +118,7 @@ class WP_Agent_Chat_Run_Control {
 		return array(
 			'workspace'          => $workspace,
 			'owner'              => $owner,
+			'principal'          => $principal,
 			'conversation_store' => WP_Agent_Conversation_Sessions::get_store( WP_Agent_Run_Control::string_keyed_array( $input ) ),
 		);
 	}
@@ -288,16 +289,17 @@ class WP_Agent_Chat_Run_Control {
 	 * Reserve a run before a handler creates and returns its canonical session.
 	 *
 	 * @param array<string,mixed>|null $owner Canonical conversation owner.
+	 * @param array<string,mixed> $metadata Safe run audit metadata.
 	 * @return array<string,mixed>|\WP_Error
 	 */
-	public static function claim_pending_run( string $run_id, string $claim_token, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null ) {
+	public static function claim_pending_run( string $run_id, string $claim_token, ?WP_Agent_Workspace_Scope $workspace = null, ?array $owner = null, array $metadata = array() ) {
 		$fingerprint = self::owner_fingerprint( $owner );
 		if ( $workspace instanceof WP_Agent_Workspace_Scope && '' === $fingerprint ) {
 			return new \WP_Error( 'agents_chat_run_owner_required', 'Explicit workspace run control requires an authenticated conversation owner.' );
 		}
 		try {
 			$result = self::mutate_state(
-				static function ( array $state ) use ( $run_id, $claim_token, $fingerprint ): array {
+				static function ( array $state ) use ( $run_id, $claim_token, $fingerprint, $metadata ): array {
 					if ( isset( $state['runs'][ $run_id ] ) ) {
 						return array( 'state' => $state, 'result' => new \WP_Error( 'agents_chat_run_already_started', 'The run_id has already been claimed for execution.' ) );
 					}
@@ -308,7 +310,7 @@ class WP_Agent_Chat_Run_Control {
 						'status'           => self::STATUS_RUNNING,
 						'started_at'       => $now,
 						'updated_at'       => $now,
-						'metadata'         => array(),
+						'metadata'         => $metadata,
 						'_owner'           => $fingerprint,
 						'_claim_token'     => $claim_token,
 						'_session_pending' => true,
