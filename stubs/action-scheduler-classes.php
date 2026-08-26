@@ -52,6 +52,11 @@ abstract class ActionScheduler_Store {
 	}
 
 	public function release_claim( ActionScheduler_ActionClaim $claim ): void {}
+
+	public function fetch_action( int $action_id ): object {
+		unset( $action_id );
+		return new \stdClass();
+	}
 }
 
 /**

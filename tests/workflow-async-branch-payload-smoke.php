@@ -450,6 +450,9 @@ smoke_assert_true( is_array( $rehydrated['branch_vars']['context']['brief'] ?? n
 foreach ( $branch_actions as $action ) {
 	AS_Limit_Shim::fire( $action['id'] );
 }
+foreach ( AS_Limit_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK ) as $action ) {
+	AS_Limit_Shim::fire( $action['id'] );
+}
 foreach ( AS_Limit_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK ) as $action ) {
 	AS_Limit_Shim::fire( $action['id'] );
 }

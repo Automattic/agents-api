@@ -166,9 +166,16 @@ final class AS_Shim {
 		self::$reject_hook = '';
 	}
 
-	public static function enqueue( string $hook, array $args, string $group ): int {
+	public static function enqueue( string $hook, array $args, string $group, bool $unique = false ): int {
 		if ( '' !== self::$reject_hook && self::$reject_hook === $hook ) {
 			return 0;
+		}
+		if ( $unique ) {
+			foreach ( self::$queue as $action ) {
+				if ( $hook === $action['hook'] && $args === $action['args'] && $group === $action['group'] && empty( self::$claimed[ $action['id'] ] ) ) {
+					return $action['id'];
+				}
+			}
 		}
 		$id                = ++self::$seq;
 		self::$queue[]     = array(
@@ -221,8 +228,14 @@ final class AS_Shim {
 }
 
 if ( ! function_exists( 'as_enqueue_async_action' ) ) {
-	function as_enqueue_async_action( string $hook, array $args = array(), string $group = '' ) {
-		return AS_Shim::enqueue( $hook, $args, $group );
+	function as_enqueue_async_action( string $hook, array $args = array(), string $group = '', bool $unique = false ) {
+		return AS_Shim::enqueue( $hook, $args, $group, $unique );
+	}
+}
+
+function as_smoke_fire_aggregate_actions(): void {
+	foreach ( AS_Shim::actions_for( \AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK ) as $action ) {
+		AS_Shim::fire( $action['id'] );
 	}
 }
 
@@ -278,12 +291,17 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Branch_Executor;
 final class AS_Smoke_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	/** @var array<string,array<string,mixed>> */
 	public array $rows = array();
+	private bool $fail_next_update = false;
 
 	public function start( WP_Agent_Workflow_Run_Result $result ) {
 		$this->rows[ $result->get_run_id() ] = $result->to_array();
 		return $result->get_run_id();
 	}
 	public function update( WP_Agent_Workflow_Run_Result $result ) {
+		if ( $this->fail_next_update ) {
+			$this->fail_next_update = false;
+			return new WP_Error( 'as_recorder_write_failed', 'Injected recorder update failure.' );
+		}
 		$this->rows[ $result->get_run_id() ] = $result->to_array();
 		return true;
 	}
@@ -310,6 +328,10 @@ final class AS_Smoke_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	public function tables(): array {
 		return array( 'workflow_runs' );
 	}
+
+	public function fail_next_update(): void {
+		$this->fail_next_update = true;
+	}
 }
 
 // ── Abilities: aggregator + sequential consumer + a real role worker ─────────
@@ -329,6 +351,10 @@ as_smoke_register_ability(
 as_smoke_register_ability(
 	'demo/aggregate',
 	static function ( array $input ): array {
+		$GLOBALS['__as_aggregate_effects'] = (int) ( $GLOBALS['__as_aggregate_effects'] ?? 0 ) + 1;
+		if ( is_callable( $GLOBALS['__as_during_aggregate'] ?? null ) ) {
+			call_user_func( $GLOBALS['__as_during_aggregate'] );
+		}
 		return array( 'final_bundle' => 'FUSED[' . (string) ( $input['headline'] ?? '' ) . '|' . (string) ( $input['body'] ?? '' ) . ']' );
 	}
 );
@@ -503,6 +529,7 @@ smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $mid->get_status()
 smoke_assert( $resume_before, count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK ) ), 'AS path: no resume enqueued before all branches terminal', $failures, $passes );
 
 AS_Shim::fire( $branch_actions[1]['id'] );
+as_smoke_fire_aggregate_actions();
 
 // Resume was DEFERRED to a claimed action — the run is still suspended until the
 // RESUME action fires (this is the whole point: not inline).
@@ -559,6 +586,7 @@ AS_Shim::fire( $branch_actions2[0]['id'] );
 $payload2      = $branch_actions2[1]['args'][0] ?? array();
 $last_handle_id = (string) ( $payload2['handle_id'] ?? '' );
 AS_Shim::fire( $branch_actions2[1]['id'] ); // last branch → reconcile all-terminal → enqueues resume #1
+as_smoke_fire_aggregate_actions();
 
 $resume_actions2 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
 smoke_assert( 1, count( $resume_actions2 ), 'race: last branch enqueued resume #1', $failures, $passes );
@@ -615,6 +643,7 @@ $branch_actions3 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Bran
 foreach ( $branch_actions3 as $action ) {
 	AS_Shim::fire( $action['id'] );
 }
+as_smoke_fire_aggregate_actions();
 $resume_actions3 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
 foreach ( $resume_actions3 as $action ) {
 	AS_Shim::fire( $action['id'] );
@@ -675,6 +704,7 @@ smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUSPENDED, $run4->get_status(
 foreach ( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK ) as $action ) {
 	AS_Shim::fire( $action['id'] );
 }
+as_smoke_fire_aggregate_actions();
 foreach ( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK ) as $action ) {
 	AS_Shim::fire( $action['id'] );
 }
@@ -715,6 +745,7 @@ $run5       = ( new WP_Agent_Workflow_Runner( $recorder5 ) )->run( as_smoke_two_
 $group5     = WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' );
 $branches5  = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK );
 AS_Shim::fire( $branches5[0]['id'] );
+as_smoke_fire_aggregate_actions();
 $resumes5 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
 as_enqueue_async_action( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK, $resumes5[0]['args'], $resumes5[0]['group'] );
 AS_Shim::fire( $resumes5[0]['id'] );
@@ -730,11 +761,146 @@ smoke_assert( $group5, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group
 smoke_assert( $group5, $branches5[1]['group'] ?? '', 'multi-fanout: second fan-out stays in the original isolated group', $failures, $passes );
 
 AS_Shim::fire( $branches5[1]['id'] );
+as_smoke_fire_aggregate_actions();
 $resumes5 = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK );
 AS_Shim::fire( $resumes5[2]['id'] );
 $final5 = $recorder5->find( 'as-two' );
 smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $final5->get_status(), 'multi-fanout: second resume reaches terminal success', $failures, $passes );
 smoke_assert( $group5, WP_Agent_Workflow_Action_Scheduler_Branch_Executor::group_for_run( 'as-two' ), 'multi-fanout: terminal run retains the same deterministic group identity', $failures, $passes );
+
+/** Prepare a run with all branches reconciled and its aggregate action queued. */
+function as_smoke_prepare_aggregate_run( string $run_id ): array {
+	AS_Shim::reset();
+	$GLOBALS['__as_aggregate_effects'] = 0;
+	$GLOBALS['__as_during_aggregate'] = null;
+	$recorder = new AS_Smoke_Recorder();
+	remove_all_filters( 'wp_agent_workflow_run_recorder' );
+	add_filter( 'wp_agent_workflow_run_recorder', static function () use ( $recorder ) { return $recorder; } );
+	( new WP_Agent_Workflow_Runner( $recorder ) )->run( as_smoke_roles_spec(), array(), array( 'run_id' => $run_id ) );
+	foreach ( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::BRANCH_HOOK ) as $action ) {
+		AS_Shim::fire( $action['id'] );
+	}
+	return array( $recorder, AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK )[0] );
+}
+
+function as_smoke_fire_resume_actions(): void {
+	foreach ( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK ) as $action ) {
+		if ( ! empty( $action['args'][0]['recover_failure'] ) ) {
+			AS_Shim::fire( $action['id'] );
+		}
+	}
+	foreach ( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK ) as $action ) {
+		AS_Shim::fire( $action['id'] );
+	}
+}
+
+// QUEUED DURABILITY + HEALTHY LONG AGGREGATION. Reconcile returns with one durable
+// aggregate action and no elapsed-time lease. Delayed execution remains healthy.
+list( $continuation_recorder, $aggregate_action ) = as_smoke_prepare_aggregate_run( 'as-continuation' );
+$queued_claim = $continuation_recorder->find( 'as-continuation' )->get_suspension()['reconcile_claim'] ?? array();
+smoke_assert( 'queued', $queued_claim['phase'] ?? '', 'aggregate continuation: all-terminal reconcile persists queued phase', $failures, $passes );
+smoke_assert( 1, count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK ) ), 'aggregate continuation: exactly one durable aggregate action is pending', $failures, $passes );
+smoke_assert( false, array_key_exists( 'expires', $queued_claim ), 'aggregate continuation: ownership has no fixed 60-second expiry', $failures, $passes );
+AS_Shim::fire( $aggregate_action['id'] );
+as_smoke_fire_resume_actions();
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $continuation_recorder->find( 'as-continuation' )->get_status(), 'aggregate continuation: delayed healthy action completes normally', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__as_aggregate_effects'], 'aggregate continuation: healthy delayed aggregator executes once', $failures, $passes );
+
+// DUPLICATE ACTION DELIVERY. Even distinct AS actions carrying the same owner
+// payload cannot both transition queued -> running.
+list( $duplicate_recorder, $aggregate_action ) = as_smoke_prepare_aggregate_run( 'as-duplicate-aggregate' );
+$duplicate_id = AS_Shim::enqueue( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK, $aggregate_action['args'], $aggregate_action['group'] );
+AS_Shim::fire( $aggregate_action['id'] );
+AS_Shim::fire( $duplicate_id );
+as_smoke_fire_resume_actions();
+smoke_assert( 1, $GLOBALS['__as_aggregate_effects'], 'aggregate duplicate: external effects execute at most once', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $duplicate_recorder->find( 'as-duplicate-aggregate' )->get_status(), 'aggregate duplicate: duplicate delivery preserves successful outcome', $failures, $passes );
+
+// ACTION CRASH AFTER EFFECTS MAY BEGIN. The AS failure callback fences `running`,
+// persists an uncertain failure, and resumes without rerunning the aggregator.
+list( $crash_recorder, $aggregate_action ) = as_smoke_prepare_aggregate_run( 'as-aggregate-crash' );
+$payload = $aggregate_action['args'][0];
+$begun = \AgentsAPI\AI\Workflows\agents_workflow_reconcile_with_lock(
+	'as-aggregate-crash',
+	static function () use ( $crash_recorder, $payload ) {
+		return \AgentsAPI\AI\Workflows\agents_workflow_begin_aggregate_action_locked( $crash_recorder, 'as-aggregate-crash', $payload['generation'], $payload['owner_token'] );
+	}
+);
+$GLOBALS['__as_aggregate_effects'] = 1;
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_aggregate_action_failure( $payload );
+as_smoke_fire_resume_actions();
+$crash_final = $crash_recorder->find( 'as-aggregate-crash' );
+smoke_assert( 'aggregate', $begun['action'] ?? '', 'aggregate crash: action durably marks running before effects', $failures, $passes );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $crash_final->get_status(), 'aggregate crash: failed-action lifecycle terminalizes the run', $failures, $passes );
+smoke_assert( 'workflow_parallel_aggregation_outcome_uncertain', $crash_final->get_error()['code'] ?? '', 'aggregate crash: failure reports uncertain external effects', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__as_aggregate_effects'], 'aggregate crash: failed action never reruns effects', $failures, $passes );
+
+// COMMITTED BEFORE RESUME CRASH. The failure callback observes durable output and
+// only dispatches resume; aggregation is not repeated.
+list( $committed_recorder, $aggregate_action ) = as_smoke_prepare_aggregate_run( 'as-committed-crash' );
+$payload = $aggregate_action['args'][0];
+$aggregate_transition = \AgentsAPI\AI\Workflows\agents_workflow_reconcile_with_lock(
+	'as-committed-crash',
+	static function () use ( $committed_recorder, $payload ) {
+		return \AgentsAPI\AI\Workflows\agents_workflow_begin_aggregate_action_locked( $committed_recorder, 'as-committed-crash', $payload['generation'], $payload['owner_token'] );
+	}
+);
+$aggregate_output = WP_Agent_Workflow_Runner::aggregate_branch_results( $aggregate_transition['aggregate'], $aggregate_transition['branch_results'], \AgentsAPI\AI\Workflows\agents_workflow_resolve_step_handlers() );
+\AgentsAPI\AI\Workflows\agents_workflow_reconcile_with_lock(
+	'as-committed-crash',
+	static function () use ( $committed_recorder, $aggregate_transition, $aggregate_output ) {
+		return \AgentsAPI\AI\Workflows\agents_workflow_commit_reconcile_claim( $committed_recorder, 'as-committed-crash', $aggregate_transition['owner_token'], $aggregate_transition['generation'], $aggregate_transition['step_index'], $aggregate_output );
+	}
+);
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_aggregate_action_failure( $payload );
+as_smoke_fire_resume_actions();
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $committed_recorder->find( 'as-committed-crash' )->get_status(), 'aggregate committed crash: failure lifecycle resumes durable output', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__as_aggregate_effects'], 'aggregate committed crash: recovery skips aggregator execution', $failures, $passes );
+
+// RECORDER FAILURES. A failed queued -> running write starts no effects and the
+// failed-action callback re-enqueues. A failed commit leaves `running`, so the
+// callback terminalizes uncertain without rerunning effects.
+list( $write_recorder, $aggregate_action ) = as_smoke_prepare_aggregate_run( 'as-running-write' );
+$write_recorder->fail_next_update();
+try {
+	AS_Shim::fire( $aggregate_action['id'] );
+} catch ( \RuntimeException $error ) {
+	unset( $error );
+}
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_aggregate_action_failure( $aggregate_action['args'][0] );
+smoke_assert( 0, $GLOBALS['__as_aggregate_effects'], 'aggregate running write: effects do not start before durable running phase', $failures, $passes );
+smoke_assert( 2, count( AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK ) ), 'aggregate running write: failure callback re-enqueues safe queued work', $failures, $passes );
+
+list( $commit_recorder, $aggregate_action ) = as_smoke_prepare_aggregate_run( 'as-commit-write' );
+$GLOBALS['__as_during_aggregate'] = static function () use ( $commit_recorder ): void {
+	$GLOBALS['__as_during_aggregate'] = null;
+	$commit_recorder->fail_next_update();
+};
+try {
+	AS_Shim::fire( $aggregate_action['id'] );
+} catch ( \RuntimeException $error ) {
+	unset( $error );
+}
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_aggregate_action_failure( $aggregate_action['args'][0] );
+as_smoke_fire_resume_actions();
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $commit_recorder->find( 'as-commit-write' )->get_status(), 'aggregate commit write: failure callback terminalizes uncertain state', $failures, $passes );
+smoke_assert( 1, $GLOBALS['__as_aggregate_effects'], 'aggregate commit write: recorder uncertainty never repeats effects', $failures, $passes );
+
+list( $recovery_recorder, $aggregate_action ) = as_smoke_prepare_aggregate_run( 'as-failure-write' );
+$payload = $aggregate_action['args'][0];
+\AgentsAPI\AI\Workflows\agents_workflow_reconcile_with_lock(
+	'as-failure-write',
+	static function () use ( $recovery_recorder, $payload ) {
+		return \AgentsAPI\AI\Workflows\agents_workflow_begin_aggregate_action_locked( $recovery_recorder, 'as-failure-write', $payload['generation'], $payload['owner_token'] );
+	}
+);
+$recovery_recorder->fail_next_update();
+WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_aggregate_action_failure( $payload );
+$aggregate_actions = AS_Shim::actions_for( WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK );
+smoke_assert( true, ! empty( $aggregate_actions[1]['args'][0]['recover_failure'] ), 'aggregate failure write: recorder outage enqueues durable recovery action', $failures, $passes );
+AS_Shim::fire( $aggregate_actions[1]['id'] );
+as_smoke_fire_resume_actions();
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $recovery_recorder->find( 'as-failure-write' )->get_status(), 'aggregate failure write: recovery action eventually terminalizes', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";
 exit( count( $failures ) > 0 ? 1 : 0 );

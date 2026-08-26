@@ -18,7 +18,10 @@
  *      rehydrates a branch from its payload, runs it through the SHARED
  *      `run_branch_steps()`, and drives the REAL reconcile.
  *
- *   3. Registers the resume action callback ({@see RESUME_HOOK}) and the
+ *   3. Registers the aggregate continuation callback ({@see AGGREGATE_HOOK}) and
+ *      its Action Scheduler failed-action recovery hooks.
+ *
+ *   4. Registers the resume action callback ({@see RESUME_HOOK}) and the
  *      deferred-resume seam ({@see wp_agent_workflow_resume_dispatch}) so the
  *      "all branches terminal → resume" transition is performed as ONE
  *      atomically-claimed AS action instead of resuming inline. AS's claim is
@@ -80,6 +83,15 @@ add_action(
 
 // 3a. Resume action: AS claimed it exactly once → re-check SUSPENDED → resume.
 add_action(
+	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::AGGREGATE_HOOK,
+	static function ( $payload = array() ): void {
+		WP_Agent_Workflow_Action_Scheduler_Branch_Executor::run_aggregate_action( is_array( $payload ) ? $payload : array() );
+	},
+	10,
+	1
+);
+
+add_action(
 	WP_Agent_Workflow_Action_Scheduler_Branch_Executor::RESUME_HOOK,
 	/**
 	 * @param array<string,mixed> $payload Action payload: { run_id, suspension_id }.
@@ -90,6 +102,39 @@ add_action(
 	10,
 	1
 );
+
+// Durable aggregate dispatch seam. Returning an action id tells reconcile that
+// aggregation is owned by Action Scheduler; null preserves non-AS inline paths.
+add_filter(
+	'wp_agent_workflow_aggregate_dispatch',
+	static function ( $action_id, $run_id, $executor_id, $generation, $owner_token, $recover_failure ) {
+		if ( is_int( $action_id ) || WP_Agent_Workflow_Action_Scheduler_Branch_Executor::ID !== $executor_id ) {
+			return $action_id;
+		}
+		return WP_Agent_Workflow_Action_Scheduler_Branch_Executor::enqueue_aggregate_action(
+			is_string( $run_id ) ? $run_id : '',
+			is_string( $generation ) ? $generation : '',
+			is_string( $owner_token ) ? $owner_token : '',
+			(bool) $recover_failure
+		);
+	},
+	10,
+	6
+);
+
+// Action Scheduler reports thrown execution errors, fatal shutdowns, and reaped
+// abandoned actions through separate lifecycle hooks. All three converge on the
+// same phase-aware aggregate recovery callback.
+foreach ( array( 'action_scheduler_failed_execution', 'action_scheduler_unexpected_shutdown', 'action_scheduler_failed_action' ) as $failure_hook ) {
+	add_action(
+		$failure_hook,
+		static function ( $action_id ): void {
+			WP_Agent_Workflow_Action_Scheduler_Branch_Executor::handle_failed_action( is_numeric( $action_id ) ? (int) $action_id : 0 );
+		},
+		20,
+		1
+	);
+}
 
 // 3b. Deferred-resume seam: enqueue a claimed RESUME action for AS-owned runs
 //     instead of resuming inline in the reconcile request.

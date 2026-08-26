@@ -23,9 +23,6 @@ defined( 'ABSPATH' ) || exit;
 
 const AGENTS_RECONCILE_WORKFLOW_BRANCH_ABILITY = 'agents/reconcile-workflow-branch';
 
-/** Effect-owner lease used only to decide when an ambiguous aggregation must fail closed. */
-const AGENTS_RECONCILE_CLAIM_TTL_SECONDS = 60;
-
 add_action(
 	'wp_abilities_api_init',
 	static function (): void {
@@ -103,9 +100,9 @@ function agents_reconcile_workflow_branch_ability( array $input ) {
  *   2. Merge the branch result into `metadata._suspension.completed[handle_id]`
  *      and flip that handle's status. Persist.
  *   3. If NOT all handles terminal → return the still-suspended run.
- *   4. If all terminal → claim this suspension generation under the lock, release
- *      the lock, run the aggregate plan, then reacquire the lock to fence its
- *      recorder commit before resuming from `step_index + 1`.
+ *   4. If all terminal → enqueue the executor's durable aggregate continuation
+ *      and persist its generation-bound owner. The claimed continuation records
+ *      `running`, aggregates outside the lock, commits, then dispatches resume.
  *
  * CONCURRENCY. Steps 1–3 are a read-modify-write on the shared per-run frame's
  * `completed[]` map. When N branches finish CONCURRENTLY in N separate processes
@@ -114,10 +111,11 @@ function agents_reconcile_workflow_branch_ability( array $input ) {
  * merge, the frame never reaches all-terminal, and the run hangs SUSPENDED
  * forever (observed in a real MySQL fanout A/B). Short recorder transitions run
  * under a per-run cross-process lock ({@see agents_workflow_reconcile_with_lock()}).
- * Once all branches are terminal, a durable claim in the suspension frame elects
- * exactly one aggregation/resume owner for that generation. Aggregation runs
- * outside the expiring lock, and its result is committed only after a fresh read
- * proves the same claim still owns the same generation.
+ * For Action Scheduler runs, a dedicated atomically claimed action owns aggregate
+ * execution and its failed-action lifecycle fences crashes. Duplicate reconcile
+ * delivery observes `queued` or `running` and cannot execute aggregation. The
+ * aggregate result is committed only after a fresh read proves the action token
+ * still owns the same suspension generation.
  *
  * @since 0.5.0
  *
@@ -136,19 +134,6 @@ function agents_reconcile_workflow_branch( string $run_id, string $handle_id, ar
 		$run_id,
 		static function () use ( $recorder, $run_id, $handle_id, $branch_result ) {
 			return agents_reconcile_workflow_branch_locked( $recorder, $run_id, $handle_id, $branch_result );
-		}
-	);
-	if ( is_wp_error( $transition ) || $transition instanceof WP_Agent_Workflow_Run_Result ) {
-		return $transition;
-	}
-	if ( 'resume' === $transition['action'] ) {
-		return agents_workflow_resume_reconcile_continuation( $recorder, $run_id, $transition['result'] );
-	}
-
-	$transition = agents_workflow_reconcile_with_lock(
-		$run_id,
-		static function () use ( $recorder, $run_id, $transition ) {
-			return agents_workflow_begin_reconcile_aggregation( $recorder, $run_id, $transition['generation'] );
 		}
 	);
 	if ( is_wp_error( $transition ) || $transition instanceof WP_Agent_Workflow_Run_Result ) {
@@ -198,7 +183,7 @@ function agents_reconcile_workflow_branch( string $run_id, string $handle_id, ar
  * @param string                         $run_id        Suspended run id.
  * @param string                         $handle_id     The completed branch's handle id.
  * @param array<string,mixed>            $branch_result BranchResult.
- * @return WP_Agent_Workflow_Run_Result|array{action:'begin',generation:string}|array{action:'resume',result:WP_Agent_Workflow_Run_Result}|\WP_Error
+ * @return WP_Agent_Workflow_Run_Result|array{action:'aggregate',owner_token:string,generation:string,step_index:int,aggregate:array<string,mixed>,branch_results:array<string,mixed>,required_failed:bool}|array{action:'resume',result:WP_Agent_Workflow_Run_Result}|\WP_Error
  */
 function agents_reconcile_workflow_branch_locked( WP_Agent_Workflow_Run_Recorder $recorder, string $run_id, string $handle_id, array $branch_result ) {
 	$result = $recorder->find( $run_id );
@@ -283,11 +268,40 @@ function agents_reconcile_workflow_branch_locked( WP_Agent_Workflow_Run_Recorder
 	$suspension['handles']   = $handles;
 	$suspension['completed'] = $completed;
 
+	$transition = null;
 	if ( count( $completed ) >= count( $handles ) ) {
-		$suspension['reconcile_claim'] = array(
-			'phase'      => 'pending',
-			'generation' => agents_workflow_suspension_generation( $suspension ),
-		);
+		$generation = agents_workflow_suspension_generation( $suspension );
+		$owner_token = agents_workflow_reconcile_claim_token();
+		$action_id = agents_workflow_dispatch_aggregate_continuation( $run_id, $suspension, $generation, $owner_token );
+		if ( is_int( $action_id ) && $action_id > 0 ) {
+			$suspension['reconcile_claim'] = array(
+				'phase'       => 'queued',
+				'generation'  => $generation,
+				'owner_token' => $owner_token,
+				'action_id'   => $action_id,
+			);
+		} elseif ( is_int( $action_id ) ) {
+			$suspension['reconcile_claim'] = array(
+				'phase'      => 'committed',
+				'generation' => $generation,
+			);
+			$failed_metadata = $result->get_metadata();
+			$failed_metadata['_suspension'] = $suspension;
+			$result = agents_workflow_splice_step_output(
+				$result->with( array( 'metadata' => $failed_metadata ) ),
+				is_numeric( $suspension['step_index'] ?? null ) ? (int) $suspension['step_index'] : 0,
+				new \WP_Error( 'workflow_parallel_aggregation_dispatch_failed', 'The durable aggregate continuation could not be enqueued.' )
+			);
+			$suspension = $result->get_suspension();
+			$transition = array( 'action' => 'resume' );
+		} else {
+			$suspension['reconcile_claim'] = array(
+				'phase'       => 'running',
+				'generation'  => $generation,
+				'owner_token' => $owner_token,
+			);
+			$transition = agents_workflow_reconcile_aggregate_transition( $suspension, $owner_token, $generation );
+		}
 	}
 
 	$metadata                = $result->get_metadata();
@@ -298,12 +312,16 @@ function agents_reconcile_workflow_branch_locked( WP_Agent_Workflow_Run_Recorder
 		return $updated;
 	}
 
-	return count( $completed ) < count( $handles )
-		? $result
-		: array(
-			'action'     => 'begin',
-			'generation' => agents_workflow_suspension_generation( $suspension ),
+	if ( null === $transition ) {
+		return $result;
+	}
+	if ( 'resume' === $transition['action'] ) {
+		return array(
+			'action' => 'resume',
+			'result' => $result,
 		);
+	}
+	return $transition;
 }
 
 /**
@@ -332,24 +350,18 @@ function agents_workflow_commit_reconcile_claim( WP_Agent_Workflow_Run_Recorder 
 	$suspension = $result->get_suspension();
 	$claim      = is_array( $suspension['reconcile_claim'] ?? null ) ? $suspension['reconcile_claim'] : array();
 	if (
-		'aggregating' !== agents_workflow_string( $claim['phase'] ?? '' ) ||
+		'running' !== agents_workflow_string( $claim['phase'] ?? '' ) ||
 		! hash_equals( $claim_token, agents_workflow_string( $claim['owner_token'] ?? '' ) ) ||
 		! hash_equals( $generation, agents_workflow_string( $claim['generation'] ?? '' ) ) ||
 		! hash_equals( $generation, agents_workflow_suspension_generation( $suspension ) )
 	) {
-		if ( 'pending' === agents_workflow_string( $claim['phase'] ?? '' ) ) {
-			return $result;
-		}
-		$continuation = agents_workflow_advance_reconcile_continuation_locked( $recorder, $result );
-		if ( is_array( $continuation ) && 'begin' === $continuation['action'] ) {
-			return $result;
-		}
-		return $continuation;
+		return agents_workflow_advance_reconcile_continuation_locked( $recorder, $result );
 	}
 
 	$suspension['reconcile_claim'] = array(
-		'phase'      => 'committed',
-		'generation' => $generation,
+		'phase'       => 'committed',
+		'generation'  => $generation,
+		'owner_token' => $claim_token,
 	);
 	$metadata = $result->get_metadata();
 	$metadata['_suspension'] = $suspension;
@@ -363,15 +375,51 @@ function agents_workflow_commit_reconcile_claim( WP_Agent_Workflow_Run_Recorder 
 }
 
 /**
- * Persist the effect-start boundary for a pending continuation. A process lost
- * before this transition is safe to retry; after it, aggregation is never rerun.
+ * Run one durable aggregate continuation action. The action atomically moves its
+ * matching `queued` generation to `running` before external effects, commits the
+ * aggregate under the short lock, then dispatches resume.
  *
  * @param WP_Agent_Workflow_Run_Recorder $recorder   Resolved recorder.
  * @param string                         $run_id     Suspended run id.
- * @param string                         $generation Suspension generation identity.
+ * @param string                         $generation  Suspension generation identity.
+ * @param string                         $owner_token Aggregate action owner token.
+ * @return WP_Agent_Workflow_Run_Result|\WP_Error
+ */
+function agents_workflow_run_aggregate_continuation( WP_Agent_Workflow_Run_Recorder $recorder, string $run_id, string $generation, string $owner_token ) {
+	$transition = agents_workflow_reconcile_with_lock(
+		$run_id,
+		static function () use ( $recorder, $run_id, $generation, $owner_token ) {
+			return agents_workflow_begin_aggregate_action_locked( $recorder, $run_id, $generation, $owner_token );
+		}
+	);
+	if ( is_wp_error( $transition ) || $transition instanceof WP_Agent_Workflow_Run_Result ) {
+		return $transition;
+	}
+	if ( 'resume' === $transition['action'] ) {
+		return agents_workflow_resume_reconcile_continuation( $recorder, $run_id, $transition['result'] );
+	}
+
+	$step_output = ! empty( $transition['required_failed'] )
+		? new \WP_Error( 'workflow_parallel_required_branch_failed', 'A required parallel branch failed during out-of-band execution.' )
+		: WP_Agent_Workflow_Runner::aggregate_branch_results( $transition['aggregate'], $transition['branch_results'], agents_workflow_resolve_step_handlers() );
+	$commit = agents_workflow_reconcile_with_lock(
+		$run_id,
+		static function () use ( $recorder, $run_id, $transition, $step_output ) {
+			return agents_workflow_commit_reconcile_claim( $recorder, $run_id, $transition['owner_token'], $transition['generation'], $transition['step_index'], $step_output );
+		}
+	);
+	if ( is_wp_error( $commit ) || $commit instanceof WP_Agent_Workflow_Run_Result ) {
+		return $commit;
+	}
+	return agents_workflow_resume_reconcile_continuation( $recorder, $run_id, $commit['result'] );
+}
+
+/**
+ * Begin a claimed aggregate action under the short lock.
+ *
  * @return WP_Agent_Workflow_Run_Result|array{action:'aggregate',owner_token:string,generation:string,step_index:int,aggregate:array<string,mixed>,branch_results:array<string,mixed>,required_failed:bool}|array{action:'resume',result:WP_Agent_Workflow_Run_Result}|\WP_Error
  */
-function agents_workflow_begin_reconcile_aggregation( WP_Agent_Workflow_Run_Recorder $recorder, string $run_id, string $generation ) {
+function agents_workflow_begin_aggregate_action_locked( WP_Agent_Workflow_Run_Recorder $recorder, string $run_id, string $generation, string $owner_token ) {
 	$result = $recorder->find( $run_id );
 	if ( null === $result ) {
 		return new \WP_Error( 'agents_reconcile_workflow_branch_not_found', sprintf( 'No suspended run was found for run_id `%s`.', $run_id ) );
@@ -379,39 +427,42 @@ function agents_workflow_begin_reconcile_aggregation( WP_Agent_Workflow_Run_Reco
 	if ( ! $result->is_suspended() ) {
 		return $result;
 	}
-
 	$suspension = $result->get_suspension();
 	$claim      = is_array( $suspension['reconcile_claim'] ?? null ) ? $suspension['reconcile_claim'] : array();
+	if ( 'committed' === agents_workflow_string( $claim['phase'] ?? '' ) && hash_equals( $generation, agents_workflow_string( $claim['generation'] ?? '' ) ) ) {
+		return array(
+			'action' => 'resume',
+			'result' => $result,
+		);
+	}
 	if (
-		'pending' !== agents_workflow_string( $claim['phase'] ?? '' ) ||
+		'queued' !== agents_workflow_string( $claim['phase'] ?? '' ) ||
 		! hash_equals( $generation, agents_workflow_string( $claim['generation'] ?? '' ) ) ||
+		! hash_equals( $owner_token, agents_workflow_string( $claim['owner_token'] ?? '' ) ) ||
 		! hash_equals( $generation, agents_workflow_suspension_generation( $suspension ) )
 	) {
-		if ( 'pending' === agents_workflow_string( $claim['phase'] ?? '' ) ) {
-			return $result;
-		}
-		$continuation = agents_workflow_advance_reconcile_continuation_locked( $recorder, $result );
-		if ( is_array( $continuation ) && 'begin' === $continuation['action'] ) {
-			return $result;
-		}
-		return $continuation;
+		return $result;
 	}
 
-	$owner_token = agents_workflow_reconcile_claim_token();
-	$suspension['reconcile_claim'] = array(
-		'phase'       => 'aggregating',
-		'generation'  => $generation,
-		'owner_token' => $owner_token,
-		'expires'     => time() + AGENTS_RECONCILE_CLAIM_TTL_SECONDS,
-	);
+	$claim['phase'] = 'running';
+	$suspension['reconcile_claim'] = $claim;
 	$metadata = $result->get_metadata();
 	$metadata['_suspension'] = $suspension;
 	$result = $result->with( array( 'metadata' => $metadata ) );
-	$updated = agents_workflow_update_reconcile_state( $recorder, $result, 'mark aggregation effects as started' );
+	$updated = agents_workflow_update_reconcile_state( $recorder, $result, 'mark the aggregate action as running' );
 	if ( is_wp_error( $updated ) ) {
 		return $updated;
 	}
+	return agents_workflow_reconcile_aggregate_transition( $suspension, $owner_token, $generation );
+}
 
+/**
+ * Return the aggregate inputs carried by one claimed suspension generation.
+ *
+ * @param array<string,mixed> $suspension Suspension frame.
+ * @return array{action:'aggregate',owner_token:string,generation:string,step_index:int,aggregate:array<string,mixed>,branch_results:array<string,mixed>,required_failed:bool}
+ */
+function agents_workflow_reconcile_aggregate_transition( array $suspension, string $owner_token, string $generation ): array {
 	$completed = is_array( $suspension['completed'] ?? null ) ? \AgentsAPI\AI\WP_Agent_Run_Control::string_keyed_array( $suspension['completed'] ) : array();
 	return array(
 		'action'          => 'aggregate',
@@ -425,41 +476,71 @@ function agents_workflow_begin_reconcile_aggregation( WP_Agent_Workflow_Run_Reco
 }
 
 /**
- * Advance an already-persisted continuation without relying on a new branch
- * completion. Active effects fail retryably; stale ambiguous effects are fenced
- * and durably converted to an honest terminal workflow failure.
+ * Duplicate reconciles never take over queued or running aggregate actions.
  *
- * @return array{action:'begin',generation:string}|array{action:'resume',result:WP_Agent_Workflow_Run_Result}|\WP_Error
+ * @return WP_Agent_Workflow_Run_Result|array{action:'resume',result:WP_Agent_Workflow_Run_Result}
  */
 function agents_workflow_advance_reconcile_continuation_locked( WP_Agent_Workflow_Run_Recorder $recorder, WP_Agent_Workflow_Run_Result $result ) {
-	$suspension = $result->get_suspension();
-	$claim      = is_array( $suspension['reconcile_claim'] ?? null ) ? $suspension['reconcile_claim'] : array();
-	$phase      = agents_workflow_string( $claim['phase'] ?? '' );
-	$generation = agents_workflow_string( $claim['generation'] ?? '' );
-	if ( '' === $generation || ! hash_equals( $generation, agents_workflow_suspension_generation( $suspension ) ) ) {
-		return agents_workflow_terminalize_reconcile_continuation( $recorder, $result, 'workflow_parallel_reconcile_claim_invalid', 'The persisted reconcile continuation does not match the suspended workflow generation.' );
+	unset( $recorder );
+	$claim = $result->get_suspension()['reconcile_claim'] ?? array();
+	if ( is_array( $claim ) && 'committed' === agents_workflow_string( $claim['phase'] ?? '' ) ) {
+		return array( 'action' => 'resume', 'result' => $result );
 	}
-	if ( 'pending' === $phase ) {
-		return array(
-			'action'     => 'begin',
-			'generation' => $generation,
-		);
-	}
-	if ( 'committed' === $phase ) {
-		return array(
-			'action' => 'resume',
-			'result' => $result,
-		);
-	}
-	if ( 'aggregating' === $phase ) {
-		$expires = is_numeric( $claim['expires'] ?? null ) ? (int) $claim['expires'] : 0;
-		if ( $expires > time() ) {
-			return new \WP_Error( 'agents_reconcile_lock_unavailable', 'Aggregation is already owned for this suspension generation; retry the persisted reconcile continuation.' );
-		}
-		return agents_workflow_terminalize_reconcile_continuation( $recorder, $result, 'workflow_parallel_aggregation_outcome_uncertain', 'The aggregation owner was lost after external effects may have begun; the aggregate was not rerun.' );
-	}
+	return $result;
+}
 
-	return agents_workflow_terminalize_reconcile_continuation( $recorder, $result, 'workflow_parallel_reconcile_claim_invalid', 'The persisted reconcile continuation phase is invalid.' );
+/**
+ * Dispatch one executor-owned durable aggregate action, or null for inline fallback.
+ *
+ * @param array<string,mixed> $suspension Suspension frame.
+ */
+function agents_workflow_dispatch_aggregate_continuation( string $run_id, array $suspension, string $generation, string $owner_token, bool $recover_failure = false ): ?int {
+	$executor_id = agents_workflow_string( $suspension['executor_id'] ?? '' );
+	$action_id = apply_filters( 'wp_agent_workflow_aggregate_dispatch', null, $run_id, $executor_id, $generation, $owner_token, $recover_failure );
+	return is_int( $action_id ) ? $action_id : null;
+}
+
+/**
+ * Handle an aggregate action failure through its persisted phase.
+ *
+ * @return WP_Agent_Workflow_Run_Result|\WP_Error|null
+ */
+function agents_workflow_fail_aggregate_continuation( WP_Agent_Workflow_Run_Recorder $recorder, string $run_id, string $generation, string $owner_token, bool $from_durable_action = false ) {
+	$transition = agents_workflow_reconcile_with_lock(
+		$run_id,
+		static function () use ( $recorder, $run_id, $generation, $owner_token ) {
+			$result = $recorder->find( $run_id );
+			if ( null === $result || ! $result->is_suspended() ) {
+				return $result;
+			}
+			$claim = $result->get_suspension()['reconcile_claim'] ?? array();
+			if ( ! is_array( $claim ) || ! hash_equals( $generation, agents_workflow_string( $claim['generation'] ?? '' ) ) || ! hash_equals( $owner_token, agents_workflow_string( $claim['owner_token'] ?? '' ) ) ) {
+				return $result;
+			}
+			if ( 'queued' === agents_workflow_string( $claim['phase'] ?? '' ) ) {
+				$action_id = agents_workflow_dispatch_aggregate_continuation( $run_id, $result->get_suspension(), $generation, $owner_token );
+				return is_int( $action_id ) && $action_id > 0
+					? $result
+					: agents_workflow_terminalize_reconcile_continuation( $recorder, $result, 'workflow_parallel_aggregation_dispatch_failed', 'The aggregate continuation failed before effects began and could not be re-enqueued.' );
+			}
+			if ( 'running' === agents_workflow_string( $claim['phase'] ?? '' ) ) {
+				return agents_workflow_terminalize_reconcile_continuation( $recorder, $result, 'workflow_parallel_aggregation_outcome_uncertain', 'The aggregate action failed after external effects may have begun; the aggregate was not rerun.' );
+			}
+			return 'committed' === agents_workflow_string( $claim['phase'] ?? '' )
+				? array( 'action' => 'resume', 'result' => $result )
+				: $result;
+		}
+	);
+	if ( is_array( $transition ) ) {
+		if ( ! $from_durable_action ) {
+			$action_id = agents_workflow_dispatch_aggregate_continuation( $run_id, $transition['result']->get_suspension(), $generation, $owner_token, true );
+			if ( is_int( $action_id ) && $action_id > 0 ) {
+				return $transition['result'];
+			}
+		}
+		return agents_workflow_resume_reconcile_continuation( $recorder, $run_id, $transition['result'] );
+	}
+	return $transition;
 }
 
 /**
@@ -470,9 +551,11 @@ function agents_workflow_advance_reconcile_continuation_locked( WP_Agent_Workflo
 function agents_workflow_terminalize_reconcile_continuation( WP_Agent_Workflow_Run_Recorder $recorder, WP_Agent_Workflow_Run_Result $result, string $code, string $message ) {
 	$suspension = $result->get_suspension();
 	$generation = agents_workflow_suspension_generation( $suspension );
+	$claim      = is_array( $suspension['reconcile_claim'] ?? null ) ? $suspension['reconcile_claim'] : array();
 	$suspension['reconcile_claim'] = array(
-		'phase'      => 'committed',
-		'generation' => $generation,
+		'phase'       => 'committed',
+		'generation'  => $generation,
+		'owner_token' => agents_workflow_string( $claim['owner_token'] ?? '' ),
 	);
 	$metadata = $result->get_metadata();
 	$metadata['_suspension'] = $suspension;
