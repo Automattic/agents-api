@@ -94,6 +94,7 @@
       "php tests/citation-metadata-smoke.php",
       "php tests/context-registry-smoke.php",
       "php tests/conversation-loop-smoke.php",
+      "php tests/conversation-loop-fail-closed-smoke.php",
       "php tests/provider-turn-adapter-smoke.php",
       "php tests/default-provider-turn-adapter-smoke.php",
       "php tests/agents-chat-ability-smoke.php",

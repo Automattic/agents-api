@@ -117,31 +117,38 @@ $result3 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 
 agents_api_smoke_assert_equals( 0, count( $persister_log ), 'persister was not called when not provided', $failures, $passes );
 
-echo "\n[4] Persister failure does not change loop result:\n";
+echo "\n[4] Persister failure prevents false successful completion:\n";
 $crashing_persister = new class() implements AgentsAPI\AI\WP_Agent_Transcript_Persister {
 	public function persist( array $messages, AgentsAPI\AI\WP_Agent_Conversation_Request $request, array $result ): string {
 		throw new \RuntimeException( 'database down' );
 	}
 };
 
-$result4 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
-	array( array( 'role' => 'user', 'content' => 'hello' ) ),
-	static function ( array $messages ): array {
-		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'ok' );
+$result4 = null;
+$result4_error = null;
+try {
+	$result4 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+		array( array( 'role' => 'user', 'content' => 'hello' ) ),
+		static function ( array $messages ): array {
+			$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'ok' );
 
-		return array(
-			'messages'               => $messages,
-			'tool_execution_results' => array(),
-			'events'                 => array(),
-		);
-	},
-	array(
-		'max_turns'            => 1,
-		'transcript_persister' => $crashing_persister,
-	)
-);
+			return array(
+				'messages'               => $messages,
+				'tool_execution_results' => array(),
+				'events'                 => array(),
+			);
+		},
+		array(
+			'max_turns'            => 1,
+			'transcript_persister' => $crashing_persister,
+		)
+	);
+} catch ( AgentsAPI\AI\WP_Agent_Run_Control_Store_Exception $error ) {
+	$result4_error = $error;
+}
 
-agents_api_smoke_assert_equals( 2, count( $result4['messages'] ), 'loop result is unaffected by persister failure', $failures, $passes );
+agents_api_smoke_assert_equals( null, $result4, 'persister failure returns no false successful result', $failures, $passes );
+agents_api_smoke_assert_equals( 'database down', $result4_error?->getPrevious()?->getMessage(), 'persister failure preserves retryable storage diagnostics', $failures, $passes );
 
 echo "\n[5] Persister receives the original request when provided:\n";
 $persister_log = array();
@@ -294,7 +301,9 @@ $result7 = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
 	)
 );
 
-agents_api_smoke_assert_equals( 'transcript_lock_contention', $result7['status'] ?? '', 'contention result is explicit', $failures, $passes );
+agents_api_smoke_assert_equals( 'failed', $result7['status'] ?? '', 'contention result is terminally failed', $failures, $passes );
+agents_api_smoke_assert_equals( 'transcript_lock_contention', $result7['failure']['type'] ?? '', 'contention failure type is explicit', $failures, $passes );
+agents_api_smoke_assert_equals( true, $result7['failure']['retryable'] ?? false, 'contention failure is retryable', $failures, $passes );
 agents_api_smoke_assert_equals( 0, $contention_runs, 'turn runner is skipped on lock contention', $failures, $passes );
 agents_api_smoke_assert_equals( 0, count( $persister_log ), 'persister is skipped on lock contention', $failures, $passes );
 

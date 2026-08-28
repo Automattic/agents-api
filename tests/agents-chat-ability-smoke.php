@@ -339,6 +339,35 @@ $failed_run = AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'failed-claim-1' 
 smoke_assert( true, $failed_claim instanceof WP_Error, 'run_claimed_runtime_error_propagates', $failures, $passes );
 smoke_assert( AgentsAPI\AI\WP_Agent_Chat_Run_Control::STATUS_FAILED, $failed_run['status'] ?? null, 'run_claimed_runtime_error_terminalizes_pending_run', $failures, $passes );
 
+$claimed_lock = new class() implements AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Lock {
+	public function acquire_session_lock( string $session_id, int $ttl_seconds = 300 ): ?string { unset( $session_id, $ttl_seconds ); return null; }
+	public function release_session_lock( string $session_id, string $lock_token ): bool { unset( $session_id, $lock_token ); return false; }
+};
+$claimed_lock_turns = 0;
+$claimed_lock_result = agents_chat_run_claimed(
+	array( 'agent' => 'x', 'message' => 'locked', 'run_id' => 'claimed-lock-contention-1' ),
+	static function ( array $claimed_input ) use ( $claimed_lock, &$claimed_lock_turns ): array {
+		return AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+			array( array( 'role' => 'user', 'content' => 'locked' ) ),
+			static function () use ( &$claimed_lock_turns ): array { ++$claimed_lock_turns; return array(); },
+			array(
+				'run_id'                => $claimed_input['run_id'],
+				'transcript_session_id' => 'claimed-lock-session-1',
+				'transcript_lock'       => $claimed_lock,
+				'context'               => array( '_agents_run_claim_token' => $claimed_input['_agents_run_claim_token'] ),
+			)
+		);
+	}
+);
+$claimed_lock_run = AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'claimed-lock-contention-1' );
+smoke_assert( false, $claimed_lock_result instanceof WP_Error, 'run_claimed_lock_contention_returns_typed_loop_result', $failures, $passes );
+smoke_assert( 'failed', $claimed_lock_result['status'] ?? null, 'run_claimed_lock_contention_result_is_failed', $failures, $passes );
+smoke_assert( 'transcript_lock_contention', $claimed_lock_result['failure']['type'] ?? null, 'run_claimed_lock_contention_preserves_busy_type', $failures, $passes );
+smoke_assert( true, $claimed_lock_result['failure']['retryable'] ?? false, 'run_claimed_lock_contention_is_retryable', $failures, $passes );
+smoke_assert( 0, $claimed_lock_turns, 'run_claimed_lock_contention_starts_no_provider_turn', $failures, $passes );
+smoke_assert( 1, count( $claimed_lock_result['messages'] ?? array() ), 'run_claimed_lock_contention_does_not_mutate_transcript', $failures, $passes );
+smoke_assert( AgentsAPI\AI\WP_Agent_Chat_Run_Control::STATUS_FAILED, $claimed_lock_run['status'] ?? null, 'run_claimed_lock_contention_terminalizes_preclaim', $failures, $passes );
+
 $canonical_id = agents_chat_run_claimed(
 	array( 'agent' => 'runtime-local-agent', 'message' => 'hi', 'session_id' => 'runtime-s-1', 'run_id' => 'claimed-id-1', 'principal' => $runtime_principal ),
 	static fn() => array( 'session_id' => 'runtime-s-1', 'reply' => 'ok', 'run_id' => 'runtime-id' )

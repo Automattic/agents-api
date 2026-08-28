@@ -347,11 +347,22 @@ class WP_Agent_Chat_Run_Control {
 				if ( ! is_array( $run ) ) {
 					return array( 'state' => $state, 'result' => null );
 				}
-				$run['status']     = self::normalize_status( $status );
-				$run['updated_at'] = self::now();
-				if ( self::STATUS_CANCELLED === $run['status'] ) {
-					$run['cancelled'] = true;
+				$run = self::normalize_cancellation_state( $run );
+				$state['runs'][ $run_id ] = $run;
+				if ( self::is_terminal_status( $run['status'] ?? null ) ) {
+					return array( 'state' => $state, 'result' => self::normalize_run( $run ) );
 				}
+
+				// A committed cancellation request wins over a success claim, but a
+				// caller that already terminalized the run as cancelled or interrupted
+				// keeps its own, more specific cancellation representation.
+				$requested = self::normalize_status( $status );
+				$honors_cancellation = in_array( $requested, array( self::STATUS_CANCELLED, self::STATUS_INTERRUPTED ), true );
+				$run['status']     = self::is_cancellation_requested( $run ) && ! $honors_cancellation
+					? self::STATUS_CANCELLED
+					: $requested;
+				$run['updated_at'] = self::now();
+				$run               = self::normalize_cancellation_state( $run );
 				$state['runs'][ $run_id ] = $run;
 				$state = self::record_event( $state, $run_id, 'run_finished', array( 'status' => $run['status'] ) );
 				return array( 'state' => $state, 'result' => self::normalize_run( $run ) );
@@ -400,9 +411,14 @@ class WP_Agent_Chat_Run_Control {
 				if ( ! is_array( $run ) || ! self::owner_matches( $run['_owner'] ?? '', $owner ) ) {
 					return array( 'state' => $state, 'result' => null );
 				}
-				$terminal          = in_array( self::normalize_status( $run['status'] ?? '' ), array( self::STATUS_COMPLETED, self::STATUS_FAILED, self::STATUS_CANCELLED, self::STATUS_BUDGET_EXCEEDED, self::STATUS_STALLED, self::STATUS_INTERRUPTED ), true );
-				$run['status']     = $terminal ? self::normalize_status( $run['status'] ?? '' ) : self::STATUS_CANCELLING;
-				$run['cancelled']  = ! $terminal;
+				$run = self::normalize_cancellation_state( $run );
+				if ( self::is_terminal_status( $run['status'] ?? null ) ) {
+					$state['runs'][ $run_id ] = $run;
+					return array( 'state' => $state, 'result' => self::normalize_run( $run ) );
+				}
+
+				$run['status']     = self::STATUS_CANCELLING;
+				$run['cancelled']  = true;
 				$run['updated_at'] = self::now();
 				$state['runs'][ $run_id ] = $run;
 				$state = self::record_event( $state, $run_id, 'cancel_requested', array( 'status' => $run['status'] ) );
@@ -709,6 +725,41 @@ class WP_Agent_Chat_Run_Control {
 
 	private static function atomic_unavailable( \RuntimeException $error ): \WP_Error {
 		return new \WP_Error( 'agents_chat_run_atomic_unavailable', $error->getMessage() );
+	}
+
+	private static function is_terminal_status( mixed $status ): bool {
+		return in_array(
+			self::normalize_status( $status ),
+			array(
+				self::STATUS_COMPLETED,
+				self::STATUS_FAILED,
+				self::STATUS_CANCELLED,
+				self::STATUS_BUDGET_EXCEEDED,
+				self::STATUS_STALLED,
+				self::STATUS_INTERRUPTED,
+			),
+			true
+		);
+	}
+
+	/** @param array<string,mixed> $run */
+	private static function is_cancellation_requested( array $run ): bool {
+		return self::STATUS_CANCELLING === self::normalize_status( $run['status'] ?? null ) || true === ( $run['cancelled'] ?? false );
+	}
+
+	/**
+	 * @param array<string,mixed> $run
+	 * @return array<string,mixed>
+	 */
+	private static function normalize_cancellation_state( array $run ): array {
+		$status = self::normalize_status( $run['status'] ?? null );
+		if ( in_array( $status, array( self::STATUS_CANCELLING, self::STATUS_CANCELLED ), true ) ) {
+			$run['cancelled'] = true;
+		} elseif ( isset( $run['cancelled'] ) ) {
+			$run['cancelled'] = false;
+		}
+
+		return $run;
 	}
 
 	/**

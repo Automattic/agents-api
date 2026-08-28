@@ -18,6 +18,8 @@ echo "agents-api-provider-turn-adapter-smoke\n";
 
 require_once __DIR__ . '/agents-api-smoke-helpers.php';
 agents_api_smoke_require_module();
+require_once __DIR__ . '/class-agents-api-memory-atomic-run-control-store.php';
+AgentsAPI\AI\WP_Agent_Run_Control::set_store( new Agents_API_Memory_Atomic_Run_Control_Store() );
 
 $tools = array(
 	'client/lookup' => array(

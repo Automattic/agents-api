@@ -143,18 +143,6 @@ class WP_Agent_Conversation_Loop {
 		$mediation_enabled     = null !== $tool_executor && ! empty( $tool_declarations );
 		self::emit_tool_declaration_diagnostics( $on_event, $rejected_declarations, $tool_declarations, $tool_executor );
 		$messages = self::normalize_messages( $messages );
-		if ( '' !== $run_id && '' !== $lock_session_id ) {
-			$conversation_store = ( $context['conversation_store'] ?? null ) instanceof \AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store ? $context['conversation_store'] : null;
-			$run_metadata       = array( 'source' => 'conversation_loop', '_claim_token' => WP_Agent_Run_Control::string_value( $context['_agents_run_claim_token'] ?? '' ) );
-			if ( $principal instanceof WP_Agent_Execution_Principal ) {
-				$run_metadata['principal'] = $principal->to_safe_metadata();
-			}
-			$started            = WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, $run_metadata, $run_workspace, $run_owner, $conversation_store );
-			if ( is_wp_error( $started ) ) {
-				self::emit_event( $on_event, 'failed', array( 'error' => $started->get_error_message() ) );
-				return self::run_control_failure_result( $messages, $started );
-			}
-		}
 		$turn_runner           = self::resolve_turn_runner( $turn_runner, $options, $tool_declarations, $run_id, $lock_session_id, $request, $budgets );
 		$events                = array();
 		$tool_results          = array();
@@ -196,12 +184,43 @@ class WP_Agent_Conversation_Loop {
 					'messages'               => $messages,
 					'tool_execution_results' => array(),
 					'events'                 => array(),
-					'status'                 => 'transcript_lock_contention',
+					'status'                 => 'failed',
+					'completed'              => false,
+					'failure'                => array(
+						'type'        => 'transcript_lock_contention',
+						'message'     => 'Transcript session is busy with another active conversation run.',
+						'code'        => 'transcript_lock_contention',
+						'turn_count'  => 0,
+						'retryable'   => true,
+						'diagnostics' => array(
+							'reason'     => 'transcript_lock_busy',
+							'session_id' => $lock_session_id,
+						),
+					),
 				) );
 			}
 		}
 
+		// Tracks a deliberate turn-runner contract violation (non-array return),
+		// which is finalized in place and re-thrown to the caller. The fail-closed
+		// guard below must let this specific throw keep escaping rather than
+		// convert it into a structured failure result.
+		$loop_contract_error = null;
+
 		try {
+			if ( '' !== $run_id && '' !== $lock_session_id ) {
+				$conversation_store = ( $context['conversation_store'] ?? null ) instanceof \AgentsAPI\Core\Database\Chat\WP_Agent_Conversation_Store ? $context['conversation_store'] : null;
+				$run_metadata       = array( 'source' => 'conversation_loop', '_claim_token' => WP_Agent_Run_Control::string_value( $context['_agents_run_claim_token'] ?? '' ) );
+				if ( $principal instanceof WP_Agent_Execution_Principal ) {
+					$run_metadata['principal'] = $principal->to_safe_metadata();
+				}
+				$started = WP_Agent_Chat_Run_Control::start_run( $run_id, $lock_session_id, $run_metadata, $run_workspace, $run_owner, $conversation_store );
+				if ( is_wp_error( $started ) ) {
+					self::emit_event( $on_event, 'failed', array( 'error' => $started->get_error_message() ) );
+					return self::run_control_failure_result( $messages, $started );
+				}
+			}
+
 			for ( $turn = 1; $turn <= $max_turns; ++$turn ) {
 				$wall_clock_exceeded = self::check_wall_clock_budget( $budgets, $wall_clock_started_at, $wall_clock_initial, $on_event );
 				if ( null !== $wall_clock_exceeded ) {
@@ -234,12 +253,8 @@ class WP_Agent_Conversation_Loop {
 				try {
 					$result = call_user_func( $turn_runner, $messages, $turn_context );
 				} catch ( \Throwable $error ) {
-					self::emit_event( $on_event, 'failed', array(
-						'turn'  => $turn,
-						'error' => $error->getMessage(),
-					) );
-
-					$failure_result = self::failure_result(
+					return self::finalize_loop_failure(
+						$on_event,
 						$messages,
 						$tool_results,
 						$tool_events,
@@ -248,34 +263,37 @@ class WP_Agent_Conversation_Loop {
 						$error,
 						$turn,
 						$total_usage,
-						$request_metadata
+						$request_metadata,
+						$run_id,
+						$lock_session_id,
+						$run_workspace,
+						$transcript_persister,
+						$options
 					);
-
-					if ( '' !== $run_id && '' !== $lock_session_id ) {
-						WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_workspace );
-					}
-
-					self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
-					return $failure_result;
 				}
 
 				if ( ! is_array( $result ) ) {
-					$error = new \InvalidArgumentException( 'invalid_agent_conversation_loop: turn runner must return an array' );
+					$loop_contract_error = new \InvalidArgumentException( 'invalid_agent_conversation_loop: turn runner must return an array' );
 
-					self::emit_event( $on_event, 'failed', array(
-						'turn'  => $turn,
-						'error' => $error->getMessage(),
-					) );
+					self::finalize_loop_failure(
+						$on_event,
+						$messages,
+						$tool_results,
+						$tool_events,
+						$tool_audit_events,
+						$events,
+						$loop_contract_error,
+						$turn,
+						$total_usage,
+						$request_metadata,
+						$run_id,
+						$lock_session_id,
+						$run_workspace,
+						$transcript_persister,
+						$options
+					);
 
-					self::persist_transcript( $transcript_persister, $messages, $options, array(
-						'messages'               => $messages,
-						'tool_execution_results' => $tool_results,
-						'tool_events'            => $tool_events,
-						'tool_audit_events'      => $tool_audit_events,
-						'events'                 => $events,
-					) );
-
-					throw $error;
+					throw $loop_contract_error;
 				}
 
 				$interrupt = self::check_runtime_cancellation( $run_id, $lock_session_id, $turn_context, $on_event, $run_workspace, $run_owner );
@@ -313,11 +331,24 @@ class WP_Agent_Conversation_Loop {
 						'failure'                => $failure,
 					) );
 
-					if ( '' !== $run_id && '' !== $lock_session_id ) {
-						WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_workspace );
+					$persistence_error = self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
+					try {
+						if ( '' !== $run_id && '' !== $lock_session_id ) {
+							self::finish_run_or_throw( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_workspace );
+						}
+					} catch ( WP_Agent_Run_Control_Store_Exception $finalization_error ) {
+						if ( null !== $persistence_error ) {
+							throw new WP_Agent_Run_Control_Store_Exception( $finalization_error->getMessage(), 0, $persistence_error );
+						}
+						throw $finalization_error;
 					}
-
-					self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
+					if ( null !== $persistence_error ) {
+						throw new WP_Agent_Run_Control_Store_Exception(
+							'Transcript persistence failed while finalizing the failed conversation run.',
+							0,
+							$persistence_error
+						);
+					}
 					return $failure_result;
 				}
 
@@ -352,25 +383,38 @@ class WP_Agent_Conversation_Loop {
 						break;
 					}
 
-					$mediation_result = WP_Agent_Tool_Mediation_Runner::run(
-						$messages,
-						self::normalize_assoc_array( $result ),
-						$tool_executor,
-						$tool_declarations,
-						array(
-							'completion_policy'            => $completion_policy,
-							'turn_context'                 => $turn_context,
-							'turn'                         => $turn,
-							'on_event'                     => $on_event,
-							'budgets'                      => $budgets,
-							'identical_failure_tracker'    => $failure_tracker,
-							'tool_result_truncator'        => $result_truncator,
-							'pre_tool_mediator'            => $pre_tool_mediator,
-							'prior_tool_results'           => $tool_results,
-							'post_tool_result_diagnostics' => $post_tool_diagnostics,
-							'runtime_tool_request_store'   => $runtime_tool_store,
-						)
-					);
+					$mediation_checkpoint = array();
+					try {
+						$mediation_result = WP_Agent_Tool_Mediation_Runner::run(
+							$messages,
+							self::normalize_assoc_array( $result ),
+							$tool_executor,
+							$tool_declarations,
+							array(
+								'completion_policy'            => $completion_policy,
+								'turn_context'                 => $turn_context,
+								'turn'                         => $turn,
+								'on_event'                     => $on_event,
+								'budgets'                      => $budgets,
+								'identical_failure_tracker'    => $failure_tracker,
+								'tool_result_truncator'        => $result_truncator,
+								'pre_tool_mediator'            => $pre_tool_mediator,
+								'prior_tool_results'           => $tool_results,
+								'post_tool_result_diagnostics' => $post_tool_diagnostics,
+								'runtime_tool_request_store'   => $runtime_tool_store,
+							),
+							$mediation_checkpoint
+						);
+					} catch ( \Throwable $error ) {
+						if ( ! empty( $mediation_checkpoint ) ) {
+							$messages          = self::normalize_messages( is_array( $mediation_checkpoint['messages'] ?? null ) ? $mediation_checkpoint['messages'] : array() );
+							$tool_results      = array_merge( $tool_results, self::normalize_array_list( $mediation_checkpoint['tool_execution_results'] ?? array() ) );
+							$tool_events       = array_merge( $tool_events, self::normalize_array_list( $mediation_checkpoint['tool_events'] ?? array() ) );
+							$tool_audit_events = array_merge( $tool_audit_events, self::normalize_array_list( $mediation_checkpoint['tool_audit_events'] ?? array() ) );
+							$events            = array_merge( $events, self::normalize_events( $mediation_checkpoint['events'] ?? array() ) );
+						}
+						throw $error;
+					}
 
 					$messages              = $mediation_result['messages'];
 					$tool_results          = array_merge( $tool_results, $mediation_result['tool_execution_results'] );
@@ -564,16 +608,52 @@ class WP_Agent_Conversation_Loop {
 			}
 
 			$final_result = self::normalize_conversation_result( $final_result_data );
-
-			if ( '' !== $run_id && '' !== $lock_session_id ) {
-				$finished = WP_Agent_Chat_Run_Control::finish_run( $run_id, WP_Agent_Run_Outcome::run_control_status( $final_result ), $run_workspace );
-				if ( is_wp_error( $finished ) ) {
-					self::emit_event( $on_event, 'failed', array( 'error' => $finished->get_error_message() ) );
-					return self::run_control_failure_result( $messages, $finished );
+			$persistence_error = self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
+			if ( null !== $persistence_error ) {
+				self::emit_event( $on_event, 'failed', array(
+					'turn'  => $turns_run,
+					'error' => $persistence_error->getMessage(),
+				) );
+				try {
+					if ( '' !== $run_id && '' !== $lock_session_id ) {
+						self::finish_run_or_throw( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_workspace );
+					}
+				} catch ( WP_Agent_Run_Control_Store_Exception $finalization_error ) {
+					throw new WP_Agent_Run_Control_Store_Exception( $finalization_error->getMessage(), 0, $persistence_error );
 				}
+				throw new WP_Agent_Run_Control_Store_Exception(
+					'Transcript persistence failed while finalizing the conversation run.',
+					0,
+					$persistence_error
+				);
 			}
 
-			self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
+			if ( '' !== $run_id && '' !== $lock_session_id ) {
+				$requested_status = WP_Agent_Run_Outcome::run_control_status( $final_result );
+				$finished_run     = self::finish_run_or_throw( $run_id, $requested_status, $run_workspace );
+				$authoritative    = WP_Agent_Chat_Run_Control::normalize_status( $finished_run['status'] ?? null );
+
+				// A cancellation that commits after the candidate result was built wins the
+				// terminal publication. The candidate is only corrected when it would
+				// otherwise claim success against a stored cancellation.
+				if ( WP_Agent_Chat_Run_Control::STATUS_CANCELLED === $authoritative && $requested_status !== $authoritative ) {
+					$final_result     = self::project_cancelled_terminal_result( $final_result, $finished_run );
+					$correction_error = self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
+					if ( null !== $correction_error ) {
+						throw new WP_Agent_Run_Control_Store_Exception(
+							'Transcript persistence failed while projecting the authoritative conversation outcome.',
+							0,
+							$correction_error
+						);
+					}
+					self::emit_event( $on_event, WP_Agent_Chat_Run_Control::STATUS_CANCELLED, array(
+						'turn'   => $turns_run,
+						'status' => WP_Agent_Chat_Run_Control::STATUS_CANCELLED,
+						'run_id' => $run_id,
+					) );
+					return $final_result;
+				}
+			}
 
 			self::emit_event( $on_event, 'completed', array(
 				'turn'          => $turns_run,
@@ -582,6 +662,41 @@ class WP_Agent_Conversation_Loop {
 			) );
 
 			return $final_result;
+		} catch ( \Throwable $error ) {
+			if ( $error instanceof WP_Agent_Run_Control_Store_Exception ) {
+				throw $error;
+			}
+
+			// A deliberate turn-runner contract violation (non-array return) is
+			// finalized in place and re-thrown to the caller; keep it escaping.
+			if ( null !== $loop_contract_error && $error === $loop_contract_error ) {
+				throw $error;
+			}
+
+			// Fail closed. An unguarded throw from anywhere in the loop body --
+			// compaction/summarizer, tool-call normalization, message construction,
+			// mediation, or the runtime-tool store -- would otherwise escape run()
+			// leaving the run stuck in STATUS_RUNNING with no `failed` event and no
+			// persisted transcript. Finalize identically to the turn-runner boundary
+			// (finish_run -> FAILED, persist transcript, emit `failed`) so the
+			// `finally` below still releases the transcript lock.
+			return self::finalize_loop_failure(
+				$on_event,
+				$messages,
+				$tool_results,
+				$tool_events,
+				$tool_audit_events,
+				$events,
+				$error,
+				$turns_run,
+				$total_usage,
+				$request_metadata,
+				$run_id,
+				$lock_session_id,
+				$run_workspace,
+				$transcript_persister,
+				$options
+			);
 		} finally {
 			if ( null !== $transcript_lock && null !== $lock_token && '' !== $lock_session_id ) {
 				try {
@@ -668,6 +783,7 @@ class WP_Agent_Conversation_Loop {
 	 * @param array<int, array<string, mixed>>         $prior_tool_results Prior mediated tool results.
 	 * @param callable|null                            $post_tool_diagnostics Optional post-result diagnostics callback.
 	 * @param WP_Agent_Runtime_Tool_Request_Store|null $runtime_tool_store Optional durable runtime tool request store.
+	 * @param array<string,mixed>|null                  $checkpoint Out: latest canonical mediation state.
 	 * @return array{messages: array<int, array<string, mixed>>, tool_execution_results: array<int, array<string, mixed>>, tool_events: array<int, array<string, mixed>>, tool_audit_events: array<int, array<string, mixed>>, events: array<int, array<string, mixed>>, conversation_complete: bool, exceeded_budget: string|null, approval_required: array<string, mixed>|null, runtime_tool_pending: array<string, mixed>|null, spin_signatures: array<int, WP_Agent_Spin_Signature>}
 	 */
 	public static function mediate_tool_calls(
@@ -685,7 +801,8 @@ class WP_Agent_Conversation_Loop {
 		?callable $pre_tool_mediator = null,
 		array $prior_tool_results = array(),
 		?callable $post_tool_diagnostics = null,
-		?WP_Agent_Runtime_Tool_Request_Store $runtime_tool_store = null
+		?WP_Agent_Runtime_Tool_Request_Store $runtime_tool_store = null,
+		?array &$checkpoint = null
 	): array {
 		$core = new WP_Agent_Tool_Execution_Core();
 
@@ -706,6 +823,13 @@ class WP_Agent_Conversation_Loop {
 		$exceeded_budget          = null;
 		$approval_required        = null;
 		$runtime_tool_pending     = null;
+		$checkpoint               = self::mediation_checkpoint(
+			$messages,
+			$tool_execution_results,
+			$tool_events,
+			$tool_audit_events,
+			$events
+		);
 
 		// If the turn runner returned text content, add it as an assistant message.
 		if ( isset( $result['content'] ) && is_string( $result['content'] ) && '' !== $result['content'] ) {
@@ -770,6 +894,13 @@ class WP_Agent_Conversation_Loop {
 					'parameters_redacted' => true,
 				)
 			);
+			$checkpoint = self::mediation_checkpoint(
+				$messages,
+				$tool_execution_results,
+				$tool_events,
+				$tool_audit_events,
+				$events
+			);
 			$mediator_complete = false;
 			$mediation_context = array(
 				'messages'               => $messages,
@@ -788,6 +919,8 @@ class WP_Agent_Conversation_Loop {
 				$pre_tool_mediator,
 				$mediation_context
 			);
+			$effect_audit_index = null;
+			$effect_occurred    = false;
 
 			if ( 'reject' === $mediator_decision['action'] ) {
 				$exec_result       = $mediator_decision['result'];
@@ -807,6 +940,27 @@ class WP_Agent_Conversation_Loop {
 					$prepared_tool_def,
 					$executor,
 					$tool_context
+				);
+				$effect_occurred = true;
+
+				// The executor returning is the audit commit point. Record a safe,
+				// non-provider-facing receipt before stores, hooks, truncators, or
+				// policies run. Mediation will append the single outward response.
+				$effect_audit_index = count( $tool_audit_events );
+				$effect_receipt      = array_merge(
+					self::tool_audit_event( $tool_name, $tool_call_id, $parameters_for_policy, $exec_result, $tool_definition, $turn_context, $turn ),
+					array(
+						'type'            => 'tool_effect_completed',
+						'effect_occurred' => true,
+					)
+				);
+				$tool_audit_events[] = $effect_receipt;
+				$checkpoint = self::mediation_checkpoint(
+					$messages,
+					$tool_execution_results,
+					$tool_events,
+					$tool_audit_events,
+					$events
 				);
 			}
 
@@ -830,7 +984,7 @@ class WP_Agent_Conversation_Loop {
 				}
 				$pending_request_json = self::json_encode_safe( $pending_request );
 				$runtime_tool_pending = $pending_request;
-				$messages[]           = WP_Agent_Message::toolResult(
+				$pending_message      = WP_Agent_Message::toolResult(
 					false !== $pending_request_json ? $pending_request_json : '',
 					$tool_name,
 					array(
@@ -840,6 +994,7 @@ class WP_Agent_Conversation_Loop {
 					),
 					array( 'tool_call_id' => $tool_call_id )
 				);
+				$messages[] = $pending_message;
 
 				self::emit_event( $on_event, WP_Agent_Runtime_Tool_Request::STATUS_PENDING, array(
 					'turn'         => $turn,
@@ -847,7 +1002,7 @@ class WP_Agent_Conversation_Loop {
 					'tool_call_id' => $tool_call_id,
 					'request_id'   => $pending_request['request_id'],
 				) );
-				$tool_events[] = self::tool_event(
+				$pending_event = self::tool_event(
 					WP_Agent_Runtime_Tool_Request::STATUS_PENDING,
 					$tool_name,
 					$tool_call_id,
@@ -857,6 +1012,15 @@ class WP_Agent_Conversation_Loop {
 						'request_id' => $pending_request['request_id'],
 					)
 				);
+				$tool_events[] = $pending_event;
+				if ( null !== $effect_audit_index ) {
+					$exec_result['runtime_tool_request'] = $pending_request;
+					$tool_audit_events[ $effect_audit_index ] = array_merge(
+						self::tool_audit_event( $tool_name, $tool_call_id, $parameters_for_policy, $exec_result, $tool_definition, $turn_context, $turn ),
+						array( 'effect_occurred' => true )
+					);
+				}
+				$checkpoint = self::mediation_checkpoint( $messages, $tool_execution_results, $tool_events, $tool_audit_events, $events );
 				$complete      = true;
 				break;
 			}
@@ -910,33 +1074,22 @@ class WP_Agent_Conversation_Loop {
 				'tool_call_id' => $tool_call_id,
 				'success'      => (bool) ( $exec_result['success'] ?? false ),
 			) );
-			$tool_events[] = self::tool_event(
+			$normalized_tool_event = self::tool_event(
 				'tool_result',
 				$tool_name,
 				$tool_call_id,
 				$turn,
 				array(
-					'status'   => ! empty( $exec_result['success'] ) ? 'success' : 'error',
-					'success'  => (bool) ( $exec_result['success'] ?? false ),
-					'rejected' => 'reject' === $mediator_decision['action'],
+					'status'          => ! empty( $exec_result['success'] ) ? 'success' : 'error',
+					'success'         => (bool) ( $exec_result['success'] ?? false ),
+					'rejected'        => 'reject' === $mediator_decision['action'],
+					'effect_occurred' => $effect_occurred,
 				)
 			);
+			$tool_events[] = $normalized_tool_event;
 
 			// Build the tool_execution_results entry.
-			$execution_result = array(
-				'tool_name'           => $tool_name,
-				'tool_call_id'        => $tool_call_id,
-				'result'              => $exec_result,
-				'parameters'          => $parameter_exposure['parameters'],
-				'parameters_sha256'   => $parameter_exposure['parameters_sha256'],
-				'parameters_redacted' => true,
-				'turn_count'          => $turn,
-			);
-
-			$runtime = isset( $exec_result['runtime'] ) && is_array( $exec_result['runtime'] ) ? $exec_result['runtime'] : array();
-			if ( ! empty( $runtime ) ) {
-				$execution_result['runtime'] = $runtime;
-			}
+			$execution_result = self::tool_execution_result( $tool_name, $tool_call_id, $exec_result, $parameter_exposure, $turn, $effect_occurred );
 
 			$diagnostics = self::post_tool_result_diagnostics(
 				$post_tool_diagnostics,
@@ -970,7 +1123,7 @@ class WP_Agent_Conversation_Loop {
 
 			$tool_execution_results[] = $execution_result;
 
-			$tool_audit_events[] = self::tool_audit_event(
+			$audit_event = self::tool_audit_event(
 				$tool_name,
 				$tool_call_id,
 				$parameters_for_policy,
@@ -979,17 +1132,33 @@ class WP_Agent_Conversation_Loop {
 				$turn_context,
 				$turn
 			);
+			if ( $effect_occurred ) {
+				$audit_event['effect_occurred'] = true;
+			}
+			if ( null !== $effect_audit_index ) {
+				$tool_audit_events[ $effect_audit_index ] = $audit_event;
+			} else {
+				$tool_audit_events[] = $audit_event;
+			}
 
 			// Add tool-result message to transcript.
 			$result_content = ( $exec_result['success'] ?? false )
 				? self::json_encode_safe( $exec_result['result'] ?? array() )
 				: ( $exec_result['error'] ?? 'Tool execution failed.' );
 
-			$messages[] = WP_Agent_Message::toolResult(
+			$tool_result_message = WP_Agent_Message::toolResult(
 				is_string( $result_content ) ? $result_content : '',
 				$tool_name,
 				$exec_result,
 				array( 'tool_call_id' => $tool_call_id )
+			);
+			$messages[] = $tool_result_message;
+			$checkpoint = self::mediation_checkpoint(
+				$messages,
+				$tool_execution_results,
+				$tool_events,
+				$tool_audit_events,
+				$events
 			);
 
 			$nudge = self::check_identical_failure_tracker(
@@ -1112,6 +1281,204 @@ class WP_Agent_Conversation_Loop {
 			'approval_required'      => $approval_required,
 			'runtime_tool_pending'   => $runtime_tool_pending,
 			'spin_signatures'        => $spin_signatures,
+		);
+	}
+
+	/**
+	 * Snapshot durable mediation state before caller-owned policy runs.
+	 *
+	 * @param array<int,array<string,mixed>> $messages Current transcript.
+	 * @param array<int,array<string,mixed>> $tool_results Current tool results.
+	 * @param array<int,array<string,mixed>> $tool_events Current tool events.
+	 * @param array<int,array<string,mixed>> $tool_audit_events Current tool audit events.
+	 * @param array<int,array<string,mixed>> $events Current loop events.
+	 * @return array{messages: array<int, array<string, mixed>>, tool_execution_results: array<int, array<string, mixed>>, tool_events: array<int, array<string, mixed>>, tool_audit_events: array<int, array<string, mixed>>, events: array<int, array<string, mixed>>}
+	 */
+	private static function mediation_checkpoint( array $messages, array $tool_results, array $tool_events, array $tool_audit_events, array $events ): array {
+		return array(
+			'messages'               => $messages,
+			'tool_execution_results' => $tool_results,
+			'tool_events'            => $tool_events,
+			'tool_audit_events'      => $tool_audit_events,
+			'events'                 => $events,
+		);
+	}
+
+	/**
+	 * Build one canonical mediated tool execution result.
+	 *
+	 * @param array<string,mixed> $result Tool execution result.
+	 * @param array{parameters:array<string,mixed>,parameters_sha256:string,parameters_redacted:bool} $parameter_exposure Safe parameter envelope.
+	 * @return array<string,mixed>
+	 */
+	private static function tool_execution_result( string $tool_name, string $tool_call_id, array $result, array $parameter_exposure, int $turn, bool $effect_occurred ): array {
+		$execution_result = array(
+			'tool_name'           => $tool_name,
+			'tool_call_id'        => $tool_call_id,
+			'result'              => $result,
+			'parameters'          => $parameter_exposure['parameters'],
+			'parameters_sha256'   => $parameter_exposure['parameters_sha256'],
+			'parameters_redacted' => true,
+			'turn_count'          => $turn,
+		);
+		if ( $effect_occurred ) {
+			$execution_result['effect_occurred'] = true;
+		}
+
+		$runtime = isset( $result['runtime'] ) && is_array( $result['runtime'] ) ? $result['runtime'] : array();
+		if ( ! empty( $runtime ) ) {
+			$execution_result['runtime'] = $runtime;
+		}
+
+		return $execution_result;
+	}
+
+	/**
+	 * Fail closed: finalize a run that threw and return the structured failure result.
+	 *
+	 * Shared by the turn-runner boundary and the outer loop-body guard so an
+	 * unguarded `\Throwable` from anywhere in the loop finalizes identically:
+	 * emit the `failed` event, mark run-control FAILED, persist the transcript,
+	 * and return the normalized failure result. Without this, a throw from
+	 * compaction, tool-call normalization, message construction, mediation, or
+	 * the runtime-tool store would escape `run()` and leave the run stuck in
+	 * STATUS_RUNNING with no `failed` event and no persisted transcript.
+	 *
+	 * @param callable|null                                                        $on_event             Event sink.
+	 * @param array<int, array<string, mixed>>                                     $messages             Current transcript messages.
+	 * @param array<int, array<string, mixed>>                                     $tool_results         Accumulated tool execution results.
+	 * @param array<mixed>                                                         $tool_events          Accumulated canonical tool events.
+	 * @param array<int, array<string, mixed>>                                     $tool_audit_events    Accumulated audit events.
+	 * @param array<int, array<string, mixed>>                                     $events               Accumulated loop events.
+	 * @param \Throwable                                                           $error                Runtime error.
+	 * @param int                                                                  $turn                 Current turn.
+	 * @param array<string, mixed>                                                 $usage                Accumulated usage.
+	 * @param array<string, mixed>                                                 $request_metadata     Latest request metadata.
+	 * @param string                                                               $run_id               Run identifier, or '' when run control is disabled.
+	 * @param string                                                               $lock_session_id      Session id, or '' when run control is disabled.
+	 * @param \AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope|null              $run_workspace        Run workspace scope.
+	 * @param WP_Agent_Transcript_Persister|null                                   $transcript_persister Transcript persister.
+	 * @param array<string, mixed>                                                 $options              Loop options.
+	 * @return array<string, mixed> Normalized conversation result.
+	 */
+	private static function finalize_loop_failure(
+		?callable $on_event,
+		array $messages,
+		array $tool_results,
+		array $tool_events,
+		array $tool_audit_events,
+		array $events,
+		\Throwable $error,
+		int $turn,
+		array $usage,
+		array $request_metadata,
+		string $run_id,
+		string $lock_session_id,
+		?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $run_workspace,
+		?WP_Agent_Transcript_Persister $transcript_persister,
+		array $options
+	): array {
+		self::emit_event( $on_event, 'failed', array(
+			'turn'  => $turn,
+			'error' => $error->getMessage(),
+		) );
+
+		$failure_result = self::failure_result(
+			$messages,
+			$tool_results,
+			$tool_events,
+			$tool_audit_events,
+			$events,
+			$error,
+			$turn,
+			$usage,
+			$request_metadata
+		);
+
+		$persistence_error = self::persist_transcript( $transcript_persister, $messages, $options, $failure_result );
+
+		try {
+			if ( '' !== $run_id && '' !== $lock_session_id ) {
+				self::finish_run_or_throw( $run_id, WP_Agent_Chat_Run_Control::STATUS_FAILED, $run_workspace );
+			}
+		} catch ( WP_Agent_Run_Control_Store_Exception $finalization_error ) {
+			if ( null !== $persistence_error ) {
+				throw new WP_Agent_Run_Control_Store_Exception( $finalization_error->getMessage(), 0, $persistence_error );
+			}
+			throw $finalization_error;
+		}
+
+		if ( null !== $persistence_error ) {
+			throw new WP_Agent_Run_Control_Store_Exception(
+				'Transcript persistence failed while finalizing the failed conversation run.',
+				0,
+				$persistence_error
+			);
+		}
+
+		return $failure_result;
+	}
+
+	/**
+	 * Finalize run control without hiding retryable storage failures.
+	 *
+	 * @return array<string,mixed> Authoritative stored run.
+	 */
+	private static function finish_run_or_throw( string $run_id, string $status, ?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace ): array {
+		$finished = WP_Agent_Chat_Run_Control::finish_run( $run_id, $status, $workspace );
+		if ( is_wp_error( $finished ) ) {
+			throw new WP_Agent_Run_Control_Store_Exception( $finished->get_error_message() );
+		}
+		if ( ! is_array( $finished ) ) {
+			throw new WP_Agent_Run_Control_Store_Exception( 'Run-control finalization did not return a stored run.' );
+		}
+
+		try {
+			$finished = WP_Agent_Chat_Run_Control::normalize_run( $finished );
+		} catch ( \Throwable $error ) {
+			throw new WP_Agent_Run_Control_Store_Exception( 'Run-control finalization returned a malformed stored run.', 0, $error );
+		}
+
+		$expected_status = WP_Agent_Chat_Run_Control::normalize_status( $status );
+		if ( $run_id !== $finished['run_id'] ) {
+			throw new WP_Agent_Run_Control_Store_Exception( 'Run-control finalization did not persist the requested terminal result.' );
+		}
+		if ( $expected_status !== $finished['status'] && ! in_array( $finished['status'], self::terminal_run_control_statuses(), true ) ) {
+			throw new WP_Agent_Run_Control_Store_Exception( 'Run-control finalization did not return an authoritative terminal result.' );
+		}
+
+		return $finished;
+	}
+
+	/**
+	 * Project a stored cancellation winner back into the conversation result.
+	 *
+	 * @param array<string,mixed> $result Normalized candidate conversation result.
+	 * @param array<string,mixed> $run    Authoritative stored run.
+	 * @return array<string,mixed>
+	 */
+	private static function project_cancelled_terminal_result( array $result, array $run ): array {
+		unset( $result['run_outcome'], $result['failure'] );
+		$result['status']      = WP_Agent_Chat_Run_Control::STATUS_CANCELLED;
+		$result['completed']   = false;
+		$result['interrupted'] = array(
+			'action' => 'cancel',
+			'reason' => 'run_control_cancelled',
+			'run_id' => is_string( $run['run_id'] ?? null ) ? $run['run_id'] : '',
+		);
+
+		return self::normalize_conversation_result( $result );
+	}
+
+	/** @return array<int,string> */
+	private static function terminal_run_control_statuses(): array {
+		return array(
+			WP_Agent_Chat_Run_Control::STATUS_COMPLETED,
+			WP_Agent_Chat_Run_Control::STATUS_FAILED,
+			WP_Agent_Chat_Run_Control::STATUS_CANCELLED,
+			WP_Agent_Chat_Run_Control::STATUS_BUDGET_EXCEEDED,
+			WP_Agent_Chat_Run_Control::STATUS_STALLED,
+			WP_Agent_Chat_Run_Control::STATUS_INTERRUPTED,
 		);
 	}
 
@@ -1269,9 +1636,9 @@ class WP_Agent_Conversation_Loop {
 	/**
 	 * Invoke and normalize the optional pre-tool mediation decision callback.
 	 *
-	 * The mediator is a synchronous, storage-free product policy seam. Invalid or
-	 * throwing callbacks fall back to `proceed` so the default execution path is
-	 * preserved unless the mediator explicitly returns a supported decision.
+	 * The mediator is a synchronous, storage-free product policy seam. Invalid
+	 * decisions retain the current decision, while exceptions propagate so policy
+	 * failures can never authorize tool execution by substituting `proceed`.
 	 *
 	 * @param callable|null       $mediator Optional pre-tool mediator.
 	 * @param array<string,mixed> $context  Tool mediation context.
@@ -1286,24 +1653,15 @@ class WP_Agent_Conversation_Loop {
 		$decision = $proceed;
 
 		if ( null !== $mediator ) {
-			try {
-				$decision = self::normalize_pre_tool_mediation_decision( call_user_func( $mediator, $context ), $context, $proceed );
-			} catch ( \Throwable $error ) {
-				unset( $error );
-				$decision = $proceed;
-			}
+			$decision = self::normalize_pre_tool_mediation_decision( call_user_func( $mediator, $context ), $context, $proceed );
 		}
 
 		if ( function_exists( 'apply_filters' ) ) {
-			try {
-				$decision = self::normalize_pre_tool_mediation_decision(
-					apply_filters( 'agents_api_pre_tool_call_decision', $decision, $context ),
-					$context,
-					$decision
-				);
-			} catch ( \Throwable $error ) {
-				unset( $error );
-			}
+			$decision = self::normalize_pre_tool_mediation_decision(
+				apply_filters( 'agents_api_pre_tool_call_decision', $decision, $context ),
+				$context,
+				$decision
+			);
 		}
 
 		return $decision;
@@ -1401,8 +1759,7 @@ class WP_Agent_Conversation_Loop {
 					)
 				) );
 			} catch ( \Throwable $error ) {
-				unset( $error );
-				return $fallback;
+				throw new \InvalidArgumentException( 'invalid_agent_pre_tool_mediation_decision: pending decision contains an invalid runtime tool request', 0, $error );
 			}
 
 			$metadata['status'] = WP_Agent_Runtime_Tool_Request::STATUS_PENDING;
@@ -1418,14 +1775,13 @@ class WP_Agent_Conversation_Loop {
 		} else {
 			$raw_result = $decision['result'] ?? null;
 			if ( ! is_array( $raw_result ) ) {
-				return $fallback;
+				throw new \InvalidArgumentException( 'invalid_agent_pre_tool_mediation_decision: replace_result decision must contain a result array' );
 			}
 			$raw_result['tool_name'] = is_string( $raw_result['tool_name'] ?? null ) && '' !== $raw_result['tool_name'] ? $raw_result['tool_name'] : $tool_name;
 			try {
 				$result = WP_Agent_Tool_Result::normalize( $raw_result );
 			} catch ( \Throwable $error ) {
-				unset( $error );
-				return $fallback;
+				throw new \InvalidArgumentException( 'invalid_agent_pre_tool_mediation_decision: replace_result decision contains an invalid tool result', 0, $error );
 			}
 		}
 
@@ -1746,24 +2102,25 @@ class WP_Agent_Conversation_Loop {
 	 * @param array<int, array<string, mixed>>                          $messages  Final messages.
 	 * @param array<string, mixed>                                      $options   Loop options.
 	 * @param array<mixed>                                              $result    Loop result.
+	 * @return \Throwable|null Persistence failure for the finalizer to surface.
 	 */
 	private static function persist_transcript(
 		?WP_Agent_Transcript_Persister $persister,
 		array $messages,
 		array $options,
 		array $result
-	): void {
+	): ?\Throwable {
 		if ( null === $persister ) {
-			return;
+			return null;
 		}
 
 		$request = self::resolve_request( $messages, $options );
 
 		try {
 			$persister->persist( $messages, $request, $result );
+			return null;
 		} catch ( \Throwable $error ) {
-			// Persister failures must not change loop results.
-			unset( $error );
+			return $error;
 		}
 	}
 
