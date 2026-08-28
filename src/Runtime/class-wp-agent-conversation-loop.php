@@ -629,7 +629,30 @@ class WP_Agent_Conversation_Loop {
 			}
 
 			if ( '' !== $run_id && '' !== $lock_session_id ) {
-				self::finish_run_or_throw( $run_id, WP_Agent_Run_Outcome::run_control_status( $final_result ), $run_workspace );
+				$requested_status = WP_Agent_Run_Outcome::run_control_status( $final_result );
+				$finished_run     = self::finish_run_or_throw( $run_id, $requested_status, $run_workspace );
+				$authoritative    = WP_Agent_Chat_Run_Control::normalize_status( $finished_run['status'] ?? null );
+
+				// A cancellation that commits after the candidate result was built wins the
+				// terminal publication. The candidate is only corrected when it would
+				// otherwise claim success against a stored cancellation.
+				if ( WP_Agent_Chat_Run_Control::STATUS_CANCELLED === $authoritative && $requested_status !== $authoritative ) {
+					$final_result     = self::project_cancelled_terminal_result( $final_result, $finished_run );
+					$correction_error = self::persist_transcript( $transcript_persister, $messages, $options, $final_result );
+					if ( null !== $correction_error ) {
+						throw new WP_Agent_Run_Control_Store_Exception(
+							'Transcript persistence failed while projecting the authoritative conversation outcome.',
+							0,
+							$correction_error
+						);
+					}
+					self::emit_event( $on_event, WP_Agent_Chat_Run_Control::STATUS_CANCELLED, array(
+						'turn'   => $turns_run,
+						'status' => WP_Agent_Chat_Run_Control::STATUS_CANCELLED,
+						'run_id' => $run_id,
+					) );
+					return $final_result;
+				}
 			}
 
 			self::emit_event( $on_event, 'completed', array(
@@ -1398,8 +1421,10 @@ class WP_Agent_Conversation_Loop {
 
 	/**
 	 * Finalize run control without hiding retryable storage failures.
+	 *
+	 * @return array<string,mixed> Authoritative stored run.
 	 */
-	private static function finish_run_or_throw( string $run_id, string $status, ?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace ): void {
+	private static function finish_run_or_throw( string $run_id, string $status, ?\AgentsAPI\Core\Workspace\WP_Agent_Workspace_Scope $workspace ): array {
 		$finished = WP_Agent_Chat_Run_Control::finish_run( $run_id, $status, $workspace );
 		if ( is_wp_error( $finished ) ) {
 			throw new WP_Agent_Run_Control_Store_Exception( $finished->get_error_message() );
@@ -1415,9 +1440,46 @@ class WP_Agent_Conversation_Loop {
 		}
 
 		$expected_status = WP_Agent_Chat_Run_Control::normalize_status( $status );
-		if ( $run_id !== $finished['run_id'] || $expected_status !== $finished['status'] ) {
+		if ( $run_id !== $finished['run_id'] ) {
 			throw new WP_Agent_Run_Control_Store_Exception( 'Run-control finalization did not persist the requested terminal result.' );
 		}
+		if ( $expected_status !== $finished['status'] && ! in_array( $finished['status'], self::terminal_run_control_statuses(), true ) ) {
+			throw new WP_Agent_Run_Control_Store_Exception( 'Run-control finalization did not return an authoritative terminal result.' );
+		}
+
+		return $finished;
+	}
+
+	/**
+	 * Project a stored cancellation winner back into the conversation result.
+	 *
+	 * @param array<string,mixed> $result Normalized candidate conversation result.
+	 * @param array<string,mixed> $run    Authoritative stored run.
+	 * @return array<string,mixed>
+	 */
+	private static function project_cancelled_terminal_result( array $result, array $run ): array {
+		unset( $result['run_outcome'], $result['failure'] );
+		$result['status']      = WP_Agent_Chat_Run_Control::STATUS_CANCELLED;
+		$result['completed']   = false;
+		$result['interrupted'] = array(
+			'action' => 'cancel',
+			'reason' => 'run_control_cancelled',
+			'run_id' => is_string( $run['run_id'] ?? null ) ? $run['run_id'] : '',
+		);
+
+		return self::normalize_conversation_result( $result );
+	}
+
+	/** @return array<int,string> */
+	private static function terminal_run_control_statuses(): array {
+		return array(
+			WP_Agent_Chat_Run_Control::STATUS_COMPLETED,
+			WP_Agent_Chat_Run_Control::STATUS_FAILED,
+			WP_Agent_Chat_Run_Control::STATUS_CANCELLED,
+			WP_Agent_Chat_Run_Control::STATUS_BUDGET_EXCEEDED,
+			WP_Agent_Chat_Run_Control::STATUS_STALLED,
+			WP_Agent_Chat_Run_Control::STATUS_INTERRUPTED,
+		);
 	}
 
 	/**

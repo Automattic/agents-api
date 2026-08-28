@@ -550,4 +550,49 @@ agents_api_smoke_assert_equals( true, $contention_result['failure']['retryable']
 agents_api_smoke_assert_equals( 0, $contention_turns, 'lock contention starts no provider execution', $failures, $passes );
 agents_api_smoke_assert_equals( null, AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-lock-contention' ), 'lock contention creates no running run-control zombie', $failures, $passes );
 
+echo "\n[13] Cancellation committed during transcript persistence wins terminal publication:\n";
+AgentsAPI\AI\WP_Agent_Run_Control::set_store( new Agents_API_Memory_Atomic_Run_Control_Store() );
+$late_cancel_results = array();
+$late_cancel_persister = new class( $late_cancel_results ) implements AgentsAPI\AI\WP_Agent_Transcript_Persister {
+	private array $results;
+	public function __construct( array &$results ) { $this->results = &$results; }
+	public function persist( array $messages, AgentsAPI\AI\WP_Agent_Conversation_Request $request, array $result ): string {
+		unset( $messages, $request );
+		$this->results[] = $result;
+		if ( 1 === count( $this->results ) ) {
+			AgentsAPI\AI\WP_Agent_Chat_Run_Control::request_cancel( 'fail-closed-late-cancel' );
+		}
+		return 'late-cancel-transcript';
+	}
+};
+$late_cancel_events = array();
+$late_cancel_turns  = 0;
+$late_cancel_result = AgentsAPI\AI\WP_Agent_Conversation_Loop::run(
+	array( array( 'role' => 'user', 'content' => 'cancel during persistence' ) ),
+	static function ( array $messages ) use ( &$late_cancel_turns ): array {
+		++$late_cancel_turns;
+		$messages[] = AgentsAPI\AI\WP_Agent_Message::text( 'assistant', 'candidate completion' );
+		return array( 'messages' => $messages, 'tool_execution_results' => array() );
+	},
+	array(
+		'run_id'                => 'fail-closed-late-cancel',
+		'transcript_session_id' => 'fail-closed-late-cancel-session',
+		'transcript_persister'  => $late_cancel_persister,
+		'on_event'              => static function ( string $event, array $payload ) use ( &$late_cancel_events ): void {
+			$late_cancel_events[] = array( 'event' => $event, 'status' => $payload['status'] ?? '' );
+		},
+	)
+);
+$late_cancel_run = AgentsAPI\AI\WP_Agent_Chat_Run_Control::get_run( 'fail-closed-late-cancel' );
+$late_cancel_terminal_events = array_values( array_filter( $late_cancel_events, static fn( array $event ): bool => in_array( $event['event'], array( 'completed', 'cancelled' ), true ) ) );
+agents_api_smoke_assert_equals( 1, $late_cancel_turns, 'late cancellation does not repeat provider execution', $failures, $passes );
+agents_api_smoke_assert_equals( 'cancelled', $late_cancel_run['status'] ?? '', 'stored run keeps the atomic cancelled winner', $failures, $passes );
+agents_api_smoke_assert_equals( true, $late_cancel_run['cancelled'] ?? false, 'stored cancellation fields remain consistent', $failures, $passes );
+agents_api_smoke_assert_equals( 'cancelled', $late_cancel_result['status'] ?? '', 'returned conversation result projects cancelled winner', $failures, $passes );
+agents_api_smoke_assert_equals( false, $late_cancel_result['completed'] ?? true, 'returned cancelled result is not successful completion', $failures, $passes );
+agents_api_smoke_assert_equals( 'cancelled', $late_cancel_result['run_outcome']['status'] ?? '', 'returned run outcome agrees with cancelled run control', $failures, $passes );
+agents_api_smoke_assert_equals( 2, count( $late_cancel_results ), 'transcript receives corrected authoritative terminal projection', $failures, $passes );
+agents_api_smoke_assert_equals( 'cancelled', $late_cancel_results[1]['status'] ?? '', 'final persisted transcript result is cancelled', $failures, $passes );
+agents_api_smoke_assert_equals( array( array( 'event' => 'cancelled', 'status' => 'cancelled' ) ), $late_cancel_terminal_events, 'terminal event reports cancelled with no completion success', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API conversation loop fail-closed', $failures, $passes );
