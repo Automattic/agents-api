@@ -51,6 +51,7 @@
       "php tests/authorization-smoke.php",
       "php tests/autonomous-capability-ceiling-smoke.php",
       "php tests/agents-access-ability-smoke.php",
+      "php tests/agents-access-write-ability-smoke.php",
       "php tests/agents-conversation-session-abilities-smoke.php",
       "php tests/conversation-session-authz-smoke.php",
       "php tests/conversation-session-store-contract-smoke.php",
