@@ -323,6 +323,29 @@ Optional fields include `label`, `prompt`, `session_id`, and `meta`. When `sessi
 
 Action Scheduler bridges and listeners are optional operational adapters. The substrate detects Action Scheduler at runtime and no-ops cleanly when absent; `composer.json` suggests `woocommerce/action-scheduler` for scheduled workflow/routine execution.
 
+### Routine generation fencing
+
+Every `WP_Agent_Routine_Action_Scheduler_Bridge::register()` mints a schedule generation (`wp_generate_uuid4()`), persists it in the non-autoloaded `agents_routine_generation_<routine_id>` option, and stamps it into the scheduled action's args as a trailing metadata element. The stamp is transparent: `WP_Agent_Routine_Action_Identity::logical_args()` strips it, so identity work (unschedule, coverage checks, the wake listener) always compares the logical args — `array( 'routine_id' => ... )` — never the stamped payload. Action Scheduler's own args matching is exact-equality, so nothing in the bridge ever queries by stamped args.
+
+Two hooks close the loop:
+
+- `action_scheduler_stored_action_instance` wraps every fetched routine action in `WP_Agent_Generation_Fenced_Action`. When the stamped generation no longer matches the persisted one, the fenced action's `execute()` no-ops (firing `agents_routine_action_fenced` for observability) and its `get_schedule()` reports a canceled schedule so the queue runner never repeats a superseded recurring chain. Unstamped legacy actions never match a live generation, so they drain as no-ops instead of double-firing beside their stamped replacements.
+- `action_scheduler_stored_action` cancels a recurrence successor that was stored carrying a stale generation — the race where an in-flight old-chain action finishes after re-registration and AS's `repeat()` clones the superseded args.
+
+`WP_Agent_Routine_Registry::current_generation( $id )` exposes the persisted generation; `unregister()` deletes the tombstone.
+
+### Routine stagger
+
+Routines registered with the same interval would all fire in the same second. `WP_Agent_Routine` accepts `stagger => bool|int` (default `true` for interval routines, `false` for cron expressions, where the expression already *is* the slot; an int is an explicit max window in seconds). `WP_Agent_Routine::stagger_offset()` computes `crc32( 'agents_routine_stagger_' . $id ) % min( interval, max_window )`, capped by `WP_Agent_Routine::MAX_STAGGER_SECONDS` (one hour). The bridge adds the offset to the first-run timestamp. The offset depends only on the routine id, so re-registration always lands the routine back in the same slot.
+
+### Routine reconcile
+
+`WP_Agent_Routine_Registry::reconcile( array $opts = [] )` repairs drift between the registry and the Action Scheduler store. For every registered, non-paused routine it checks pending-action coverage by logical identity and enqueues a fresh schedule when coverage is missing; pending routine actions whose logical `routine_id` is not registered (or is durably paused) are unscheduled as orphans. It returns `array( 'enqueued' => [ids], 'removed' => [ids], 'unchanged' => [ids], 'errors' => [id => message] )`; `$opts['dry_run']` reports the same shape without writing. The run is serialized through an `add_option()` compare-and-set lock (`agents_routine_reconcile_lock`); a lock older than five minutes is treated as stale and taken over, and the lock is always released in a `finally`.
+
+Pause state is durable: the bridge maintains the `agents_routine_paused` option so reconcile can distinguish "unscheduled on purpose" from "missing by drift" across requests, even though the registry itself stays in-memory.
+
+The `agents/reconcile-routines` ability (`show_in_rest: true`, annotations `destructive: true, idempotent: true`) exposes the same operation to ability consumers: input `{ dry_run?: bool }`, output the reconcile report, permission `current_user_can( 'manage_options' )` filterable via `agents_reconcile_routines_permission`.
+
 ## Transcripts and approvals
 
 Transcript contracts live in `src/Transcripts/` and runtime persister contracts live in `src/Runtime/`:

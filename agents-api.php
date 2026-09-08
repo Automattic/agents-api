@@ -333,9 +333,12 @@ require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-branch-executor.
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-bridge-sync.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-action-scheduler-listener.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine.php';
+require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine-action-identity.php';
+require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-generation-fenced-action.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine-registry.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine-action-scheduler-bridge.php';
 require_once AGENTS_API_PATH . 'src/Routines/register-routines.php';
+require_once AGENTS_API_PATH . 'src/Routines/register-routine-abilities.php';
 require_once AGENTS_API_PATH . 'src/Routines/register-routine-bridge-sync.php';
 require_once AGENTS_API_PATH . 'src/Routines/register-action-scheduler-listener.php';
 require_once AGENTS_API_PATH . 'src/Triggers/class-wp-agent-event-trigger.php';

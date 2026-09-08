@@ -32,14 +32,22 @@ final class WP_Agent_Routine {
 	public const TRIGGER_INTERVAL   = 'interval';
 	public const TRIGGER_EXPRESSION = 'expression';
 
+	/**
+	 * Default upper bound for the deterministic first-run stagger window, in
+	 * seconds. The effective window is always capped by the routine's own
+	 * interval so a routine never waits longer than one interval to first run.
+	 */
+	public const MAX_STAGGER_SECONDS = 3600;
+
 	private string $id;
 	private string $label;
 	private string $agent_slug;
 	private string $trigger_type;
-	private int $interval_s    = 0;
-	private string $expression = '';
-	private string $prompt     = '';
-	private string $session_id = '';
+	private int $interval_s     = 0;
+	private string $expression  = '';
+	private string $prompt      = '';
+	private string $session_id  = '';
+	private int $stagger_window = 0;
 	/** @var array<string, mixed> */
 	private array $meta = array();
 
@@ -50,7 +58,9 @@ final class WP_Agent_Routine {
 	 *                                    `interval` (int seconds) OR
 	 *                                    `expression` (cron string),
 	 *                                    `prompt` (string), `session_id`
-	 *                                    (string), `meta` (array).
+	 *                                    (string), `stagger` (bool|int — see
+	 *                                    {@see stagger_offset()}), `meta`
+	 *                                    (array).
 	 */
 	public function __construct( string $id, array $args ) {
 		$id = sanitize_title( $id );
@@ -85,6 +95,8 @@ final class WP_Agent_Routine {
 			$this->expression   = trim( (string) $args['expression'] );
 		}
 
+		$this->stagger_window = self::resolve_stagger_window( $args['stagger'] ?? null, $this->trigger_type );
+
 		$this->prompt     = isset( $args['prompt'] ) && is_scalar( $args['prompt'] ) ? (string) $args['prompt'] : '';
 		$this->session_id = isset( $args['session_id'] ) && is_scalar( $args['session_id'] ) && '' !== (string) $args['session_id']
 			? (string) $args['session_id']
@@ -117,6 +129,61 @@ final class WP_Agent_Routine {
 
 	public function get_interval_seconds(): int {
 		return $this->interval_s;
+	}
+
+	/**
+	 * Deterministic first-run stagger offset in seconds.
+	 *
+	 * Routines registered with the same interval would otherwise all fire in
+	 * the same second. The offset spreads them across a bounded window:
+	 * `crc32( 'agents_routine_stagger_' . $id ) % min( interval, window )`.
+	 * It depends only on the routine id, so re-registration always lands the
+	 * routine back in the same slot.
+	 *
+	 * The `stagger` arg controls the window: `true` uses
+	 * {@see MAX_STAGGER_SECONDS}, an int sets an explicit max window in
+	 * seconds, and `false` (or `0`) disables staggering. Defaults to `true`
+	 * for interval routines and `false` for cron-expression routines, where
+	 * the expression already *is* the slot.
+	 */
+	public function stagger_offset(): int {
+		if ( self::TRIGGER_INTERVAL !== $this->trigger_type || $this->stagger_window <= 0 || $this->interval_s <= 0 ) {
+			return 0;
+		}
+
+		$max_offset = min( $this->interval_s, $this->stagger_window );
+		return abs( (int) crc32( 'agents_routine_stagger_' . $this->id ) ) % $max_offset;
+	}
+
+	/**
+	 * Configured stagger window ceiling in seconds (0 = staggering disabled).
+	 */
+	public function get_stagger_window(): int {
+		return self::TRIGGER_INTERVAL === $this->trigger_type ? $this->stagger_window : 0;
+	}
+
+	/**
+	 * @param mixed  $stagger     Raw `stagger` arg (bool|int|null).
+	 * @param string $trigger_type Resolved trigger type.
+	 */
+	private static function resolve_stagger_window( $stagger, string $trigger_type ): int {
+		if ( self::TRIGGER_INTERVAL !== $trigger_type ) {
+			return 0;
+		}
+
+		if ( null === $stagger ) {
+			$stagger = true;
+		}
+
+		if ( is_bool( $stagger ) ) {
+			return $stagger ? self::MAX_STAGGER_SECONDS : 0;
+		}
+
+		if ( is_numeric( $stagger ) ) {
+			return max( 0, (int) $stagger );
+		}
+
+		return 0;
 	}
 
 	public function get_expression(): string {
@@ -156,6 +223,7 @@ final class WP_Agent_Routine {
 		);
 		if ( self::TRIGGER_INTERVAL === $this->trigger_type ) {
 			$out['interval'] = $this->interval_s;
+			$out['stagger']  = $this->stagger_window;
 		} else {
 			$out['expression'] = $this->expression;
 		}

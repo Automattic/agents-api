@@ -121,9 +121,15 @@ function dispatch_scheduled_routine_run( $args ): void {
 }
 
 /**
+ * Resolve the routine id out of scheduled-action args. Scheduled args carry a
+ * trailing generation-metadata element (see
+ * {@see WP_Agent_Routine_Action_Identity}), so identity is always resolved
+ * from the logical args, never the stamped payload.
+ *
  * @param array<mixed> $args Scheduled action args.
  */
 function self_extract_scheduled_routine_id( array $args ): string {
+	$args  = WP_Agent_Routine_Action_Identity::logical_args( $args );
 	$value = $args['routine_id'] ?? ( $args[0] ?? '' );
 	return is_string( $value ) ? $value : '';
 }

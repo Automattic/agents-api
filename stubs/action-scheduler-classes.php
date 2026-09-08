@@ -63,13 +63,71 @@ abstract class ActionScheduler_Store {
 }
 
 class ActionScheduler_Action {
+	/**
+	 * @param string                          $hook     Action hook.
+	 * @param array<array-key,mixed>          $args     Action args.
+	 * @param ActionScheduler_Schedule|null   $schedule Action schedule.
+	 * @param string                          $group    Action group.
+	 */
+	public function __construct( string $hook = '', array $args = array(), ?ActionScheduler_Schedule $schedule = null, string $group = '' ) {}
+
+	public function execute() {}
+
 	public function get_hook(): string {
 		return '';
 	}
 
-	/** @return array<int,mixed> */
+	/** @return array<array-key,mixed> */
 	public function get_args(): array {
 		return array();
+	}
+
+	public function get_schedule(): ActionScheduler_Schedule {
+		return new ActionScheduler_NullSchedule();
+	}
+
+	public function get_group(): string {
+		return '';
+	}
+
+	/** @param int $priority Action priority. */
+	public function set_priority( $priority ): void {
+		unset( $priority );
+	}
+}
+
+/**
+ * Action Scheduler schedule value object.
+ */
+abstract class ActionScheduler_Schedule {
+	public function is_recurring(): bool {
+		return false;
+	}
+
+	public function get_date(): ?DateTime {
+		return null;
+	}
+
+	/**
+	 * @return DateTime|null
+	 */
+	public function get_next( DateTime $after ) {
+		unset( $after );
+		return null;
+	}
+}
+
+/**
+ * Non-recurring schedule.
+ */
+class ActionScheduler_NullSchedule extends ActionScheduler_Schedule {}
+
+/**
+ * Canceled (never-recurring) schedule used to fence superseded recurrences.
+ */
+class ActionScheduler_CanceledSchedule extends ActionScheduler_Schedule {
+	public function __construct( DateTime $date ) {
+		unset( $date );
 	}
 }
 
