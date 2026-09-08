@@ -40,6 +40,20 @@ raw bearer token
 
 `WP_Agent_Access_Grant` models a role-based grant between a WordPress user and an agent. Roles are ordered from lowest to highest privilege: `viewer`, `operator`, `admin`. `role_meets()` compares a grant with a required role. Concrete stores implement `WP_Agent_Access_Store`.
 
+### Agent access abilities
+
+The access model is exposed as Abilities API abilities (category `agents-api`, `show_in_rest: true`). Authorization uses the agent-role model, not WordPress capabilities: every ability requires the current request principal to hold a grant on the target agent at or above a minimum role, filtered through the `agents_access_permission` hook.
+
+| Ability | Min role | Input | Output | Annotations |
+| --- | --- | --- | --- | --- |
+| `agents/can-access-agent` | any (requested) | `{ agent, minimum_role?, workspace_id?, client_id? }` | `{ allowed, agent, minimum_role }` | idempotent |
+| `agents/list-accessible-agents` | any (requested) | `{ minimum_role?, workspace_id?, client_id? }` | `{ agents: [...] }` | idempotent |
+| `agents/grant-agent-access` | `admin` | `{ agent, user_id, role? (default viewer), workspace_id?, metadata? }` | `{ granted, grant }` | idempotent (stores upsert) |
+| `agents/revoke-agent-access` | `admin` | `{ agent, user_id, workspace_id? }` | `{ revoked }` | destructive |
+| `agents/list-agent-users` | `operator` | `{ agent, workspace_id? }` | `{ users: [grant] }` | idempotent, readonly |
+
+Write abilities return `WP_Error` for an unknown agent, an invalid role or user id, a missing access store, and — for revocation — `agents_access_last_admin` when the revoke would remove the agent's last remaining `admin` grant. A grant export shape is `{ grant_id, agent_id, user_id, role, workspace_id, granted_by_user_id, granted_at, metadata, audience_id }`.
+
 `WP_Agent_Capability_Ceiling` intersects token/client restrictions with a user's WordPress capabilities. `WP_Agent_WordPress_Authorization_Policy` denies unless the ceiling allows the requested capability and `user_can()` allows it for the acting/owner user.
 
 ## Caller context headers
