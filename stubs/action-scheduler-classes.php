@@ -105,7 +105,9 @@ class ActionScheduler {
  * Resets stale claims / marks abandoned actions failed.
  */
 class ActionScheduler_QueueCleaner {
-	public function __construct( ?ActionScheduler_Store $store = null, int $batch_size = 20 ) {}
+	public function __construct( ?ActionScheduler_Store $store = null, int $batch_size = 20 ) {
+		unset( $store, $batch_size );
+	}
 
 	/**
 	 * @return array<int,int|string>
