@@ -87,9 +87,11 @@ if ( defined( 'AGENTS_API_LOADED' ) ) {
 		}
 	};
 
-	$agents_api_symbol_files = array_merge(
-		glob( __DIR__ . '/src/*/class-*.php' ) ? glob( __DIR__ . '/src/*/class-*.php' ) : array(),
-		glob( __DIR__ . '/src/*/interface-*.php' ) ? glob( __DIR__ . '/src/*/interface-*.php' ) : array(),
+	$agents_api_class_files     = glob( __DIR__ . '/src/*/class-*.php' );
+	$agents_api_interface_files = glob( __DIR__ . '/src/*/interface-*.php' );
+	$agents_api_symbol_files    = array_merge(
+		is_array( $agents_api_class_files ) ? $agents_api_class_files : array(),
+		is_array( $agents_api_interface_files ) ? $agents_api_interface_files : array(),
 		array( __DIR__ . '/src/Channels/register-default-agents-chat-handler.php' )
 	);
 	foreach ( $agents_api_symbol_files as $agents_api_symbol_file ) {
