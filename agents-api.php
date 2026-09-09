@@ -37,19 +37,24 @@ if ( defined( 'AGENTS_API_LOADED' ) ) {
 	// absent, without repeating registration side effects.
 	$agents_api_load_symbol_file = static function ( string $file ): void {
 		$namespace = '';
-		$tokens    = token_get_all( (string) file_get_contents( $file ) );
+		// Local plugin source, not a remote URL; wp_remote_get() does not apply.
+		$tokens = token_get_all( (string) file_get_contents( $file ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 		$count     = count( $tokens );
 
-		for ( $index = 0; $index < $count; ++$index ) {
+		// Single cursor over the token stream; nested scans advance it deliberately.
+		$index = 0;
+		while ( $index < $count ) {
 			$token = $tokens[ $index ];
+			++$index;
 			if ( ! is_array( $token ) ) {
 				continue;
 			}
 
 			if ( T_NAMESPACE === $token[0] ) {
 				$namespace = '';
-				for ( ++$index; $index < $count; ++$index ) {
+				while ( $index < $count ) {
 					$namespace_token = $tokens[ $index ];
+					++$index;
 					if ( ';' === $namespace_token || '{' === $namespace_token ) {
 						break;
 					}
@@ -63,12 +68,13 @@ if ( defined( 'AGENTS_API_LOADED' ) ) {
 			if ( ! in_array( $token[0], array( T_CLASS, T_INTERFACE, T_TRAIT ), true ) ) {
 				continue;
 			}
-			if ( T_CLASS === $token[0] && T_DOUBLE_COLON === ( $tokens[ $index - 1 ][0] ?? null ) ) {
+			if ( T_CLASS === $token[0] && T_DOUBLE_COLON === ( $tokens[ $index - 2 ][0] ?? null ) ) {
 				continue;
 			}
 
-			for ( ++$index; $index < $count; ++$index ) {
+			while ( $index < $count ) {
 				$symbol_token = $tokens[ $index ];
+				++$index;
 				if ( is_array( $symbol_token ) && T_STRING === $symbol_token[0] ) {
 					$namespace = trim( $namespace );
 					$symbol    = '' === $namespace ? $symbol_token[1] : $namespace . '\\' . $symbol_token[1];
@@ -81,9 +87,11 @@ if ( defined( 'AGENTS_API_LOADED' ) ) {
 		}
 	};
 
-	$agents_api_symbol_files = array_merge(
-		glob( __DIR__ . '/src/*/class-*.php' ) ?: array(),
-		glob( __DIR__ . '/src/*/interface-*.php' ) ?: array(),
+	$agents_api_class_files     = glob( __DIR__ . '/src/*/class-*.php' );
+	$agents_api_interface_files = glob( __DIR__ . '/src/*/interface-*.php' );
+	$agents_api_symbol_files    = array_merge(
+		is_array( $agents_api_class_files ) ? $agents_api_class_files : array(),
+		is_array( $agents_api_interface_files ) ? $agents_api_interface_files : array(),
 		array( __DIR__ . '/src/Channels/register-default-agents-chat-handler.php' )
 	);
 	foreach ( $agents_api_symbol_files as $agents_api_symbol_file ) {
