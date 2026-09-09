@@ -155,6 +155,7 @@
       "php tests/agents-workflow-ability-smoke.php",
       "php tests/routine-smoke.php",
       "php tests/routines-durability-smoke.php",
+      "php tests/routine-ability-target-smoke.php",
       "php tests/routines-backend-contract-smoke.php",
       "php tests/event-trigger-smoke.php",
       "php tests/subagents-smoke.php",
