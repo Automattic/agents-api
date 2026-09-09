@@ -39,7 +39,7 @@ if ( defined( 'AGENTS_API_LOADED' ) ) {
 		$namespace = '';
 		// Local plugin source, not a remote URL; wp_remote_get() does not apply.
 		$tokens = token_get_all( (string) file_get_contents( $file ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
-		$count     = count( $tokens );
+		$count  = count( $tokens );
 
 		// Single cursor over the token stream; nested scans advance it deliberately.
 		$index = 0;
