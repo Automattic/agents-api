@@ -33,6 +33,14 @@ final class WP_Agent_Routine {
 	public const TRIGGER_EXPRESSION = 'expression';
 
 	/**
+	 * Wake target types. A `chat` target dispatches the routine's prompt to
+	 * its agent through the canonical `agents/chat` ability; an `ability`
+	 * target executes the named ability directly with the routine's input.
+	 */
+	public const TARGET_CHAT    = 'chat';
+	public const TARGET_ABILITY = 'ability';
+
+	/**
 	 * Default upper bound for the deterministic first-run stagger window, in
 	 * seconds. The effective window is always capped by the routine's own
 	 * interval so a routine never waits longer than one interval to first run.
@@ -42,6 +50,9 @@ final class WP_Agent_Routine {
 	private string $id;
 	private string $label;
 	private string $agent_slug;
+	private string $ability_slug = '';
+	/** @var array<string, mixed> */
+	private array $ability_input = array();
 	private string $trigger_type;
 	private int $interval_s     = 0;
 	private string $expression  = '';
@@ -54,11 +65,14 @@ final class WP_Agent_Routine {
 	/**
 	 * @param string                $id   Unique routine slug.
 	 * @param array<string, mixed>  $args Recognised keys: `label` (string),
-	 *                                    `agent` (string, required),
-	 *                                    `interval` (int seconds) OR
-	 *                                    `expression` (cron string),
-	 *                                    `prompt` (string), `session_id`
-	 *                                    (string), `stagger` (bool|int — see
+	 *                                    `agent` (string) OR `ability`
+	 *                                    (string — exactly one of the two is
+	 *                                    required), `input` (array, ability
+	 *                                    targets only), `interval` (int
+	 *                                    seconds) OR `expression` (cron
+	 *                                    string), `prompt` (string),
+	 *                                    `session_id` (string), `stagger`
+	 *                                    (bool|int — see
 	 *                                    {@see stagger_offset()}), `meta`
 	 *                                    (array).
 	 */
@@ -71,11 +85,26 @@ final class WP_Agent_Routine {
 
 		$this->label = isset( $args['label'] ) && is_scalar( $args['label'] ) ? (string) $args['label'] : $id;
 
-		$agent = isset( $args['agent'] ) && is_scalar( $args['agent'] ) ? (string) $args['agent'] : '';
-		if ( '' === $agent ) {
-			throw new \InvalidArgumentException( esc_html( sprintf( 'Routine "%s" must specify an agent slug.', $id ) ) );
+		$agent   = isset( $args['agent'] ) && is_scalar( $args['agent'] ) ? (string) $args['agent'] : '';
+		$ability = isset( $args['ability'] ) && is_scalar( $args['ability'] ) ? (string) $args['ability'] : '';
+
+		if ( '' !== $agent && '' !== $ability ) {
+			throw new \InvalidArgumentException( esc_html( sprintf( 'Routine "%s" must specify either an agent or an ability wake target, not both.', $id ) ) );
 		}
-		$this->agent_slug = $agent;
+		if ( '' === $agent && '' === $ability ) {
+			throw new \InvalidArgumentException( esc_html( sprintf( 'Routine "%s" must specify an agent slug or an ability slug.', $id ) ) );
+		}
+
+		$this->agent_slug   = $agent;
+		$this->ability_slug = $ability;
+
+		if ( isset( $args['input'] ) && is_array( $args['input'] ) ) {
+			foreach ( $args['input'] as $key => $value ) {
+				if ( is_string( $key ) ) {
+					$this->ability_input[ $key ] = $value;
+				}
+			}
+		}
 
 		$has_interval   = isset( $args['interval'] ) && is_numeric( $args['interval'] ) && (int) $args['interval'] > 0;
 		$has_expression = isset( $args['expression'] ) && is_scalar( $args['expression'] ) && '' !== trim( (string) $args['expression'] );
@@ -121,6 +150,38 @@ final class WP_Agent_Routine {
 
 	public function get_agent_slug(): string {
 		return $this->agent_slug;
+	}
+
+	/**
+	 * The wake target type: {@see TARGET_CHAT} for agent/chat dispatch, or
+	 * {@see TARGET_ABILITY} for a direct ability execution.
+	 *
+	 * @since 0.11.0
+	 */
+	public function get_target_type(): string {
+		return '' !== $this->ability_slug ? self::TARGET_ABILITY : self::TARGET_CHAT;
+	}
+
+	/**
+	 * The target ability slug for {@see TARGET_ABILITY} routines (empty
+	 * otherwise).
+	 *
+	 * @since 0.11.0
+	 */
+	public function get_ability(): string {
+		return $this->ability_slug;
+	}
+
+	/**
+	 * Input passed to the target ability on each wake ({@see TARGET_ABILITY}
+	 * routines only).
+	 *
+	 * @return array<string, mixed>
+	 *
+	 * @since 0.11.0
+	 */
+	public function get_input(): array {
+		return $this->ability_input;
 	}
 
 	public function get_trigger_type(): string {
@@ -216,11 +277,16 @@ final class WP_Agent_Routine {
 		$out = array(
 			'id'         => $this->id,
 			'label'      => $this->label,
+			'target'     => $this->get_target_type(),
 			'agent'      => $this->agent_slug,
 			'prompt'     => $this->prompt,
 			'session_id' => $this->session_id,
 			'meta'       => $this->meta,
 		);
+		if ( self::TARGET_ABILITY === $this->get_target_type() ) {
+			$out['ability'] = $this->ability_slug;
+			$out['input']   = $this->ability_input;
+		}
 		if ( self::TRIGGER_INTERVAL === $this->trigger_type ) {
 			$out['interval'] = $this->interval_s;
 			$out['stagger']  = $this->stagger_window;

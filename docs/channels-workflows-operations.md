@@ -311,17 +311,30 @@ Do not call the drain from inside one of the scoped branch or resume actions. `W
 
 ## Routines and scheduling
 
-`AgentsAPI\AI\Routines\WP_Agent_Routine` models a persistent scheduled invocation of an agent. A routine differs from a workflow because it reuses the same conversation session across every wake, letting context accumulate.
+`AgentsAPI\AI\Routines\WP_Agent_Routine` models a persistent scheduled invocation. A routine differs from a workflow because a `chat`-targeted routine reuses the same conversation session across every wake, letting context accumulate.
 
 Required shape:
 
 - routine id slug;
-- `agent` slug;
+- exactly one wake target: an `agent` slug or an `ability` slug (see [Wake targets](#wake-targets));
 - exactly one trigger: positive `interval` seconds or non-empty cron `expression`.
 
-Optional fields include `label`, `prompt`, `session_id`, and `meta`. When `session_id` is omitted, the default is `routine:<id>`.
+Optional fields include `label`, `prompt`, `session_id`, and `meta` (for `chat` targets), `input` (for `ability` targets). When `session_id` is omitted, the default is `routine:<id>`.
 
 Action Scheduler bridges and listeners are optional operational adapters. The substrate detects Action Scheduler at runtime and no-ops cleanly when absent; `composer.json` suggests `woocommerce/action-scheduler` for scheduled workflow/routine execution.
+
+### Wake targets
+
+A routine's wake target is what the scheduled listener dispatches when the schedule fires. `WP_Agent_Routine::get_target_type()` reports `WP_Agent_Routine::TARGET_CHAT` (the default) or `WP_Agent_Routine::TARGET_ABILITY`:
+
+- **`agent`** (chat target) — sends the routine's `prompt` to the named agent through the canonical `agents/chat` ability, reusing the routine's persistent `session_id`. This is today's behavior, unchanged.
+- **`ability`** (ability target) — executes the named ability directly, passing the routine's `input` array. No agent, prompt, or session is involved; `get_agent_slug()` returns an empty string and `session_id`/`prompt` stay unused.
+
+Exactly one of `agent` / `ability` is required — providing both or neither throws. `WP_Agent_Routine::to_array()` always includes a `target` key and adds `ability` + `input` for ability targets, so operators can see what a routine does.
+
+Permission differs by target. The scheduled invocation runs as the cron/loopback principal: the chat path lifts the `agents/chat` permission gate for that one invocation (existing behavior), while the ability path **denies by default** — there is no implicit elevation and no per-ability bypass. The listener fires `apply_filters( 'wp_agent_routine_ability_permission', false, $routine, $ability )` and only executes when a consumer's filter returns true. Consumers that register ability-targeted routines opt in by filtering, typically scoped to the abilities they own.
+
+Failure reporting is uniform: a missing ability (`ability_missing`), a denied permission filter (`permission_denied`), or a `WP_Error` returned by the ability (its error code) all fire `agents_run_routine_dispatch_failed`. Successful ability results arrive through the same `wp_agent_routine_run_completed` action as chat results, with the ability output as the second argument.
 
 ### Routine backends
 

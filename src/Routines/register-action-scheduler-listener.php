@@ -3,9 +3,12 @@
  * Action Scheduler listener for routine wake-ups.
  *
  * Closes the loop on the routines side: when AS fires the routine's
- * scheduled hook, look up the routine, dispatch the canonical
- * `agents/chat` ability with the routine's persistent session id, and
- * record success/failure through the standard observability hook.
+ * scheduled hook, look up the routine and dispatch its wake target. A
+ * `chat` target sends the routine's prompt to its agent through the
+ * canonical `agents/chat` ability with the routine's persistent session
+ * id; an `ability` target executes the named ability directly with the
+ * routine's input. Success/failure is recorded through the standard
+ * observability hook either way.
  *
  * Errors are funneled through `agents_run_routine_dispatch_failed` rather
  * than thrown — throwing from an AS callback marks the action as failed
@@ -29,7 +32,7 @@ add_action(
 );
 
 /**
- * Run the scheduled routine via the canonical chat dispatcher.
+ * Run the scheduled routine via its wake target.
  *
  * @since 0.105.0
  *
@@ -68,6 +71,11 @@ function dispatch_scheduled_routine_run( $args ): void {
 
 	if ( ! function_exists( 'wp_get_ability' ) ) {
 		do_action( 'agents_run_routine_dispatch_failed', 'abilities_api_missing', array( 'routine_id' => $routine_id ) );
+		return;
+	}
+
+	if ( WP_Agent_Routine::TARGET_ABILITY === $routine->get_target_type() ) {
+		self_dispatch_routine_ability_target( $routine );
 		return;
 	}
 
@@ -114,6 +122,88 @@ function dispatch_scheduled_routine_run( $args ): void {
 	 *
 	 * @param WP_Agent_Routine $routine
 	 * @param mixed                   $result Canonical chat output.
+	 */
+	do_action( 'wp_agent_routine_run_completed', $routine, $result );
+}
+
+/**
+ * Dispatch a scheduled routine whose wake target is an ability.
+ *
+ * Unlike the chat path there is no implicit permission lift: the scheduled
+ * invocation runs as the cron/loopback principal, so executing an arbitrary
+ * ability on a schedule requires an explicit opt-in through the
+ * `wp_agent_routine_ability_permission` filter (default deny).
+ *
+ * @since 0.11.0
+ *
+ * @param WP_Agent_Routine $routine The resolved routine.
+ */
+function self_dispatch_routine_ability_target( WP_Agent_Routine $routine ): void {
+	$routine_id = $routine->get_id();
+	$ability    = wp_get_ability( $routine->get_ability() );
+	if ( null === $ability ) {
+		do_action(
+			'agents_run_routine_dispatch_failed',
+			'ability_missing',
+			array(
+				'routine_id' => $routine_id,
+				'ability'    => $routine->get_ability(),
+			)
+		);
+		return;
+	}
+
+	/**
+	 * Filters whether a scheduled routine may execute its target ability.
+	 *
+	 * Defaults to false — consumers that register ability-targeted routines
+	 * opt in by filtering, typically scoped to the abilities they own. The
+	 * same shape as the chat gate (`agents_chat_permission`), with no
+	 * hidden elevation for the scheduled invocation.
+	 *
+	 * @since 0.11.0
+	 *
+	 * @param bool             $allowed Whether the routine may execute the ability. Default false.
+	 * @param WP_Agent_Routine $routine The routine attempting the wake.
+	 * @param mixed            $ability The resolved target ability object.
+	 */
+	$allowed = (bool) apply_filters( 'wp_agent_routine_ability_permission', false, $routine, $ability );
+	if ( ! $allowed ) {
+		do_action(
+			'agents_run_routine_dispatch_failed',
+			'permission_denied',
+			array(
+				'routine_id' => $routine_id,
+				'ability'    => $routine->get_ability(),
+			)
+		);
+		return;
+	}
+
+	$result = $ability->execute( $routine->get_input() );
+
+	if ( is_wp_error( $result ) ) {
+		do_action(
+			'agents_run_routine_dispatch_failed',
+			$result->get_error_code(),
+			array(
+				'routine_id' => $routine_id,
+				'ability'    => $routine->get_ability(),
+			)
+		);
+		return;
+	}
+
+	/**
+	 * Fires after a successful scheduled routine dispatch with an ability
+	 * target. Mirrors the chat-path completion action: consumers wire up
+	 * run-recording here, receiving the ability result instead of the
+	 * canonical chat output.
+	 *
+	 * @since 0.11.0
+	 *
+	 * @param WP_Agent_Routine $routine
+	 * @param mixed                   $result Target ability output.
 	 */
 	do_action( 'wp_agent_routine_run_completed', $routine, $result );
 }
