@@ -121,6 +121,8 @@ function dispatch_scheduled_routine_run( $args ): void {
 }
 
 /**
+ * Resolve the routine id out of scheduled-action args.
+ *
  * @param array<mixed> $args Scheduled action args.
  */
 function self_extract_scheduled_routine_id( array $args ): string {

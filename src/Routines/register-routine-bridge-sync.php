@@ -61,3 +61,8 @@ add_action(
 	10,
 	1
 );
+
+// The fence hooks listen to Action Scheduler's store lifecycle so fetched
+// routine actions are generation-fenced and stale recurrence successors are
+// cancelled. The callbacks no-op when Action Scheduler is absent.
+WP_Agent_Routine_Action_Scheduler_Bridge::register_generation_fence();

@@ -24,6 +24,17 @@ defined( 'ABSPATH' ) || exit;
 final class WP_Agent_Routine_Registry {
 
 	/**
+	 * Option name of the reconcile compare-and-set lock.
+	 */
+	private const RECONCILE_LOCK_OPTION = 'agents_routine_reconcile_lock';
+
+	/**
+	 * Seconds after which a held reconcile lock is treated as stale and may
+	 * be taken over (a crashed holder must not strand future reconciles).
+	 */
+	private const RECONCILE_LOCK_TTL = 300;
+
+	/**
 	 * @var array<string,WP_Agent_Routine>
 	 */
 	private static array $routines = array();
@@ -86,11 +97,11 @@ final class WP_Agent_Routine_Registry {
 	 * itself. The value object stays in the registry; the cron schedule is
 	 * cancelled. Use {@see resume()} to re-establish it later.
 	 *
-	 * State (paused-vs-active) is intentionally NOT stored on the value
-	 * object or the registry — both are stateless across requests. Consumers
-	 * that want a "this routine is paused" UI persist that fact themselves
-	 * (typically a `wp_options` flag) and re-fire `pause()` on each plugin
-	 * boot. The substrate just provides the verb and the event.
+	 * The bridge records paused ids durably (`agents_routine_paused` option)
+	 * so {@see reconcile()} treats a paused routine as intentionally
+	 * unscheduled rather than missing. The value object and registry stay
+	 * stateless; consumers that need a "paused" UI read it through the
+	 * bridge.
 	 *
 	 * @since 0.106.0
 	 *
@@ -188,6 +199,178 @@ final class WP_Agent_Routine_Registry {
 
 	public static function find( string $routine_id ): ?WP_Agent_Routine {
 		return self::$routines[ $routine_id ] ?? null;
+	}
+
+	/**
+	 * The routine's current schedule generation as persisted by the Action
+	 * Scheduler bridge, or null when none exists.
+	 */
+	public static function current_generation( string $routine_id ): ?string {
+		return WP_Agent_Routine_Action_Scheduler_Bridge::current_generation( $routine_id );
+	}
+
+	/**
+	 * Reconcile the in-memory registry against the Action Scheduler store.
+	 *
+	 * Registry state and AS state drift: the AS table can be pruned, a site
+	 * can be restored from backup, actions can be manually deleted. For every
+	 * registered, non-paused routine this checks pending-action coverage by
+	 * logical identity (hook + logical args + group) and enqueues a fresh
+	 * schedule when coverage is missing; pending routine actions whose
+	 * logical routine_id is not registered (or is durably paused) are
+	 * unscheduled as orphans.
+	 *
+	 * The whole run is serialized through an add_option() compare-and-set
+	 * lock (`agents_routine_reconcile_lock`); a lock older than five minutes
+	 * is treated as stale and taken over. Dry runs report the same shape
+	 * without writing anything (and without taking the lock).
+	 *
+	 * @param array<string,mixed> $opts Recognised keys: `dry_run` (bool).
+	 * @return array{enqueued:string[],removed:string[],unchanged:string[],errors:array<string,string>}
+	 */
+	public static function reconcile( array $opts = array() ): array {
+		$dry_run = ! empty( $opts['dry_run'] );
+
+		if ( ! WP_Agent_Routine_Action_Scheduler_Bridge::is_available() ) {
+			return array(
+				'enqueued'  => array(),
+				'removed'   => array(),
+				'unchanged' => array(),
+				'errors'    => array( '_scheduler' => 'Action Scheduler is not available.' ),
+			);
+		}
+
+		if ( $dry_run ) {
+			return self::reconcile_unlocked( true );
+		}
+
+		if ( ! self::acquire_reconcile_lock() ) {
+			return array(
+				'enqueued'  => array(),
+				'removed'   => array(),
+				'unchanged' => array(),
+				'errors'    => array( '_lock' => 'Another routine reconcile is already running.' ),
+			);
+		}
+
+		try {
+			return self::reconcile_unlocked( false );
+		} finally {
+			self::release_reconcile_lock();
+		}
+	}
+
+	/**
+	 * @return array{enqueued:string[],removed:string[],unchanged:string[],errors:array<string,string>}
+	 */
+	private static function reconcile_unlocked( bool $dry_run ): array {
+		$enqueued  = array();
+		$removed   = array();
+		$unchanged = array();
+		$errors    = array();
+
+		$pending = WP_Agent_Routine_Action_Scheduler_Bridge::pending_routine_actions();
+
+		$covered = array();
+		foreach ( $pending as $action ) {
+			$routine_id = self::logical_routine_id( $action->get_args() );
+			if ( '' !== $routine_id ) {
+				$covered[ $routine_id ] = true;
+			}
+		}
+
+		foreach ( self::$routines as $routine_id => $routine ) {
+			if ( WP_Agent_Routine_Action_Scheduler_Bridge::is_paused( $routine_id ) ) {
+				continue;
+			}
+
+			if ( isset( $covered[ $routine_id ] ) ) {
+				$unchanged[] = $routine_id;
+				continue;
+			}
+
+			if ( $dry_run ) {
+				$enqueued[] = $routine_id;
+				continue;
+			}
+
+			if ( WP_Agent_Routine_Action_Scheduler_Bridge::register( $routine ) ) {
+				$enqueued[] = $routine_id;
+			} else {
+				$errors[ $routine_id ] = 'Failed to enqueue the missing routine schedule.';
+			}
+		}
+
+		foreach ( $pending as $action_id => $action ) {
+			$routine_id = self::logical_routine_id( $action->get_args() );
+			if ( '' === $routine_id ) {
+				continue;
+			}
+
+			$orphan = ! isset( self::$routines[ $routine_id ] )
+				|| WP_Agent_Routine_Action_Scheduler_Bridge::is_paused( $routine_id );
+			if ( ! $orphan ) {
+				continue;
+			}
+
+			if ( $dry_run ) {
+				$removed[] = $routine_id;
+				continue;
+			}
+
+			if ( WP_Agent_Routine_Action_Scheduler_Bridge::cancel_action_by_id( (int) $action_id ) ) {
+				$removed[] = $routine_id;
+			} else {
+				$errors[ $routine_id ] = 'Failed to remove the orphaned routine schedule.';
+			}
+		}
+
+		return array(
+			'enqueued'  => $enqueued,
+			'removed'   => array_values( array_unique( $removed ) ),
+			'unchanged' => $unchanged,
+			'errors'    => $errors,
+		);
+	}
+
+	/**
+	 * Resolve the routine id out of stored action args.
+	 *
+	 * @param array<array-key,mixed> $args Stored action args.
+	 */
+	private static function logical_routine_id( array $args ): string {
+		$value = $args['routine_id'] ?? ( $args[0] ?? '' );
+		return is_string( $value ) ? $value : '';
+	}
+
+	/**
+	 * Acquire the reconcile lock via an add_option() compare-and-set. A lock
+	 * older than five minutes is stale and taken over. When there is no
+	 * option layer (non-WordPress harness) callers are already
+	 * single-process and the lock is a no-op success.
+	 */
+	private static function acquire_reconcile_lock(): bool {
+		if ( ! function_exists( 'add_option' ) || ! function_exists( 'get_option' ) || ! function_exists( 'delete_option' ) ) {
+			return true;
+		}
+
+		if ( add_option( self::RECONCILE_LOCK_OPTION, time(), '', false ) ) {
+			return true;
+		}
+
+		$existing = get_option( self::RECONCILE_LOCK_OPTION );
+		if ( is_numeric( $existing ) && (int) $existing > time() - self::RECONCILE_LOCK_TTL ) {
+			return false;
+		}
+
+		delete_option( self::RECONCILE_LOCK_OPTION );
+		return add_option( self::RECONCILE_LOCK_OPTION, time(), '', false );
+	}
+
+	private static function release_reconcile_lock(): void {
+		if ( function_exists( 'delete_option' ) ) {
+			delete_option( self::RECONCILE_LOCK_OPTION );
+		}
 	}
 
 	/**

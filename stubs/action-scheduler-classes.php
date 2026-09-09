@@ -67,9 +67,13 @@ class ActionScheduler_Action {
 		return '';
 	}
 
-	/** @return array<int,mixed> */
+	/** @return array<array-key,mixed> */
 	public function get_args(): array {
 		return array();
+	}
+
+	public function get_group(): string {
+		return '';
 	}
 }
 
