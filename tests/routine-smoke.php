@@ -111,6 +111,7 @@ if ( ! function_exists( 'as_enqueue_async_action' ) ) {
 }
 
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine.php';
+require_once __DIR__ . '/../src/Routines/interface-wp-agent-routine-backend.php';
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-registry.php';
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-action-scheduler-bridge.php';
 
@@ -244,7 +245,7 @@ smoke_assert( true, null !== $run_now_event && $run_now_event['arg'] instanceof 
 
 // 7. Action Scheduler bridge uses one stable associative args shape.
 $GLOBALS['routine_as_calls'] = array();
-$scheduled_routine = new WP_Agent_Routine(
+$scheduled_routine           = new WP_Agent_Routine(
 	'daily-check',
 	array(
 		'agent'    => 'commander',
@@ -252,9 +253,9 @@ $scheduled_routine = new WP_Agent_Routine(
 	)
 );
 
-WP_Agent_Routine_Action_Scheduler_Bridge::register( $scheduled_routine );
-WP_Agent_Routine_Action_Scheduler_Bridge::unregister( 'daily-check' );
-WP_Agent_Routine_Action_Scheduler_Bridge::run_now( $scheduled_routine );
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->register( $scheduled_routine );
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->unregister( 'daily-check' );
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->run_now( $scheduled_routine );
 
 $args_for_call = static function ( string $fn, int $index ): ?array {
 	$matches = array_values( array_filter(

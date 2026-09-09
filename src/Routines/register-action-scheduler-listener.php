@@ -82,7 +82,6 @@ function dispatch_scheduled_routine_run( $args ): void {
 	// listener.
 	$grant = static fn() => true;
 	add_filter( 'agents_chat_permission', $grant );
-	add_filter( 'openclawp_chat_ability_permission', $grant );
 	try {
 		$result = $chat->execute(
 			array(
@@ -92,7 +91,6 @@ function dispatch_scheduled_routine_run( $args ): void {
 			)
 		);
 	} finally {
-		remove_filter( 'openclawp_chat_ability_permission', $grant );
 		remove_filter( 'agents_chat_permission', $grant );
 	}
 

@@ -5,7 +5,7 @@
  * Mirrors {@see WP_Agent_Workflow_Registry}: plugins call
  * {@see wp_register_routine()} during boot, the substrate keeps the
  * resolved Routine in process memory for the duration of the request, and
- * the Action Scheduler bridge (separate file) reads the registry to
+ * the resolved scheduling backend (separate files) reads the registry to
  * (re-)register cron schedules on each plugin load.
  *
  * Like the workflow registry, this is stateless across requests — not a
@@ -40,6 +40,17 @@ final class WP_Agent_Routine_Registry {
 	private static array $routines = array();
 
 	/**
+	 * The routine scheduling backend, resolved once per request by
+	 * {@see backend()}.
+	 */
+	private static ?WP_Agent_Routine_Backend $backend = null;
+
+	/**
+	 * Whether {@see backend()} has resolved (the resolved value may be null).
+	 */
+	private static bool $backend_resolved = false;
+
+	/**
 	 * @param array<string,mixed> $args See {@see WP_Agent_Routine::__construct()}.
 	 * @return WP_Agent_Routine|WP_Error
 	 */
@@ -54,8 +65,8 @@ final class WP_Agent_Routine_Registry {
 
 		/**
 		 * Fires after a routine is added to the in-memory registry. The
-		 * Action Scheduler bridge subscribes to this hook to (re-)register
-		 * the cron schedule.
+		 * resolved scheduling backend subscribes to this hook to
+		 * (re-)register the cron schedule.
 		 *
 		 * @since 0.105.0
 		 *
@@ -81,7 +92,7 @@ final class WP_Agent_Routine_Registry {
 
 		/**
 		 * Fires after a routine is removed from the in-memory registry. The
-		 * AS bridge subscribes to cancel the matching schedule.
+		 * resolved backend subscribes to cancel the matching schedule.
 		 *
 		 * @since 0.105.0
 		 *
@@ -97,11 +108,10 @@ final class WP_Agent_Routine_Registry {
 	 * itself. The value object stays in the registry; the cron schedule is
 	 * cancelled. Use {@see resume()} to re-establish it later.
 	 *
-	 * The bridge records paused ids durably (`agents_routine_paused` option)
-	 * so {@see reconcile()} treats a paused routine as intentionally
-	 * unscheduled rather than missing. The value object and registry stay
-	 * stateless; consumers that need a "paused" UI read it through the
-	 * bridge.
+	 * The backend records paused ids durably so {@see reconcile()} treats a
+	 * paused routine as intentionally unscheduled rather than missing. The
+	 * value object and registry stay stateless; consumers that need a
+	 * "paused" UI read it through the backend.
 	 *
 	 * @since 0.106.0
 	 *
@@ -117,8 +127,8 @@ final class WP_Agent_Routine_Registry {
 		$routine = self::$routines[ $routine_id ];
 
 		/**
-		 * Fires when a caller requests pausing a routine. The Action Scheduler
-		 * bridge listens to cancel the schedule (without unregistering).
+		 * Fires when a caller requests pausing a routine. The resolved
+		 * backend listens to cancel the schedule (without unregistering).
 		 *
 		 * @since 0.106.0
 		 *
@@ -133,7 +143,7 @@ final class WP_Agent_Routine_Registry {
 	 * Resume a previously-paused routine by re-establishing its schedule.
 	 *
 	 * Idempotent: resuming a routine whose schedule is still active just
-	 * re-fires `wp_agent_routine_resumed`. The AS bridge's register call is
+	 * re-fires `wp_agent_routine_resumed`. The backend's register call is
 	 * already idempotent (unschedules first), so the net effect is safe.
 	 *
 	 * @since 0.106.0
@@ -150,8 +160,9 @@ final class WP_Agent_Routine_Registry {
 		$routine = self::$routines[ $routine_id ];
 
 		/**
-		 * Fires when a caller requests resuming a paused routine. The AS
-		 * bridge listens to re-register the recurring/cron schedule.
+		 * Fires when a caller requests resuming a paused routine. The
+		 * resolved backend listens to re-register the recurring/cron
+		 * schedule.
 		 *
 		 * @since 0.106.0
 		 *
@@ -185,8 +196,8 @@ final class WP_Agent_Routine_Registry {
 
 		/**
 		 * Fires when a caller requests an immediate one-shot wake of a
-		 * routine. The AS bridge listens to enqueue a single-action job for
-		 * the same scheduled-hook the recurring schedule uses.
+		 * routine. The resolved backend listens to enqueue a single-action
+		 * job for the same scheduled hook the recurring schedule uses.
 		 *
 		 * @since 0.106.0
 		 *
@@ -202,23 +213,67 @@ final class WP_Agent_Routine_Registry {
 	}
 
 	/**
-	 * The routine's current schedule generation as persisted by the Action
-	 * Scheduler bridge, or null when none exists.
+	 * The resolved routine scheduling backend, or null when none is
+	 * available.
+	 *
+	 * Resolved once per request: the default is the Action Scheduler bridge
+	 * when Action Scheduler is present, and null otherwise. Consumers can
+	 * substitute any {@see WP_Agent_Routine_Backend} implementation through
+	 * the `wp_agent_routine_backend` filter; a filter return that is not a
+	 * backend falls back to the default.
+	 *
+	 * @since 0.11.0
 	 */
-	public static function current_generation( string $routine_id ): ?string {
-		return WP_Agent_Routine_Action_Scheduler_Bridge::current_generation( $routine_id );
+	public static function backend(): ?WP_Agent_Routine_Backend {
+		if ( ! self::$backend_resolved ) {
+			$default = WP_Agent_Routine_Action_Scheduler_Bridge::instance()->is_available()
+				? WP_Agent_Routine_Action_Scheduler_Bridge::instance()
+				: null;
+
+			/**
+			 * Filters the routine scheduling backend.
+			 *
+			 * @since 0.11.0
+			 *
+			 * @param WP_Agent_Routine_Backend|null $default The default backend (the Action Scheduler bridge when available), or null.
+			 */
+			$filtered               = apply_filters( 'wp_agent_routine_backend', $default );
+			self::$backend          = $filtered instanceof WP_Agent_Routine_Backend ? $filtered : $default;
+			self::$backend_resolved = true;
+		}
+
+		return self::$backend;
 	}
 
 	/**
-	 * Reconcile the in-memory registry against the Action Scheduler store.
+	 * Test-only: forget the resolved backend so the next {@see backend()}
+	 * call re-resolves it (re-running the `wp_agent_routine_backend` filter).
 	 *
-	 * Registry state and AS state drift: the AS table can be pruned, a site
-	 * can be restored from backup, actions can be manually deleted. For every
-	 * registered, non-paused routine this checks pending-action coverage by
-	 * logical identity (hook + logical args + group) and enqueues a fresh
-	 * schedule when coverage is missing; pending routine actions whose
+	 * @since 0.11.0
+	 */
+	public static function reset_backend(): void {
+		self::$backend          = null;
+		self::$backend_resolved = false;
+	}
+
+	/**
+	 * The routine's current schedule generation as persisted by the active
+	 * backend, or null when none exists.
+	 */
+	public static function current_generation( string $routine_id ): ?string {
+		return self::backend()?->current_generation( $routine_id );
+	}
+
+	/**
+	 * Reconcile the in-memory registry against the scheduling backend.
+	 *
+	 * Registry state and backend state drift: the backend's store can be
+	 * pruned, a site can be restored from backup, scheduled work can be
+	 * manually deleted. For every registered, non-paused routine this checks
+	 * pending-handle coverage by logical identity (routine id) and registers
+	 * a fresh schedule when coverage is missing; pending handles whose
 	 * logical routine_id is not registered (or is durably paused) are
-	 * unscheduled as orphans.
+	 * cancelled as orphans.
 	 *
 	 * The whole run is serialized through an add_option() compare-and-set
 	 * lock (`agents_routine_reconcile_lock`); a lock older than five minutes
@@ -231,12 +286,12 @@ final class WP_Agent_Routine_Registry {
 	public static function reconcile( array $opts = array() ): array {
 		$dry_run = ! empty( $opts['dry_run'] );
 
-		if ( ! WP_Agent_Routine_Action_Scheduler_Bridge::is_available() ) {
+		if ( null === self::backend() ) {
 			return array(
 				'enqueued'  => array(),
 				'removed'   => array(),
 				'unchanged' => array(),
-				'errors'    => array( '_scheduler' => 'Action Scheduler is not available.' ),
+				'errors'    => array( '_scheduler' => 'No routine scheduling backend is available.' ),
 			);
 		}
 
@@ -269,22 +324,24 @@ final class WP_Agent_Routine_Registry {
 		$unchanged = array();
 		$errors    = array();
 
-		$pending = WP_Agent_Routine_Action_Scheduler_Bridge::pending_routine_actions();
-
-		$covered = array();
-		foreach ( $pending as $action ) {
-			$routine_id = self::logical_routine_id( $action->get_args() );
-			if ( '' !== $routine_id ) {
-				$covered[ $routine_id ] = true;
-			}
+		$backend = self::backend();
+		if ( null === $backend ) {
+			return array(
+				'enqueued'  => array(),
+				'removed'   => array(),
+				'unchanged' => array(),
+				'errors'    => array( '_scheduler' => 'No routine scheduling backend is available.' ),
+			);
 		}
 
+		$pending = $backend->pending_by_routine();
+
 		foreach ( self::$routines as $routine_id => $routine ) {
-			if ( WP_Agent_Routine_Action_Scheduler_Bridge::is_paused( $routine_id ) ) {
+			if ( $backend->is_paused( $routine_id ) ) {
 				continue;
 			}
 
-			if ( isset( $covered[ $routine_id ] ) ) {
+			if ( ! empty( $pending[ $routine_id ] ) ) {
 				$unchanged[] = $routine_id;
 				continue;
 			}
@@ -294,21 +351,16 @@ final class WP_Agent_Routine_Registry {
 				continue;
 			}
 
-			if ( WP_Agent_Routine_Action_Scheduler_Bridge::register( $routine ) ) {
+			if ( $backend->register( $routine ) ) {
 				$enqueued[] = $routine_id;
 			} else {
 				$errors[ $routine_id ] = 'Failed to enqueue the missing routine schedule.';
 			}
 		}
 
-		foreach ( $pending as $action_id => $action ) {
-			$routine_id = self::logical_routine_id( $action->get_args() );
-			if ( '' === $routine_id ) {
-				continue;
-			}
-
+		foreach ( $pending as $routine_id => $handles ) {
 			$orphan = ! isset( self::$routines[ $routine_id ] )
-				|| WP_Agent_Routine_Action_Scheduler_Bridge::is_paused( $routine_id );
+				|| $backend->is_paused( $routine_id );
 			if ( ! $orphan ) {
 				continue;
 			}
@@ -318,7 +370,14 @@ final class WP_Agent_Routine_Registry {
 				continue;
 			}
 
-			if ( WP_Agent_Routine_Action_Scheduler_Bridge::cancel_action_by_id( (int) $action_id ) ) {
+			$cancelled_all = true;
+			foreach ( $handles as $handle ) {
+				if ( ! $backend->cancel( (int) $handle ) ) {
+					$cancelled_all = false;
+				}
+			}
+
+			if ( $cancelled_all ) {
 				$removed[] = $routine_id;
 			} else {
 				$errors[ $routine_id ] = 'Failed to remove the orphaned routine schedule.';
@@ -331,16 +390,6 @@ final class WP_Agent_Routine_Registry {
 			'unchanged' => $unchanged,
 			'errors'    => $errors,
 		);
-	}
-
-	/**
-	 * Resolve the routine id out of stored action args.
-	 *
-	 * @param array<array-key,mixed> $args Stored action args.
-	 */
-	private static function logical_routine_id( array $args ): string {
-		$value = $args['routine_id'] ?? ( $args[0] ?? '' );
-		return is_string( $value ) ? $value : '';
 	}
 
 	/**

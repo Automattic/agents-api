@@ -1,11 +1,22 @@
 <?php
 /**
- * Optional Action Scheduler bridge for routines.
+ * Action Scheduler backend for routines.
  *
- * Mirrors {@see \AgentsAPI\AI\Workflows\WP_Agent_Workflow_Action_Scheduler_Bridge}:
- * agents-api does not require Action Scheduler. When AS is available we
- * register one recurring (or cron-expression) action per routine with a
- * stable logical args array so the listener can resolve the routine on wake.
+ * The default {@see WP_Agent_Routine_Backend} implementation: agents-api
+ * does not require Action Scheduler. When AS is available we register one
+ * recurring (or cron-expression) action per routine with a stable logical
+ * args array so the listener can resolve the routine on wake. The registry
+ * resolves this backend through `WP_Agent_Routine_Registry::backend()`.
+ *
+ * Deprecated statics: the pre-0.11.0 static facade for the interface
+ * methods (register/unregister/pause/resume/run_now/is_available/
+ * is_paused/current_generation) had to be removed — PHP cannot carry a
+ * static and an instance method of the same name, and the instance forms
+ * are required by the interface. Resolve the backend through
+ * `WP_Agent_Routine_Registry::backend()` instead. The AS-specific statics
+ * that do not collide with the interface (`pending_routine_actions()`,
+ * `cancel_action_by_id()`, the option helpers, and the fence installers)
+ * remain, the first two as thin deprecation shims.
  *
  * Durability behaviors layered on top:
  *
@@ -33,7 +44,7 @@ namespace AgentsAPI\AI\Routines;
 
 defined( 'ABSPATH' ) || exit;
 
-final class WP_Agent_Routine_Action_Scheduler_Bridge {
+final class WP_Agent_Routine_Action_Scheduler_Bridge implements WP_Agent_Routine_Backend {
 
 	public const SCHEDULED_HOOK = 'wp_agent_routine_run_scheduled';
 
@@ -43,9 +54,17 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	private const ACTION_GENERATION_OPTION_PREFIX = 'agents_routine_action_generation_';
 	private const PAUSED_OPTION                   = 'agents_routine_paused';
 
+	private static ?self $instance = null;
+
 	private static bool $fence_registered = false;
 
-	public static function is_available(): bool {
+	private function __construct() {}
+
+	public static function instance(): self {
+		return self::$instance ??= new self();
+	}
+
+	public function is_available(): bool {
 		return function_exists( 'as_schedule_recurring_action' )
 			&& function_exists( 'as_schedule_cron_action' )
 			&& function_exists( 'as_unschedule_all_actions' );
@@ -62,7 +81,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	 * The routine's current schedule generation, or null when none has been
 	 * minted (or the option layer is absent).
 	 */
-	public static function current_generation( string $routine_id ): ?string {
+	public function current_generation( string $routine_id ): ?string {
 		if ( ! function_exists( 'get_option' ) ) {
 			return null;
 		}
@@ -74,7 +93,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	/**
 	 * Whether the routine was durably paused via {@see pause()}.
 	 */
-	public static function is_paused( string $routine_id ): bool {
+	public function is_paused( string $routine_id ): bool {
 		if ( ! function_exists( 'get_option' ) ) {
 			return false;
 		}
@@ -96,9 +115,9 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	 *              `wp_agent_routine_schedule_requested` hook was fired
 	 *              even without AS); false on no-op.
 	 */
-	public static function register( WP_Agent_Routine $routine ): bool {
+	public function register( WP_Agent_Routine $routine ): bool {
 		/**
-		 * Fires whenever the bridge would schedule a routine, regardless
+		 * Fires whenever the backend would schedule a routine, regardless
 		 * of whether Action Scheduler is loaded. Custom schedulers can
 		 * hook this to take over.
 		 *
@@ -109,7 +128,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 		// Registration implies the routine is active.
 		self::set_paused( $routine->get_id(), false );
 
-		if ( ! self::is_available() ) {
+		if ( ! $this->is_available() ) {
 			return false;
 		}
 
@@ -149,16 +168,16 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	}
 
 	/**
-	 * Cancel every scheduled action this bridge owns for the given routine,
+	 * Cancel every scheduled action this backend owns for the given routine,
 	 * remove its generation tombstone, and clear any paused marker.
 	 */
-	public static function unregister( string $routine_id ): void {
+	public function unregister( string $routine_id ): void {
 		if ( self::has_option_layer() ) {
 			delete_option( self::generation_option_name( $routine_id ) );
 		}
 		self::set_paused( $routine_id, false );
 
-		if ( ! self::is_available() ) {
+		if ( ! $this->is_available() ) {
 			return;
 		}
 		as_unschedule_all_actions( self::SCHEDULED_HOOK, array( 'routine_id' => $routine_id ), self::GROUP );
@@ -170,9 +189,9 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	 * {@see WP_Agent_Routine_Registry::reconcile()} does not re-enqueue a
 	 * deliberately-paused routine.
 	 */
-	public static function pause( string $routine_id ): void {
+	public function pause( string $routine_id ): void {
 		self::set_paused( $routine_id, true );
-		if ( ! self::is_available() ) {
+		if ( ! $this->is_available() ) {
 			return;
 		}
 		as_unschedule_all_actions( self::SCHEDULED_HOOK, array( 'routine_id' => $routine_id ), self::GROUP );
@@ -184,8 +203,8 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	 * active simply re-registers (the underlying register call unschedules
 	 * first).
 	 */
-	public static function resume( WP_Agent_Routine $routine ): bool {
-		return self::register( $routine );
+	public function resume( WP_Agent_Routine $routine ): bool {
+		return $this->register( $routine );
 	}
 
 	/**
@@ -194,8 +213,8 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	 * generation when one exists, so the fetched-action fence applies to it
 	 * exactly like the recurring chain.
 	 */
-	public static function run_now( WP_Agent_Routine $routine ): bool {
-		if ( ! self::is_available() || ! function_exists( 'as_enqueue_async_action' ) ) {
+	public function run_now( WP_Agent_Routine $routine ): bool {
+		if ( ! $this->is_available() || ! function_exists( 'as_enqueue_async_action' ) ) {
 			return false;
 		}
 
@@ -208,6 +227,17 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	}
 
 	/**
+	 * All pending routine actions, hydrated from the store.
+	 *
+	 * @deprecated 0.11.0 Use WP_Agent_Routine_Registry::backend()->pending_by_routine().
+	 *
+	 * @return array<int,\ActionScheduler_Action> Pending actions keyed by action id.
+	 */
+	public static function pending_routine_actions(): array {
+		return self::instance()->hydrate_pending_actions();
+	}
+
+	/**
 	 * All pending actions under the routine hook/group, hydrated from the
 	 * store. This is the one bulk scan in the module and belongs to
 	 * {@see WP_Agent_Routine_Registry::reconcile()} only; register() and
@@ -215,7 +245,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	 *
 	 * @return array<int,\ActionScheduler_Action> Pending actions keyed by action id.
 	 */
-	public static function pending_routine_actions(): array {
+	private function hydrate_pending_actions(): array {
 		if ( ! function_exists( 'as_get_scheduled_actions' ) || ! class_exists( '\ActionScheduler_Store' ) ) {
 			return array();
 		}
@@ -252,23 +282,56 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 	}
 
 	/**
-	 * Cancel one stored action by id. Returns true when the cancel call
-	 * succeeded (or at least did not throw).
+	 * Pending backend handles grouped by logical routine id.
+	 *
+	 * @return array<string, list<int>> routine_id => pending action ids.
+	 */
+	public function pending_by_routine(): array {
+		$by_routine = array();
+		foreach ( $this->pending_routine_actions() as $action_id => $action ) {
+			$args       = $action->get_args();
+			$routine_id = $args['routine_id'] ?? ( $args[0] ?? '' );
+			if ( ! is_string( $routine_id ) || '' === $routine_id ) {
+				continue;
+			}
+			$by_routine[ $routine_id ][] = (int) $action_id;
+		}
+		return $by_routine;
+	}
+
+	/**
+	 * Cancel one stored action by id.
+	 *
+	 * @deprecated 0.11.0 Use WP_Agent_Routine_Registry::backend()->cancel().
+	 *
+	 * @param int $action_id Action Scheduler action id.
+	 * @return bool
 	 */
 	public static function cancel_action_by_id( int $action_id ): bool {
-		if ( $action_id <= 0 || ! class_exists( '\ActionScheduler_Store' ) ) {
+		return self::instance()->cancel( $action_id );
+	}
+
+	/**
+	 * Cancel one pending action handle. Returns true when the cancel call
+	 * succeeded (or at least did not throw).
+	 *
+	 * @param int $handle The opaque backend handle to cancel.
+	 * @return bool
+	 */
+	public function cancel( int $handle ): bool {
+		if ( $handle <= 0 || ! class_exists( '\ActionScheduler_Store' ) ) {
 			return false;
 		}
 
 		try {
-			\ActionScheduler_Store::instance()->cancel_action( $action_id );
+			\ActionScheduler_Store::instance()->cancel_action( $handle );
 		} catch ( \Throwable $error ) {
 			unset( $error );
 			return false;
 		}
 
 		if ( function_exists( 'delete_option' ) ) {
-			delete_option( self::action_generation_option_name( $action_id ) );
+			delete_option( self::action_generation_option_name( $handle ) );
 		}
 
 		return true;
@@ -332,7 +395,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 		if ( '' === $routine_id ) {
 			return;
 		}
-		$generation = self::current_generation( $routine_id );
+		$generation = self::instance()->current_generation( $routine_id );
 		if ( null === $generation ) {
 			return;
 		}
@@ -357,11 +420,11 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 			return;
 		}
 		$stamped = self::action_generation( $action_id );
-		$current = self::current_generation( $routine_id );
+		$current = self::instance()->current_generation( $routine_id );
 		if ( null === $stamped || ( null !== $current && hash_equals( $stamped, $current ) ) ) {
 			return; // Unstamped (legacy) or current: let it run.
 		}
-		if ( self::cancel_action_by_id( $action_id ) ) {
+		if ( self::instance()->cancel( $action_id ) ) {
 			do_action( 'agents_routine_action_fenced', $routine_id, $stamped, $action_id );
 		}
 	}
