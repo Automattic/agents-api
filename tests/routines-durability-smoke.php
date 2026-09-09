@@ -263,7 +263,7 @@ class ActionScheduler_Store {
 	/** @param int|string $action_id Action id. */
 	public function fetch_action( $action_id ): ActionScheduler_Action {
 		$GLOBALS['smoke_as_fetches'][] = (int) $action_id;
-		$row = $GLOBALS['smoke_as'][ (int) $action_id ] ?? null;
+		$row                           = $GLOBALS['smoke_as'][ (int) $action_id ] ?? null;
 		if ( null === $row ) {
 			throw new RuntimeException( 'unknown action' );
 		}
@@ -378,6 +378,7 @@ function as_get_scheduled_actions( array $query = array(), string $return_format
 // ---------------------------------------------------------------------------
 
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine.php';
+require_once __DIR__ . '/../src/Routines/interface-wp-agent-routine-backend.php';
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-registry.php';
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-action-scheduler-bridge.php';
 require_once __DIR__ . '/../src/Routines/register-routine-bridge-sync.php';
@@ -390,6 +391,7 @@ use AgentsAPI\AI\Routines\WP_Agent_Routine_Registry;
 function smoke_reset_state(): void {
 	$GLOBALS['smoke_as_fetches'] = array();
 	WP_Agent_Routine_Registry::reset();
+	WP_Agent_Routine_Registry::reset_backend();
 	$GLOBALS['smoke_as']           = array();
 	$GLOBALS['smoke_as_next_id']   = 0;
 	$GLOBALS['smoke_options']      = array();

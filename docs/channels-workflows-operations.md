@@ -323,9 +323,13 @@ Optional fields include `label`, `prompt`, `session_id`, and `meta`. When `sessi
 
 Action Scheduler bridges and listeners are optional operational adapters. The substrate detects Action Scheduler at runtime and no-ops cleanly when absent; `composer.json` suggests `woocommerce/action-scheduler` for scheduled workflow/routine execution.
 
+### Routine backends
+
+Durable scheduling sits behind a contract: `WP_Agent_Routine_Backend` (in `src/Routines/`) is the only scheduling surface the registry consumes — availability, register/unregister, pause/resume, run-now, pause-state and generation reads, and `pending_by_routine()` / `cancel()` for reconcile (handles are opaque ints). The registry resolves one backend per request through the `wp_agent_routine_backend` filter; the default is the Action Scheduler bridge (`WP_Agent_Routine_Action_Scheduler_Bridge`) when Action Scheduler is present, and `null` otherwise. With no backend, routines are still registered and their lifecycle hooks still fire, but nothing is scheduled and `reconcile()` reports a `_scheduler` error. Consumers replace the backend by filtering in their own `WP_Agent_Routine_Backend` implementation.
+
 ### Routine generation fencing
 
-Every `WP_Agent_Routine_Action_Scheduler_Bridge::register()` mints a schedule generation (`wp_generate_uuid4()`) and persists it in the non-autoloaded `agents_routine_generation_<routine_id>` option. Scheduled action args stay purely logical — `array( 'routine_id' => ... )` — so Action Scheduler's exact-match queries (`as_unschedule_all_actions`, `as_next_scheduled_action`) keep working and `register()` stays O(1) regardless of how many routines exist. The generation is recorded **per stored action**, keyed by action id, in `agents_routine_action_generation_<action_id>`.
+Every `WP_Agent_Routine_Action_Scheduler_Bridge` register call mints a schedule generation (`wp_generate_uuid4()`) and persists it in the non-autoloaded `agents_routine_generation_<routine_id>` option. Scheduled action args stay purely logical — `array( 'routine_id' => ... )` — so Action Scheduler's exact-match queries (`as_unschedule_all_actions`, `as_next_scheduled_action`) keep working and `register()` stays O(1) regardless of how many routines exist. The generation is recorded **per stored action**, keyed by action id, in `agents_routine_action_generation_<action_id>`.
 
 Two Action Scheduler hooks carry the mechanism:
 

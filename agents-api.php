@@ -341,6 +341,7 @@ require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-branch-executor.
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-bridge-sync.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-action-scheduler-listener.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine.php';
+require_once AGENTS_API_PATH . 'src/Routines/interface-wp-agent-routine-backend.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine-registry.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine-action-scheduler-bridge.php';
 require_once AGENTS_API_PATH . 'src/Routines/register-routines.php';
