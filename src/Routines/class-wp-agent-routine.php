@@ -152,7 +152,7 @@ final class WP_Agent_Routine {
 		}
 
 		$max_offset = min( $this->interval_s, $this->stagger_window );
-		return abs( (int) crc32( 'agents_routine_stagger_' . $this->id ) ) % $max_offset;
+		return crc32( 'agents_routine_stagger_' . $this->id ) % $max_offset;
 	}
 
 	/**

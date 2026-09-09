@@ -9,12 +9,16 @@
  *
  * Durability behaviors layered on top:
  *
- *  - Generation fencing: every register() mints a generation, persists it in
- *    `agents_routine_generation_<id>`, and stamps it into the scheduled
- *    action's args. Fetched actions are wrapped in
- *    {@see WP_Agent_Generation_Fenced_Action}, which refuses to execute (and
- *    refuses to spawn a recurrence successor) once the stamped generation is
- *    no longer current.
+ *  - Generation fencing: every register() mints a generation and persists it
+ *    in `agents_routine_generation_<id>`. Each stored action under the routine
+ *    hook is stamped with the generation current at insert time, keyed by
+ *    action id (`agents_routine_action_generation_<action_id>`), on
+ *    `action_scheduler_stored_action` — which covers both the initial
+ *    schedule and every recurrence successor Action Scheduler spawns. On
+ *    `action_scheduler_before_execute` a stale stamp cancels the action;
+ *    Action Scheduler's own pending-status re-check then skips it. Scheduled
+ *    args stay purely logical (`['routine_id' => ...]`), so exact-match
+ *    lookups and unschedules remain O(1).
  *  - Stagger: interval routines offset their first run by a deterministic,
  *    id-derived offset so co-scheduled routines do not all fire at the same
  *    second.
@@ -35,8 +39,9 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 
 	public const GROUP = 'agents-api';
 
-	private const GENERATION_OPTION_PREFIX = 'agents_routine_generation_';
-	private const PAUSED_OPTION            = 'agents_routine_paused';
+	private const GENERATION_OPTION_PREFIX        = 'agents_routine_generation_';
+	private const ACTION_GENERATION_OPTION_PREFIX = 'agents_routine_action_generation_';
+	private const PAUSED_OPTION                   = 'agents_routine_paused';
 
 	private static bool $fence_registered = false;
 
@@ -119,12 +124,10 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 			update_option( self::generation_option_name( $routine_id ), $generation, false );
 		}
 
-		// Unschedule prior occurrences for idempotency.
-		self::unschedule_logical( $logical_args );
-
-		$args = null !== $generation
-			? WP_Agent_Routine_Action_Identity::with_generation( $logical_args, $generation )
-			: $logical_args;
+		// Unschedule prior occurrences for idempotency. Args are purely
+		// logical, so this is an exact-match store query, not a scan.
+		as_unschedule_all_actions( self::SCHEDULED_HOOK, $logical_args, self::GROUP );
+		$args = $logical_args;
 
 		if ( WP_Agent_Routine::TRIGGER_EXPRESSION === $routine->get_trigger_type() ) {
 			return ! empty( as_schedule_cron_action(
@@ -158,7 +161,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 		if ( ! self::is_available() ) {
 			return;
 		}
-		self::unschedule_logical( array( 'routine_id' => $routine_id ) );
+		as_unschedule_all_actions( self::SCHEDULED_HOOK, array( 'routine_id' => $routine_id ), self::GROUP );
 	}
 
 	/**
@@ -172,7 +175,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 		if ( ! self::is_available() ) {
 			return;
 		}
-		self::unschedule_logical( array( 'routine_id' => $routine_id ) );
+		as_unschedule_all_actions( self::SCHEDULED_HOOK, array( 'routine_id' => $routine_id ), self::GROUP );
 	}
 
 	/**
@@ -196,15 +199,9 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 			return false;
 		}
 
-		$logical_args = array( 'routine_id' => $routine->get_id() );
-		$generation   = self::current_generation( $routine->get_id() );
-		$args         = null !== $generation
-			? WP_Agent_Routine_Action_Identity::with_generation( $logical_args, $generation )
-			: $logical_args;
-
 		as_enqueue_async_action(
 			self::SCHEDULED_HOOK,
-			$args,
+			array( 'routine_id' => $routine->get_id() ),
 			self::GROUP
 		);
 		return true;
@@ -212,10 +209,9 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 
 	/**
 	 * All pending actions under the routine hook/group, hydrated from the
-	 * store. Identity work (coverage, orphan scans) compares
-	 * {@see WP_Agent_Routine_Action_Identity::logical_args()} of each action
-	 * because Action Scheduler's own args matching is exact-equality and
-	 * cannot see through the generation stamp.
+	 * store. This is the one bulk scan in the module and belongs to
+	 * {@see WP_Agent_Routine_Registry::reconcile()} only; register() and
+	 * friends use exact-match queries.
 	 *
 	 * @return array<int,\ActionScheduler_Action> Pending actions keyed by action id.
 	 */
@@ -271,145 +267,124 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge {
 			return false;
 		}
 
+		if ( function_exists( 'delete_option' ) ) {
+			delete_option( self::action_generation_option_name( $action_id ) );
+		}
+
 		return true;
 	}
 
 	/**
-	 * Register the fetched-action fence and the stored-successor reconciler.
-	 * Idempotent; the hooks only ever fire when Action Scheduler runs, and the
-	 * callbacks additionally guard on AS classes being loaded.
+	 * Install the generation fence hooks once per request.
+	 *
+	 * Two Action Scheduler hooks carry the whole mechanism:
+	 *
+	 *  - `action_scheduler_stored_action` ($action_id) fires after every
+	 *    insert — the initial schedule and each recurrence successor. We
+	 *    stamp the routine's current generation onto the action id.
+	 *  - `action_scheduler_before_execute` ($action_id) fires before the
+	 *    runner re-checks that the action is still pending. A stale stamp
+	 *    cancels the action there, so the runner's own status check skips
+	 *    it and no recurrence successor is spawned.
 	 */
 	public static function register_generation_fence(): void {
 		if ( self::$fence_registered ) {
 			return;
 		}
 		self::$fence_registered = true;
-
-		add_filter( 'action_scheduler_stored_action_instance', array( self::class, 'fence_stored_action' ), 10, 6 );
-		add_action( 'action_scheduler_stored_action', array( self::class, 'reconcile_stored_successor' ), PHP_INT_MAX, 1 );
+		add_action( 'action_scheduler_stored_action', array( self::class, 'stamp_stored_action' ), 10, 1 );
+		add_action( 'action_scheduler_before_execute', array( self::class, 'fence_before_execute' ), 0, 1 );
 	}
 
 	/**
-	 * Fetched-action fence: wrap routine actions in a generation-fenced
-	 * decorator whose execute() no-ops (and whose schedule reports canceled)
-	 * once the stamped generation stops being current.
+	 * Option name holding the generation stamped on one stored action.
 	 *
-	 * Unstamped (pre-fencing) routine actions are wrapped with an empty
-	 * expected generation, which never matches a live generation — they drain
-	 * as no-ops instead of double-firing beside the stamped replacement chain
-	 * that register() persists on every boot.
-	 *
-	 * @param mixed                       $action   Instantiated action.
-	 * @param string                      $hook     Action hook.
-	 * @param array<array-key,mixed>      $args     Stored (possibly stamped) args.
-	 * @param mixed                       $schedule Action schedule.
-	 * @param string                      $group    Action group.
-	 * @param int                         $priority Action priority.
-	 * @return mixed Original or fenced action.
+	 * @param int $action_id Action Scheduler action id.
 	 */
-	public static function fence_stored_action( $action, string $hook, array $args, $schedule, string $group, int $priority ) {
-		if ( ! $action instanceof \ActionScheduler_Action
-			|| self::SCHEDULED_HOOK !== $hook
-			|| self::GROUP !== $group
-			|| ! $schedule instanceof \ActionScheduler_Schedule
-		) {
-			return $action;
-		}
-
-		$logical_args = WP_Agent_Routine_Action_Identity::logical_args( $args );
-		$routine_id   = isset( $logical_args['routine_id'] ) && is_string( $logical_args['routine_id'] )
-			? $logical_args['routine_id']
-			: '';
-		if ( '' === $routine_id || ! class_exists( __NAMESPACE__ . '\\WP_Agent_Generation_Fenced_Action' ) ) {
-			return $action;
-		}
-
-		$expected = WP_Agent_Routine_Action_Identity::generation_from_args( $args ) ?? '';
-		$fenced   = new WP_Agent_Generation_Fenced_Action( $hook, $args, $schedule, $group, $routine_id, $expected );
-		$fenced->set_priority( $priority );
-		return $fenced;
+	public static function action_generation_option_name( int $action_id ): string {
+		return self::ACTION_GENERATION_OPTION_PREFIX . $action_id;
 	}
 
 	/**
-	 * Cancel a recurrence successor that was stored carrying a stale
-	 * generation.
+	 * Generation stamped on a stored action, or null when unstamped.
 	 *
-	 * Action Scheduler clones successors from the executed action's args.
-	 * Between a routine's re-registration (new generation, fresh chain) and an
-	 * in-flight old-chain action finishing, AS's `repeat()` can store a
-	 * successor stamped with the superseded generation. The register() call
-	 * that advanced the generation already owns the live chain, so the clone
-	 * is safe to cancel; without this the duplicate stale chain would linger
-	 * fenced-but-present until the worker drained it.
-	 *
-	 * @param int|string $action_id Stored action id.
+	 * @param int $action_id Action Scheduler action id.
 	 */
-	public static function reconcile_stored_successor( $action_id ): void {
+	public static function action_generation( int $action_id ): ?string {
+		if ( $action_id <= 0 || ! function_exists( 'get_option' ) ) {
+			return null;
+		}
+		$value = get_option( self::action_generation_option_name( $action_id ), '' );
+		return is_string( $value ) && '' !== $value ? $value : null;
+	}
+
+	/**
+	 * Stamp a freshly stored routine action with its routine's current generation.
+	 *
+	 * @param int|string $action_id Action Scheduler action id.
+	 */
+	public static function stamp_stored_action( $action_id ): void {
+		if ( ! is_numeric( $action_id ) || ! class_exists( '\ActionScheduler_Store' ) || ! self::has_option_layer() ) {
+			return;
+		}
+		$action_id  = (int) $action_id;
+		$routine_id = self::routine_id_for_action( $action_id );
+		if ( '' === $routine_id ) {
+			return;
+		}
+		$generation = self::current_generation( $routine_id );
+		if ( null === $generation ) {
+			return;
+		}
+		update_option( self::action_generation_option_name( $action_id ), $generation, false );
+	}
+
+	/**
+	 * Cancel a routine action whose stamped generation is no longer current.
+	 *
+	 * Runs at priority 0 on `action_scheduler_before_execute`; the runner
+	 * then observes the non-pending status and ignores the action.
+	 *
+	 * @param int|string $action_id Action Scheduler action id.
+	 */
+	public static function fence_before_execute( $action_id ): void {
 		if ( ! is_numeric( $action_id ) || ! class_exists( '\ActionScheduler_Store' ) ) {
 			return;
 		}
-		$action_id = (int) $action_id;
+		$action_id  = (int) $action_id;
+		$routine_id = self::routine_id_for_action( $action_id );
+		if ( '' === $routine_id ) {
+			return;
+		}
+		$stamped = self::action_generation( $action_id );
+		$current = self::current_generation( $routine_id );
+		if ( null === $stamped || ( null !== $current && hash_equals( $stamped, $current ) ) ) {
+			return; // Unstamped (legacy) or current: let it run.
+		}
+		if ( self::cancel_action_by_id( $action_id ) ) {
+			do_action( 'agents_routine_action_fenced', $routine_id, $stamped, $action_id );
+		}
+	}
 
+	/**
+	 * Resolve the routine id for a stored action, or '' when it is not ours.
+	 *
+	 * @param int $action_id Action Scheduler action id.
+	 */
+	private static function routine_id_for_action( int $action_id ): string {
 		try {
 			$action = \ActionScheduler_Store::instance()->fetch_action( $action_id );
 		} catch ( \Throwable $error ) {
 			unset( $error );
-			return;
+			return '';
 		}
-
-		if ( self::SCHEDULED_HOOK !== $action->get_hook()
-			|| self::GROUP !== $action->get_group()
-		) {
-			return;
+		if ( self::SCHEDULED_HOOK !== $action->get_hook() || self::GROUP !== $action->get_group() ) {
+			return '';
 		}
-
-		// NOTE: do not gate on the action's schedule here. The fetched action
-		// is already wrapped by the fence filter, whose get_schedule() reports
-		// a canceled (non-recurring) schedule for exactly the stale actions
-		// this reconciler exists to cancel — gating on is_recurring() would
-		// make the fence swallow the stale-successor cleanup.
-		$stamped = WP_Agent_Routine_Action_Identity::generation_from_args( $action->get_args() );
-		if ( null === $stamped ) {
-			return; // Legacy unstamped chain; the boot-time re-register owns cleanup.
-		}
-
-		$logical_args = WP_Agent_Routine_Action_Identity::logical_args( $action->get_args() );
-		$routine_id   = isset( $logical_args['routine_id'] ) && is_string( $logical_args['routine_id'] )
-			? $logical_args['routine_id']
-			: '';
-		if ( '' === $routine_id ) {
-			return;
-		}
-
-		$current = self::current_generation( $routine_id );
-		if ( null !== $current && hash_equals( $stamped, $current ) ) {
-			return; // Successor carries the current generation: the chain is live.
-		}
-
-		self::cancel_action_by_id( $action_id );
+		$args = $action->get_args();
+		return isset( $args['routine_id'] ) && is_string( $args['routine_id'] ) ? $args['routine_id'] : '';
 	}
 
-	/**
-	 * Cancel every pending action whose logical args match, and fall back to
-	 * Action Scheduler's exact-args bulk cancel when the granular store API is
-	 * unavailable (plain-code harnesses).
-	 *
-	 * @param array<array-key,mixed> $logical_args Logical routine args.
-	 */
-	private static function unschedule_logical( array $logical_args ): void {
-		if ( function_exists( 'as_get_scheduled_actions' ) && class_exists( '\ActionScheduler_Store' ) ) {
-			foreach ( self::pending_routine_actions() as $action_id => $action ) {
-				if ( WP_Agent_Routine_Action_Identity::logical_args( $action->get_args() ) === $logical_args ) {
-					self::cancel_action_by_id( (int) $action_id );
-				}
-			}
-			return;
-		}
-
-		if ( function_exists( 'as_unschedule_all_actions' ) ) {
-			as_unschedule_all_actions( self::SCHEDULED_HOOK, $logical_args, self::GROUP );
-		}
-	}
 
 	private static function has_option_layer(): bool {
 		return function_exists( 'add_option' ) && function_exists( 'get_option' ) && function_exists( 'update_option' ) && function_exists( 'delete_option' );

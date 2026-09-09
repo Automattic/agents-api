@@ -325,14 +325,14 @@ Action Scheduler bridges and listeners are optional operational adapters. The su
 
 ### Routine generation fencing
 
-Every `WP_Agent_Routine_Action_Scheduler_Bridge::register()` mints a schedule generation (`wp_generate_uuid4()`), persists it in the non-autoloaded `agents_routine_generation_<routine_id>` option, and stamps it into the scheduled action's args as a trailing metadata element. The stamp is transparent: `WP_Agent_Routine_Action_Identity::logical_args()` strips it, so identity work (unschedule, coverage checks, the wake listener) always compares the logical args — `array( 'routine_id' => ... )` — never the stamped payload. Action Scheduler's own args matching is exact-equality, so nothing in the bridge ever queries by stamped args.
+Every `WP_Agent_Routine_Action_Scheduler_Bridge::register()` mints a schedule generation (`wp_generate_uuid4()`) and persists it in the non-autoloaded `agents_routine_generation_<routine_id>` option. Scheduled action args stay purely logical — `array( 'routine_id' => ... )` — so Action Scheduler's exact-match queries (`as_unschedule_all_actions`, `as_next_scheduled_action`) keep working and `register()` stays O(1) regardless of how many routines exist. The generation is recorded **per stored action**, keyed by action id, in `agents_routine_action_generation_<action_id>`.
 
-Two hooks close the loop:
+Two Action Scheduler hooks carry the mechanism:
 
-- `action_scheduler_stored_action_instance` wraps every fetched routine action in `WP_Agent_Generation_Fenced_Action`. When the stamped generation no longer matches the persisted one, the fenced action's `execute()` no-ops (firing `agents_routine_action_fenced` for observability) and its `get_schedule()` reports a canceled schedule so the queue runner never repeats a superseded recurring chain. Unstamped legacy actions never match a live generation, so they drain as no-ops instead of double-firing beside their stamped replacements.
-- `action_scheduler_stored_action` cancels a recurrence successor that was stored carrying a stale generation — the race where an in-flight old-chain action finishes after re-registration and AS's `repeat()` clones the superseded args.
+- `action_scheduler_stored_action` fires after every insert — the initial schedule and each recurrence successor AS spawns. The bridge stamps the routine's *current* generation onto the new action id. A successor stored after re-registration therefore carries the new generation and is live; one stored by a late-finishing old-chain action still carries the old generation and is stale.
+- `action_scheduler_before_execute` fires before the queue runner re-checks that the action is still pending. When the stamp no longer matches the routine's current generation the bridge cancels the action (firing `agents_routine_action_fenced( $routine_id, $stamped, $action_id )` for observability); the runner's own status check then ignores it and no recurrence successor is spawned. Unstamped (pre-fencing) actions are allowed to run.
 
-`WP_Agent_Routine_Registry::current_generation( $id )` exposes the persisted generation; `unregister()` deletes the tombstone.
+`cancel_action_by_id()` deletes the per-action stamp alongside the cancel. `WP_Agent_Routine_Registry::current_generation( $id )` exposes the persisted routine generation; `unregister()` deletes it.
 
 ### Routine stagger
 

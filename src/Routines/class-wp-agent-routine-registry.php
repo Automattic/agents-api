@@ -334,13 +334,12 @@ final class WP_Agent_Routine_Registry {
 	}
 
 	/**
-	 * Resolve the logical routine id out of possibly-stamped action args.
+	 * Resolve the routine id out of stored action args.
 	 *
 	 * @param array<array-key,mixed> $args Stored action args.
 	 */
 	private static function logical_routine_id( array $args ): string {
-		$logical = WP_Agent_Routine_Action_Identity::logical_args( $args );
-		$value   = $logical['routine_id'] ?? ( $logical[0] ?? '' );
+		$value = $args['routine_id'] ?? ( $args[0] ?? '' );
 		return is_string( $value ) ? $value : '';
 	}
 
