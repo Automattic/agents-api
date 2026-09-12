@@ -660,6 +660,7 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge implements WP_Agent_Routine
 		if ( ! is_string( $query ) ) {
 			return 0;
 		}
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is built by $wpdb->prepare() above.
 		$deleted = $wpdb->query( $query );
 
 		if ( function_exists( 'wp_cache_supports' ) && function_exists( 'wp_cache_flush_group' ) && wp_cache_supports( 'flush_group' ) ) {
