@@ -453,6 +453,7 @@ final class WP_Agent_Routine_Registry {
 			return false;
 		}
 
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is built by $wpdb->prepare() above.
 		$affected = $wpdb->query( $query );
 
 		self::flush_reconcile_lock_cache();
@@ -468,6 +469,7 @@ final class WP_Agent_Routine_Registry {
 
 		$query = $wpdb->prepare( 'DELETE FROM %i WHERE option_name = %s', $wpdb->options, self::RECONCILE_LOCK_OPTION );
 		if ( is_string( $query ) ) {
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is built by $wpdb->prepare() above.
 			$wpdb->query( $query );
 		}
 
