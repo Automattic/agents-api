@@ -38,13 +38,19 @@ interface WP_Agent_Routine_Backend {
 	public function is_available(): bool;
 
 	/**
-	 * (Re-)register a routine's schedule. Idempotent: existing schedules for
-	 * the same routine are replaced.
+	 * (Re-)register a routine's schedule. Idempotent and cheap to call on
+	 * every boot: when the routine already has a matching schedule in
+	 * place, implementations must treat this as a read-only no-op rather
+	 * than unconditionally tearing down and recreating it — a backend that
+	 * always replaces the schedule does not scale to consumers with
+	 * hundreds of persisted routines calling register() on every request.
 	 *
 	 * @since 0.11.0
 	 *
 	 * @param WP_Agent_Routine $routine The routine to schedule.
-	 * @return bool True when a schedule was registered; false on no-op.
+	 * @return bool True when a schedule is in place (freshly registered or
+	 *              already matching); false on no-op due to the backend
+	 *              being unavailable or the schedule call failing.
 	 */
 	public function register( WP_Agent_Routine $routine ): bool;
 

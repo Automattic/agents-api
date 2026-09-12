@@ -62,6 +62,25 @@ abstract class ActionScheduler_Store {
 	public function cancel_action( $action_id ): void {}
 }
 
+/**
+ * A stored action's own schedule (recurrence + next-run date). Concrete
+ * subclasses in real Action Scheduler include
+ * `ActionScheduler_IntervalSchedule` (recurring, `get_recurrence()` returns
+ * the interval in seconds) and `ActionScheduler_CronSchedule` (recurring,
+ * `get_recurrence()` returns the cron expression); non-recurring schedules
+ * return `false` from `is_recurring()`.
+ */
+abstract class ActionScheduler_Schedule {
+	public function is_recurring(): bool {
+		return false;
+	}
+
+	/** @return int|string|null */
+	public function get_recurrence() {
+		return null;
+	}
+}
+
 class ActionScheduler_Action {
 	public function get_hook(): string {
 		return '';
@@ -74,6 +93,10 @@ class ActionScheduler_Action {
 
 	public function get_group(): string {
 		return '';
+	}
+
+	public function get_schedule(): ActionScheduler_Schedule {
+		throw new \RuntimeException( 'stub' );
 	}
 }
 
