@@ -280,6 +280,7 @@ class ActionScheduler_Store {
 
 	/** @param int|string $action_id Action id. */
 	public function cancel_action( $action_id ): void {
+		$GLOBALS['smoke_as_cancel_calls'][] = (int) $action_id;
 		if ( isset( $GLOBALS['smoke_as'][ (int) $action_id ] ) ) {
 			$GLOBALS['smoke_as'][ (int) $action_id ]['status'] = self::STATUS_CANCELED;
 		}
@@ -374,6 +375,150 @@ function as_get_scheduled_actions( array $query = array(), string $return_format
 }
 
 // ---------------------------------------------------------------------------
+// Fake object cache and $wpdb — deliberately separate stores, so a test can
+// model the exact production bug: the object cache saying an option exists
+// while the backing DB row does not.
+// ---------------------------------------------------------------------------
+
+$GLOBALS['smoke_object_cache'] = array();
+if ( ! function_exists( 'wp_cache_set' ) ) {
+	function wp_cache_set( string $key, $value, string $group = '', int $expire = 0 ): bool {
+		unset( $expire );
+		$GLOBALS['smoke_object_cache'][ $group ][ $key ] = $value;
+		return true;
+	}
+}
+if ( ! function_exists( 'wp_cache_get' ) ) {
+	function wp_cache_get( string $key, string $group = '' ) {
+		return $GLOBALS['smoke_object_cache'][ $group ][ $key ] ?? false;
+	}
+}
+if ( ! function_exists( 'wp_cache_delete' ) ) {
+	function wp_cache_delete( string $key, string $group = '' ): bool {
+		unset( $GLOBALS['smoke_object_cache'][ $group ][ $key ] );
+		return true;
+	}
+}
+if ( ! function_exists( 'wp_cache_supports' ) ) {
+	function wp_cache_supports( string $feature ): bool {
+		return 'flush_group' === $feature;
+	}
+}
+if ( ! function_exists( 'wp_cache_flush_group' ) ) {
+	function wp_cache_flush_group( string $group ): bool {
+		unset( $GLOBALS['smoke_object_cache'][ $group ] );
+		return true;
+	}
+}
+
+/**
+ * Minimal $wpdb double, named to match the real global `wpdb` class so the
+ * substrate's `$wpdb instanceof \wpdb` narrowing (required for the code to
+ * type-check under PHPStan against the real wordpress-stubs `wpdb` class)
+ * also resolves correctly in this pure-PHP harness, which loads no such
+ * class otherwise.
+ *
+ * It does not parse SQL generically — it recognises the three fixed
+ * queries the routines substrate issues (the reconcile lock's upsert and
+ * delete, and the legacy-option purge's LIKE delete) and reproduces their
+ * real MySQL affected-rows semantics against its own `rows` store, which is
+ * intentionally independent of the `$GLOBALS['smoke_options']` /
+ * object-cache shims above.
+ */
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $options = 'wp_options';
+
+		/** @var array<string,string> */
+		public array $rows = array();
+
+		/** @var list<mixed> */
+		private array $last_prepare_args = array();
+
+		private string $last_query_kind = '';
+
+		/** @param mixed ...$args */
+		public function prepare( string $query, ...$args ): string {
+			$this->last_prepare_args = $args;
+			if ( str_contains( $query, 'ON DUPLICATE KEY UPDATE' ) ) {
+				$this->last_query_kind = 'lock_upsert';
+			} elseif ( str_contains( $query, 'DELETE FROM' ) && str_contains( $query, 'LIKE' ) ) {
+				$this->last_query_kind = 'legacy_purge';
+			} elseif ( str_contains( $query, 'DELETE FROM' ) ) {
+				$this->last_query_kind = 'lock_delete';
+			} else {
+				$this->last_query_kind = '';
+			}
+			return $query;
+		}
+
+		/** @param string $sql Already-prepared query (ignored; kind + args were captured by prepare()). */
+		public function query( string $sql ) {
+			unset( $sql );
+			switch ( $this->last_query_kind ) {
+				case 'lock_upsert':
+					return $this->upsert_lock();
+				case 'lock_delete':
+					return $this->delete_row();
+				case 'legacy_purge':
+					return $this->purge_legacy();
+				default:
+					return 0;
+			}
+		}
+
+		public function esc_like( string $text ): string {
+			// Real wpdb::esc_like() backslash-escapes SQL wildcard characters
+			// so they match literally; this fake only needs the plain prefix
+			// back out again for its own string-prefix comparison, so it is
+			// a no-op.
+			return $text;
+		}
+
+		private function upsert_lock(): int {
+			[ $table, $option_name, $new_value, $autoload, $stale_before ] = $this->last_prepare_args;
+			unset( $table, $autoload );
+			if ( ! array_key_exists( $option_name, $this->rows ) ) {
+				$this->rows[ $option_name ] = (string) $new_value;
+				return 1;
+			}
+			if ( (int) $this->rows[ $option_name ] <= (int) $stale_before ) {
+				$this->rows[ $option_name ] = (string) $new_value;
+				return 2;
+			}
+			return 0;
+		}
+
+		private function delete_row(): int {
+			[ $table, $option_name ] = $this->last_prepare_args;
+			unset( $table );
+			if ( array_key_exists( $option_name, $this->rows ) ) {
+				unset( $this->rows[ $option_name ] );
+				return 1;
+			}
+			return 0;
+		}
+
+		private function purge_legacy(): int {
+			[ $table, $like ] = $this->last_prepare_args;
+			unset( $table );
+			$prefix = rtrim( (string) $like, '%' );
+			$deleted_ids = array();
+			foreach ( array_keys( $this->rows ) as $name ) {
+				if ( str_starts_with( $name, $prefix ) ) {
+					$deleted_ids[] = $name;
+				}
+			}
+			foreach ( $deleted_ids as $name ) {
+				unset( $this->rows[ $name ] );
+			}
+			return count( $deleted_ids );
+		}
+	}
+}
+$GLOBALS['wpdb'] = new wpdb();
+
+// ---------------------------------------------------------------------------
 // Module under test.
 // ---------------------------------------------------------------------------
 
@@ -389,12 +534,16 @@ use AgentsAPI\AI\Routines\WP_Agent_Routine_Action_Scheduler_Bridge;
 use AgentsAPI\AI\Routines\WP_Agent_Routine_Registry;
 
 function smoke_reset_state(): void {
-	$GLOBALS['smoke_as_fetches'] = array();
+	$GLOBALS['smoke_as_fetches']      = array();
+	$GLOBALS['smoke_as_cancel_calls'] = array();
 	WP_Agent_Routine_Registry::reset();
 	WP_Agent_Routine_Registry::reset_backend();
+	WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
 	$GLOBALS['smoke_as']           = array();
 	$GLOBALS['smoke_as_next_id']   = 0;
 	$GLOBALS['smoke_options']      = array();
+	$GLOBALS['smoke_object_cache'] = array();
+	$GLOBALS['wpdb']->rows         = array();
 	$GLOBALS['smoke_fired_hooks']  = array();
 	$GLOBALS['smoke_chat_ability'] = new Smoke_Chat_Ability();
 }
@@ -420,17 +569,18 @@ function smoke_hook_fired( string $hook ): bool {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Scheduled args stay logical; generations live per action id.
+// 1. Scheduled args stay logical; the routine's generation + watermark live
+//    in ONE option row — never a per-action option.
 // ---------------------------------------------------------------------------
 
 smoke_reset_state();
 WP_Agent_Routine_Registry::register( 'alpha', array( 'agent' => 'commander', 'interval' => 600 ) );
-$alpha_id  = $GLOBALS['smoke_as_next_id'];
-$alpha_gen = get_option( 'agents_routine_generation_alpha', '' );
+$alpha_id    = $GLOBALS['smoke_as_next_id'];
+$alpha_state = get_option( 'agents_routine_generation_alpha', array() );
 durable_assert( array( 'routine_id' => 'alpha' ), $GLOBALS['smoke_as'][ $alpha_id ]['args'], 'identity: scheduled args are purely logical' );
-durable_assert( $alpha_gen, WP_Agent_Routine_Action_Scheduler_Bridge::action_generation( $alpha_id ), 'identity: the stored action is stamped with the routine generation by action id' );
-durable_assert( $alpha_gen, get_option( 'agents_routine_action_generation_' . $alpha_id, '' ), 'identity: the per-action stamp is an option keyed by action id' );
-durable_assert( null, WP_Agent_Routine_Action_Scheduler_Bridge::action_generation( 999999 ), 'identity: unknown action ids have no stamp' );
+durable_assert( true, is_array( $alpha_state ) && isset( $alpha_state['generation'], $alpha_state['watermark'] ), 'identity: the per-routine option carries a generation and a watermark' );
+durable_assert( $alpha_id, $alpha_state['watermark'], "identity: the watermark is the new chain's own first action id" );
+durable_assert( false, array_key_exists( 'agents_routine_action_generation_' . $alpha_id, $GLOBALS['smoke_options'] ), 'identity: no per-action option row is written when an action is stored (the leak this fixes)' );
 
 // ---------------------------------------------------------------------------
 
@@ -453,7 +603,9 @@ $cron_routine = new WP_Agent_Routine( 'stag-alpha', array( 'agent' => 'commander
 durable_assert( 0, $cron_routine->stagger_offset(), 'stagger: cron expressions are not staggered' );
 
 // ---------------------------------------------------------------------------
-// 3. Registration stamps a generation and schedules with stagger.
+// 3. Registration persists a generation + watermark and schedules with
+//    stagger. The stagger offset only shifts the first-run timestamp; it
+//    never causes a later, unchanged re-register to look like a mismatch.
 // ---------------------------------------------------------------------------
 
 smoke_reset_state();
@@ -466,72 +618,106 @@ durable_assert( true, isset( $rows[0]['timestamp'], $rows[1]['timestamp'] ), 'br
 $delta = $rows[1]['timestamp'] - $rows[0]['timestamp'];
 durable_assert( true, abs( $delta - ( 1073 - 1517 ) ) <= 1, 'bridge: first-run timestamps differ by the stagger delta' );
 
-$gen_alpha = get_option( 'agents_routine_generation_stag-alpha', '' );
-durable_assert( true, is_string( $gen_alpha ) && '' !== $gen_alpha, 'bridge: register persists the generation option' );
-durable_assert( $gen_alpha, WP_Agent_Routine_Registry::current_generation( 'stag-alpha' ), 'registry: current_generation reads the persisted generation' );
+$state_alpha = get_option( 'agents_routine_generation_stag-alpha', array() );
+durable_assert( true, is_array( $state_alpha ) && is_string( $state_alpha['generation'] ?? null ) && '' !== $state_alpha['generation'], 'bridge: register persists a generation' );
+durable_assert( $state_alpha['generation'], WP_Agent_Routine_Registry::current_generation( 'stag-alpha' ), 'registry: current_generation reads the persisted generation' );
 durable_assert( array( 'routine_id' => 'stag-alpha' ), $rows[0]['args'], 'bridge: scheduled args are purely logical' );
-durable_assert( $gen_alpha, WP_Agent_Routine_Action_Scheduler_Bridge::action_generation( array_keys( smoke_pending_rows() )[0] ), 'bridge: the stored action carries the generation by id' );
+durable_assert( array_keys( smoke_pending_rows() )[0], $state_alpha['watermark'], "bridge: the watermark is the stored action's own id" );
+
+// Re-registering the exact same routine (same interval, hence same stagger
+// slot too) a second time is a pure no-op: no new action, no new
+// generation/watermark. This is the core of the idempotent-register fix —
+// a consumer with hundreds of persisted routines calling register() on
+// every boot must not pay for an unschedule + reschedule when nothing
+// changed.
+$as_next_before                  = $GLOBALS['smoke_as_next_id'];
+$GLOBALS['smoke_as_cancel_calls'] = array();
+$noop = WP_Agent_Routine_Registry::register( 'stag-alpha', array( 'agent' => 'commander', 'interval' => 3600 ) );
+durable_assert( true, $noop instanceof WP_Agent_Routine, 'idempotent register: re-registering an unchanged routine still succeeds' );
+durable_assert( $as_next_before, $GLOBALS['smoke_as_next_id'], 'idempotent register: schedules no new action' );
+durable_assert( array(), $GLOBALS['smoke_as_cancel_calls'], 'idempotent register: cancels nothing' );
+durable_assert( $state_alpha, get_option( 'agents_routine_generation_stag-alpha', array() ), 'idempotent register: mints no new generation/watermark' );
+
+// Changing the interval is a genuine mismatch: exactly one cancel (the
+// superseded action) and exactly one new action.
+$as_next_before                  = $GLOBALS['smoke_as_next_id'];
+$GLOBALS['smoke_as_cancel_calls'] = array();
+WP_Agent_Routine_Registry::register( 'stag-alpha', array( 'agent' => 'commander', 'interval' => 7200 ) );
+durable_assert( $as_next_before + 1, $GLOBALS['smoke_as_next_id'], 'changed register: schedules exactly one new action' );
+durable_assert( 1, count( $GLOBALS['smoke_as_cancel_calls'] ), 'changed register: cancels exactly the superseded action' );
+durable_assert( true, get_option( 'agents_routine_generation_stag-alpha', array() )['watermark'] > $state_alpha['watermark'], 'changed register: the watermark advances' );
 
 // ---------------------------------------------------------------------------
-// 4. Re-registration fences a claimed superseded action at before_execute.
+// 4. Re-registration fences a claimed superseded action at before_execute —
+//    purely by comparing the action's own id to the routine's watermark, no
+//    per-action stamping involved.
 // ---------------------------------------------------------------------------
 
 smoke_reset_state();
 WP_Agent_Routine_Registry::register( 'alpha', array( 'agent' => 'commander', 'interval' => 600, 'prompt' => 'Tick.' ) );
-$first_id = $GLOBALS['smoke_as_next_id'];
-$gen_one  = get_option( 'agents_routine_generation_alpha', '' );
+$first_id  = $GLOBALS['smoke_as_next_id'];
+$state_one = get_option( 'agents_routine_generation_alpha', array() );
 
 // Simulate a worker that already claimed the old action (it is still pending
 // in its view) while the routine is re-registered with a new interval.
 $claimed_row = $GLOBALS['smoke_as'][ $first_id ];
 WP_Agent_Routine_Registry::register( 'alpha', array( 'agent' => 'commander', 'interval' => 1200, 'prompt' => 'Tick.' ) );
-$gen_two = get_option( 'agents_routine_generation_alpha', '' );
-durable_assert( true, '' !== $gen_one && '' !== $gen_two && $gen_one !== $gen_two, 'fencing: re-registration advances the generation' );
-durable_assert( ActionScheduler_Store::STATUS_CANCELED, $GLOBALS['smoke_as'][ $first_id ]['status'], 'fencing: re-registration unschedules the superseded action by exact logical args' );
+$state_two = get_option( 'agents_routine_generation_alpha', array() );
+durable_assert( true, '' !== $state_one['generation'] && '' !== $state_two['generation'] && $state_one['generation'] !== $state_two['generation'], 'fencing: a genuine schedule change advances the generation' );
+durable_assert( true, $state_two['watermark'] > $state_one['watermark'], 'fencing: a genuine schedule change advances the watermark' );
+durable_assert( ActionScheduler_Store::STATUS_CANCELED, $GLOBALS['smoke_as'][ $first_id ]['status'], 'fencing: re-registration cancels the superseded action directly by id — no group-wide unschedule scan' );
 
 // Resurrect the claimed row as pending to model the race: the claim happened
-// before the unschedule landed, so the runner still tries to execute it.
+// before the cancel landed, so the runner still tries to execute it. Its id
+// ($first_id) is below the new watermark — no stamp is needed for the fence
+// to catch it.
 $GLOBALS['smoke_as'][ $first_id ]           = $claimed_row;
 $GLOBALS['smoke_as'][ $first_id ]['status'] = ActionScheduler_Store::STATUS_PENDING;
-update_option( 'agents_routine_action_generation_' . $first_id, $gen_one, false );
+durable_assert( true, $first_id < $state_two['watermark'], 'fencing: the claimed action id is below the new watermark' );
 
 $before = count( $GLOBALS['smoke_chat_ability']->calls );
-durable_assert( false, smoke_as_run( $first_id ), 'fencing: the runner skips a stale-generation action' );
+durable_assert( false, smoke_as_run( $first_id ), 'fencing: the runner skips an action below the current watermark' );
 durable_assert( $before, count( $GLOBALS['smoke_chat_ability']->calls ), 'fencing: a stale action does not fire the routine callback' );
 durable_assert( ActionScheduler_Store::STATUS_CANCELED, $GLOBALS['smoke_as'][ $first_id ]['status'], 'fencing: the stale action is cancelled, so no recurrence successor is spawned' );
 durable_assert( true, smoke_hook_fired( 'agents_routine_action_fenced' ), 'fencing: the fence is reported via agents_routine_action_fenced' );
-durable_assert( false, get_option( 'agents_routine_action_generation_' . $first_id, false ), 'fencing: cancelling drops the per-action stamp' );
 
-// The live (current-generation) action executes normally.
+// The live (current-watermark) action executes normally.
 $live_rows = array_keys( smoke_pending_rows() );
 durable_assert( 1, count( $live_rows ), 'fencing: exactly one live chain remains after re-registration' );
-durable_assert( true, smoke_as_run( $live_rows[0] ), 'fencing: the runner executes the current-generation action' );
-durable_assert( $before + 1, count( $GLOBALS['smoke_chat_ability']->calls ), 'fencing: the current-generation action fires the routine callback' );
+durable_assert( true, $live_rows[0] >= $state_two['watermark'], 'fencing: the live action id is at or above the current watermark' );
+durable_assert( true, smoke_as_run( $live_rows[0] ), 'fencing: the runner executes the current-watermark action' );
+durable_assert( $before + 1, count( $GLOBALS['smoke_chat_ability']->calls ), 'fencing: the current action fires the routine callback' );
 durable_assert( 'commander', $GLOBALS['smoke_chat_ability']->calls[0]['agent'], 'listener: dispatched through the routine agent' );
 durable_assert( 'routine:alpha', $GLOBALS['smoke_chat_ability']->calls[0]['session_id'], 'listener: dispatched with the persistent routine session' );
 
-// An unstamped (legacy) pending action is allowed to run.
-$legacy_id = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK, array( 'routine_id' => 'alpha' ), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time(), 1200 );
-delete_option( 'agents_routine_action_generation_' . $legacy_id );
-durable_assert( true, smoke_as_run( $legacy_id ), 'fencing: an unstamped action is not fenced' );
+// A pending action for a routine with no recorded watermark (never
+// re-registered this process, or a pre-fix legacy action) is allowed to run.
+$legacy_id = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK, array( 'routine_id' => 'never-registered-this-process' ), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time(), 1200 );
+durable_assert( true, smoke_as_run( $legacy_id ), 'fencing: an action for a routine with no recorded watermark is not fenced' );
 
-// register() must not scan other routines' actions: registering beta after
-// alpha performs zero fetch_action() calls against alpha's live action.
+// Caching: after the first register() call populates the request-scoped
+// bulk pending map, a second register() for a DIFFERENT routine must not
+// re-fetch the first routine's action — this is what makes register() cheap
+// to call hundreds of times per request instead of once per routine.
 $GLOBALS['smoke_as_fetches'] = array();
 WP_Agent_Routine_Registry::register( 'beta', array( 'agent' => 'commander', 'interval' => 600 ) );
 $beta_id = $GLOBALS['smoke_as_next_id'];
-durable_assert( array( $beta_id ), array_values( array_unique( $GLOBALS['smoke_as_fetches'] ) ), 'register: only the newly stored action is fetched (stamping); no scan of other routines' );
+durable_assert( array( $beta_id ), array_values( array_unique( $GLOBALS['smoke_as_fetches'] ) ), 'register: the cached pending map is reused across routines in one request; only the newly stored action is fetched' );
 
 // ---------------------------------------------------------------------------
-// 5. Recurrence successors are stamped with the current generation on store.
+// 5. Recurrence successors need no stamping at all: Action Scheduler ids are
+//    a global increasing sequence, so any action id at or above the
+//    routine's current watermark is live and any id below it is fenced —
+//    including a successor AS spawns after the initial schedule.
 // ---------------------------------------------------------------------------
 
 smoke_reset_state();
 WP_Agent_Routine_Registry::register( 'beta', array( 'agent' => 'commander', 'interval' => 600 ) );
-$gen_beta = get_option( 'agents_routine_generation_beta', '' );
+$state_beta = get_option( 'agents_routine_generation_beta', array() );
 
-// AS repeat() stores the successor with the same logical args; the stored
-// hook stamps it with whatever generation is current at that moment.
+// AS's own repeat() stores the next occurrence with the same logical args
+// and a fresh (higher) id — no hook, no per-action write. It just runs
+// because its id is already above the current watermark.
 $successor = smoke_as_save(
 	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
 	array( 'routine_id' => 'beta' ),
@@ -539,17 +725,28 @@ $successor = smoke_as_save(
 	time() + 600,
 	600
 );
-durable_assert( $gen_beta, WP_Agent_Routine_Action_Scheduler_Bridge::action_generation( $successor ), 'successor: a recurrence clone is stamped with the current generation' );
+durable_assert( true, $successor > $state_beta['watermark'], 'successor: a recurrence clone gets an id above the current watermark' );
+durable_assert( true, smoke_as_run( $successor ), 'successor: the recurrence clone runs unfenced' );
 
-// Re-register (new generation); the old successor is now stale and fenced.
+// A second successor lands, then the routine is re-registered with a
+// genuinely different schedule — advancing the watermark past it, exactly
+// as if it belonged to the now-superseded chain.
+$late_successor = smoke_as_save(
+	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
+	array( 'routine_id' => 'beta' ),
+	WP_Agent_Routine_Action_Scheduler_Bridge::GROUP,
+	time() + 600,
+	600
+);
 WP_Agent_Routine_Registry::register( 'beta', array( 'agent' => 'commander', 'interval' => 900 ) );
-$GLOBALS['smoke_as'][ $successor ]['status'] = ActionScheduler_Store::STATUS_PENDING; // model a late-landing successor
-durable_assert( false, smoke_as_run( $successor ), 'successor: a stale-generation clone is fenced at execution' );
-durable_assert( ActionScheduler_Store::STATUS_CANCELED, $GLOBALS['smoke_as'][ $successor ]['status'], 'successor: the stale clone is cancelled' );
+$state_beta_two = get_option( 'agents_routine_generation_beta', array() );
+durable_assert( true, $late_successor < $state_beta_two['watermark'], 'successor: the pre-existing clone is now below the advanced watermark' );
+durable_assert( false, smoke_as_run( $late_successor ), 'successor: a clone below the new watermark is fenced at execution' );
+durable_assert( ActionScheduler_Store::STATUS_CANCELED, $GLOBALS['smoke_as'][ $late_successor ]['status'], 'successor: the stale clone is cancelled' );
 
-// Actions outside the routine hook/group are never stamped or fenced.
+// Actions outside the routine hook/group are never fenced, regardless of id.
 $foreign = smoke_as_save( 'some_other_hook', array( 'x' => 1 ), 'other', time(), 0 );
-durable_assert( null, WP_Agent_Routine_Action_Scheduler_Bridge::action_generation( $foreign ), 'successor: foreign actions are not stamped' );
+durable_assert( true, smoke_as_run( $foreign ), 'successor: foreign actions (different hook/group) are never fenced' );
 
 // ---------------------------------------------------------------------------
 // 6. Reconcile: missing coverage, orphans, dry runs, pause, and the lock.
@@ -563,7 +760,7 @@ $result = WP_Agent_Routine_Registry::reconcile();
 durable_assert( array(), $result['enqueued'], 'reconcile: fully-covered registry enqueues nothing' );
 durable_assert( array( 'alpha', 'beta' ), $result['unchanged'], 'reconcile: covered routines report unchanged' );
 durable_assert( array(), $result['errors'], 'reconcile: no errors on a healthy registry' );
-durable_assert( false, get_option( 'agents_routine_reconcile_lock', false ), 'reconcile: the lock is released after the run' );
+durable_assert( false, array_key_exists( 'agents_routine_reconcile_lock', $GLOBALS['wpdb']->rows ), 'reconcile: the $wpdb lock row is deleted after the run' );
 
 // Delete the pending action (AS table pruned) → reconcile restores it.
 foreach ( smoke_pending_rows() as $id => $row ) {
@@ -602,7 +799,7 @@ $result     = WP_Agent_Routine_Registry::reconcile( array( 'dry_run' => true ) )
 durable_assert( array( 'beta' ), $result['enqueued'], 'reconcile: dry run reports the missing schedule' );
 durable_assert( 1, count( smoke_pending_rows() ), 'reconcile: dry run writes no scheduled action' );
 durable_assert( $gen_before, get_option( 'agents_routine_generation_beta', '' ), 'reconcile: dry run does not advance the generation' );
-durable_assert( false, get_option( 'agents_routine_reconcile_lock', false ), 'reconcile: dry run takes no lock' );
+durable_assert( false, array_key_exists( 'agents_routine_reconcile_lock', $GLOBALS['wpdb']->rows ), 'reconcile: dry run takes no lock' );
 
 // Paused routines are intentionally uncovered: reconcile must not re-enqueue.
 WP_Agent_Routine_Registry::register( 'delta-ops', array( 'agent' => 'commander', 'interval' => 600 ) );
@@ -611,14 +808,31 @@ $result = WP_Agent_Routine_Registry::reconcile();
 durable_assert( false, in_array( 'delta-ops', $result['enqueued'], true ), 'reconcile: a paused routine is not re-enqueued' );
 durable_assert( array( 'beta' ), $result['enqueued'], 'reconcile: the still-missing active routine is enqueued' );
 
-// Lock: a fresh held lock blocks; a stale lock is taken over.
-add_option( 'agents_routine_reconcile_lock', time(), '', false );
+// Lock: a fresh held lock blocks; a stale lock is taken over. The lock now
+// lives only in $wpdb — never in get_option()/the options cache — so it is
+// seeded and inspected directly against the fake DB row store.
+$GLOBALS['wpdb']->rows['agents_routine_reconcile_lock'] = (string) time();
 $result = WP_Agent_Routine_Registry::reconcile();
 durable_assert( true, isset( $result['errors']['_lock'] ), 'reconcile: a held lock blocks a concurrent run' );
 
-update_option( 'agents_routine_reconcile_lock', time() - 400 );
+$GLOBALS['wpdb']->rows['agents_routine_reconcile_lock'] = (string) ( time() - 400 );
 $result = WP_Agent_Routine_Registry::reconcile();
 durable_assert( array(), $result['errors'], 'reconcile: a stale lock is taken over' );
+
+// Self-heal: a stale/dangling object-cache entry for the lock option must
+// never block acquisition when the backing DB row is actually absent — the
+// exact production failure this replaces. A killed request left
+// `agents_routine_reconcile_lock` as a persistent Redis "locked" value with
+// no DB row: add_option() always failed (the cache said it existed), the
+// old stale check read that same cached value, and delete_option() found
+// nothing in the DB to delete, so the lock stayed stuck for 25+ minutes.
+// Reading and writing the lock exclusively through $wpdb means a cache
+// entry with no backing row simply cannot influence the decision.
+unset( $GLOBALS['wpdb']->rows['agents_routine_reconcile_lock'] );
+wp_cache_set( 'agents_routine_reconcile_lock', time(), 'options' );
+$result = WP_Agent_Routine_Registry::reconcile();
+durable_assert( array(), $result['errors'], 'reconcile: a stale cache entry with no backing DB row does not block acquisition' );
+wp_cache_delete( 'agents_routine_reconcile_lock', 'options' );
 
 // ---------------------------------------------------------------------------
 // 7. Unregister tears down the schedule and the generation tombstone.
@@ -629,6 +843,37 @@ WP_Agent_Routine_Registry::register( 'alpha', array( 'agent' => 'commander', 'in
 WP_Agent_Routine_Registry::unregister( 'alpha' );
 durable_assert( '', get_option( 'agents_routine_generation_alpha', '' ), 'unregister: the generation option is deleted' );
 durable_assert( 0, count( smoke_pending_rows() ), 'unregister: the scheduled action is cancelled' );
+
+// ---------------------------------------------------------------------------
+// 8. One-shot cleanup of legacy per-action option rows left by a pre-fix
+//    version. Single DELETE, gated to run at most once per site.
+// ---------------------------------------------------------------------------
+
+smoke_reset_state();
+$GLOBALS['wpdb']->rows['agents_routine_action_generation_101'] = 'gen-a';
+$GLOBALS['wpdb']->rows['agents_routine_action_generation_102'] = 'gen-a';
+$GLOBALS['wpdb']->rows['agents_routine_action_generation_9']   = 'gen-b';
+$GLOBALS['wpdb']->rows['agents_routine_generation_alpha']      = 'unrelated-should-survive';
+$GLOBALS['wpdb']->rows['some_other_plugin_option']             = 'unrelated-should-survive';
+
+$deleted = WP_Agent_Routine_Action_Scheduler_Bridge::purge_legacy_action_generation_options();
+durable_assert( 3, $deleted, 'purge: deletes every agents_routine_action_generation_* row in one query' );
+durable_assert( false, array_key_exists( 'agents_routine_action_generation_101', $GLOBALS['wpdb']->rows ), 'purge: a legacy row is gone' );
+durable_assert( true, array_key_exists( 'agents_routine_generation_alpha', $GLOBALS['wpdb']->rows ), 'purge: an unrelated per-routine option survives' );
+durable_assert( true, array_key_exists( 'some_other_plugin_option', $GLOBALS['wpdb']->rows ), 'purge: an unrelated option from another plugin survives' );
+durable_assert( 0, WP_Agent_Routine_Action_Scheduler_Bridge::purge_legacy_action_generation_options(), 'purge: calling it again deletes nothing (idempotent)' );
+
+// maybe_purge...() gates the purge behind a persisted marker: it runs once,
+// then never again, even if legacy rows reappear (e.g. a downgrade+re-fix).
+smoke_reset_state();
+$GLOBALS['wpdb']->rows['agents_routine_action_generation_5'] = 'gen-c';
+WP_Agent_Routine_Action_Scheduler_Bridge::maybe_purge_legacy_action_generation_options();
+durable_assert( false, array_key_exists( 'agents_routine_action_generation_5', $GLOBALS['wpdb']->rows ), 'maybe_purge: the first call purges legacy rows' );
+durable_assert( true, is_numeric( get_option( 'agents_routine_action_generation_purged', false ) ), 'maybe_purge: a marker option records that the purge ran' );
+
+$GLOBALS['wpdb']->rows['agents_routine_action_generation_6'] = 'gen-d';
+WP_Agent_Routine_Action_Scheduler_Bridge::maybe_purge_legacy_action_generation_options();
+durable_assert( true, array_key_exists( 'agents_routine_action_generation_6', $GLOBALS['wpdb']->rows ), 'maybe_purge: a second call is gated by the marker and does not run again' );
 
 // ---------------------------------------------------------------------------
 

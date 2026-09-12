@@ -265,9 +265,19 @@ $args_for_call = static function ( string $fn, int $index ): ?array {
 	return isset( $matches[ $index ]['args'] ) && is_array( $matches[ $index ]['args'] ) ? $matches[ $index ]['args'] : null;
 };
 
-smoke_assert( array( 'routine_id' => 'daily-check' ), $args_for_call( 'unschedule', 0 ), 'bridge register unschedules by routine_id arg', $failures, $passes );
+// This harness does not shim as_get_scheduled_actions(), so the bridge's
+// idempotency check always finds nothing pending — register() on a
+// never-before-seen routine id goes straight to scheduling, with no
+// unschedule call at all (the whole point of the idempotent-register fix:
+// an unconditional unschedule is no longer part of the happy path). The
+// only 'unschedule' call in this sequence is therefore unregister()'s.
+$unschedule_calls = array_values( array_filter(
+	$GLOBALS['routine_as_calls'],
+	static fn( array $call ): bool => 'unschedule' === $call['fn']
+) );
+smoke_assert( 1, count( $unschedule_calls ), 'exactly one unschedule call total: register() with nothing pending issues none', $failures, $passes );
+smoke_assert( array( 'routine_id' => 'daily-check' ), $unschedule_calls[0]['args'] ?? null, 'bridge unregister unschedules by routine_id arg', $failures, $passes );
 smoke_assert( array( 'routine_id' => 'daily-check' ), $args_for_call( 'recurring', 0 ), 'bridge register schedules by routine_id arg', $failures, $passes );
-smoke_assert( array( 'routine_id' => 'daily-check' ), $args_for_call( 'unschedule', 1 ), 'bridge unregister unschedules by routine_id arg', $failures, $passes );
 smoke_assert( array( 'routine_id' => 'daily-check' ), $args_for_call( 'enqueue', 0 ), 'bridge run_now enqueues by routine_id arg', $failures, $passes );
 
 // All three verbs return WP_Error('not_registered') for unknown ids.
