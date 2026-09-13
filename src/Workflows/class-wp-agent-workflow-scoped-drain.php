@@ -245,7 +245,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 				++$batches;
 				$processed += (int) $batch['processed'];
 				$warnings  += (int) $batch['warnings'];
-				if ( isset( $batch['diagnostic'] ) && is_array( $batch['diagnostic'] ) ) {
+				if ( isset( $batch['diagnostic'] ) ) {
 					$diagnostic = $batch['diagnostic'];
 				}
 

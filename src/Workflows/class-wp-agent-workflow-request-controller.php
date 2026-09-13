@@ -252,7 +252,7 @@ final class WP_Agent_Workflow_Request_Controller {
 					if ( is_wp_error( $awaited ) ) {
 						return $awaited;
 					}
-					$drain  = is_array( $awaited['drain'] ?? null ) ? $awaited['drain'] : null;
+					$drain  = $awaited['drain'];
 					$result = $this->recorder->find( $result->get_run_id() ) ?? $result;
 				}
 
@@ -445,6 +445,7 @@ final class WP_Agent_Workflow_Request_Controller {
 
 	/**
 	 * @param array<string,mixed> $entry
+	 * @param array<string,int|string|bool|array{code:string,message:string,actionable:bool}>|null $drain
 	 * @return array<string,mixed>
 	 */
 	private function response( string $operation_id, array $entry, bool $busy, ?array $drain = null ): array {
