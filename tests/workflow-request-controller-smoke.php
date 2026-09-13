@@ -100,7 +100,7 @@ final class Controller_Awaiter extends WP_Agent_Workflow_Run_Awaiter {
 	public function await( string $id, WP_Agent_Workflow_Run_Recorder $recorder, array $options = array() ) {
 		++$this->calls; $this->last_options = $options; $r = $this->recorder->find( $id );
 		if ( ! empty( $options['complete'] ) && null !== $r ) { $this->recorder->update( $r->with( array( 'status' => WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, 'ended_at' => 2 ) ) ); }
-		return array();
+		return array( 'drain' => array( 'diagnostic' => array( 'code' => 'scoped_drain_claim_failed', 'message' => 'Action Scheduler could not claim the workflow action group.', 'actionable' => true ) ) );
 	}
 }
 $fails = array(); $passes = 0;
@@ -118,8 +118,10 @@ controller_assert( $one['run_id'] === $duplicate['run_id'], 'duplicate starts re
 $two = $controller->start( 'two', $spec );
 controller_assert( 2 === $runner->starts && $one['run_id'] !== $two['run_id'], 'operation scopes are isolated' );
 controller_assert( 'running' === $controller->get_status( 'two' )['status'], 'public get-status returns reconnectable operation state' );
-$controller->reconnect( 'two', array( 'await' => array( 'time_limit_ms' => 999999, 'limit' => 999999 ) ) );
+$advanced_two = $controller->reconnect( 'two', array( 'await' => array( 'time_limit_ms' => 999999, 'limit' => 999999 ) ) );
 controller_assert( 5000 === $awaiter->last_options['time_limit_ms'] && 25 === $awaiter->last_options['limit'], 'advance clamps wall-clock and action budgets' );
+controller_assert( 'scoped_drain_claim_failed' === ( $advanced_two['drain']['diagnostic']['code'] ?? '' ), 'immediate advance response preserves await drain diagnostics' );
+controller_assert( ! isset( $controller->get_status( 'two' )['drain'] ), 'status reads do not fabricate a prior drain diagnostic' );
 controller_assert( true === $one['reconnectable'], 'interrupted suspended request is reconnectable' );
 $complete = $controller->reconnect( 'one', array( 'await' => array( 'complete' => true ) ) );
 controller_assert( true === $complete['terminal'] && 'succeeded' === $complete['status'], 'reconnect advances the original suspended run' );

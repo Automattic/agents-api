@@ -207,7 +207,7 @@ if ( ! class_exists( '\ActionScheduler_Store' ) ) {
 		public function stake_claim( int $max = 10, $before = null, array $hooks = array(), string $group = '' ): ActionScheduler_ActionClaim {
 			unset( $before );
 			if ( '' !== $group && Scoped_Drain_AS::$throw_group_claim ) {
-				throw new InvalidArgumentException( 'group does not exist' );
+				throw new InvalidArgumentException( 'group does not exist; token=top-secret; SELECT * FROM actions' );
 			}
 			$claimed = array();
 			foreach ( Scoped_Drain_AS::$actions as $id => $action ) {
@@ -482,6 +482,9 @@ $strict = ( new WP_Agent_Workflow_Scoped_Drain() )->drain(
 	)
 );
 smoke_assert( 'warning', $strict['stop_reason'], 'strict run scope reports an unavailable group claim without widening scope', $failures, $passes );
+smoke_assert( 'scoped_drain_claim_failed', $strict['diagnostic']['code'] ?? '', 'strict run scope preserves a stable claim diagnostic code', $failures, $passes );
+smoke_assert( 'Action Scheduler could not claim the workflow action group.', $strict['diagnostic']['message'] ?? '', 'strict run scope replaces raw SQL and credentials with a safe group summary', $failures, $passes );
+smoke_assert( true, $strict['diagnostic']['actionable'] ?? false, 'strict run scope marks the safe claim diagnostic actionable', $failures, $passes );
 smoke_assert( 2, Scoped_Drain_AS::count_status( ActionScheduler_Store::STATUS_PENDING ), 'strict run scope leaves both runs pending instead of cross-claiming by hook', $failures, $passes );
 
 echo "Passed: {$passes}, Failed: " . count( $failures ) . "\n";

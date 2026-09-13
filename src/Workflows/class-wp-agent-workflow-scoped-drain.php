@@ -150,7 +150,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 *     execution_context?:string,
 	 *     terminal_status_callback?:callable
 	 * } $options Drain options.
-	 * @return array<string,int|string|bool> Drain stats.
+	 * @return array<string,int|string|bool|array{code:string,message:string,actionable:bool}> Drain stats.
 	 */
 	public function drain( array $options = array() ): array {
 		$hooks             = $this->normalize_hooks( $options['hooks'] ?? null );
@@ -196,6 +196,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 		$warnings      = 0;
 		$stop_reason   = 'empty';
 		$terminal      = '';
+		$diagnostic    = null;
 
 		try {
 			while ( $this->due_pending_count( $hooks, $group ) > 0 ) {
@@ -244,6 +245,9 @@ final class WP_Agent_Workflow_Scoped_Drain {
 				++$batches;
 				$processed += (int) $batch['processed'];
 				$warnings  += (int) $batch['warnings'];
+				if ( isset( $batch['diagnostic'] ) && is_array( $batch['diagnostic'] ) ) {
+					$diagnostic = $batch['diagnostic'];
+				}
 
 				if ( '' !== (string) $batch['stop_reason'] ) {
 					$stop_reason = (string) $batch['stop_reason'];
@@ -271,7 +275,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 			self::$draining = false;
 		}
 
-		return $this->build_stats( $before_counts, $this->status_counts( $hooks, $group ), $hooks, $group, $batches, $processed, $warnings, $stop_reason, $terminal );
+		return $this->build_stats( $before_counts, $this->status_counts( $hooks, $group ), $hooks, $group, $batches, $processed, $warnings, $stop_reason, $terminal, $diagnostic );
 	}
 
 	/**
@@ -289,7 +293,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 * @param string                         $run_id   Suspended workflow run id.
 	 * @param WP_Agent_Workflow_Run_Recorder $recorder Recorder that can reload the run.
 	 * @param array<string,mixed>            $options  Drain options forwarded to {@see drain()}.
-	 * @return array{result:?WP_Agent_Workflow_Run_Result,stats:array<string,int|string|bool>}
+	 * @return array{result:?WP_Agent_Workflow_Run_Result,stats:array<string,int|string|bool|array{code:string,message:string,actionable:bool}>}
 	 */
 	public function drain_suspended_run( string $run_id, WP_Agent_Workflow_Run_Recorder $recorder, array $options = array() ): array {
 		$terminal_status_callback = static function () use ( $recorder, $run_id ): string {
@@ -350,7 +354,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 * @param float             $deadline_at       Unix timestamp (with microseconds); 0 = no deadline.
 	 * @param string            $execution_context AS execution context label.
 	 * @param bool              $allow_group_fallback Whether HybridStore may retry without the group.
-	 * @return array{processed:int,warnings:int,stop_reason:string} Batch result.
+	 * @return array{processed:int,warnings:int,stop_reason:string,diagnostic?:array{code:string,message:string,actionable:bool}} Batch result.
 	 */
 	private function run_batch( int $batch_size, array $hooks, string $group, float $deadline_at, string $execution_context, bool $allow_group_fallback ): array {
 		/** @var \ActionScheduler_Store $store */
@@ -371,11 +375,15 @@ final class WP_Agent_Workflow_Scoped_Drain {
 			// because hook-only claims would cross run boundaries.
 			$claim = $this->stake_claim( $store, $batch_size, $hooks, $group, $allow_group_fallback );
 		} catch ( \Throwable $throwable ) {
-			unset( $throwable );
 			return array(
 				'processed'   => 0,
 				'warnings'    => 1,
 				'stop_reason' => 'warning',
+				'diagnostic'  => array(
+					'code'       => 'scoped_drain_claim_failed',
+					'message'    => self::safe_diagnostic_message( $throwable ),
+					'actionable' => true,
+				),
 			);
 		}
 
@@ -604,9 +612,10 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 * @param int                             $warnings      Warnings.
 	 * @param string                          $stop_reason   Why the loop stopped.
 	 * @param string                          $terminal      Terminal state from the callback.
-	 * @return array<string,int|string|bool> Stats.
+	 * @param array{code:string,message:string,actionable:bool}|null $diagnostic Safe claim diagnostic.
+	 * @return array<string,int|string|bool|array{code:string,message:string,actionable:bool}> Stats.
 	 */
-	private function build_stats( array $before, array $after, array $hooks, string $group, int $batches, int $processed, int $warnings, string $stop_reason, string $terminal ): array {
+	private function build_stats( array $before, array $after, array $hooks, string $group, int $batches, int $processed, int $warnings, string $stop_reason, string $terminal, ?array $diagnostic = null ): array {
 		$completions = 0;
 		$failures    = 0;
 		foreach ( $hooks as $hook ) {
@@ -614,7 +623,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 			$failures    += max( 0, ( $after[ $hook ]['failed'] ?? 0 ) - ( $before[ $hook ]['failed'] ?? 0 ) );
 		}
 
-		return array(
+		$stats = array(
 			'batches'           => $batches,
 			'actions_processed' => $processed,
 			'completions'       => $completions,
@@ -628,6 +637,10 @@ final class WP_Agent_Workflow_Scoped_Drain {
 			'group'             => $group,
 			'available'         => true,
 		);
+		if ( null !== $diagnostic ) {
+			$stats['diagnostic'] = $diagnostic;
+		}
+		return $stats;
 	}
 
 	/**
@@ -638,7 +651,7 @@ final class WP_Agent_Workflow_Scoped_Drain {
 	 * @param string            $stop_reason Why no batch ran.
 	 * @param array<int,string> $hooks       Scoped hooks.
 	 * @param string            $group       AS group.
-	 * @return array<string,int|string|bool> Stats.
+	 * @return array<string,int|string|bool|array{code:string,message:string,actionable:bool}> Stats.
 	 */
 	private function empty_stats( string $stop_reason, array $hooks, string $group ): array {
 		$available = self::is_available();
@@ -697,6 +710,13 @@ final class WP_Agent_Workflow_Scoped_Drain {
 			return (string) $value;
 		}
 		return '';
+	}
+
+	/** Return a stable summary without exposing arbitrary exception text to callers. */
+	private static function safe_diagnostic_message( \Throwable $error ): string {
+		return $error instanceof \InvalidArgumentException
+			? 'Action Scheduler could not claim the workflow action group.'
+			: 'Action Scheduler could not claim workflow actions.';
 	}
 
 	/**

@@ -61,6 +61,7 @@ final class Await_Smoke_Awaiter extends WP_Agent_Workflow_Run_Awaiter {
 	public int $drains = 0;
 	public string $next_status = WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED;
 	public string $stop_reason = 'terminal_status';
+	public array $diagnostic = array();
 	public array $last_options = array();
 
 	public function __construct() {}
@@ -73,7 +74,7 @@ final class Await_Smoke_Awaiter extends WP_Agent_Workflow_Run_Awaiter {
 			$recorder->update( $current->with( array( 'status' => $this->next_status ) ) );
 		}
 		$result = $recorder->find( $run_id );
-		return array(
+		$stats = array(
 			'result' => $result,
 			'stats'  => array(
 				'batches' => isset( $options['limit'] ) ? 1 : 2, 'actions_processed' => isset( $options['limit'] ) ? 1 : 2,
@@ -83,6 +84,8 @@ final class Await_Smoke_Awaiter extends WP_Agent_Workflow_Run_Awaiter {
 				'hooks' => 'branch,resume', 'group' => 'workflow', 'available' => true,
 			),
 		);
+		if ( ! empty( $this->diagnostic ) ) { $stats['stats']['diagnostic'] = $this->diagnostic; }
+		return $stats;
 	}
 }
 
@@ -155,6 +158,11 @@ $awaiter->stop_reason = 'refused_reentrant';
 $refused = $awaiter->await( 'limited', $recorder );
 await_assert( 'refused_reentrant', $refused['drain']['stop_reason'], 'reentrant refusal is preserved without fallback' );
 await_assert( true, $refused['reconnectable'], 'refused suspended run remains reconnectable' );
+
+$awaiter->stop_reason = 'warning';
+$awaiter->diagnostic  = array( 'code' => 'scoped_drain_claim_failed', 'message' => 'Action Scheduler could not claim the workflow action group.', 'actionable' => true );
+$diagnostic = $awaiter->await( 'limited', $recorder );
+await_assert( 'scoped_drain_claim_failed', $diagnostic['drain']['diagnostic']['code'] ?? '', 'claim diagnostics survive the await envelope' );
 
 $source = (string) file_get_contents( __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-awaiter.php' );
 await_assert( false, str_contains( $source, 'wp_agent_workflow_run_recorder' ), 'awaiter has no ambient recorder resolver' );

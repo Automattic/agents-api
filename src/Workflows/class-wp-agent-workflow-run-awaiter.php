@@ -36,7 +36,7 @@ class WP_Agent_Workflow_Run_Awaiter {
 	 * @param string                         $run_id   Workflow run id.
 	 * @param WP_Agent_Workflow_Run_Recorder $recorder Caller-owned run recorder.
 	 * @param array<string,mixed>            $options  Scoped drain options.
-	 * @return array{schema:string,run_id:string,status:string,terminal:bool,reconnectable:bool,result:?array<string,mixed>,drain:array<string,int|string|bool>}|\WP_Error
+	 * @return array{schema:string,run_id:string,status:string,terminal:bool,reconnectable:bool,result:?array<string,mixed>,drain:array<string,int|string|bool|array{code:string,message:string,actionable:bool}>}|\WP_Error
 	 */
 	public function await( string $run_id, WP_Agent_Workflow_Run_Recorder $recorder, array $options = array() ) {
 		if ( ! isset( $options['group'] ) || ! is_scalar( $options['group'] ) || '' === (string) $options['group'] ) {
@@ -81,7 +81,7 @@ class WP_Agent_Workflow_Run_Awaiter {
 	 * @param string                         $run_id   Workflow run id.
 	 * @param WP_Agent_Workflow_Run_Recorder $recorder Run recorder.
 	 * @param array<string,mixed>            $options  Drain options.
-	 * @return array{result:?WP_Agent_Workflow_Run_Result,stats:array<string,int|string|bool>}
+	 * @return array{result:?WP_Agent_Workflow_Run_Result,stats:array<string,int|string|bool|array{code:string,message:string,actionable:bool}>}
 	 */
 	protected function drain_suspended_run( string $run_id, WP_Agent_Workflow_Run_Recorder $recorder, array $options ): array {
 		return $this->drain->drain_suspended_run( $run_id, $recorder, $options );
@@ -104,7 +104,7 @@ class WP_Agent_Workflow_Run_Awaiter {
 	 * Build the scoped-drain stats shape without touching the queue.
 	 *
 	 * @param array<string,mixed> $options Await options.
-	 * @return array<string,int|string|bool>
+	 * @return array<string,int|string|bool|array{code:string,message:string,actionable:bool}>
 	 */
 	private function zero_work_stats( string $status, array $options ): array {
 		$hooks = isset( $options['hooks'] ) && is_array( $options['hooks'] )
