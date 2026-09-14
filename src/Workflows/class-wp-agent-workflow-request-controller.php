@@ -225,6 +225,7 @@ final class WP_Agent_Workflow_Request_Controller {
 			}
 
 			$primary_error = null;
+			$drain         = null;
 			try {
 				$phase = 'read_operation';
 				$entry = $this->get( $operation_id );
@@ -251,6 +252,7 @@ final class WP_Agent_Workflow_Request_Controller {
 					if ( is_wp_error( $awaited ) ) {
 						return $awaited;
 					}
+					$drain  = $awaited['drain'];
 					$result = $this->recorder->find( $result->get_run_id() ) ?? $result;
 				}
 
@@ -265,7 +267,7 @@ final class WP_Agent_Workflow_Request_Controller {
 				}
 				$stored_lease = $this->array_value( $entry['lease'] ?? array() );
 				$rejected     = $lease !== $this->string_value( $stored_lease['token'] ?? '' ) && $this->lease_is_active( $entry );
-				return $this->response( $operation_id, $entry, $rejected );
+				return $this->response( $operation_id, $entry, $rejected, $drain );
 			} catch ( \Throwable $error ) {
 				$primary_error = $error;
 				throw $error;
@@ -443,11 +445,12 @@ final class WP_Agent_Workflow_Request_Controller {
 
 	/**
 	 * @param array<string,mixed> $entry
+	 * @param array<string,int|string|bool|array{code:string,message:string,actionable:bool}>|null $drain
 	 * @return array<string,mixed>
 	 */
-	private function response( string $operation_id, array $entry, bool $busy ): array {
+	private function response( string $operation_id, array $entry, bool $busy, ?array $drain = null ): array {
 		$terminal = ! empty( $entry['terminal'] );
-		return array(
+		$response = array(
 			'schema'        => self::SCHEMA,
 			'operation_id'  => $operation_id,
 			'run_id'        => $this->string_value( $entry['run_id'] ?? '' ),
@@ -457,6 +460,10 @@ final class WP_Agent_Workflow_Request_Controller {
 			'status'        => $terminal ? $this->string_value( $entry['terminal_status'] ?? '' ) : 'running',
 			'result'        => $terminal ? ( $entry['result'] ?? null ) : null,
 		);
+		if ( null !== $drain ) {
+			$response['drain'] = $drain;
+		}
+		return $response;
 	}
 
 	private function storage_unavailable( string $operation, string $phase ): \WP_Error {
