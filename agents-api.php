@@ -312,6 +312,7 @@ require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-run-control-ab
 require_once AGENTS_API_PATH . 'src/Runtime/register-runtime-package-run-ability.php';
 require_once AGENTS_API_PATH . 'src/Tasks/register-agents-task-abilities.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-frontend-chat-rest-route.php';
+require_once AGENTS_API_PATH . 'src/Channels/register-frontend-chat-session-list-rest-route.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-jsonrpc-route.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-dispatch-message-ability.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-bindings.php';
