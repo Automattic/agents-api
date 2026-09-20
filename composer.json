@@ -128,6 +128,7 @@
       "php tests/external-chat-run-bridge-fixture-smoke.php",
       "php tests/task-execution-smoke.php",
       "php tests/frontend-chat-rest-smoke.php",
+      "php tests/frontend-chat-session-list-rest-smoke.php",
       "php tests/agents-chat-jsonrpc-route-smoke.php",
       "php tests/response-and-input-primitives-smoke.php",
       "php tests/agents-dispatch-message-ability-smoke.php",
