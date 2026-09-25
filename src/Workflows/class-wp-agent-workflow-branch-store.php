@@ -118,6 +118,7 @@ final class WP_Agent_Workflow_Branch_Store {
 		if ( '' === $run_id || ! function_exists( 'delete_option' ) ) {
 			return '';
 		}
+		self::maybe_sweep_expired();
 
 		$ref   = self::ADMISSION_PREFIX . md5( $run_id );
 		$token = $ref . ':' . md5( uniqid( $run_id . ':', true ) );
@@ -494,6 +495,75 @@ final class WP_Agent_Workflow_Branch_Store {
 		}
 		delete_option( self::INDEX_PREFIX . md5( $run_id ) );
 		delete_option( self::CONTEXT_PREFIX . md5( $run_id ) );
+	}
+
+	/**
+	 * Delete built-in branch rows whose TTL has passed.
+	 *
+	 * Expiry was only honoured on read, so rows of runs that never resumed
+	 * (stranded branches, crashed workers, a drain that stopped) stayed forever.
+	 * This deletes, in bounded batches: every row whose `expires` is past, and
+	 * every per-run index whose referenced rows are all gone. Rows without an
+	 * `expires` field other than indexes are left alone.
+	 *
+	 * @param int $limit Maximum rows to inspect in one call.
+	 * @return int Number of rows deleted.
+	 */
+	public static function sweep_expired( int $limit = 500 ): int {
+		global $wpdb;
+		if ( ! $wpdb instanceof \wpdb || ! function_exists( 'delete_option' ) || ! function_exists( 'get_option' ) ) {
+			return 0;
+		}
+		$names = $wpdb->get_col(
+			$wpdb->prepare(
+				'SELECT option_name FROM %i WHERE option_name LIKE %s LIMIT %d',
+				$wpdb->options,
+				$wpdb->esc_like( self::BRANCH_PREFIX ) . '%',
+				max( 1, $limit )
+			)
+		);
+		$now     = time();
+		$deleted = 0;
+		foreach ( $names as $name ) {
+			if ( ! is_string( $name ) ) {
+				continue;
+			}
+			$row  = get_option( $name, null );
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			if ( str_starts_with( $name, self::INDEX_PREFIX ) ) {
+				$live = array_filter( $row, static fn( $ref ): bool => is_string( $ref ) && null !== get_option( $ref, null ) );
+				if ( empty( $live ) ) {
+					delete_option( $name );
+					++$deleted;
+				}
+				continue;
+			}
+			$expires = is_numeric( $row['expires'] ?? null ) ? (int) $row['expires'] : 0;
+			if ( $expires > 0 && $expires <= $now ) {
+				delete_option( $name );
+				++$deleted;
+			}
+		}
+		return $deleted;
+	}
+
+	/**
+	 * Run {@see self::sweep_expired()} at most once per TTL window, piggy-backed
+	 * on fan-out admission so it needs no scheduler.
+	 */
+	private static function maybe_sweep_expired(): void {
+		if ( ! function_exists( 'get_option' ) || ! function_exists( 'update_option' ) ) {
+			return;
+		}
+		$last = get_option( 'agents_wf_sweep_at', 0 );
+		$last = is_numeric( $last ) ? (int) $last : 0;
+		if ( time() - $last < self::TTL_SECONDS ) {
+			return;
+		}
+		update_option( 'agents_wf_sweep_at', time(), false );
+		self::sweep_expired();
 	}
 
 	/**
