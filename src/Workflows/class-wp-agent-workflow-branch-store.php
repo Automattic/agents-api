@@ -522,13 +522,14 @@ final class WP_Agent_Workflow_Branch_Store {
 				max( 1, $limit )
 			)
 		);
+
 		$now     = time();
 		$deleted = 0;
 		foreach ( $names as $name ) {
 			if ( ! is_string( $name ) ) {
 				continue;
 			}
-			$row  = get_option( $name, null );
+			$row = get_option( $name, null );
 			if ( ! is_array( $row ) ) {
 				continue;
 			}

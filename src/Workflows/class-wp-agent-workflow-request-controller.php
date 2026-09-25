@@ -168,7 +168,8 @@ final class WP_Agent_Workflow_Request_Controller {
 				}
 				$pruned        = $this->prune_expired_operations( $state['runs'] );
 				$state['runs'] = $pruned['runs'];
-				$run_id = 'workflow_request_' . substr( hash( 'sha256', $this->store_key . "\0" . $operation_id ), 0, 32 );
+
+				$run_id                         = 'workflow_request_' . substr( hash( 'sha256', $this->store_key . "\0" . $operation_id ), 0, 32 );
 				$state['runs'][ $operation_id ] = array(
 					'run_id'      => $run_id,
 					'spec'        => $spec->to_array(),
@@ -179,7 +180,10 @@ final class WP_Agent_Workflow_Request_Controller {
 					'lease'       => array(),
 					'created_at'  => $this->int_value( ( $this->clock )() ),
 				);
-				return array( 'state' => $state, 'result' => $pruned['run_ids'] );
+				return array(
+					'state'  => $state,
+					'result' => $pruned['run_ids'],
+				);
 			}
 		);
 		// Branch rows for pruned runs are released outside the store lock.
