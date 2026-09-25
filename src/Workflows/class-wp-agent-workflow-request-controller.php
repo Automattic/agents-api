@@ -166,8 +166,8 @@ final class WP_Agent_Workflow_Request_Controller {
 				if ( isset( $state['runs'][ $operation_id ] ) ) {
 					return array( 'state' => $state, 'result' => null );
 				}
-				$pruned = $this->prune_expired_operations( $state );
-				$state  = $pruned['state'];
+				$pruned        = $this->prune_expired_operations( $state['runs'] );
+				$state['runs'] = $pruned['runs'];
 				$run_id = 'workflow_request_' . substr( hash( 'sha256', $this->store_key . "\0" . $operation_id ), 0, 32 );
 				$state['runs'][ $operation_id ] = array(
 					'run_id'      => $run_id,
@@ -183,8 +183,10 @@ final class WP_Agent_Workflow_Request_Controller {
 			}
 		);
 		// Branch rows for pruned runs are released outside the store lock.
-		foreach ( is_array( $forgotten ) && class_exists( WP_Agent_Workflow_Branch_Store::class ) ? $forgotten : array() as $run_id ) {
-			WP_Agent_Workflow_Branch_Store::forget_run( (string) $run_id );
+		if ( is_array( $forgotten ) && class_exists( WP_Agent_Workflow_Branch_Store::class ) ) {
+			foreach ( $forgotten as $run_id ) {
+				WP_Agent_Workflow_Branch_Store::forget_run( $this->string_value( $run_id ) );
+			}
 		}
 	}
 
@@ -197,10 +199,10 @@ final class WP_Agent_Workflow_Request_Controller {
 	 * with the current time, so they age out one window later. An operation with
 	 * an active lease is never pruned.
 	 *
-	 * @param array<string,mixed> $state Run-control state for this controller key.
-	 * @return array{state:array<string,mixed>,run_ids:array<int,string>}
+	 * @param array<string,array<string,mixed>> $runs Operations for this controller key.
+	 * @return array{runs:array<string,array<string,mixed>>,run_ids:array<int,string>}
 	 */
-	private function prune_expired_operations( array $state ): array {
+	private function prune_expired_operations( array $runs ): array {
 		$now = $this->int_value( ( $this->clock )() );
 		/**
 		 * Filters how long a workflow request operation is retained, in seconds.
@@ -208,28 +210,29 @@ final class WP_Agent_Workflow_Request_Controller {
 		 * @param int    $seconds   Retention window. Default 86400 (one day).
 		 * @param string $store_key Controller store key.
 		 */
-		$retention = max( 60, (int) ( function_exists( 'apply_filters' ) ? apply_filters( 'agents_workflow_request_retention_seconds', 86400, $this->store_key ) : 86400 ) );
+		$retention = max( 60, $this->int_value( function_exists( 'apply_filters' ) ? apply_filters( 'agents_workflow_request_retention_seconds', 86400, $this->store_key ) : 86400 ) );
+		$kept      = array();
 		$run_ids   = array();
-		foreach ( $this->array_value( $state['runs'] ?? array() ) as $id => $entry ) {
-			$entry = $this->array_value( $entry );
+		foreach ( $runs as $id => $entry ) {
 			if ( ! isset( $entry['created_at'] ) ) {
-				$entry['created_at']  = $now;
-				$state['runs'][ $id ] = $entry;
-				continue;
-			}
-			if ( $this->lease_is_active( $entry ) ) {
+				$entry['created_at'] = $now;
+				$kept[ $id ]         = $entry;
 				continue;
 			}
 			$since = ! empty( $entry['terminal'] ) && isset( $entry['terminal_at'] ) ? $entry['terminal_at'] : $entry['created_at'];
-			if ( $now - $this->int_value( $since ) > $retention ) {
-				unset( $state['runs'][ $id ] );
-				$run_id = $this->string_value( $entry['run_id'] ?? '' );
-				if ( '' !== $run_id ) {
-					$run_ids[] = $run_id;
-				}
+			if ( $this->lease_is_active( $entry ) || $now - $this->int_value( $since ) <= $retention ) {
+				$kept[ $id ] = $entry;
+				continue;
+			}
+			$run_id = $this->string_value( $entry['run_id'] ?? '' );
+			if ( '' !== $run_id ) {
+				$run_ids[] = $run_id;
 			}
 		}
-		return array( 'state' => $state, 'run_ids' => $run_ids );
+		return array(
+			'runs'    => $kept,
+			'run_ids' => $run_ids,
+		);
 	}
 
 	/**

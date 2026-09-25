@@ -28,7 +28,7 @@ function delete_option( string $option ): bool {
 }
 
 // Minimal wpdb: answers the sweeper's prefix scan from the option array.
-$GLOBALS['wpdb'] = new class() {
+class wpdb {
 	public string $options = 'wp_options';
 	public function esc_like( string $text ): string {
 		return addcslashes( $text, '_%\\' );
@@ -37,11 +37,12 @@ $GLOBALS['wpdb'] = new class() {
 		return $args;
 	}
 	public function get_col( array $prepared ): array {
-		$prefix = stripslashes( rtrim( (string) $prepared[0], '%' ) );
+		$prefix = stripslashes( rtrim( (string) $prepared[1], '%' ) );
 		$names  = array_values( array_filter( array_keys( $GLOBALS['options'] ), static fn( $name ): bool => str_starts_with( $name, $prefix ) ) );
-		return array_slice( $names, 0, (int) $prepared[1] );
+		return array_slice( $names, 0, (int) $prepared[2] );
 	}
-};
+}
+$GLOBALS['wpdb'] = new wpdb();
 
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-branch-store.php';
 

@@ -511,20 +511,23 @@ final class WP_Agent_Workflow_Branch_Store {
 	 */
 	public static function sweep_expired( int $limit = 500 ): int {
 		global $wpdb;
-		if ( ! isset( $wpdb ) || ! is_object( $wpdb ) || ! function_exists( 'delete_option' ) || ! function_exists( 'get_option' ) ) {
+		if ( ! $wpdb instanceof \wpdb || ! function_exists( 'delete_option' ) || ! function_exists( 'get_option' ) ) {
 			return 0;
 		}
 		$names = $wpdb->get_col(
 			$wpdb->prepare(
-				"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s LIMIT %d",
+				'SELECT option_name FROM %i WHERE option_name LIKE %s LIMIT %d',
+				$wpdb->options,
 				$wpdb->esc_like( self::BRANCH_PREFIX ) . '%',
 				max( 1, $limit )
 			)
 		);
 		$now     = time();
 		$deleted = 0;
-		foreach ( is_array( $names ) ? $names : array() as $name ) {
-			$name = (string) $name;
+		foreach ( $names as $name ) {
+			if ( ! is_string( $name ) ) {
+				continue;
+			}
 			$row  = get_option( $name, null );
 			if ( ! is_array( $row ) ) {
 				continue;
@@ -554,7 +557,8 @@ final class WP_Agent_Workflow_Branch_Store {
 		if ( ! function_exists( 'get_option' ) || ! function_exists( 'update_option' ) ) {
 			return;
 		}
-		$last = (int) get_option( 'agents_wf_sweep_at', 0 );
+		$last = get_option( 'agents_wf_sweep_at', 0 );
+		$last = is_numeric( $last ) ? (int) $last : 0;
 		if ( time() - $last < self::TTL_SECONDS ) {
 			return;
 		}
