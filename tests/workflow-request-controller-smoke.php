@@ -241,5 +241,26 @@ $release_runner->after_run = static function () use ( $release_store ): void { $
 $primary_visible = false;
 try { $release_controller->start( 'programmer-primary', $spec ); } catch ( RuntimeException $error ) { $primary_visible = 'Primary programmer failure.' === $error->getMessage(); }
 controller_assert( $primary_visible, 'lease-release storage failure does not replace an in-flight programmer exception' );
+$retention_clock = 10000;
+WP_Agent_Run_Control::set_store( new Controller_Memory_Store() );
+$retention_recorder = new Controller_Recorder(); $retention_runner = new Controller_Runner( $retention_recorder ); $retention_awaiter = new Controller_Awaiter( $retention_recorder );
+$retention = new WP_Agent_Workflow_Request_Controller( $retention_runner, $retention_recorder, $retention_awaiter, 'controller-retention', null, null, static function () use ( &$retention_clock ): int { return $retention_clock; } );
+$retention->start( 'old-terminal', $spec, array( 'status' => 'succeeded' ) );
+$retention->start( 'old-pending', $spec, array( 'status' => 'running' ) );
+$retention_state = WP_Agent_Run_Control::state( 'controller-retention' );
+$retention_state['runs']['legacy'] = array( 'run_id' => 'legacy-run', 'terminal' => false, 'lease' => array() );
+$retention_state['runs']['leased'] = array( 'run_id' => 'leased-run', 'terminal' => false, 'created_at' => 1, 'lease' => array( 'token' => 't', 'expires_at' => 999999 ) );
+WP_Agent_Run_Control::save_state( 'controller-retention', $retention_state );
+$retention_clock += 86400 + 1;
+$retention->start( 'fresh', $spec, array( 'status' => 'succeeded' ) );
+$kept = array_keys( WP_Agent_Run_Control::state( 'controller-retention' )['runs'] );
+sort( $kept );
+controller_assert( array( 'fresh', 'leased', 'legacy' ) === $kept, 'operations past retention are pruned, leased ones are kept, and legacy entries are stamped instead of dropped' );
+$retention_clock += 86400 + 1;
+$retention->start( 'fresher', $spec, array( 'status' => 'succeeded' ) );
+$kept = array_keys( WP_Agent_Run_Control::state( 'controller-retention' )['runs'] );
+sort( $kept );
+controller_assert( array( 'fresher', 'leased' ) === $kept, 'stamped legacy entries age out one window later' );
+
 echo "Passed: $passes, Failed: " . count( $fails ) . "\n";
 exit( empty( $fails ) ? 0 : 1 );
