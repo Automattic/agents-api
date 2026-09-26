@@ -120,10 +120,10 @@ class WP_Agent_Workflow_Runner {
 	 * @return WP_Agent_Workflow_Run_Result
 	 */
 	public function run( WP_Agent_Workflow_Spec $spec, array $inputs = array(), array $options = array() ): WP_Agent_Workflow_Run_Result {
-		$started_at    = time();
-		$run_id        = self::string_value( $options['run_id'] ?? self::generate_run_id() );
-		$runtime       = self::string_value( $options['runtime'] ?? '' );
-		$metadata      = (array) ( $options['metadata'] ?? array() );
+		$started_at = time();
+		$run_id     = self::string_value( $options['run_id'] ?? self::generate_run_id() );
+		$runtime    = self::string_value( $options['runtime'] ?? '' );
+		$metadata   = (array) ( $options['metadata'] ?? array() );
 		if ( '' !== $runtime ) {
 			// Substrate-reserved attribution key (#567): scopes every later
 			// recorder / handler resolution to the runtime that owns this run.
@@ -171,7 +171,10 @@ class WP_Agent_Workflow_Runner {
 						'ended_at' => time(),
 					)
 				);
-				WP_Agent_Run_Control::start_run( self::RUN_CONTROL_STORE, $run_id, array( 'workflow_id' => $spec->get_id(), 'metadata' => $metadata ) );
+				WP_Agent_Run_Control::start_run( self::RUN_CONTROL_STORE, $run_id, array(
+					'workflow_id' => $spec->get_id(),
+					'metadata'    => $metadata,
+				) );
 				return $this->complete_terminal_result( $terminal, false );
 			}
 			if ( '' !== $persisted ) {
@@ -207,7 +210,7 @@ class WP_Agent_Workflow_Runner {
 			return $this->complete_terminal_result( $terminal );
 		}
 
-		$context  = new WP_Agent_Workflow_Run_Context(
+		$context = new WP_Agent_Workflow_Run_Context(
 			array(
 				'inputs'              => $inputs,
 				'steps'               => array(),
@@ -514,7 +517,10 @@ class WP_Agent_Workflow_Runner {
 			$result = $result->with(
 				array(
 					'status'   => WP_Agent_Workflow_Run_Result::STATUS_FAILED,
-					'error'    => array( 'code' => $code, 'message' => $message ),
+					'error'    => array(
+						'code'    => $code,
+						'message' => $message,
+					),
 					'ended_at' => time(),
 					'metadata' => $metadata,
 				)
@@ -553,7 +559,7 @@ class WP_Agent_Workflow_Runner {
 	 * Commit and project one authoritative terminal workflow outcome.
 	 */
 	public static function authoritative_terminal_result( WP_Agent_Workflow_Run_Result $result ): WP_Agent_Workflow_Run_Result {
-		$status = WP_Agent_Workflow_Run_Result::STATUS_CANCELLED === $result->get_status()
+		$status        = WP_Agent_Workflow_Run_Result::STATUS_CANCELLED === $result->get_status()
 			? WP_Agent_Run_Control::STATUS_CANCELLED
 			: ( WP_Agent_Workflow_Run_Result::STATUS_FAILED === $result->get_status() ? WP_Agent_Run_Control::STATUS_FAILED : WP_Agent_Run_Control::STATUS_SUCCEEDED );
 		$authoritative = WP_Agent_Run_Control::finish_run( self::RUN_CONTROL_STORE, $result->get_run_id(), $status );
@@ -595,10 +601,16 @@ class WP_Agent_Workflow_Runner {
 			);
 		}
 		if ( WP_Agent_Run_Control::STATUS_SKIPPED === $stored_status ) {
-			return $result->with( array( 'status' => WP_Agent_Workflow_Run_Result::STATUS_SKIPPED, 'error' => array() ) );
+			return $result->with( array(
+				'status' => WP_Agent_Workflow_Run_Result::STATUS_SKIPPED,
+				'error'  => array(),
+			) );
 		}
 		if ( in_array( $stored_status, array( WP_Agent_Run_Control::STATUS_SUCCEEDED, WP_Agent_Run_Control::STATUS_COMPLETED ), true ) ) {
-			return $result->with( array( 'status' => WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, 'error' => array() ) );
+			return $result->with( array(
+				'status' => WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED,
+				'error'  => array(),
+			) );
 		}
 
 		return $result;
@@ -1179,10 +1191,10 @@ class WP_Agent_Workflow_Runner {
 		foreach ( array_values( $items ) as $index => $item ) {
 			$descriptors[] = array(
 				'key'               => (string) $index,
-				'index'            => $index,
-				'item'             => $item,
-				'steps'            => $steps,
-				'branch_vars'      => array(
+				'index'             => $index,
+				'item'              => $item,
+				'steps'             => $steps,
+				'branch_vars'       => array(
 					$as       => $item,
 					$index_as => $index,
 				),
@@ -1219,10 +1231,10 @@ class WP_Agent_Workflow_Runner {
 
 		return array(
 			'key'               => $role,
-			'role'             => $role,
-			'required'         => ! empty( $branch_spec['required'] ),
-			'steps'            => is_array( $branch_spec['steps'] ?? null ) ? $branch_spec['steps'] : array(),
-			'branch_vars'      => array(
+			'role'              => $role,
+			'required'          => ! empty( $branch_spec['required'] ),
+			'steps'             => is_array( $branch_spec['steps'] ?? null ) ? $branch_spec['steps'] : array(),
+			'branch_vars'       => array(
 				'context' => $shared_context,
 				'role'    => $role_contract,
 			),

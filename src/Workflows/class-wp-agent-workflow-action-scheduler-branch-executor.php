@@ -924,11 +924,11 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			self::AGGREGATE_HOOK,
 			array(
 				array(
-					'run_id'      => $run_id,
-					'generation'  => $generation,
-					'owner_token' => $owner_token,
+					'run_id'          => $run_id,
+					'generation'      => $generation,
+					'owner_token'     => $owner_token,
 					'recover_failure' => $recover_failure,
-					'runtime'     => $runtime,
+					'runtime'         => $runtime,
 				),
 			),
 			self::group_for_run( $run_id ),
@@ -991,7 +991,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			if ( self::AGGREGATE_HOOK !== $action->get_hook() ) {
 				return;
 			}
-			$args = $action->get_args();
+			$args    = $action->get_args();
 			$payload = is_array( $args[0] ?? null ) ? $args[0] : array();
 			self::run_aggregate_action_failure( $payload );
 		} catch ( \Throwable $error ) {
@@ -1191,7 +1191,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			'store_backend' => $store_backend,
 			'runtime'       => $runtime,
 		);
-		$recovery_id = self::enqueue_async_action( self::RECONCILE_HOOK, array( $retry_payload ), self::group_for_run( $run_id ) );
+		$recovery_id   = self::enqueue_async_action( self::RECONCILE_HOOK, array( $retry_payload ), self::group_for_run( $run_id ) );
 		if ( $recovery_id > 0 ) {
 			return;
 		}
@@ -1219,7 +1219,10 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			static function () use ( $recorder, $run_id, $handle_id, $message, $code ) {
 				$result = $recorder->find( $run_id );
 				if ( null === $result || ! $result->is_suspended() ) {
-					return array( 'won' => false, 'terminal' => null );
+					return array(
+						'won'      => false,
+						'terminal' => null,
+					);
 				}
 				$metadata = $result->get_metadata();
 				unset( $metadata['_suspension'] );
@@ -1235,8 +1238,11 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 					)
 				);
 				$terminal = WP_Agent_Workflow_Runner::authoritative_terminal_result( $terminal );
-				$updated = $recorder->update( $terminal );
-				return is_wp_error( $updated ) ? $updated : array( 'won' => true, 'terminal' => $terminal );
+				$updated  = $recorder->update( $terminal );
+				return is_wp_error( $updated ) ? $updated : array(
+					'won'      => true,
+					'terminal' => $terminal,
+				);
 			},
 		);
 
@@ -1471,14 +1477,14 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$runtime = '' !== self::string_value( $suspension['runtime'] ?? '' )
 			? self::string_value( $suspension['runtime'] )
 			: $result_runtime;
-		$args = array(
+		$args    = array(
 			array(
 				'run_id'        => $run_id,
 				'suspension_id' => self::suspension_id( $suspension ),
 				'runtime'       => $runtime,
 			),
 		);
-		$group = self::group_for_run( $run_id );
+		$group   = self::group_for_run( $run_id );
 		if ( self::has_scheduled_action( self::RESUME_HOOK, $args, $group ) ) {
 			return true;
 		}
@@ -1713,8 +1719,8 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * @param array<string,mixed> $suspension Suspension frame.
 	 */
 	private static function suspension_id( array $suspension ): string {
-		$handles = is_array( $suspension['handles'] ?? null ) ? $suspension['handles'] : array();
-		$ids     = array();
+		$handles    = is_array( $suspension['handles'] ?? null ) ? $suspension['handles'] : array();
+		$ids        = array();
 		$step_index = is_numeric( $suspension['step_index'] ?? null ) ? (int) $suspension['step_index'] : 0;
 		foreach ( $handles as $handle ) {
 			if ( is_array( $handle ) ) {

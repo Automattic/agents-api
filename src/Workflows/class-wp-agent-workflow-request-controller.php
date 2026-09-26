@@ -22,11 +22,11 @@ defined( 'ABSPATH' ) || exit;
  */
 final class WP_Agent_Workflow_Request_Controller {
 
-	public const SCHEMA = 'agents-api/workflow-request-controller/v1';
-	private const DEFAULT_ADVANCE_TIME_LIMIT_MS = 5000;
-	private const DEFAULT_ADVANCE_ACTION_LIMIT = 25;
+	public const SCHEMA                           = 'agents-api/workflow-request-controller/v1';
+	private const DEFAULT_ADVANCE_TIME_LIMIT_MS   = 5000;
+	private const DEFAULT_ADVANCE_ACTION_LIMIT    = 25;
 	private const TERMINAL_DELIVERY_CLAIM_VERSION = 2;
-	private const MAX_TERMINAL_EVIDENCE_BYTES = 65536;
+	private const MAX_TERMINAL_EVIDENCE_BYTES     = 65536;
 
 	/** @var callable|null */
 	private $terminal_action;
@@ -176,7 +176,10 @@ final class WP_Agent_Workflow_Request_Controller {
 				if ( null !== $result && ! $this->is_terminal( $result ) ) {
 					$result = $result->with( array(
 						'status'   => WP_Agent_Workflow_Run_Result::STATUS_CANCELLED,
-						'error'    => array( 'code' => 'cancel_requested', 'message' => 'Workflow operation cancellation was requested.' ),
+						'error'    => array(
+							'code'    => 'cancel_requested',
+							'message' => 'Workflow operation cancellation was requested.',
+						),
 						'ended_at' => $this->int_value( ( $this->clock )() ),
 					) );
 					$this->recorder->update( $result );
@@ -226,7 +229,10 @@ final class WP_Agent_Workflow_Request_Controller {
 			$this->store_key,
 			function ( array $state ) use ( $operation_id, $spec, $inputs, $options ): array {
 				if ( isset( $state['runs'][ $operation_id ] ) ) {
-					return array( 'state' => $state, 'result' => null );
+					return array(
+						'state'  => $state,
+						'result' => null,
+					);
 				}
 				$pruned        = $this->prune_expired_operations( $state['runs'] );
 				$state['runs'] = $pruned['runs'];
@@ -321,7 +327,7 @@ final class WP_Agent_Workflow_Request_Controller {
 		try {
 			$await_options = $this->bounded_await_options( $options );
 			$lease_seconds = max( $this->int_value( $options['lease_seconds'] ?? 0 ), (int) ceil( $this->int_value( $await_options['time_limit_ms'] ) / 1000 ) + 2, 1 );
-			$lease = $this->claim_lease( $operation_id, $lease_seconds, $this->string_value( $options['worker_id'] ?? '' ) );
+			$lease         = $this->claim_lease( $operation_id, $lease_seconds, $this->string_value( $options['worker_id'] ?? '' ) );
 			if ( null === $lease ) {
 				$phase = 'read_status';
 				$entry = $this->get( $operation_id );
@@ -360,8 +366,8 @@ final class WP_Agent_Workflow_Request_Controller {
 					}
 					$run_options           = is_array( $entry['options'] ?? null ) ? $entry['options'] : array();
 					$run_options['run_id'] = $this->string_value( $entry['run_id'] ?? '' );
-					$phase                  = 'run';
-					$result                 = $this->runner->run( $spec, is_array( $entry['inputs'] ?? null ) ? $entry['inputs'] : array(), $run_options );
+					$phase                 = 'run';
+					$result                = $this->runner->run( $spec, is_array( $entry['inputs'] ?? null ) ? $entry['inputs'] : array(), $run_options );
 				}
 
 				if ( $result->is_suspended() ) {
@@ -414,17 +420,30 @@ final class WP_Agent_Workflow_Request_Controller {
 		$result = WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $seconds, $worker_id ) {
 			$entry = $state['runs'][ $operation_id ] ?? null;
 			if ( ! is_array( $entry ) || ! empty( $entry['terminal'] ) ) {
-				return array( 'state' => $state, 'result' => null );
+				return array(
+					'state'  => $state,
+					'result' => null,
+				);
 			}
-			$now = $this->int_value( ( $this->clock )() );
+			$now   = $this->int_value( ( $this->clock )() );
 			$lease = $this->array_value( $entry['lease'] ?? array() );
 			if ( $this->int_value( $lease['expires_at'] ?? 0 ) > $now ) {
-				return array( 'state' => $state, 'result' => null );
+				return array(
+					'state'  => $state,
+					'result' => null,
+				);
 			}
-			$token          = bin2hex( random_bytes( 12 ) );
-			$entry['lease'] = array( 'token' => $token, 'worker_id' => '' !== $worker_id ? $worker_id : $token, 'expires_at' => $now + $seconds );
+			$token                          = bin2hex( random_bytes( 12 ) );
+			$entry['lease']                 = array(
+				'token'      => $token,
+				'worker_id'  => '' !== $worker_id ? $worker_id : $token,
+				'expires_at' => $now + $seconds,
+			);
 			$state['runs'][ $operation_id ] = $entry;
-			return array( 'state' => $state, 'result' => $token );
+			return array(
+				'state'  => $state,
+				'result' => $token,
+			);
 		} );
 		return is_string( $result ) ? $result : null;
 	}
@@ -434,11 +453,14 @@ final class WP_Agent_Workflow_Request_Controller {
 			$entry = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
 			$lease = $this->array_value( $entry['lease'] ?? array() );
 			if ( $token === $this->string_value( $lease['token'] ?? '' ) && empty( $entry['terminal'] ) ) {
-				$lease['expires_at'] = $this->int_value( ( $this->clock )() ) + $seconds;
-				$entry['lease'] = $lease;
+				$lease['expires_at']            = $this->int_value( ( $this->clock )() ) + $seconds;
+				$entry['lease']                 = $lease;
 				$state['runs'][ $operation_id ] = $entry;
 			}
-			return array( 'state' => $state, 'result' => null );
+			return array(
+				'state'  => $state,
+				'result' => null,
+			);
 		} );
 	}
 
@@ -447,7 +469,10 @@ final class WP_Agent_Workflow_Request_Controller {
 		$stored = WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $result, $lease_token ) {
 			$entry = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
 			if ( null !== $lease_token && $lease_token !== $this->string_value( $this->array_value( $entry['lease'] ?? array() )['token'] ?? '' ) ) {
-				return array( 'state' => $state, 'result' => $entry );
+				return array(
+					'state'  => $state,
+					'result' => $entry,
+				);
 			}
 			if ( $this->is_terminal( $result ) && empty( $entry['terminal'] ) ) {
 				$entry['terminal']        = true;
@@ -457,7 +482,10 @@ final class WP_Agent_Workflow_Request_Controller {
 				$entry['terminal_at']     = $this->int_value( ( $this->clock )() );
 			}
 			$state['runs'][ $operation_id ] = $entry;
-			return array( 'state' => $state, 'result' => $entry );
+			return array(
+				'state'  => $state,
+				'result' => $entry,
+			);
 		} );
 		return $this->array_value( $stored );
 	}
@@ -468,12 +496,15 @@ final class WP_Agent_Workflow_Request_Controller {
 			WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id ) {
 				$stored = $this->array_value( $state['runs'][ $operation_id ] ?? array() );
 				if ( in_array( $stored['disposition'] ?? '', array( 'pending', 'callback_failed' ), true ) ) {
-					$stored['disposition']            = 'delivered';
-					$stored['terminal_cleanup']       = true;
-					$stored['lease']                  = array();
-					$state['runs'][ $operation_id ]   = $stored;
+					$stored['disposition']          = 'delivered';
+					$stored['terminal_cleanup']     = true;
+					$stored['lease']                = array();
+					$state['runs'][ $operation_id ] = $stored;
 				}
-				return array( 'state' => $state, 'result' => null );
+				return array(
+					'state'  => $state,
+					'result' => null,
+				);
 			} );
 			return;
 		}
@@ -496,7 +527,10 @@ final class WP_Agent_Workflow_Request_Controller {
 				$disposition = $this->string_value( $stored['disposition'] ?? '' );
 				$recoverable = 'delivering' === $disposition && self::TERMINAL_DELIVERY_CLAIM_VERSION === $this->int_value( $stored['delivery_claim_version'] ?? 0 );
 				if ( ! in_array( $disposition, array( 'pending', 'callback_failed' ), true ) && ! $recoverable ) {
-					return array( 'state' => $state, 'result' => false );
+					return array(
+						'state'  => $state,
+						'result' => false,
+					);
 				}
 				$stored['disposition']            = 'delivering';
 				$stored['delivery_token']         = $token;
@@ -504,7 +538,10 @@ final class WP_Agent_Workflow_Request_Controller {
 				$stored['terminal_cleanup']       = true;
 				$stored['lease']                  = array();
 				$state['runs'][ $operation_id ]   = $stored;
-				return array( 'state' => $state, 'result' => $token );
+				return array(
+					'state'  => $state,
+					'result' => $token,
+				);
 			} );
 			if ( $token !== $claimed ) {
 				return;
@@ -536,7 +573,10 @@ final class WP_Agent_Workflow_Request_Controller {
 					unset( $stored['delivery_token'], $stored['delivery_claim_version'] );
 					$state['runs'][ $operation_id ] = $stored;
 				}
-				return array( 'state' => $state, 'result' => null );
+				return array(
+					'state'  => $state,
+					'result' => null,
+				);
 			} );
 		} );
 	}
@@ -545,10 +585,13 @@ final class WP_Agent_Workflow_Request_Controller {
 		WP_Agent_Run_Control::mutate_state( $this->store_key, function ( array $state ) use ( $operation_id, $token ) {
 			$entry = $state['runs'][ $operation_id ] ?? null;
 			if ( is_array( $entry ) && $token === $this->string_value( $this->array_value( $entry['lease'] ?? array() )['token'] ?? '' ) ) {
-				$entry['lease'] = array();
+				$entry['lease']                 = array();
 				$state['runs'][ $operation_id ] = $entry;
 			}
-			return array( 'state' => $state, 'result' => null );
+			return array(
+				'state'  => $state,
+				'result' => null,
+			);
 		} );
 	}
 
@@ -614,7 +657,10 @@ final class WP_Agent_Workflow_Request_Controller {
 			is_array( $entry['inputs'] ?? null ) ? $entry['inputs'] : array(),
 			array(),
 			array(),
-			array( 'code' => 'cancel_requested', 'message' => 'Workflow operation cancellation was requested.' ),
+			array(
+				'code'    => 'cancel_requested',
+				'message' => 'Workflow operation cancellation was requested.',
+			),
 			0,
 			$ended_at,
 			array()
@@ -648,9 +694,9 @@ final class WP_Agent_Workflow_Request_Controller {
 	 * @return array<string,mixed>
 	 */
 	private function bounded_await_options( array $options ): array {
-		$await = $this->array_value( $options['await'] ?? array() );
+		$await                  = $this->array_value( $options['await'] ?? array() );
 		$await['time_limit_ms'] = max( 1, min( self::DEFAULT_ADVANCE_TIME_LIMIT_MS, $this->int_value( $await['time_limit_ms'] ?? self::DEFAULT_ADVANCE_TIME_LIMIT_MS ) ) );
-		$await['limit'] = max( 1, min( self::DEFAULT_ADVANCE_ACTION_LIMIT, $this->int_value( $await['limit'] ?? self::DEFAULT_ADVANCE_ACTION_LIMIT ) ) );
+		$await['limit']         = max( 1, min( self::DEFAULT_ADVANCE_ACTION_LIMIT, $this->int_value( $await['limit'] ?? self::DEFAULT_ADVANCE_ACTION_LIMIT ) ) );
 		return $await;
 	}
 
