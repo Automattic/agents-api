@@ -104,8 +104,36 @@ final class WP_Agent_Workflow_Request_Controller {
 	}
 
 	/**
-	 * Request cancellation and record its terminal disposition without waiting for a
-	 * future worker to observe the request. Repeating cancel is therefore harmless.
+	 * Request cancellation and record its terminal disposition once a durable
+	 * winner is proven, without waiting for a future worker to observe the
+	 * request. Repeating cancel is therefore harmless.
+	 *
+	 * The cancellation state machine:
+	 *
+	 *  1. INTENT — a durable run-control cancellation intent is staged for the
+	 *     operation's run id before the workflow run may exist
+	 *     (`WP_Agent_Run_Control::stage_cancellation()`), so a runner that
+	 *     starts later consumes it and terminalizes cancelled without
+	 *     executing any steps.
+	 *  2. FENCE — one atomic compare-and-set on the run-control terminal
+	 *     transition (`finish_run`) decides the single authoritative winner
+	 *     between this cancellation and a live worker's terminalization.
+	 *  3. WINNER — when cancellation wins the fence, the recorder is projected
+	 *     cancelled and the operation records terminal cancelled; when a worker
+	 *     already committed another terminal outcome, the operation records
+	 *     that outcome instead; when no terminal disposition is provable yet
+	 *     (a live worker is still finalizing), the response stays non-terminal
+	 *     and the worker's own advance path records and delivers the outcome.
+	 *
+	 * Cleanup never unschedules Action Scheduler actions while an unexpired
+	 * lease shows a live worker; that worker terminalizes and cleans up on its
+	 * own advance path.
+	 *
+	 * The response carries a `cancellation` disposition:
+	 *   - `cancelled`:  durable cancellation proven; terminal cancelled.
+	 *   - `superseded`: the run had already terminalized with another outcome.
+	 *   - `pending`:    the intent is durable but no terminal disposition is
+	 *                   provable yet; the response stays reconnectable.
 	 *
 	 * @return array<string,mixed>|\WP_Error
 	 */
@@ -118,30 +146,64 @@ final class WP_Agent_Workflow_Request_Controller {
 				return new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' );
 			}
 
-			$run_id = $this->string_value( $entry['run_id'] ?? '' );
-			$phase  = 'request_cancel';
-			WP_Agent_Run_Control::request_cancel( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, $run_id );
-			$result = $this->recorder->find( $run_id );
-			if ( null !== $result && ! $this->is_terminal( $result ) ) {
-				$result = $result->with( array(
-					'status'   => WP_Agent_Workflow_Run_Result::STATUS_CANCELLED,
-					'error'    => array( 'code' => 'cancel_requested', 'message' => 'Workflow operation cancellation was requested.' ),
-					'ended_at' => $this->int_value( ( $this->clock )() ),
-				) );
-				$this->recorder->update( $result );
-			}
-			if ( null === $result ) {
+			$run_id           = $this->string_value( $entry['run_id'] ?? '' );
+			$lease_was_active = $this->lease_is_active( $entry );
+
+			$phase = 'request_cancel';
+			WP_Agent_Run_Control::stage_cancellation( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, $run_id );
+
+			$phase = 'terminal_fence';
+			$run   = WP_Agent_Run_Control::finish_run( WP_Agent_Workflow_Runner::RUN_CONTROL_STORE, $run_id, WP_Agent_Run_Control::STATUS_CANCELLED );
+
+			$stored_status = is_array( $run ) ? WP_Agent_Run_Control::normalize_status( $run['status'] ?? '' ) : '';
+			$won           = is_array( $run ) && '' !== $stored_status && WP_Agent_Run_Control::is_terminal_status( $stored_status );
+			$cancellation  = ! $won ? 'pending' : ( WP_Agent_Run_Control::STATUS_CANCELLED === $stored_status ? 'cancelled' : 'superseded' );
+
+			if ( 'pending' === $cancellation ) {
+				// The intent is durable but no terminal disposition is provable: a
+				// live worker is still finalizing (or the fence row vanished). The
+				// authoritative worker path records and delivers the terminal outcome.
 				$phase = 'read_status';
-				$entry = $this->get( $operation_id );
-				return null === $entry ? new \WP_Error( 'agents_workflow_operation_not_found', 'No workflow operation was found for the requested operation_id.' ) : $this->response( $operation_id, $entry, $this->lease_is_active( $entry ) );
+				$entry = $this->get( $operation_id ) ?? $entry;
+				return $this->cancellation_response( $operation_id, $entry, 'pending' );
 			}
+
+			$phase  = 'read_result';
+			$result = $this->recorder->find( $run_id );
+			if ( 'cancelled' === $cancellation ) {
+				// Cancellation owns the terminal transition; project it into the
+				// recorder so a worker that lost the fence records the same outcome.
+				if ( null !== $result && ! $this->is_terminal( $result ) ) {
+					$result = $result->with( array(
+						'status'   => WP_Agent_Workflow_Run_Result::STATUS_CANCELLED,
+						'error'    => array( 'code' => 'cancel_requested', 'message' => 'Workflow operation cancellation was requested.' ),
+						'ended_at' => $this->int_value( ( $this->clock )() ),
+					) );
+					$this->recorder->update( $result );
+				}
+				if ( null === $result ) {
+					// The run never started: synthesize the terminal cancelled
+					// evidence the operation record and terminal delivery need.
+					$result = self::synthetic_cancelled_result( $run_id, $entry, $this->int_value( ( $this->clock )() ) );
+				}
+			} elseif ( null === $result || ! $this->is_terminal( $result ) ) {
+				// The fence shows a non-cancelled terminal winner but the recorder
+				// has not committed its terminal evidence yet; stay non-terminal
+				// rather than fabricating a conflicting outcome.
+				$phase = 'read_status';
+				$entry = $this->get( $operation_id ) ?? $entry;
+				return $this->cancellation_response( $operation_id, $entry, 'pending' );
+			}
+
 			$phase = 'record_terminal';
 			$entry = $this->record_terminal( $operation_id, $result );
-			$this->cleanup_operation_actions( $run_id );
+			if ( ! $lease_was_active ) {
+				$this->cleanup_operation_actions( $run_id );
+			}
 			$phase = 'deliver_terminal';
 			$this->deliver_terminal_once( $operation_id, $entry, $result );
 			$phase = 'read_terminal';
-			return $this->response( $operation_id, $this->get( $operation_id ) ?? $entry, false );
+			return $this->cancellation_response( $operation_id, $this->get( $operation_id ) ?? $entry, $cancellation, false );
 		} catch ( WP_Agent_Run_Control_Store_Exception $error ) {
 			unset( $error );
 			return $this->storage_unavailable( 'cancel', $phase );
@@ -522,6 +584,41 @@ final class WP_Agent_Workflow_Request_Controller {
 			$response['drain'] = $drain;
 		}
 		return $response;
+	}
+
+	/**
+	 * Build a cancel() response, adding the `cancellation` disposition key.
+	 *
+	 * @param array<string,mixed> $entry Operation entry.
+	 * @return array<string,mixed>
+	 */
+	private function cancellation_response( string $operation_id, array $entry, string $cancellation, ?bool $busy = null ): array {
+		$response                 = $this->response( $operation_id, $entry, $busy ?? $this->lease_is_active( $entry ) );
+		$response['cancellation'] = $cancellation;
+		return $response;
+	}
+
+	/**
+	 * Build the terminal cancelled evidence for a run that never started, so
+	 * the operation record and terminal delivery carry a complete result
+	 * envelope even when the recorder holds no row for the run.
+	 *
+	 * @param array<string,mixed> $entry Operation entry.
+	 */
+	private function synthetic_cancelled_result( string $run_id, array $entry, int $ended_at ): WP_Agent_Workflow_Run_Result {
+		$spec = is_array( $entry['spec'] ?? null ) ? $this->array_value( $entry['spec'] ) : array();
+		return new WP_Agent_Workflow_Run_Result(
+			$run_id,
+			$this->string_value( $spec['id'] ?? '' ),
+			WP_Agent_Workflow_Run_Result::STATUS_CANCELLED,
+			is_array( $entry['inputs'] ?? null ) ? $entry['inputs'] : array(),
+			array(),
+			array(),
+			array( 'code' => 'cancel_requested', 'message' => 'Workflow operation cancellation was requested.' ),
+			0,
+			$ended_at,
+			array()
+		);
 	}
 
 	private function storage_unavailable( string $operation, string $phase ): \WP_Error {
