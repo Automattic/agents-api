@@ -53,7 +53,7 @@ add_action(
 				AGENTS_RUN_WORKFLOW_ABILITY,
 				array(
 					'label'               => 'Run Workflow',
-					'description'         => 'Canonical entry point for running a registered workflow. Dispatches to whichever runtime is registered via the wp_agent_workflow_handler filter.',
+					'description'         => 'Canonical entry point for running a registered workflow. Routes to the runtime that owns the target workflow via the wp_agent_workflow_runtime_handlers map, falling back to the legacy wp_agent_workflow_handler filter.',
 					'category'            => 'agents-api',
 					'input_schema'        => agents_run_workflow_input_schema(),
 					'output_schema'       => agents_run_workflow_output_schema(),
@@ -205,28 +205,112 @@ add_action(
 );
 
 /**
- * Dispatch a workflow run to the registered runtime.
+ * Resolve the owning runtime key that should route a `agents/run-workflow`
+ * dispatch (#567).
+ *
+ * Resolution order:
+ *
+ *   1. Explicit `runtime` input — the caller targets a runtime directly. This
+ *      is the only way to route an inline `spec` or a store-owned workflow
+ *      that is not in the in-memory registry.
+ *   2. The registered workflow's spec `meta['runtime']` — a spec declares its
+ *      owning runtime key in its free-form `meta` map when it is registered,
+ *      so dispatches by `workflow_id` route to the registering runtime.
+ *   3. Empty string — no runtime is identifiable; dispatch falls back to the
+ *      legacy first-callable-wins filter.
+ *
+ * @since 0.13.0
+ *
+ * @param array<mixed> $input Canonical run-workflow input.
+ * @return string The owning runtime key, or '' when unidentifiable.
+ */
+function agents_workflow_resolve_dispatch_runtime( array $input ): string {
+	$explicit = is_string( $input['runtime'] ?? null ) ? trim( $input['runtime'] ) : '';
+	if ( '' !== $explicit ) {
+		return $explicit;
+	}
+
+	$workflow_id = is_string( $input['workflow_id'] ?? null ) ? $input['workflow_id'] : '';
+	if ( '' === $workflow_id ) {
+		return '';
+	}
+
+	$spec = WP_Agent_Workflow_Registry::find( $workflow_id );
+	if ( null === $spec ) {
+		return '';
+	}
+
+	$meta = $spec->get_meta();
+	return is_string( $meta['runtime'] ?? null ) ? trim( $meta['runtime'] ) : '';
+}
+
+/**
+ * Dispatch a workflow run to the runtime that owns the target workflow.
+ *
+ * Routing is scoped by the run's owning runtime key (#567): when a runtime is
+ * identifiable (explicit `runtime` input, or the target workflow's registered
+ * spec `meta['runtime']`), the dispatcher looks it up in the runtime-scoped
+ * handler map ({@see 'wp_agent_workflow_runtime_handlers'}) and calls ONLY the
+ * handler registered under that key. Two consumers on one site can each
+ * register a handler and neither receives the other's dispatches.
  *
  * @since  0.103.0
+ * @since  0.13.0 Routes by owning runtime key via `wp_agent_workflow_runtime_handlers`.
  *
  * @param  array<mixed> $input Canonical run-workflow input.
  * @return array<mixed>|\WP_Error Canonical output, or WP_Error if no runtime is registered.
  */
 function agents_run_workflow_dispatch( array $input ) {
-	/**
-	 * Filter the workflow runtime handler.
-	 *
-	 * Consumers register a callable that accepts the canonical input array
-	 * and returns either the canonical output or WP_Error. The first hook
-	 * to return a callable wins.
-	 *
-	 * @since 0.103.0
-	 *
-	 * @param callable|null $handler Currently registered handler. Null when
-	 *                               no runtime has registered.
-	 * @param array<mixed>         $input   The canonical input being dispatched.
-	 */
-	$handler = apply_filters( 'wp_agent_workflow_handler', null, $input );
+	$runtime = agents_workflow_resolve_dispatch_runtime( $input );
+
+	$handler = null;
+	if ( '' !== $runtime ) {
+		/**
+		 * Filter the runtime-scoped workflow handler map (#567).
+		 *
+		 * Consumers register their handler keyed by the opaque runtime key they
+		 * own: array<string runtime, callable handler>. The dispatcher picks
+		 * exactly the entry matching the target workflow's owning runtime —
+		 * first-callable-wins no longer applies to attributed dispatches. A
+		 * handler receives the canonical input array and returns either the
+		 * canonical output or WP_Error.
+		 *
+		 * Use {@see register_workflow_runtime_handler()} to add an entry.
+		 *
+		 * @since 0.13.0
+		 *
+		 * @param array<string,callable> $handlers Runtime key → handler map. Empty by default.
+		 * @param string                 $runtime  The resolved owning runtime key.
+		 * @param array<mixed>           $input    The canonical input being dispatched.
+		 */
+		$handlers  = (array) apply_filters( 'wp_agent_workflow_runtime_handlers', array(), $runtime, $input );
+		$candidate = $handlers[ $runtime ] ?? null;
+		if ( is_callable( $candidate ) ) {
+			$handler = $candidate;
+		}
+	}
+
+	if ( null === $handler ) {
+		/**
+		 * LEGACY FALLBACK — first-callable-wins dispatch for dispatches whose
+		 * owning runtime is unidentifiable, or whose runtime has no scoped
+		 * entry. BACK-COMPAT for exactly one release: a site with a single
+		 * unscoped consumer keeps working unchanged. Delete this fallback once
+		 * consumers register via `wp_agent_workflow_runtime_handlers`; do NOT
+		 * keep a permanent alias.
+		 *
+		 * Consumers register a callable that accepts the canonical input array
+		 * and returns either the canonical output or WP_Error. The first hook
+		 * to return a callable wins.
+		 *
+		 * @since 0.103.0
+		 *
+		 * @param callable|null $handler Currently registered handler. Null when
+		 *                               no runtime has registered.
+		 * @param array<mixed>         $input   The canonical input being dispatched.
+		 */
+		$handler = apply_filters( 'wp_agent_workflow_handler', null, $input );
+	}
 
 	if ( ! is_callable( $handler ) ) {
 		/**
@@ -479,6 +563,10 @@ function agents_run_workflow_input_schema(): array {
 				'type'        => array( 'string', 'null' ),
 				'description' => 'Id of a registered or stored workflow to run. Pass `null` to run an inline `spec` instead.',
 			),
+			'runtime'     => array(
+				'type'        => array( 'string', 'null' ),
+				'description' => 'Owning runtime key to route the dispatch to (#567). Opaque, consumer-chosen. Overrides the registered workflow spec\'s meta.runtime; omit to route by the spec, or when a single legacy runtime is registered.',
+			),
 			'spec'        => array(
 				'type'        => array( 'object', 'null' ),
 				'description' => 'Inline workflow spec to run. Use when the workflow is not (yet) persisted. Either `workflow_id` or `spec` must be provided.',
@@ -639,5 +727,31 @@ function register_workflow_handler( callable $handler, int $priority = 10 ): voi
 		},
 		$priority,
 		2
+	);
+}
+
+/**
+ * Convenience helper for consumers: register a callable as the handler for ONE
+ * runtime key (#567). The dispatcher routes only dispatches whose owning
+ * runtime matches `$runtime` to this handler — registering here never captures
+ * another runtime's dispatches.
+ *
+ * @since 0.13.0
+ *
+ * @param string   $runtime  Opaque runtime key this handler owns.
+ * @param callable $handler  Receives the canonical input array, returns the
+ *                           canonical output array or WP_Error.
+ * @param int      $priority Filter priority. Default 10.
+ */
+function register_workflow_runtime_handler( string $runtime, callable $handler, int $priority = 10 ): void {
+	add_filter(
+		'wp_agent_workflow_runtime_handlers',
+		static function ( array $handlers, string $resolved, array $input ) use ( $runtime, $handler ) {
+			unset( $resolved, $input );
+			$handlers[ $runtime ] = $handler;
+			return $handlers;
+		},
+		$priority,
+		3
 	);
 }
