@@ -363,7 +363,61 @@ class WP_Agent_Run_Control {
 	}
 
 	/**
+	 * Stage a durable cancellation intent for a run that may not exist yet.
+	 *
+	 * Unlike {@see self::request_cancel()}, this primitive persists the intent
+	 * even when no run-control row exists: the intent row is created in the
+	 * `cancelling` state (with an empty `started_at`, marking a run that never
+	 * started). A runner that later calls {@see self::start_run()} observes the
+	 * staged intent and must terminalize as cancelled without executing steps,
+	 * so a cancellation racing run creation can never be lost. For an existing
+	 * row the behavior matches `request_cancel()`: a non-terminal row moves to
+	 * `cancelling`, and an already-terminal row is returned unchanged.
+	 *
+	 * @param string              $store_key Option key used by the backing store.
+	 * @param string              $run_id    Run ID.
+	 * @param WP_Agent_Workspace_Scope|null $workspace Explicit workspace scope.
+	 * @return array<string,mixed> The normalized run row carrying the staged intent.
+	 */
+	public static function stage_cancellation( string $store_key, string $run_id, ?WP_Agent_Workspace_Scope $workspace = null ): array {
+		$result = self::mutate_run_state(
+			$store_key,
+			static function ( array $state ) use ( $run_id ): array {
+				$current = $state['runs'][ $run_id ] ?? null;
+				if ( is_array( $current ) ) {
+					$current                  = self::normalize_cancellation_state( $current );
+					$state['runs'][ $run_id ] = $current;
+					if ( self::is_terminal_status( $current['status'] ?? null ) ) {
+						return array( 'state' => $state, 'result' => $current );
+					}
+				}
+
+				$run = self::normalize_cancellation_state( array(
+					'run_id'     => $run_id,
+					'status'     => self::STATUS_CANCELLING,
+					'cancelled'  => true,
+					'started_at' => is_array( $current ) ? self::string_value( $current['started_at'] ?? '' ) : '',
+					'updated_at' => self::now(),
+					'metadata'   => is_array( $current ) && is_array( $current['metadata'] ?? null ) ? $current['metadata'] : array(),
+				) );
+
+				$state['runs'][ $run_id ] = $run;
+				$state                    = self::record_event_in_state( $state, $run_id, 'cancel_requested', array( 'status' => self::STATUS_CANCELLING ) );
+				return array( 'state' => $state, 'result' => $run );
+			},
+			$workspace
+		);
+
+		return is_array( $result ) ? self::normalize_run( self::string_keyed_array( $result ) ) : array();
+	}
+
+	/**
 	 * Request cancellation of a stored run.
+	 *
+	 * Returns null only when no run-control row exists; the intent is not
+	 * persisted in that case. Callers that must fence cancellation against a
+	 * run that may not have started yet should use
+	 * {@see self::stage_cancellation()} instead.
 	 *
 	 * @return array<string,mixed>|null
 	 */
@@ -395,9 +449,18 @@ class WP_Agent_Run_Control {
 		return is_array( $result ) ? self::normalize_run( self::string_keyed_array( $result ) ) : null;
 	}
 
+	/**
+	 * Whether cancellation was requested for a run and is still in force.
+	 *
+	 * True for a `cancelling` run and for a run whose terminal outcome is
+	 * `cancelled`, so an active worker's next cancellation check observes a
+	 * fence-won cancellation and stops instead of running to natural
+	 * completion after the terminal transition already committed.
+	 */
 	public static function cancel_requested( string $store_key, string $run_id ): bool {
 		$run = self::get_run( $store_key, $run_id );
-		return null !== $run && self::STATUS_CANCELLING === ( $run['status'] ?? '' );
+		return null !== $run
+			&& ( self::STATUS_CANCELLING === ( $run['status'] ?? '' ) || true === ( $run['cancelled'] ?? false ) );
 	}
 
 	/**
@@ -525,7 +588,10 @@ class WP_Agent_Run_Control {
 		return $mutated['result'];
 	}
 
-	private static function is_terminal_status( mixed $status ): bool {
+	/**
+	 * Whether a normalized run-control status is terminal.
+	 */
+	public static function is_terminal_status( mixed $status ): bool {
 		return in_array(
 			self::normalize_status( $status ),
 			array(

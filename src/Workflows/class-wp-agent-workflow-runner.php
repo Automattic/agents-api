@@ -179,7 +179,7 @@ class WP_Agent_Workflow_Runner {
 			}
 		}
 
-		WP_Agent_Run_Control::start_run(
+		$control = WP_Agent_Run_Control::start_run(
 			self::RUN_CONTROL_STORE,
 			$result->get_run_id(),
 			array(
@@ -187,6 +187,12 @@ class WP_Agent_Workflow_Runner {
 				'metadata'    => $metadata,
 			)
 		);
+		if ( self::consume_pending_cancellation( $control ) ) {
+			// A cancellation intent was staged before this run started; the fence
+			// already owns the terminal transition. Terminalize cancelled without
+			// executing any steps.
+			return $this->complete_terminal_result( self::cancelled_result( $result, array() ) );
+		}
 
 		// Validate inputs against the spec's input declarations.
 		$input_error = self::validate_inputs( $spec, $inputs );
@@ -522,6 +528,18 @@ class WP_Agent_Workflow_Runner {
 	/** @phpstan-impure */
 	private static function is_cancel_requested( string $run_id ): bool {
 		return WP_Agent_Run_Control::cancel_requested( self::RUN_CONTROL_STORE, $run_id );
+	}
+
+	/**
+	 * Whether the run-control row returned by `start_run()` already carries a
+	 * cancellation intent staged before this run started. Consuming it at start
+	 * is what makes a pre-start cancel authoritative: the runner terminalizes
+	 * cancelled without executing any steps.
+	 *
+	 * @param array<string,mixed> $control Normalized run-control row.
+	 */
+	private static function consume_pending_cancellation( array $control ): bool {
+		return ! empty( $control['cancelled'] );
 	}
 
 	/**
