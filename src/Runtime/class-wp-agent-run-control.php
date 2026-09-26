@@ -256,16 +256,22 @@ class WP_Agent_Run_Control {
 			static function ( array $state ) use ( $run_id, $run ): array {
 				$current = $state['runs'][ $run_id ] ?? null;
 				if ( is_array( $current ) ) {
-					$current                    = self::normalize_cancellation_state( $current );
+					$current                  = self::normalize_cancellation_state( $current );
 					$state['runs'][ $run_id ] = $current;
 				}
 				if ( is_array( $current ) ) {
-					return array( 'state' => $state, 'result' => $current );
+					return array(
+						'state'  => $state,
+						'result' => $current,
+					);
 				}
 
 				$state['runs'][ $run_id ] = $run;
 				$state                    = self::record_event_in_state( $state, $run_id, 'run_started', array( 'status' => self::STATUS_RUNNING ) );
-				return array( 'state' => $state, 'result' => $run );
+				return array(
+					'state'  => $state,
+					'result' => $run,
+				);
 			},
 			$workspace
 		);
@@ -292,11 +298,14 @@ class WP_Agent_Run_Control {
 			static function ( array $state ) use ( $run_id, $normalized ): array {
 				$current = $state['runs'][ $run_id ] ?? null;
 				if ( is_array( $current ) ) {
-					$current                    = self::normalize_cancellation_state( $current );
+					$current                  = self::normalize_cancellation_state( $current );
 					$state['runs'][ $run_id ] = $current;
 				}
 				if ( is_array( $current ) && self::is_terminal_status( $current['status'] ?? null ) ) {
-					return array( 'state' => $state, 'result' => $current );
+					return array(
+						'state'  => $state,
+						'result' => $current,
+					);
 				}
 
 				$next = $normalized;
@@ -307,7 +316,10 @@ class WP_Agent_Run_Control {
 
 				$state['runs'][ $run_id ] = $next;
 				$state                    = self::record_event_in_state( $state, $run_id, 'run_updated', array( 'status' => $next['status'] ) );
-				return array( 'state' => $state, 'result' => $next );
+				return array(
+					'state'  => $state,
+					'result' => $next,
+				);
 			},
 			$workspace
 		);
@@ -328,13 +340,19 @@ class WP_Agent_Run_Control {
 			$store_key,
 			static function ( array $state ) use ( $run_id, $status ): array {
 				if ( ! isset( $state['runs'][ $run_id ] ) ) {
-					return array( 'state' => $state, 'result' => null );
+					return array(
+						'state'  => $state,
+						'result' => null,
+					);
 				}
 
 				$run                      = self::normalize_cancellation_state( $state['runs'][ $run_id ] );
 				$state['runs'][ $run_id ] = $run;
 				if ( self::is_terminal_status( $run['status'] ?? null ) ) {
-					return array( 'state' => $state, 'result' => $run );
+					return array(
+						'state'  => $state,
+						'result' => $run,
+					);
 				}
 
 				$run['status']     = self::is_cancellation_requested( $run ) ? self::STATUS_CANCELLED : self::normalize_status( $status );
@@ -343,7 +361,10 @@ class WP_Agent_Run_Control {
 
 				$state['runs'][ $run_id ] = $run;
 				$state                    = self::record_event_in_state( $state, $run_id, 'run_finished', array( 'status' => $run['status'] ) );
-				return array( 'state' => $state, 'result' => $run );
+				return array(
+					'state'  => $state,
+					'result' => $run,
+				);
 			},
 			$workspace
 		);
@@ -388,7 +409,10 @@ class WP_Agent_Run_Control {
 					$current                  = self::normalize_cancellation_state( $current );
 					$state['runs'][ $run_id ] = $current;
 					if ( self::is_terminal_status( $current['status'] ?? null ) ) {
-						return array( 'state' => $state, 'result' => $current );
+						return array(
+							'state'  => $state,
+							'result' => $current,
+						);
 					}
 				}
 
@@ -403,7 +427,10 @@ class WP_Agent_Run_Control {
 
 				$state['runs'][ $run_id ] = $run;
 				$state                    = self::record_event_in_state( $state, $run_id, 'cancel_requested', array( 'status' => self::STATUS_CANCELLING ) );
-				return array( 'state' => $state, 'result' => $run );
+				return array(
+					'state'  => $state,
+					'result' => $run,
+				);
 			},
 			$workspace
 		);
@@ -426,13 +453,19 @@ class WP_Agent_Run_Control {
 			$store_key,
 			static function ( array $state ) use ( $run_id ): array {
 				if ( ! isset( $state['runs'][ $run_id ] ) ) {
-					return array( 'state' => $state, 'result' => null );
+					return array(
+						'state'  => $state,
+						'result' => null,
+					);
 				}
 
 				$run                      = self::normalize_cancellation_state( $state['runs'][ $run_id ] );
 				$state['runs'][ $run_id ] = $run;
 				if ( self::is_terminal_status( $run['status'] ?? null ) ) {
-					return array( 'state' => $state, 'result' => $run );
+					return array(
+						'state'  => $state,
+						'result' => $run,
+					);
 				}
 
 				$run['status']     = self::STATUS_CANCELLING;
@@ -441,7 +474,10 @@ class WP_Agent_Run_Control {
 
 				$state['runs'][ $run_id ] = $run;
 				$state                    = self::record_event_in_state( $state, $run_id, 'cancel_requested', array( 'status' => $run['status'] ) );
-				return array( 'state' => $state, 'result' => $run );
+				return array(
+					'state'  => $state,
+					'result' => $run,
+				);
 			},
 			$workspace
 		);
@@ -573,7 +609,7 @@ class WP_Agent_Run_Control {
 	 * @return mixed Mutation result.
 	 */
 	private static function mutate_run_state( string $store_key, callable $mutation, ?WP_Agent_Workspace_Scope $workspace = null ): mixed {
-		$store = self::store();
+		$store                           = self::store();
 		$default_store_without_wordpress = $store instanceof WP_Agent_Option_Run_Control_Store && ! class_exists( '\wpdb' );
 		if ( null === $workspace && $store instanceof WP_Agent_Atomic_Run_Control_Store && ! $default_store_without_wordpress ) {
 			return $store->mutate_state( $store_key, $mutation );
