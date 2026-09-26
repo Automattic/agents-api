@@ -145,9 +145,12 @@ add_action(
 
 // Durable aggregate dispatch seam. Returning an action id tells reconcile that
 // aggregation is owned by Action Scheduler; null preserves non-AS inline paths.
+// The suspension's owning runtime key (#567) rides through so the durable
+// aggregate payload carries it and the claimed callback resolves the run's OWN
+// recorder.
 add_filter(
 	'wp_agent_workflow_aggregate_dispatch',
-	static function ( $action_id, $run_id, $executor_id, $generation, $owner_token, $recover_failure ) {
+	static function ( $action_id, $run_id, $executor_id, $generation, $owner_token, $recover_failure, $runtime = '' ) {
 		if ( is_int( $action_id ) || WP_Agent_Workflow_Action_Scheduler_Branch_Executor::ID !== $executor_id ) {
 			return $action_id;
 		}
@@ -155,11 +158,12 @@ add_filter(
 			is_string( $run_id ) ? $run_id : '',
 			is_string( $generation ) ? $generation : '',
 			is_string( $owner_token ) ? $owner_token : '',
-			(bool) $recover_failure
+			(bool) $recover_failure,
+			is_string( $runtime ) ? $runtime : ''
 		);
 	},
 	10,
-	6
+	7
 );
 
 // Fatal shutdown is separate from AS's failed execution/timeout hooks above.

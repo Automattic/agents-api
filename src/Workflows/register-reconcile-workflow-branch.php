@@ -42,6 +42,10 @@ add_action(
 					'properties' => array(
 						'run_id'        => array( 'type' => 'string' ),
 						'handle_id'     => array( 'type' => 'string' ),
+						'runtime'       => array(
+							'type'        => 'string',
+							'description' => 'Owning runtime key of the run. Scopes recorder resolution to the runtime that owns the run (#567). Omit for legacy runs started before runtime attribution existed.',
+						),
 						'branch_result' => array(
 							'type'        => 'object',
 							'description' => 'BranchResult: { key, status, output, steps?, error? }.',
@@ -75,13 +79,14 @@ add_action(
 function agents_reconcile_workflow_branch_ability( array $input ) {
 	$run_id        = agents_workflow_string( $input['run_id'] ?? '' );
 	$handle_id     = agents_workflow_string( $input['handle_id'] ?? '' );
+	$runtime       = agents_workflow_string( $input['runtime'] ?? '' );
 	$branch_result = is_array( $input['branch_result'] ?? null ) ? \AgentsAPI\AI\WP_Agent_Run_Control::string_keyed_array( $input['branch_result'] ) : array();
 
 	if ( '' === $run_id || '' === $handle_id ) {
 		return new \WP_Error( 'agents_reconcile_workflow_branch_invalid_input', 'run_id and handle_id are required.' );
 	}
 
-	$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
+	$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result, $runtime );
 	if ( is_wp_error( $result ) ) {
 		return $result;
 	}
@@ -118,14 +123,17 @@ function agents_reconcile_workflow_branch_ability( array $input ) {
  * still owns the same suspension generation.
  *
  * @since 0.5.0
+ * @since 0.13.0 Added the optional `$runtime` parameter for scoped recorder resolution.
  *
  * @param string              $run_id        Suspended run id.
  * @param string              $handle_id     The completed branch's handle id.
  * @param array<string,mixed> $branch_result BranchResult: { key, status, output, steps?, error? }.
+ * @param string              $runtime       Owning runtime key. Empty for legacy runs;
+ *                                            scopes {@see agents_workflow_resolve_recorder()}.
  * @return WP_Agent_Workflow_Run_Result|\WP_Error The (possibly still-suspended) run.
  */
-function agents_reconcile_workflow_branch( string $run_id, string $handle_id, array $branch_result ) {
-	$recorder = agents_workflow_resolve_recorder();
+function agents_reconcile_workflow_branch( string $run_id, string $handle_id, array $branch_result, string $runtime = '' ) {
+	$recorder = agents_workflow_resolve_recorder( $runtime, $run_id );
 	if ( null === $recorder ) {
 		return new \WP_Error( 'agents_reconcile_workflow_branch_no_recorder', 'A recorder is required to reconcile a suspended run. Register one via the `wp_agent_workflow_run_recorder` filter.' );
 	}
@@ -492,11 +500,19 @@ function agents_workflow_advance_reconcile_continuation_locked( WP_Agent_Workflo
 /**
  * Dispatch one executor-owned durable aggregate action, or null for inline fallback.
  *
+ * The suspension frame's owning runtime key (stamped by the runner at suspend
+ * time) rides to the executor through the filter so the durable action payload
+ * carries it and the later callback resolves the run's OWN recorder (#567).
+ *
+ * @since 0.5.0
+ * @since 0.13.0 Passes the suspension's owning runtime key to the filter.
+ *
  * @param array<string,mixed> $suspension Suspension frame.
  */
 function agents_workflow_dispatch_aggregate_continuation( string $run_id, array $suspension, string $generation, string $owner_token, bool $recover_failure = false ): ?int {
 	$executor_id = agents_workflow_string( $suspension['executor_id'] ?? '' );
-	$action_id = apply_filters( 'wp_agent_workflow_aggregate_dispatch', null, $run_id, $executor_id, $generation, $owner_token, $recover_failure );
+	$runtime     = agents_workflow_string( $suspension['runtime'] ?? '' );
+	$action_id = apply_filters( 'wp_agent_workflow_aggregate_dispatch', null, $run_id, $executor_id, $generation, $owner_token, $recover_failure, $runtime );
 	return is_int( $action_id ) ? $action_id : null;
 }
 
@@ -858,17 +874,48 @@ function agents_workflow_splice_step_output( WP_Agent_Workflow_Run_Result $resul
  * persistence, so the recorder is supplied via a filter — the same seam a
  * consumer already uses to wire a runtime.
  *
+ * Resolution is SCOPED to the run's owning runtime (#567): `$runtime` is the
+ * opaque, consumer-chosen key the runner stamped onto the run at start (the
+ * `runtime` run option, persisted as `metadata._runtime`) and carried in every
+ * Action Scheduler payload that later needs a recorder. A consumer hook should
+ * return its recorder ONLY when `$runtime` matches the key it owns (and return
+ * `null` otherwise), so two consumers on one site each reconcile their own
+ * suspended runs without cross-reconciling each other's.
+ *
  * @since 0.5.0
+ *
+ * @param string $runtime Owning runtime key of the run. Empty string for runs
+ *                        started before the key existed (legacy/unattributed).
+ * @param string $run_id  The suspended run id (diagnostic context for the filter).
+ * @return WP_Agent_Workflow_Run_Recorder|null
  */
-function agents_workflow_resolve_recorder(): ?WP_Agent_Workflow_Run_Recorder {
+function agents_workflow_resolve_recorder( string $runtime = '', string $run_id = '' ): ?WP_Agent_Workflow_Run_Recorder {
 	/**
 	 * Filter the workflow run recorder used to reload + resume suspended runs.
 	 *
+	 * Scoped contract (#567): return a recorder ONLY for runs your runtime
+	 * owns — when `$runtime` equals the opaque runtime key you registered the
+	 * run under — and return `null` for every other run so the next hook (or
+	 * no hook) resolves it. `$runtime` is `''` for runs started before the
+	 * runtime key existed.
+	 *
+	 * BACK-COMPAT (one release only, then delete this paragraph): hooks
+	 * registered against the original zero-argument contract still work —
+	 * WordPress passes only the arguments a hook declares, so an old hook
+	 * receives just `$recorder` and resolves every run on the site exactly as
+	 * it did before scoping shipped. That global ownership is the collision
+	 * this seam fixes; unscoped hooks must migrate to the scoped contract
+	 * (accept `$runtime` + `$run_id`, return null for foreign runs) and the
+	 * unscoped behavior then dies with the fallback release.
+	 *
 	 * @since 0.5.0
+	 * @since 0.13.0 Added the `$runtime` and `$run_id` scoping arguments.
 	 *
 	 * @param WP_Agent_Workflow_Run_Recorder|null $recorder Currently resolved recorder.
+	 * @param string                              $runtime Owning runtime key ('' = legacy/unattributed).
+	 * @param string                              $run_id  The suspended run id.
 	 */
-	$recorder = apply_filters( 'wp_agent_workflow_run_recorder', null );
+	$recorder = apply_filters( 'wp_agent_workflow_run_recorder', null, $runtime, $run_id );
 	return $recorder instanceof WP_Agent_Workflow_Run_Recorder ? $recorder : null;
 }
 

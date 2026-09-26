@@ -107,6 +107,11 @@ class WP_Agent_Workflow_Runner {
 	 *                                       failure with a structured error.
 	 * @param array<mixed>                  $options Runtime options:
 	 *                                        - `run_id` (string, optional): caller-suggested run id.
+	 *                                        - `runtime` (string, optional): the run's owning runtime key —
+	 *                                          an opaque, consumer-chosen string (#567). Stamped onto the run
+	 *                                          (`metadata._runtime`), the execution context (`_workflow_runtime`),
+	 *                                          and every suspension frame / async payload the run later produces,
+	 *                                          so recorder and handler resolution can be scoped to the run's owner.
 	 *                                        - `continue_on_error` (bool): keep running after a failed step. Default false.
 	 *                                        - `metadata` (array): forwarded to the run result.
 	 *                                        - `evidence_refs` (array): neutral artifact/log references forwarded to the run result.
@@ -117,7 +122,13 @@ class WP_Agent_Workflow_Runner {
 	public function run( WP_Agent_Workflow_Spec $spec, array $inputs = array(), array $options = array() ): WP_Agent_Workflow_Run_Result {
 		$started_at    = time();
 		$run_id        = self::string_value( $options['run_id'] ?? self::generate_run_id() );
+		$runtime       = self::string_value( $options['runtime'] ?? '' );
 		$metadata      = (array) ( $options['metadata'] ?? array() );
+		if ( '' !== $runtime ) {
+			// Substrate-reserved attribution key (#567): scopes every later
+			// recorder / handler resolution to the runtime that owns this run.
+			$metadata['_runtime'] = $runtime;
+		}
 		$evidence_refs = (array) ( $options['evidence_refs'] ?? array() );
 		$artifacts     = (array) ( $options['artifacts'] ?? array() );
 		$logs          = (array) ( $options['logs'] ?? array() );
@@ -197,6 +208,7 @@ class WP_Agent_Workflow_Runner {
 				'vars'                => array(),
 				'_workflow_run_id'    => $result->get_run_id(),
 				'_workflow_store_key' => self::RUN_CONTROL_STORE,
+				'_workflow_runtime'   => $runtime,
 			)
 		);
 
@@ -241,6 +253,7 @@ class WP_Agent_Workflow_Runner {
 		}
 
 		$snapshot = is_array( $suspension['context_snapshot'] ?? null ) ? $suspension['context_snapshot'] : array();
+		$metadata = $result->get_metadata();
 		$context  = new WP_Agent_Workflow_Run_Context(
 			array(
 				'inputs'              => is_array( $snapshot['inputs'] ?? null ) ? $snapshot['inputs'] : $result->get_inputs(),
@@ -248,6 +261,10 @@ class WP_Agent_Workflow_Runner {
 				'vars'                => is_array( $snapshot['vars'] ?? null ) ? $snapshot['vars'] : array(),
 				'_workflow_run_id'    => $run_id,
 				'_workflow_store_key' => self::RUN_CONTROL_STORE,
+				// Carry the owning runtime key forward (#567): a resumed run that
+				// suspends again must stamp the runtime onto its new suspension
+				// frame and async payloads.
+				'_workflow_runtime'   => self::string_value( $metadata['_runtime'] ?? '' ),
 			)
 		);
 
@@ -265,7 +282,6 @@ class WP_Agent_Workflow_Runner {
 		// Clear the suspension frame so the resumed run is no longer parked and
 		// the table-free per-run row (metadata._suspension) is not carried
 		// forward once the run reaches a terminal outcome.
-		$metadata = $result->get_metadata();
 		unset( $metadata['_suspension'] );
 		$result = $result->with(
 			array(
@@ -427,6 +443,10 @@ class WP_Agent_Workflow_Runner {
 			'step_index'       => $step_index,
 			'step_id'          => self::string_value( $record['id'] ?? ( $step['id'] ?? '' ) ),
 			'executor_id'      => self::string_value( $directive['executor'] ?? '' ),
+			// Owning runtime key (#567): rides the frame so the durable aggregate
+			// continuation dispatches with it and later callbacks resolve the
+			// run's OWN recorder. Empty for runs started before attribution existed.
+			'runtime'          => self::string_value( $context->to_array()['_workflow_runtime'] ?? '' ),
 			'reason'           => self::string_value( $directive['reason'] ?? '' ),
 			'handles'          => is_array( $directive['handles'] ?? null ) ? array_values( $directive['handles'] ) : array(),
 			'aggregate'        => is_array( $directive['aggregate'] ?? null ) ? $directive['aggregate'] : array(),
@@ -985,10 +1005,13 @@ class WP_Agent_Workflow_Runner {
 
 		// Pass the run/step identity alongside the shared context (in a reserved
 		// envelope, not merged into it) so an executor's dispatch() can address
-		// the run without the identity leaking into `${vars.context.*}`.
+		// the run without the identity leaking into `${vars.context.*}`. The
+		// owning runtime key (#567) rides the same envelope so every async
+		// payload the executor enqueues carries it.
 		$dispatch_context = array(
 			'_workflow_run_id'  => $run_id,
 			'_workflow_step_id' => $step_id,
+			'_workflow_runtime' => self::string_value( $context['_workflow_runtime'] ?? '' ),
 			'shared_context'    => $plan['shared_context'],
 		);
 

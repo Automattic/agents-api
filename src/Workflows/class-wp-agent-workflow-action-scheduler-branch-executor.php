@@ -165,6 +165,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	public function dispatch( array $branches, array $context ) {
 		$context_run_id  = self::string_value( $context['_workflow_run_id'] ?? '' );
 		$context_step_id = self::string_value( $context['_workflow_step_id'] ?? '' );
+		// Owning runtime key (#567): rides every branch payload so each async
+		// callback resolves the run's OWN recorder, not a site-global one.
+		$context_runtime = self::string_value( $context['_workflow_runtime'] ?? '' );
 		$run_id_for_ctx  = '' !== $context_run_id ? $context_run_id : self::first_branch_run_id( $branches );
 		$admission_token = WP_Agent_Workflow_Branch_Store::begin_admission( $run_id_for_ctx );
 		if ( '' === $admission_token ) {
@@ -228,6 +231,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 				'store_backend'   => $store_backend,
 				'context_ref'     => $context_ref,
 				'admission_token' => $admission_token,
+				'runtime'         => $context_runtime,
 			);
 
 			$group     = self::group_for_run( $run_id );
@@ -827,8 +831,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * only WHERE (a claimed AS action) and WHEN (its result lands via reconcile).
 	 *
 	 * @since 0.5.0
+	 * @since 0.13.0 Carries the payload's owning runtime key into recorder resolution.
 	 *
-	 * @param array<mixed> $payload Action payload: { run_id, handle_id, store_ref, store_backend, context_ref, admission_token }.
+	 * @param array<mixed> $payload Action payload: { run_id, handle_id, store_ref, store_backend, context_ref, admission_token, runtime? }.
 	 * @return void
 	 */
 	public static function run_branch_action( array $payload ): void {
@@ -838,6 +843,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$store_backend   = self::payload_store_backend( $payload );
 		$context_ref     = self::string_value( $payload['context_ref'] ?? '' );
 		$admission_token = self::string_value( $payload['admission_token'] ?? '' );
+		$runtime         = self::payload_runtime( $payload );
 
 		if ( '' === $run_id || '' === $handle_id ) {
 			return;
@@ -864,7 +870,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$receipt_ref = WP_Agent_Workflow_Branch_Store::locate_reconcile_receipt( $store_ref, $run_id, $handle_id, $context_ref, $store_backend );
 		$receipt     = '' !== $receipt_ref ? WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $receipt_ref, $context_ref, $store_backend ) : null;
 		if ( null !== $receipt ) {
-			self::reconcile_branch_result( $run_id, $handle_id, $receipt_ref, $context_ref, $store_backend, $receipt['branch_result'], $receipt['continuation'], true );
+			self::reconcile_branch_result( $run_id, $handle_id, $receipt_ref, $context_ref, $store_backend, $receipt['branch_result'], $receipt['continuation'], true, $runtime );
 			return;
 		}
 
@@ -900,9 +906,20 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 
 		self::reconcile_branch_action_result( $payload, $branch_result );
 	}
-
-	/** Enqueue the unique aggregate continuation for one suspension generation. */
-	public static function enqueue_aggregate_action( string $run_id, string $generation, string $owner_token, bool $recover_failure = false ): int {
+	/**
+	 * Enqueue the unique aggregate continuation for one suspension generation.
+	 *
+	 * @since 0.5.0
+	 * @since 0.13.0 Added the `$runtime` parameter; the payload carries the run's
+	 *               owning runtime key so the callback resolves its OWN recorder.
+	 *
+	 * @param string $run_id      Run id.
+	 * @param string $generation  Suspension generation identity.
+	 * @param string $owner_token Aggregate action owner token.
+	 * @param bool   $recover_failure Whether this enqueue recovers a failed action.
+	 * @param string $runtime     Owning runtime key ('' = legacy/unattributed).
+	 */
+	public static function enqueue_aggregate_action( string $run_id, string $generation, string $owner_token, bool $recover_failure = false, string $runtime = '' ): int {
 		return self::enqueue_async_action(
 			self::AGGREGATE_HOOK,
 			array(
@@ -911,6 +928,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 					'generation'  => $generation,
 					'owner_token' => $owner_token,
 					'recover_failure' => $recover_failure,
+					'runtime'     => $runtime,
 				),
 			),
 			self::group_for_run( $run_id ),
@@ -921,16 +939,17 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	/**
 	 * Run the claimed aggregate action and fail loudly into AS lifecycle hooks.
 	 *
-	 * @param array<mixed> $payload Aggregate action payload.
+	 * @param array<mixed> $payload Aggregate action payload: { run_id, generation, owner_token, recover_failure?, runtime? }.
 	 */
 	public static function run_aggregate_action( array $payload ): void {
 		$run_id      = self::string_value( $payload['run_id'] ?? '' );
 		$generation  = self::string_value( $payload['generation'] ?? '' );
 		$owner_token = self::string_value( $payload['owner_token'] ?? '' );
+		$runtime     = self::payload_runtime( $payload );
 		if ( '' === $run_id || '' === $generation || '' === $owner_token ) {
 			return;
 		}
-		$recorder = agents_workflow_resolve_recorder();
+		$recorder = agents_workflow_resolve_recorder( $runtime, $run_id );
 		if ( null === $recorder ) {
 			throw new \RuntimeException( 'A recorder is required to run an aggregate continuation.' );
 		}
@@ -945,19 +964,20 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	/**
 	 * Apply AS failed-action recovery to a known aggregate payload.
 	 *
-	 * @param array<mixed> $payload Aggregate action payload.
+	 * @param array<mixed> $payload Aggregate action payload: { run_id, generation, owner_token, runtime? }.
 	 */
 	public static function run_aggregate_action_failure( array $payload ): void {
 		$run_id      = self::string_value( $payload['run_id'] ?? '' );
 		$generation  = self::string_value( $payload['generation'] ?? '' );
 		$owner_token = self::string_value( $payload['owner_token'] ?? '' );
-		$recorder    = agents_workflow_resolve_recorder();
+		$runtime     = self::payload_runtime( $payload );
+		$recorder    = agents_workflow_resolve_recorder( $runtime, $run_id );
 		if ( '' === $run_id || '' === $generation || '' === $owner_token || null === $recorder ) {
 			return;
 		}
 		$result = agents_workflow_fail_aggregate_continuation( $recorder, $run_id, $generation, $owner_token );
 		if ( is_wp_error( $result ) ) {
-			self::enqueue_aggregate_action( $run_id, $generation, $owner_token, true );
+			self::enqueue_aggregate_action( $run_id, $generation, $owner_token, true, $runtime );
 		}
 	}
 
@@ -995,8 +1015,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$store_ref     = self::string_value( $payload['store_ref'] ?? '' );
 		$store_backend = self::payload_store_backend( $payload );
 		$context_ref   = self::string_value( $payload['context_ref'] ?? '' );
+		$runtime       = self::payload_runtime( $payload );
 
-		self::reconcile_branch_result( $run_id, $handle_id, $store_ref, $context_ref, $store_backend, $branch_result, array(), false );
+		self::reconcile_branch_result( $run_id, $handle_id, $store_ref, $context_ref, $store_backend, $branch_result, array(), false, $runtime );
 	}
 
 	/**
@@ -1004,8 +1025,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * retries only the recorder merge; branch execution is deliberately absent.
 	 *
 	 * @since 0.7.0
+	 * @since 0.13.0 Carries the payload's owning runtime key into recorder resolution.
 	 *
-	 * @param array<mixed> $payload Action payload: { run_id, handle_id, result_ref, store_backend, context_ref }.
+	 * @param array<mixed> $payload Action payload: { run_id, handle_id, result_ref, store_backend, context_ref, runtime? }.
 	 * @return bool Whether reconciliation completed or a durable continuation exists.
 	 */
 	public static function run_reconcile_action( array $payload ): bool {
@@ -1014,24 +1036,29 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$result_ref    = self::string_value( $payload['result_ref'] ?? '' );
 		$store_backend = self::payload_store_backend( $payload );
 		$context_ref   = self::string_value( $payload['context_ref'] ?? '' );
+		$runtime       = self::payload_runtime( $payload );
 		if ( '' === $run_id || '' === $handle_id || '' === $result_ref ) {
 			return false;
 		}
 
 		$receipt = WP_Agent_Workflow_Branch_Store::get_reconcile_receipt( $result_ref, $context_ref, $store_backend );
 		if ( null === $receipt ) {
-			if ( self::is_branch_reconciled( $run_id, $handle_id ) ) {
+			if ( self::is_branch_reconciled( $run_id, $handle_id, $runtime ) ) {
 				return true;
 			}
 			throw new \RuntimeException( sprintf( 'Could not rehydrate the terminal result for branch `%s` in run `%s`.', $handle_id, $run_id ) );
 		}
 
-		return self::reconcile_branch_result( $run_id, $handle_id, $result_ref, $context_ref, $store_backend, $receipt['branch_result'], $receipt['continuation'], true );
+		return self::reconcile_branch_result( $run_id, $handle_id, $result_ref, $context_ref, $store_backend, $receipt['branch_result'], $receipt['continuation'], true, $runtime );
 	}
 
 	/**
 	 * Reconcile a persisted terminal result, enqueueing another reconcile-only
 	 * action when lock contention prevents it from being recorded.
+	 *
+	 * @since 0.7.0
+	 * @since 0.13.0 Added the `$runtime` parameter; the retry payload carries it
+	 *               so every later callback resolves the run's OWN recorder.
 	 *
 	 * @param string              $run_id        Run id.
 	 * @param string              $handle_id     Branch handle id.
@@ -1041,9 +1068,10 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * @param array<string,mixed> $branch_result Terminal BranchResult.
 	 * @param array<string,mixed> $continuation  Opaque reconcile continuation state.
 	 * @param bool                $is_retry      Whether this is a reconcile-only retry.
+	 * @param string              $runtime       Owning runtime key ('' = legacy/unattributed).
 	 * @return bool Whether reconciliation completed or a durable continuation exists.
 	 */
-	private static function reconcile_branch_result( string $run_id, string $handle_id, string $result_ref, string $context_ref, string $store_backend, array $branch_result, array $continuation, bool $is_retry ): bool {
+	private static function reconcile_branch_result( string $run_id, string $handle_id, string $result_ref, string $context_ref, string $store_backend, array $branch_result, array $continuation, bool $is_retry, string $runtime = '' ): bool {
 		$result = null;
 		if ( $is_retry ) {
 			/**
@@ -1063,7 +1091,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			$result = apply_filters( 'wp_agent_workflow_reconcile_retry', null, $run_id, $handle_id, $branch_result, $continuation );
 		}
 		if ( null === $result ) {
-			$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
+			$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result, $runtime );
 		}
 
 		if ( ! is_wp_error( $result ) ) {
@@ -1082,7 +1110,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			? self::string_keyed_array( $error_data['reconcile_continuation'] )
 			: $continuation;
 		if ( in_array( $store_backend, array( WP_Agent_Workflow_Branch_Store::BACKEND_TRANSITION, WP_Agent_Workflow_Branch_Store::BACKEND_LEGACY ), true ) ) {
-			return self::continue_compatibility_reconcile( $run_id, $handle_id, $branch_result, $next_continuation );
+			return self::continue_compatibility_reconcile( $run_id, $handle_id, $branch_result, $next_continuation, $runtime );
 		}
 		$next_ref = WP_Agent_Workflow_Branch_Store::put_reconcile_receipt( $run_id, $handle_id, $result_ref, $context_ref, $store_backend, $branch_result, $next_continuation );
 		if ( is_wp_error( $next_ref ) ) {
@@ -1099,6 +1127,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 					'result_ref'    => $result_ref,
 					'store_backend' => $store_backend,
 					'context_ref'   => $context_ref,
+					'runtime'       => $runtime,
 				),
 			),
 			self::group_for_run( $run_id )
@@ -1133,6 +1162,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$payload       = is_array( $args[0] ?? null ) ? $args[0] : array();
 		$run_id        = self::string_value( $payload['run_id'] ?? '' );
 		$handle_id     = self::string_value( $payload['handle_id'] ?? '' );
+		$runtime       = self::payload_runtime( $payload );
 		$result_ref    = self::string_value( self::RECONCILE_HOOK === $failed_hook ? ( $payload['result_ref'] ?? '' ) : ( $payload['store_ref'] ?? '' ) );
 		$context_ref   = self::string_value( $payload['context_ref'] ?? '' );
 		$store_backend = self::payload_store_backend( $payload );
@@ -1144,12 +1174,12 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			return;
 		}
 		if ( null === $receipt ) {
-			if ( self::is_branch_reconciled( $run_id, $handle_id ) ) {
+			if ( self::is_branch_reconciled( $run_id, $handle_id, $runtime ) ) {
 				return;
 			}
 			$failure_message = $failure instanceof \Throwable ? $failure->getMessage() : 'The branch failed before a durable reconcile continuation could be established.';
 			$failure_code    = self::BRANCH_HOOK === $failed_hook ? 'workflow_branch_execution_uncertain' : 'workflow_branch_reconcile_recovery_failed';
-			self::fail_reconcile_recovery( $run_id, $handle_id, $failure_message, $failure_code );
+			self::fail_reconcile_recovery( $run_id, $handle_id, $failure_message, $failure_code, $runtime );
 			return;
 		}
 
@@ -1159,6 +1189,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			'result_ref'    => $receipt_ref,
 			'context_ref'   => $context_ref,
 			'store_backend' => $store_backend,
+			'runtime'       => $runtime,
 		);
 		$recovery_id = self::enqueue_async_action( self::RECONCILE_HOOK, array( $retry_payload ), self::group_for_run( $run_id ) );
 		if ( $recovery_id > 0 ) {
@@ -1177,8 +1208,8 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	}
 
 	/** Elect and publish one terminal failure when every recovery path failed. */
-	private static function fail_reconcile_recovery( string $run_id, string $handle_id, string $message, string $code = 'workflow_branch_reconcile_recovery_failed' ): bool {
-		$recorder = agents_workflow_resolve_recorder();
+	private static function fail_reconcile_recovery( string $run_id, string $handle_id, string $message, string $code = 'workflow_branch_reconcile_recovery_failed', string $runtime = '' ): bool {
+		$recorder = agents_workflow_resolve_recorder( $runtime, $run_id );
 		if ( null === $recorder ) {
 			return false;
 		}
@@ -1221,14 +1252,19 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	/**
 	 * Continue a pre-provenance payload without guessing its backend.
 	 *
+	 * @since 0.13.0 Added the `$runtime` parameter for scoped recorder resolution.
+	 *
+	 * @param string              $run_id        Run id.
+	 * @param string              $handle_id     Branch handle id.
 	 * @param array<string,mixed> $branch_result Terminal BranchResult.
 	 * @param array<string,mixed> $continuation  Opaque reconcile continuation.
+	 * @param string              $runtime       Owning runtime key ('' = legacy/unattributed).
 	 */
-	private static function continue_compatibility_reconcile( string $run_id, string $handle_id, array $branch_result, array $continuation ): bool {
+	private static function continue_compatibility_reconcile( string $run_id, string $handle_id, array $branch_result, array $continuation, string $runtime = '' ): bool {
 		for ( $attempt = 0; $attempt < 3; ++$attempt ) {
 			$result = apply_filters( 'wp_agent_workflow_reconcile_retry', null, $run_id, $handle_id, $branch_result, $continuation );
 			if ( null === $result ) {
-				$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result );
+				$result = agents_reconcile_workflow_branch( $run_id, $handle_id, $branch_result, $runtime );
 			}
 			if ( ! is_wp_error( $result ) ) {
 				if ( is_object( $result ) && method_exists( $result, 'is_suspended' ) && ! $result->is_suspended() ) {
@@ -1237,7 +1273,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 				return true;
 			}
 			if ( 'agents_reconcile_lock_unavailable' !== $result->get_error_code() ) {
-				return self::fail_reconcile_recovery( $run_id, $handle_id, $result->get_error_message() );
+				return self::fail_reconcile_recovery( $run_id, $handle_id, $result->get_error_message(), 'workflow_branch_reconcile_recovery_failed', $runtime );
 			}
 			$error_data = $result->get_error_data();
 			if ( is_array( $error_data ) && is_array( $error_data['reconcile_continuation'] ?? null ) ) {
@@ -1262,9 +1298,20 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			: WP_Agent_Workflow_Branch_Store::BACKEND_LEGACY;
 	}
 
+	/**
+	 * Read the payload's owning runtime key (#567). Payloads enqueued before
+	 * runtime attribution shipped carry no key; they resolve as '' and hit the
+	 * legacy (unscoped) resolution contract.
+	 *
+	 * @param array<mixed> $payload Action payload.
+	 */
+	private static function payload_runtime( array $payload ): string {
+		return self::string_value( $payload['runtime'] ?? '' );
+	}
+
 	/** Whether the authoritative run already recorded this branch completion. */
-	private static function is_branch_reconciled( string $run_id, string $handle_id ): bool {
-		$recorder = agents_workflow_resolve_recorder();
+	private static function is_branch_reconciled( string $run_id, string $handle_id, string $runtime = '' ): bool {
+		$recorder = agents_workflow_resolve_recorder( $runtime, $run_id );
 		if ( null === $recorder ) {
 			return false;
 		}
@@ -1390,6 +1437,8 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * resume; the handler re-checks SUSPENDED and no-ops otherwise.
 	 *
 	 * @since 0.5.0
+	 * @since 0.13.0 The resume payload carries the run's owning runtime key so the
+	 *               claimed callback resolves the run's OWN recorder.
 	 *
 	 * @param bool   $deferred    Whether resume is already deferred.
 	 * @param string $run_id      The suspended run id.
@@ -1413,10 +1462,20 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 		$suspension = is_object( $result ) && method_exists( $result, 'get_suspension' )
 			? self::string_keyed_array( (array) $result->get_suspension() )
 			: array();
+		// Prefer the frame's stamped runtime key (#567); fall back to the run
+		// metadata stamp for any frame persisted before the frame carried it.
+		$result_runtime = '';
+		if ( is_object( $result ) && method_exists( $result, 'get_metadata' ) ) {
+			$result_runtime = self::string_value( ( (array) $result->get_metadata() )['_runtime'] ?? '' );
+		}
+		$runtime = '' !== self::string_value( $suspension['runtime'] ?? '' )
+			? self::string_value( $suspension['runtime'] )
+			: $result_runtime;
 		$args = array(
 			array(
 				'run_id'        => $run_id,
 				'suspension_id' => self::suspension_id( $suspension ),
+				'runtime'       => $runtime,
 			),
 		);
 		$group = self::group_for_run( $run_id );
@@ -1458,8 +1517,9 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 	 * guard is AS's claim, and the re-read of the frame's SUSPENDED status.
 	 *
 	 * @since 0.5.0
+	 * @since 0.13.0 Resolves the recorder scoped to the payload's owning runtime key.
 	 *
-	 * @param array<mixed> $payload Action payload: { run_id, suspension_id }.
+	 * @param array<mixed> $payload Action payload: { run_id, suspension_id, runtime? }.
 	 * @return void
 	 */
 	public static function run_resume_action( array $payload ): void {
@@ -1468,7 +1528,7 @@ final class WP_Agent_Workflow_Action_Scheduler_Branch_Executor implements WP_Age
 			return;
 		}
 
-		$recorder = agents_workflow_resolve_recorder();
+		$recorder = agents_workflow_resolve_recorder( self::payload_runtime( $payload ), $run_id );
 		if ( null === $recorder ) {
 			return;
 		}
