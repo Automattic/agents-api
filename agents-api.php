@@ -341,6 +341,7 @@ require_once AGENTS_API_PATH . 'src/Workflows/register-agents-workflow-abilities
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-reconcile-lock.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-reconcile-workflow-branch.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-branch-executor.php';
+require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-await.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-bridge-sync.php';
 require_once AGENTS_API_PATH . 'src/Workflows/register-action-scheduler-listener.php';
 require_once AGENTS_API_PATH . 'src/Routines/class-wp-agent-routine.php';

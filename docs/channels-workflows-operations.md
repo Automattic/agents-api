@@ -319,6 +319,50 @@ Supported await/drain options are forwarded to the scoped drain after validation
 
 Do not call the drain from inside one of the scoped branch or resume actions. `WP_Agent_Workflow_Scoped_Drain` checks the live action stack and a process-level guard and refuses those contexts to avoid self-deadlocking a worker that is holding an Action Scheduler claim while trying to claim sibling actions.
 
+### The `await` primitive
+
+`await` is the generic "park a step on an external durable job" wait (agents-api#577). It reuses the same suspend/resume model `parallel` already uses — a step handler returns `_suspend`, the runner persists a table-free frame under `metadata._suspension`, and the run stays `suspended` until something resumes it — but for a SINGLE opaque external wait instead of a dispatched branch set.
+
+A step handler suspends with:
+
+```php
+return array(
+    '_suspend' => array(
+        'kind'       => 'await',
+        'wait_id'    => $opaque_external_job_id, // caller-defined, opaque to the substrate
+        'timeout_at' => $unix_timestamp,          // optional
+    ),
+);
+```
+
+The runner stamps the frame with `kind`, `wait_id`, `timeout_at` (when given), and a freshly minted `generation` — an unguessable identity for this exact suspension INSTANCE, distinct from the caller-opaque `wait_id`. The owning runtime key (#567) rides the frame exactly like it does for `parallel`.
+
+Something outside the run — a webhook handler, a scheduled poll, another workflow's terminal hook — completes the wait:
+
+```php
+$result = AgentsAPI\AI\Workflows\agents_workflow_complete_wait(
+    $runtime,   // owning runtime key; '' for legacy/unattributed runs
+    $run_id,
+    $wait_id,
+    array(
+        'status' => 'succeeded', // or 'failed'
+        'output' => array( /* becomes the step's output */ ),
+        'error'  => array( 'code' => '...', 'message' => '...' ), // when status is 'failed'
+    )
+);
+```
+
+or through the ability `agents/complete-workflow-wait` (`show_in_rest` false by default; permission `current_user_can( 'manage_options' )`, filterable with `agents_workflow_complete_wait_permission`, mirroring the other workflow control abilities).
+
+Contract:
+
+- **Exactly once.** The completion is delivered under the same per-run reconcile lock `parallel` reconcile uses. The FIRST caller to observe the wait still open atomically claims it and splices the output/error into the suspended step's record; a second caller — a duplicate delivery, or a real completion racing its own timeout — sees the claim already consumed and returns the current run state untouched, before resume ever runs.
+- **Bindings.** After a successful completion, downstream steps see the output through the normal `${steps.<id>.output}` bindings, exactly like any other step.
+- **Wrong or unknown `wait_id`.** A completion whose `wait_id` does not match the run's currently suspended wait (or whose run is not suspended on `await` at all) returns `WP_Error`, not a silent no-op.
+- **`failed` completions.** Mark the waited step failed and follow the runner's normal failure semantics — the run terminalizes failed unless `continue_on_error` keeps it going, exactly like a synchronous step failure.
+- **Timeout.** When the directive names a `timeout_at` and Action Scheduler is present (`as_schedule_single_action()`), one action is scheduled under the `agents_workflow_await_timeout` hook, group `agents-api-run-{md5(run_id)}`, carrying `{ run_id, wait_id, generation, runtime }`. It fires the wait as `failed` with error code `workflow_wait_timeout` through the SAME exactly-once path, fenced to the exact suspension `generation` so a stale timeout (the run resumed and suspended again on the same `wait_id`) cannot touch a newer, unrelated suspension. No Action Scheduler present → no timeout is scheduled; the wait can still be completed manually or never times out.
+- **Cancellation.** No `await`-specific cancellation code exists. A cancelled run suspended on `await` uses the runner's existing fence unmodified: the intent stages via `WP_Agent_Run_Control::request_cancel()`/`stage_cancellation()`, and the next thing that advances the run — a real completion, or the timeout — resumes through `WP_Agent_Workflow_Runner::resume()`, whose step loop checks `is_cancel_requested()` before running the next step and terminalizes `cancelled` (discarding the spliced output) instead of the completion's own outcome. A later completion after that is a no-op like any other post-terminal completion.
+
 ## Workflow abilities and permissions
 
 `src/Workflows/register-agents-workflow-abilities.php` registers three abilities:
