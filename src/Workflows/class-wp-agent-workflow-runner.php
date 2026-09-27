@@ -367,6 +367,25 @@ class WP_Agent_Workflow_Runner {
 				if ( $this->recorder ) {
 					$this->recorder->update( $result );
 				}
+
+				/**
+				 * Fires once a workflow run is persisted as SUSPENDED.
+				 *
+				 * Generic, kind-agnostic hook: any `_suspend` directive (the
+				 * built-in `parallel` fanout, an `await` external-job wait, or a
+				 * consumer's own kind) lands here after its frame is durably
+				 * persisted. A listener inspects `$suspension['kind']` to decide
+				 * whether it owns follow-up scheduling (e.g. an `await` wait's
+				 * optional `timeout_at` backstop) — this hook carries no
+				 * knowledge of any particular kind itself.
+				 *
+				 * @since 0.15.0
+				 *
+				 * @param WP_Agent_Workflow_Run_Result $result     The suspended run.
+				 * @param array<string,mixed>          $suspension The suspension frame just persisted.
+				 */
+				do_action( 'wp_agent_workflow_run_suspended', $result, $suspension );
+
 				return $result;
 			}
 
@@ -448,8 +467,9 @@ class WP_Agent_Workflow_Runner {
 	private static function build_suspension_frame( int $step_index, array $step, array $record, WP_Agent_Workflow_Run_Context $context ): array {
 		$directive = is_array( $record['suspend'] ?? null ) ? $record['suspend'] : array();
 		$snapshot  = $context->to_array();
+		$kind      = self::string_value( $directive['kind'] ?? '' );
 
-		return array(
+		$frame = array(
 			'step_index'       => $step_index,
 			'step_id'          => self::string_value( $record['id'] ?? ( $step['id'] ?? '' ) ),
 			'executor_id'      => self::string_value( $directive['executor'] ?? '' ),
@@ -467,6 +487,44 @@ class WP_Agent_Workflow_Runner {
 			),
 			'completed'        => array(),
 		);
+
+		// `await` directive (agents-api#577): a step handler parks the run on an
+		// opaque external `wait_id` instead of a dispatched branch set. `kind` is
+		// generic and additive — every other suspension (the built-in `parallel`
+		// fanout, or a consumer's own kind) simply omits it and the fields below
+		// stay empty. A fresh `generation` is minted per suspension INSTANCE (not
+		// derived from `wait_id`, which is caller-opaque and may in principle be
+		// reused) so a durable timeout scheduled against this exact instance can
+		// tell a stale fire (the run resumed and suspended again) from a live one.
+		if ( 'await' === $kind ) {
+			$frame['kind']       = 'await';
+			$frame['wait_id']    = self::string_value( $directive['wait_id'] ?? '' );
+			$frame['timeout_at'] = isset( $directive['timeout_at'] ) && is_numeric( $directive['timeout_at'] ) ? (int) $directive['timeout_at'] : null;
+			$frame['generation'] = self::generate_wait_generation();
+		}
+
+		return $frame;
+	}
+
+	/**
+	 * Mint a fresh, unguessable identity for one `await` suspension instance.
+	 *
+	 * Self-contained (no dependency on another Workflows file) so a caller that
+	 * only loads the runner — e.g. a minimal pure-PHP harness that never touches
+	 * the reconcile/lock machinery — can still suspend on `await` deterministically.
+	 *
+	 * @since 0.15.0
+	 */
+	private static function generate_wait_generation(): string {
+		if ( function_exists( 'wp_generate_uuid4' ) ) {
+			return wp_generate_uuid4();
+		}
+		try {
+			return bin2hex( random_bytes( 16 ) );
+		} catch ( \Throwable $error ) {
+			unset( $error );
+			return uniqid( 'wait_', true );
+		}
 	}
 
 	/**
