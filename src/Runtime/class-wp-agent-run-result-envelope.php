@@ -149,7 +149,8 @@ final class WP_Agent_Run_Result_Envelope {
 	 * Exact enum matches win outright. Empty/null input maps to `running`,
 	 * matching historical behavior for in-progress producers that build the
 	 * envelope before a terminal status is known. Any other unrecognised
-	 * input is treated as a *finished* run whose canonical shape we can't
+	 * input other than the parked-but-alive states `suspended`/`waiting`
+	 * (which map to `running`) is treated as a *finished* run whose canonical shape we can't
 	 * fully infer: a recognisable terminal prefix/suffix (`failed…`,
 	 * `completed…`, `cancel…`, `skipped`/`*_skipped`) maps to that terminal
 	 * value; anything else maps to `incomplete`. Unknown input is never
@@ -165,6 +166,13 @@ final class WP_Agent_Run_Result_Envelope {
 		}
 
 		if ( '' === $normalized ) {
+			return self::STATUS_RUNNING;
+		}
+
+		// Parked-but-alive states (e.g. a workflow run suspended on async
+		// branches) are non-terminal: the run will resume. Keep them active;
+		// the raw value survives in `status_detail`.
+		if ( in_array( $normalized, array( 'suspended', 'waiting' ), true ) ) {
 			return self::STATUS_RUNNING;
 		}
 

@@ -233,6 +233,10 @@ agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_INCOMPLETE,
 agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_COMPLETED, WP_Agent_Run_Result_Envelope::normalize_status( 'completed_no_items' ), 'completed-prefixed status maps to completed', $failures, $passes );
 agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_FAILED, WP_Agent_Run_Result_Envelope::normalize_status( 'failed - timeout' ), 'failed-prefixed status maps to failed', $failures, $passes );
 agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_SKIPPED, WP_Agent_Run_Result_Envelope::normalize_status( 'agent_skipped' ), 'skipped-suffixed status maps to skipped', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_RUNNING, WP_Agent_Run_Result_Envelope::normalize_status( 'suspended' ), 'suspended (parked but alive) stays non-terminal', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_RUNNING, WP_Agent_Run_Result_Envelope::normalize_status( 'waiting' ), 'waiting stays non-terminal', $failures, $passes );
+$suspended_workflow = WP_Agent_Run_Result_Envelope::from_array( array( 'run_id' => 'r-susp', 'status' => 'suspended' ) );
+agents_api_smoke_assert_equals( 'suspended', $suspended_workflow->get_status_detail(), 'suspended raw status preserved in status_detail', $failures, $passes );
 agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_CANCELLED, WP_Agent_Run_Result_Envelope::normalize_status( 'cancel_requested' ), 'cancel-prefixed status maps to cancelled', $failures, $passes );
 agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_RUNNING, WP_Agent_Run_Result_Envelope::normalize_status( null ), 'null status preserves the historical running default', $failures, $passes );
 agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_RUNNING, WP_Agent_Run_Result_Envelope::normalize_status( '' ), 'empty string status preserves the historical running default', $failures, $passes );
