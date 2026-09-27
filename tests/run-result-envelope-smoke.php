@@ -197,4 +197,86 @@ agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_SUCCEEDED, 
 agents_api_smoke_assert_equals( 'demo-agent', $package_envelope->get_outputs()['agent_slug'] ?? '', 'package agent slug maps to outputs', $failures, $passes );
 agents_api_smoke_assert_equals( 'agents/demo.md', $package_envelope->get_artifact_refs()[0]['source'] ?? '', 'package recorded artifacts map to artifact refs', $failures, $passes );
 
+echo "\n[6] Multi-step fields round-trip through from_array()/to_array():\n";
+$multistep = WP_Agent_Run_Result_Envelope::from_array(
+	array(
+		'run_id'          => 'run-multistep',
+		'status'          => 'succeeded',
+		'status_detail'   => 'succeeded_no_items',
+		'steps'           => array(
+			array( 'id' => 'step-1', 'status' => 'succeeded' ),
+			'ignored',
+		),
+		'parent_run_id'   => 'run-parent',
+		'child_run_refs'  => array(
+			array( 'type' => 'run', 'id' => ' run-child-1 ' ),
+		),
+	)
+);
+agents_api_smoke_assert_equals( 'succeeded_no_items', $multistep->get_status_detail(), 'status_detail round-trips verbatim when explicitly supplied', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $multistep->get_steps() ), 'steps drop non-array entries', $failures, $passes );
+agents_api_smoke_assert_equals( 'step-1', $multistep->get_steps()[0]['id'] ?? '', 'steps preserve step record fields', $failures, $passes );
+agents_api_smoke_assert_equals( 'run-parent', $multistep->get_parent_run_id(), 'parent_run_id round-trips', $failures, $passes );
+agents_api_smoke_assert_equals( 'run-child-1', $multistep->get_child_run_refs()[0]['id'] ?? '', 'child_run_refs normalize like artifact_refs', $failures, $passes );
+
+$multistep_array = $multistep->to_array();
+agents_api_smoke_assert_equals( 'succeeded_no_items', $multistep_array['status_detail'] ?? '', 'to_array() carries status_detail', $failures, $passes );
+agents_api_smoke_assert_equals( 1, count( $multistep_array['steps'] ?? array() ), 'to_array() carries steps', $failures, $passes );
+agents_api_smoke_assert_equals( 'run-parent', $multistep_array['parent_run_id'] ?? '', 'to_array() carries parent_run_id', $failures, $passes );
+agents_api_smoke_assert_equals( 'run-child-1', $multistep_array['child_run_refs'][0]['id'] ?? '', 'to_array() carries child_run_refs', $failures, $passes );
+
+$multistep_rehydrated = WP_Agent_Run_Result_Envelope::from_array( $multistep_array );
+agents_api_smoke_assert_equals( $multistep_array, $multistep_rehydrated->to_array(), 'multi-step fields survive a full round-trip', $failures, $passes );
+
+echo "\n[7] normalize_status() never coerces unknown/terminal-looking input to running:\n";
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_INCOMPLETE, WP_Agent_Run_Result_Envelope::normalize_status( 'quux' ), 'unrecognised status maps to incomplete, never running', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_COMPLETED, WP_Agent_Run_Result_Envelope::normalize_status( 'completed_no_items' ), 'completed-prefixed status maps to completed', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_FAILED, WP_Agent_Run_Result_Envelope::normalize_status( 'failed - timeout' ), 'failed-prefixed status maps to failed', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_SKIPPED, WP_Agent_Run_Result_Envelope::normalize_status( 'agent_skipped' ), 'skipped-suffixed status maps to skipped', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_RUNNING, WP_Agent_Run_Result_Envelope::normalize_status( 'suspended' ), 'suspended (parked but alive) stays non-terminal', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_RUNNING, WP_Agent_Run_Result_Envelope::normalize_status( 'waiting' ), 'waiting stays non-terminal', $failures, $passes );
+$suspended_workflow = WP_Agent_Run_Result_Envelope::from_array( array( 'run_id' => 'r-susp', 'status' => 'suspended' ) );
+agents_api_smoke_assert_equals( 'suspended', $suspended_workflow->get_status_detail(), 'suspended raw status preserved in status_detail', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_CANCELLED, WP_Agent_Run_Result_Envelope::normalize_status( 'cancel_requested' ), 'cancel-prefixed status maps to cancelled', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_RUNNING, WP_Agent_Run_Result_Envelope::normalize_status( null ), 'null status preserves the historical running default', $failures, $passes );
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_RUNNING, WP_Agent_Run_Result_Envelope::normalize_status( '' ), 'empty string status preserves the historical running default', $failures, $passes );
+foreach ( WP_Agent_Run_Result_Envelope::statuses() as $exact_status ) {
+	agents_api_smoke_assert_equals( $exact_status, WP_Agent_Run_Result_Envelope::normalize_status( $exact_status ), "exact enum value '{$exact_status}' is unchanged", $failures, $passes );
+}
+
+echo "\n[8] from_array() preserves the raw status in status_detail only for lossy coercions:\n";
+$unknown_envelope = WP_Agent_Run_Result_Envelope::from_array(
+	array(
+		'run_id' => 'run-unknown-status',
+		'status' => 'completed_no_items',
+	)
+);
+agents_api_smoke_assert_equals( WP_Agent_Run_Result_Envelope::STATUS_COMPLETED, $unknown_envelope->get_status(), 'unrecognised terminal-looking status normalizes to completed', $failures, $passes );
+agents_api_smoke_assert_equals( 'completed_no_items', $unknown_envelope->get_status_detail(), 'raw status is preserved verbatim in status_detail when not an exact enum match', $failures, $passes );
+
+$exact_envelope = WP_Agent_Run_Result_Envelope::from_array(
+	array(
+		'run_id' => 'run-exact-status',
+		'status' => 'succeeded',
+	)
+);
+agents_api_smoke_assert_equals( '', $exact_envelope->get_status_detail(), 'exact enum status does not synthesize a status_detail', $failures, $passes );
+
+echo "\n[9] Workflow run result projection carries steps into the envelope:\n";
+$workflow_with_steps = new WP_Agent_Workflow_Run_Result(
+	'workflow-run-steps',
+	'build-site',
+	WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED,
+	array(),
+	array( 'done' => true ),
+	array( array( 'id' => 'step-1', 'status' => 'succeeded' ), array( 'id' => 'step-2', 'status' => 'succeeded' ) ),
+	array(),
+	100,
+	110,
+	array()
+);
+$workflow_steps_envelope = $workflow_with_steps->to_run_result_envelope();
+agents_api_smoke_assert_equals( 2, count( $workflow_steps_envelope->get_steps() ), 'workflow projection carries every step record into the canonical steps field', $failures, $passes );
+agents_api_smoke_assert_equals( 'step-2', $workflow_steps_envelope->get_steps()[1]['id'] ?? '', 'workflow step records preserve their fields in the canonical steps field', $failures, $passes );
+
 agents_api_smoke_finish( 'Agents API run result envelope', $failures, $passes );

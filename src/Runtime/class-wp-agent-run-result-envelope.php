@@ -34,16 +34,20 @@ final class WP_Agent_Run_Result_Envelope {
 	public const STATUS_INTERRUPTED          = 'interrupted';
 
 	/**
-	 * @param array<string,mixed>            $outputs       Consumer-defined outputs.
-	 * @param array<int,array<string,mixed>> $artifact_refs Canonical artifact references.
-	 * @param array<int,array<string,mixed>> $evidence_refs Canonical evidence/log references.
-	 * @param array<string,mixed>            $replay        Replay/materialization metadata.
-	 * @param array<string,mixed>            $provenance    Producer/source metadata.
-	 * @param array<string,mixed>            $timestamps    started_at/ended_at/updated_at values.
-	 * @param array<string,mixed>            $error         Stable error envelope.
-	 * @param array<string,mixed>            $cancellation  Cancellation request/result metadata.
-	 * @param array<string,mixed>            $metadata      Host/runtime metadata.
-	 * @param array<int,array<string,mixed>> $logs          Canonical log entries.
+	 * @param array<string,mixed>            $outputs        Consumer-defined outputs.
+	 * @param array<int,array<string,mixed>> $artifact_refs  Canonical artifact references.
+	 * @param array<int,array<string,mixed>> $evidence_refs  Canonical evidence/log references.
+	 * @param array<string,mixed>            $replay         Replay/materialization metadata.
+	 * @param array<string,mixed>            $provenance     Producer/source metadata.
+	 * @param array<string,mixed>            $timestamps     started_at/ended_at/updated_at values.
+	 * @param array<string,mixed>            $error          Stable error envelope.
+	 * @param array<string,mixed>            $cancellation   Cancellation request/result metadata.
+	 * @param array<string,mixed>            $metadata       Host/runtime metadata.
+	 * @param array<int,array<string,mixed>> $logs           Canonical log entries.
+	 * @param string                         $status_detail  Opaque, consumer-defined raw status/reason preserved verbatim alongside the canonical `status`.
+	 * @param array<int,array<string,mixed>> $steps          Per-step result records for durable multi-step runs.
+	 * @param string                         $parent_run_id  The id of the run this run was fanned out from, if any.
+	 * @param array<int,array<string,mixed>> $child_run_refs Canonical references to child runs fanned out from this run.
 	 */
 	public function __construct(
 		private string $run_id,
@@ -57,19 +61,25 @@ final class WP_Agent_Run_Result_Envelope {
 		private array $error = array(),
 		private array $cancellation = array(),
 		private array $metadata = array(),
-		private array $logs = array()
+		private array $logs = array(),
+		private string $status_detail = '',
+		private array $steps = array(),
+		private string $parent_run_id = '',
+		private array $child_run_refs = array()
 	) {
-		$this->status        = self::normalize_status( $this->status );
-		$this->outputs       = self::map_value( $this->outputs );
-		$this->artifact_refs = self::normalize_refs( $this->artifact_refs );
-		$this->evidence_refs = self::normalize_refs( $this->evidence_refs );
-		$this->logs          = self::normalize_entries( $this->logs );
-		$this->replay        = self::map_value( $this->replay );
-		$this->provenance    = self::map_value( $this->provenance );
-		$this->timestamps    = self::timestamps_value( $this->timestamps );
-		$this->error         = self::map_value( $this->error );
-		$this->cancellation  = self::map_value( $this->cancellation );
-		$this->metadata      = self::map_value( $this->metadata );
+		$this->status         = self::normalize_status( $this->status );
+		$this->outputs        = self::map_value( $this->outputs );
+		$this->artifact_refs  = self::normalize_refs( $this->artifact_refs );
+		$this->evidence_refs  = self::normalize_refs( $this->evidence_refs );
+		$this->logs           = self::normalize_entries( $this->logs );
+		$this->replay         = self::map_value( $this->replay );
+		$this->provenance     = self::map_value( $this->provenance );
+		$this->timestamps     = self::timestamps_value( $this->timestamps );
+		$this->error          = self::map_value( $this->error );
+		$this->cancellation   = self::map_value( $this->cancellation );
+		$this->metadata       = self::map_value( $this->metadata );
+		$this->steps          = self::normalize_entries( $this->steps );
+		$this->child_run_refs = self::normalize_refs( $this->child_run_refs );
 	}
 
 	/** @return array<int,string> */
@@ -104,9 +114,18 @@ final class WP_Agent_Run_Result_Envelope {
 			}
 		}
 
+		$raw_status    = $value['status'] ?? null;
+		$status_detail = self::string_value( $value['status_detail'] ?? '' );
+		if ( '' === $status_detail ) {
+			$raw_status_normalized = strtolower( trim( self::string_value( $raw_status ) ) );
+			if ( '' !== $raw_status_normalized && ! in_array( $raw_status_normalized, self::statuses(), true ) ) {
+				$status_detail = self::string_value( $raw_status );
+			}
+		}
+
 		return new self(
 			self::string_value( $value['run_id'] ?? '' ),
-			self::normalize_status( $value['status'] ?? null ),
+			self::normalize_status( $raw_status ),
 			self::map_value( $value['outputs'] ?? ( $value['output'] ?? array() ) ),
 			self::normalize_refs( $value['artifact_refs'] ?? array() ),
 			self::normalize_refs( $value['evidence_refs'] ?? array() ),
@@ -116,13 +135,64 @@ final class WP_Agent_Run_Result_Envelope {
 			self::map_value( $value['error'] ?? array() ),
 			self::map_value( $value['cancellation'] ?? array() ),
 			self::map_value( $value['metadata'] ?? array() ),
-			self::normalize_entries( $value['logs'] ?? array() )
+			self::normalize_entries( $value['logs'] ?? array() ),
+			$status_detail,
+			self::normalize_entries( $value['steps'] ?? array() ),
+			self::string_value( $value['parent_run_id'] ?? '' ),
+			self::normalize_refs( $value['child_run_refs'] ?? array() )
 		);
 	}
 
+	/**
+	 * Normalize a raw status into the canonical, bounded vocabulary.
+	 *
+	 * Exact enum matches win outright. Empty/null input maps to `running`,
+	 * matching historical behavior for in-progress producers that build the
+	 * envelope before a terminal status is known. Any other unrecognised
+	 * input other than the parked-but-alive states `suspended`/`waiting`
+	 * (which map to `running`) is treated as a *finished* run whose canonical shape we can't
+	 * fully infer: a recognisable terminal prefix/suffix (`failed…`,
+	 * `completed…`, `cancel…`, `skipped`/`*_skipped`) maps to that terminal
+	 * value; anything else maps to `incomplete`. Unknown input is never
+	 * coerced to `running`, since that would make a finished run look alive
+	 * to any observer. The raw value is preserved verbatim in
+	 * `status_detail` by {@see self::from_array()}.
+	 */
 	public static function normalize_status( mixed $status ): string {
-		$status = strtolower( trim( self::string_value( $status ) ) );
-		return in_array( $status, self::statuses(), true ) ? $status : self::STATUS_RUNNING;
+		$normalized = strtolower( trim( self::string_value( $status ) ) );
+
+		if ( in_array( $normalized, self::statuses(), true ) ) {
+			return $normalized;
+		}
+
+		if ( '' === $normalized ) {
+			return self::STATUS_RUNNING;
+		}
+
+		// Parked-but-alive states (e.g. a workflow run suspended on async
+		// branches) are non-terminal: the run will resume. Keep them active;
+		// the raw value survives in `status_detail`.
+		if ( in_array( $normalized, array( 'suspended', 'waiting' ), true ) ) {
+			return self::STATUS_RUNNING;
+		}
+
+		if ( str_starts_with( $normalized, 'failed' ) ) {
+			return self::STATUS_FAILED;
+		}
+
+		if ( str_starts_with( $normalized, 'completed' ) ) {
+			return self::STATUS_COMPLETED;
+		}
+
+		if ( str_starts_with( $normalized, 'cancel' ) ) {
+			return self::STATUS_CANCELLED;
+		}
+
+		if ( str_starts_with( $normalized, 'skipped' ) || str_ends_with( $normalized, '_skipped' ) ) {
+			return self::STATUS_SKIPPED;
+		}
+
+		return self::STATUS_INCOMPLETE;
 	}
 
 	/**
@@ -218,23 +288,52 @@ final class WP_Agent_Run_Result_Envelope {
 		return $this->metadata;
 	}
 
+	/**
+	 * Opaque, consumer-defined raw status/reason, preserved verbatim
+	 * alongside the canonical {@see self::get_status()}.
+	 */
+	public function get_status_detail(): string {
+		return $this->status_detail;
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function get_steps(): array {
+		return $this->steps;
+	}
+
+	/**
+	 * The id of the run this run was fanned out from, if any.
+	 */
+	public function get_parent_run_id(): string {
+		return $this->parent_run_id;
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function get_child_run_refs(): array {
+		return $this->child_run_refs;
+	}
+
 	/** @return array<string,mixed> */
 	public function to_array(): array {
 		return array(
-			'schema'        => self::SCHEMA,
-			'version'       => self::VERSION,
-			'run_id'        => $this->run_id,
-			'status'        => $this->status,
-			'outputs'       => $this->outputs,
-			'artifact_refs' => $this->artifact_refs,
-			'evidence_refs' => $this->evidence_refs,
-			'logs'          => $this->logs,
-			'replay'        => $this->replay,
-			'provenance'    => $this->provenance,
-			'timestamps'    => $this->timestamps,
-			'error'         => $this->error,
-			'cancellation'  => $this->cancellation,
-			'metadata'      => $this->metadata,
+			'schema'         => self::SCHEMA,
+			'version'        => self::VERSION,
+			'run_id'         => $this->run_id,
+			'status'         => $this->status,
+			'status_detail'  => $this->status_detail,
+			'outputs'        => $this->outputs,
+			'artifact_refs'  => $this->artifact_refs,
+			'evidence_refs'  => $this->evidence_refs,
+			'logs'           => $this->logs,
+			'replay'         => $this->replay,
+			'provenance'     => $this->provenance,
+			'timestamps'     => $this->timestamps,
+			'error'          => $this->error,
+			'cancellation'   => $this->cancellation,
+			'metadata'       => $this->metadata,
+			'steps'          => $this->steps,
+			'parent_run_id'  => $this->parent_run_id,
+			'child_run_refs' => $this->child_run_refs,
 		);
 	}
 
