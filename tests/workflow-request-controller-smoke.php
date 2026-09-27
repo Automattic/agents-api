@@ -15,6 +15,7 @@ require_once __DIR__ . '/../src/Runtime/interface-wp-agent-atomic-run-control-st
 require_once __DIR__ . '/../src/Runtime/interface-wp-agent-exclusive-run-control-store.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control-store-exception.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control.php';
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-type-registry.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-result-envelope.php';

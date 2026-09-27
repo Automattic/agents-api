@@ -177,6 +177,7 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 }
 
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-bindings.php';
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-type-registry.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-result.php';

@@ -72,12 +72,7 @@ class WP_Agent_Workflow_Runner {
 		protected ?WP_Agent_Workflow_Run_Recorder $recorder = null,
 		array $step_handlers = array()
 	) {
-		$defaults = array(
-			'ability'  => array( __CLASS__, 'default_ability_handler' ),
-			'agent'    => array( __CLASS__, 'default_agent_handler' ),
-			'foreach'  => array( __CLASS__, 'default_foreach_handler' ),
-			'parallel' => array( __CLASS__, 'default_parallel_handler' ),
-		);
+		$defaults = WP_Agent_Workflow_Step_Type_Registry::handlers();
 
 		/**
 		 * Filter the step-type handler map. Consumers add new step types
@@ -86,9 +81,15 @@ class WP_Agent_Workflow_Runner {
 		 * if a consumer wants to substitute a different ability / agent
 		 * runtime.
 		 *
+		 * @deprecated 0.14.0 Register step types through
+		 *             {@see WP_Agent_Workflow_Step_Type_Registry::register()}
+		 *             or `register_workflow_step_type()` instead. This
+		 *             filter is kept for one release of back-compat and
+		 *             will be removed in a future version.
+		 *
 		 * @since 0.103.0
 		 *
-		 * @param array<string,mixed> $handlers Default + caller-supplied handlers.
+		 * @param array<string,mixed> $handlers Registry + caller-supplied handlers.
 		 */
 		$this->step_handlers = (array) apply_filters(
 			'wp_agent_workflow_step_handlers',
@@ -1693,15 +1694,16 @@ class WP_Agent_Workflow_Runner {
 	 * @return array<string,mixed>
 	 */
 	private static function default_step_handlers(): array {
+		/**
+		 * @deprecated 0.14.0 Register step types through
+		 *             {@see WP_Agent_Workflow_Step_Type_Registry::register()}
+		 *             or `register_workflow_step_type()` instead. Kept for
+		 *             one release of back-compat.
+		 */
 		/** @var array<string,mixed> $handlers */
 		$handlers = (array) apply_filters(
 			'wp_agent_workflow_step_handlers',
-			array(
-				'ability'  => array( __CLASS__, 'default_ability_handler' ),
-				'agent'    => array( __CLASS__, 'default_agent_handler' ),
-				'foreach'  => array( __CLASS__, 'default_foreach_handler' ),
-				'parallel' => array( __CLASS__, 'default_parallel_handler' ),
-			)
+			WP_Agent_Workflow_Step_Type_Registry::handlers()
 		);
 
 		return $handlers;

@@ -34,7 +34,17 @@ defined( 'ABSPATH' ) || exit;
 
 final class WP_Agent_Workflow_Spec_Validator {
 
-	/** @since 0.103.0 */
+	/**
+	 * Agents-api's built-in step type names.
+	 *
+	 * Kept for backward compatibility only — since 0.14.0 the source of
+	 * truth for known step types is {@see WP_Agent_Workflow_Step_Type_Registry::types()}
+	 * (see {@see self::known_step_types()}), not this constant. A consumer
+	 * that still reads this constant directly sees agents-api's own four
+	 * built-ins, not types a host has registered through the registry.
+	 *
+	 * @since 0.103.0
+	 */
 	public const KNOWN_STEP_TYPES = array( 'ability', 'agent', 'foreach', 'parallel' );
 
 	/** @since 0.103.0 */
@@ -108,10 +118,19 @@ final class WP_Agent_Workflow_Spec_Validator {
 	}
 
 	/**
+	 * Validate a list of steps. Public because
+	 * {@see WP_Agent_Workflow_Step_Type_Registry}'s built-in `foreach` and
+	 * `parallel` validate callbacks recurse into a step's nested `steps`
+	 * (or, for `parallel`, each branch's `steps`) through this same
+	 * function — one recursive step-list validator instead of a copy
+	 * living in the registry.
+	 *
+	 * @since 0.103.0
+	 *
 	 * @param array<int,mixed> $steps
 	 * @return array<int,array{path:string,code:string,message:string}>
 	 */
-	private static function validate_steps( array $steps ): array {
+	public static function validate_steps( array $steps ): array {
 		$errors = array();
 		$seen   = array();
 
@@ -152,204 +171,59 @@ final class WP_Agent_Workflow_Spec_Validator {
 				continue; // type is needed for the per-type checks below
 			}
 
-			if ( ! in_array( $step['type'], self::KNOWN_STEP_TYPES, true ) ) {
-				/**
-				 * Allow consumer-extended step types. Agents-api ships only
-				 * `ability` and `agent`; extra types (`branch`, `parallel`,
-				 * `workflow`) get registered by consumers via a filter on
-				 * `wp_agent_workflow_known_step_types`. Filtered list wins.
-				 *
-				 * @since 0.103.0
-				 *
-				 * @param array<string> $known_types Default v0 set.
-				 */
-				$known = (array) apply_filters( 'wp_agent_workflow_known_step_types', self::KNOWN_STEP_TYPES );
-				if ( ! in_array( $step['type'], $known, true ) ) {
-					$errors[] = array(
-						'path'    => "{$path}.type",
-						'code'    => 'unknown_step_type',
-						'message' => sprintf(
-							'unknown step type `%s` (known: %s)',
-							$step['type'],
-							implode( ', ', $known )
-						),
-					);
-					continue;
-				}
+			$known = self::known_step_types();
+			if ( ! in_array( $step['type'], $known, true ) ) {
+				$errors[] = array(
+					'path'    => "{$path}.type",
+					'code'    => 'unknown_step_type',
+					'message' => sprintf(
+						'unknown step type `%s` (known: %s)',
+						$step['type'],
+						implode( ', ', $known )
+					),
+				);
+				continue;
 			}
 
-			if ( 'ability' === $step['type'] ) {
-				if ( empty( $step['ability'] ) || ! is_string( $step['ability'] ) ) {
-					$errors[] = array(
-						'path'    => "{$path}.ability",
-						'code'    => 'missing_required',
-						'message' => 'ability step is missing a non-empty `ability`',
-					);
-				}
-			}
-
-			if ( 'agent' === $step['type'] ) {
-				if ( empty( $step['agent'] ) || ! is_string( $step['agent'] ) ) {
-					$errors[] = array(
-						'path'    => "{$path}.agent",
-						'code'    => 'missing_required',
-						'message' => 'agent step is missing a non-empty `agent`',
-					);
-				}
-				if ( empty( $step['message'] ) || ! is_string( $step['message'] ) ) {
-					$errors[] = array(
-						'path'    => "{$path}.message",
-						'code'    => 'missing_required',
-						'message' => 'agent step is missing a non-empty `message`',
-					);
-				}
-			}
-
-			if ( 'foreach' === $step['type'] ) {
-				if ( ! array_key_exists( 'items', $step ) ) {
-					$errors[] = array(
-						'path'    => "{$path}.items",
-						'code'    => 'missing_required',
-						'message' => 'foreach step is missing required `items` field',
-					);
-				}
-				if ( empty( $step['steps'] ) || ! is_array( $step['steps'] ) || array_values( $step['steps'] ) !== $step['steps'] ) {
-					$errors[] = array(
-						'path'    => "{$path}.steps",
-						'code'    => 'missing_required',
-						'message' => 'foreach step must declare a non-empty `steps` list',
-					);
-				} else {
-					foreach ( self::validate_steps( $step['steps'] ) as $inner_error ) {
-						$inner_path          = (string) preg_replace( '/^steps\./', '', $inner_error['path'] );
-						$inner_error['path'] = "{$path}.steps." . $inner_path;
-						$errors[]            = $inner_error;
-					}
-				}
-			}
-
-			if ( 'parallel' === $step['type'] ) {
-				$errors = array_merge( $errors, self::validate_parallel_step( $step, $path ) );
-			}
+			$errors = array_merge( $errors, WP_Agent_Workflow_Step_Type_Registry::validate_step( $step, $path ) );
 		}
 
 		return $errors;
 	}
 
 	/**
-	 * Validate a `parallel` (agent fanout) step. The one step type expresses
-	 * two shapes; exactly one must be present:
+	 * Known step types: {@see WP_Agent_Workflow_Step_Type_Registry}'s
+	 * registered types, extended by the legacy
+	 * `wp_agent_workflow_known_step_types` filter for one release of
+	 * back-compat.
 	 *
-	 *   - parallel-map: `items` + a non-empty nested `steps` list.
-	 *   - parallel-roles: a non-empty `branches` list, each branch a role
-	 *     contract with a `role` + nested `steps`. At most one branch may be
-	 *     flagged `is_aggregator` (the optional aggregator); zero is valid.
+	 * @since 0.14.0
 	 *
-	 * @since 0.4.0
-	 *
-	 * @param array<mixed> $step Raw parallel step.
-	 * @param string       $path Error path prefix for this step.
-	 * @return array<int,array{path:string,code:string,message:string}>
+	 * @return array<int,string>
 	 */
-	private static function validate_parallel_step( array $step, string $path ): array {
-		$errors       = array();
-		$has_branches = isset( $step['branches'] );
-		$has_items    = array_key_exists( 'items', $step );
+	public static function known_step_types(): array {
+		$known = WP_Agent_Workflow_Step_Type_Registry::types();
 
-		if ( $has_branches === $has_items ) {
-			$errors[] = array(
-				'path'    => $path,
-				'code'    => 'invalid_parallel_shape',
-				'message' => 'parallel step must declare exactly one of `branches` (roles) or `items` (map)',
-			);
-			// Without a clear shape there's nothing further to validate.
-			if ( ! $has_branches && ! $has_items ) {
-				return $errors;
-			}
+		if ( ! function_exists( 'apply_filters' ) ) {
+			return $known;
 		}
 
-		// parallel-map shape.
-		if ( $has_items ) {
-			if ( empty( $step['steps'] ) || ! is_array( $step['steps'] ) || array_values( $step['steps'] ) !== $step['steps'] ) {
-				$errors[] = array(
-					'path'    => "{$path}.steps",
-					'code'    => 'missing_required',
-					'message' => 'parallel-map step must declare a non-empty `steps` list',
-				);
-			} else {
-				foreach ( self::validate_steps( $step['steps'] ) as $inner_error ) {
-					$inner_path          = (string) preg_replace( '/^steps\./', '', $inner_error['path'] );
-					$inner_error['path'] = "{$path}.steps." . $inner_path;
-					$errors[]            = $inner_error;
-				}
-			}
-		}
+		/**
+		 * Filters the known workflow step types.
+		 *
+		 * @deprecated 0.14.0 Register step types through
+		 *             {@see WP_Agent_Workflow_Step_Type_Registry::register()}
+		 *             or `register_workflow_step_type()` instead. This
+		 *             filter is kept for one release of back-compat and
+		 *             will be removed in a future version.
+		 *
+		 * @since 0.103.0
+		 *
+		 * @param array<int,string> $known_types Registry-derived known types.
+		 */
+		$filtered = (array) apply_filters( 'wp_agent_workflow_known_step_types', $known );
 
-		// parallel-roles shape.
-		if ( $has_branches ) {
-			if ( ! is_array( $step['branches'] ) || array_values( $step['branches'] ) !== $step['branches'] || empty( $step['branches'] ) ) {
-				$errors[] = array(
-					'path'    => "{$path}.branches",
-					'code'    => 'missing_required',
-					'message' => 'parallel-roles step must declare a non-empty list of `branches`',
-				);
-				return $errors;
-			}
-
-			$aggregator_count = 0;
-			foreach ( $step['branches'] as $branch_idx => $branch ) {
-				$branch_path = "{$path}.branches.{$branch_idx}";
-				if ( ! is_array( $branch ) ) {
-					$errors[] = array(
-						'path'    => $branch_path,
-						'code'    => 'invalid_type',
-						'message' => 'parallel branch entry must be an array',
-					);
-					continue;
-				}
-
-				if ( empty( $branch['role'] ) || ! is_string( $branch['role'] ) ) {
-					$errors[] = array(
-						'path'    => "{$branch_path}.role",
-						'code'    => 'missing_required',
-						'message' => 'parallel branch is missing a non-empty `role`',
-					);
-				}
-
-				if ( empty( $branch['steps'] ) || ! is_array( $branch['steps'] ) || array_values( $branch['steps'] ) !== $branch['steps'] ) {
-					$errors[] = array(
-						'path'    => "{$branch_path}.steps",
-						'code'    => 'missing_required',
-						'message' => 'parallel branch must declare a non-empty `steps` list',
-					);
-				} else {
-					foreach ( self::validate_steps( $branch['steps'] ) as $inner_error ) {
-						$inner_path          = (string) preg_replace( '/^steps\./', '', $inner_error['path'] );
-						$inner_error['path'] = "{$branch_path}.steps." . $inner_path;
-						$errors[]            = $inner_error;
-					}
-				}
-
-				if ( ! empty( $branch['is_aggregator'] ) ) {
-					++$aggregator_count;
-				}
-			}
-
-			// The aggregator branch is OPTIONAL: zero or one is valid, more than
-			// one is ambiguous (which output is the step's final?).
-			if ( $aggregator_count > 1 ) {
-				$errors[] = array(
-					'path'    => "{$path}.branches",
-					'code'    => 'invalid_parallel_aggregator',
-					'message' => sprintf(
-						'parallel-roles step may flag at most one branch with `is_aggregator` (the aggregator); found %d',
-						$aggregator_count
-					),
-				);
-			}
-		}
-
-		return $errors;
+		return array_values( array_filter( $filtered, 'is_string' ) );
 	}
 
 	/**
