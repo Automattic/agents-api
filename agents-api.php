@@ -316,6 +316,8 @@ require_once AGENTS_API_PATH . 'src/Channels/register-frontend-chat-session-list
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-chat-jsonrpc-route.php';
 require_once AGENTS_API_PATH . 'src/Channels/register-agents-dispatch-message-ability.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-bindings.php';
+require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-step-type-registry.php';
+require_once AGENTS_API_PATH . 'src/Workflows/register-workflow-step-types.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-spec.php';
 require_once AGENTS_API_PATH . 'src/Workflows/class-wp-agent-workflow-run-result.php';

@@ -138,6 +138,7 @@
       "php tests/context-authority-smoke.php",
       "php tests/guidelines-substrate-smoke.php",
       "php tests/workflow-bindings-smoke.php",
+      "php tests/workflow-step-type-registry-smoke.php",
       "php tests/workflow-spec-validator-smoke.php",
       "php tests/workflow-runner-smoke.php",
       "php tests/workflow-parallel-smoke.php",

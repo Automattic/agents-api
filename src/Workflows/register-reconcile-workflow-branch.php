@@ -953,15 +953,16 @@ function agents_workflow_resolve_runner( WP_Agent_Workflow_Run_Recorder $recorde
  * @return array<string,mixed>
  */
 function agents_workflow_resolve_step_handlers(): array {
+	/**
+	 * @deprecated 0.14.0 Register step types through
+	 *             {@see WP_Agent_Workflow_Step_Type_Registry::register()}
+	 *             or `register_workflow_step_type()` instead. Kept for one
+	 *             release of back-compat.
+	 */
 	/** @var array<string,mixed> $handlers */
 	$handlers = (array) apply_filters(
 		'wp_agent_workflow_step_handlers',
-		array(
-			'ability'  => array( WP_Agent_Workflow_Runner::class, 'default_ability_handler' ),
-			'agent'    => array( WP_Agent_Workflow_Runner::class, 'default_agent_handler' ),
-			'foreach'  => array( WP_Agent_Workflow_Runner::class, 'default_foreach_handler' ),
-			'parallel' => array( WP_Agent_Workflow_Runner::class, 'default_parallel_handler' ),
-		)
+		WP_Agent_Workflow_Step_Type_Registry::handlers()
 	);
 
 	return $handlers;

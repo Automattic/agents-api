@@ -226,7 +226,7 @@ Bridge authorization is intentionally separate from queue state. Connectors can 
 
 ## Workflow specs and validation
 
-Workflows are deterministic recipes composed of inputs, triggers, and steps. Agents API provides the spec value object, structural validator, in-memory registry, runner, default step handlers, store/recorder interfaces, optional Action Scheduler bridge and branch executor, and canonical abilities. It does not ship a durable workflow runtime, editor UI, product-specific step types, or run-history database.
+Workflows are deterministic recipes composed of inputs, triggers, and steps. Agents API provides the spec value object, structural validator, step-type registry, in-memory workflow registry, runner, store/recorder interfaces, optional Action Scheduler bridge and branch executor, and canonical abilities. It does not ship a durable workflow runtime, editor UI, product-specific step types, or run-history database.
 
 `WP_Agent_Workflow_Spec_Validator::validate( array $spec ): array` performs structural validation only:
 
@@ -234,12 +234,34 @@ Workflows are deterministic recipes composed of inputs, triggers, and steps. Age
 - `inputs`, when present, must be a map;
 - `steps` must be a non-empty list;
 - each step needs an `id` and `type`;
-- built-in step types are `ability`, `agent`, `foreach`, and `parallel`;
-- consumers can extend known step types through `wp_agent_workflow_known_step_types`;
+- known step types and their field validation come from `WP_Agent_Workflow_Step_Type_Registry` (see below);
 - `wp_action` and `cron` trigger shapes are checked;
 - forward or unknown `${steps.<id>.output.*}` binding references are reported.
 
 The validator does not check whether referenced agents or abilities exist; the runner handles that at execution time.
+
+### The step-type registry
+
+`WP_Agent_Workflow_Step_Type_Registry` pairs one step type name with its runner handler and its field validation contract, so a type can't validate and then fail at run time with no handler, or vice versa. Built-in types (`ability`, `agent`, `foreach`, `parallel`) are registered lazily on first access — no `init` hook dependency, so the registry behaves identically inside and outside a full WordPress bootstrap.
+
+Register a step type with `register_workflow_step_type( string $type, array $args ): bool`:
+
+```php
+register_workflow_step_type(
+    'branch',
+    array(
+        'handler'  => 'my_plugin_branch_step_handler', // callable( array $resolved_step, array $context ): array|WP_Error
+        'required' => array( 'condition' ),            // simple non-empty-string required-field check
+        'validate' => 'my_plugin_validate_branch_step', // callable( array $step, string $path ): list<{path,code,message}>
+    )
+);
+```
+
+`required` covers the common case (a field must be a non-empty string); write a `validate` callback for anything more specific — shape checks, mutually-exclusive fields, recursion into nested `steps`, etc. Registering an already-registered type keeps the first registration and triggers `_doing_it_wrong` (or the non-WordPress equivalent) — no silent overwrite.
+
+The runner and the reconcile branch resolver (`agents_workflow_resolve_step_handlers()`) both read their handler map from `WP_Agent_Workflow_Step_Type_Registry::handlers()`, so one registration reaches structural validation, execution, and async branch reconciliation — a consumer no longer registers two unrelated filters that can drift apart.
+
+**Back-compat, one release only:** the legacy `wp_agent_workflow_known_step_types` and `wp_agent_workflow_step_handlers` filters are still applied on top of the registry's output, so an unmigrated consumer keeps working. Both filters are deprecated as of the registry's introduction and will be removed in a future release; a type registered only through these legacy filters gets no field validation. `WP_Agent_Workflow_Spec_Validator::KNOWN_STEP_TYPES` is likewise kept for back-compat only — it is no longer the source of truth for known step types, `WP_Agent_Workflow_Step_Type_Registry::types()` is.
 
 ## Workflow runner
 
@@ -266,7 +288,7 @@ The default `parallel` handler uses `wp_agent_workflow_step_executor` as its con
 
 The Action Scheduler executor requires a store that supports concurrent writes for parallel branch execution. MySQL and MariaDB can provide that concurrency. SQLite uses a single database-wide writer lock, so Action Scheduler claims and branch execution serialize even when multiple workers are requested. SQLite remains correct for async branch completion, but it provides no parallel speedup. Consumers that require parallel execution should use MySQL or MariaDB; Agents API does not detect or warn about the active database engine at runtime.
 
-Consumers extend the runner through the constructor or the `wp_agent_workflow_step_handlers` filter. Product-specific steps such as `branch` or nested `workflow` belong in consumers.
+Consumers extend the runner by registering a step type through `register_workflow_step_type()` (see [The step-type registry](#the-step-type-registry)), or, for a one-off handler override on a single runner instance, through the constructor's `$step_handlers` argument. Product-specific steps such as `branch` or nested `workflow` belong in consumers.
 
 Recorder behavior is conservative: `start()` runs before input validation, per-step `update()` calls follow state changes, and recorder-start failure returns a failed run result without executing steps.
 

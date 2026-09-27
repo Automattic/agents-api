@@ -61,6 +61,7 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 	echo '    actual:   ' . var_export( $actual, true ) . "\n";
 }
 
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-type-registry.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
 

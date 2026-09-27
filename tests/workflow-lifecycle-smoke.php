@@ -110,6 +110,7 @@ if ( ! function_exists( 'as_unschedule_all_actions' ) ) {
 	}
 }
 
+require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-type-registry.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-action-scheduler-bridge.php';
