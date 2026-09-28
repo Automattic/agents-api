@@ -62,11 +62,13 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 }
 
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-type-registry.php';
+require_once __DIR__ . '/../src/Workflows/register-workflow-step-types.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
 
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec_Validator;
+use function AgentsAPI\AI\Workflows\register_workflow_step_type;
 
 // ─── Validator ──────────────────────────────────────────────────────
 
@@ -124,18 +126,15 @@ $errors = WP_Agent_Workflow_Spec_Validator::validate(
 );
 smoke_assert( 'unknown_step_type', $errors[0]['code'] ?? '', 'unknown step type flagged', $failures, $passes );
 
-// Filter widens the known step types.
-add_filter(
-	'wp_agent_workflow_known_step_types',
-	static fn( $types ) => array_merge( (array) $types, array( 'martian' ) )
-);
+// Registering a step type widens the known step types.
+register_workflow_step_type( 'martian', array( 'handler' => static fn(): array => array() ) );
 $errors = WP_Agent_Workflow_Spec_Validator::validate(
 	array(
 		'id'    => 'demo/x',
 		'steps' => array( array( 'id' => 'a', 'type' => 'martian', 'something' => 'x' ) ),
 	)
 );
-smoke_assert( array(), $errors, 'filter-extended step type accepted', $failures, $passes );
+smoke_assert( array(), $errors, 'registry-extended step type accepted', $failures, $passes );
 
 // Agent step missing message.
 $errors = WP_Agent_Workflow_Spec_Validator::validate(

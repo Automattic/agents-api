@@ -22,8 +22,10 @@
  *      upgrade still reconcile.
  *   4. `agents/run-workflow` routes by the owning runtime: an explicit
  *      `runtime` input or a spec `meta['runtime']` selects exactly that
- *      runtime's handler from `wp_agent_workflow_runtime_handlers`; unattributed
- *      dispatches fall back to the legacy `wp_agent_workflow_handler` filter.
+ *      runtime's handler from `wp_agent_workflow_runtime_handlers`; an
+ *      unattributed dispatch requires exactly one registered runtime
+ *      (zero is `no_handler`, two-or-more is
+ *      `agents_run_workflow_ambiguous_runtime`).
  *
  * Run with: php tests/workflow-scoped-seams-smoke.php
  *
@@ -315,7 +317,6 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec;
 
 use function AgentsAPI\AI\Workflows\agents_run_workflow_dispatch;
 use function AgentsAPI\AI\Workflows\agents_workflow_resolve_recorder;
-use function AgentsAPI\AI\Workflows\register_workflow_handler;
 use function AgentsAPI\AI\Workflows\register_workflow_runtime_handler;
 
 /**
@@ -582,7 +583,6 @@ smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $recorder_legacy->
 // ═════════════════════════════════════════════════════════════════════════════
 
 WP_Agent_Workflow_Registry::reset();
-remove_all_filters( 'wp_agent_workflow_handler' );
 remove_all_filters( 'wp_agent_workflow_runtime_handlers' );
 
 $handled_by = array();
@@ -600,17 +600,11 @@ register_workflow_runtime_handler(
 		return array( 'run_id' => 'h-b', 'workflow_id' => (string) ( $input['workflow_id'] ?? '' ), 'status' => 'succeeded', 'runtime' => $input['runtime'] ?? '' );
 	}
 );
-register_workflow_handler(
-	static function () use ( &$handled_by ) {
-		$handled_by[] = 'legacy';
-		return array( 'run_id' => 'h-legacy', 'workflow_id' => '', 'status' => 'succeeded' );
-	}
-);
 
-// Explicit runtime input routes to that runtime's handler — NOT the legacy one.
+// Explicit runtime input routes to that runtime's handler — NOT the other one.
 $handled_by = array();
 $result     = agents_run_workflow_dispatch( array( 'workflow_id' => null, 'spec' => array( 'id' => 'x', 'steps' => array() ), 'runtime' => 'runtime_a' ) );
-smoke_assert( array( 'a' ), $handled_by, 'dispatch: explicit runtime routes to its OWN handler (legacy handler skipped)', $failures, $passes );
+smoke_assert( array( 'a' ), $handled_by, 'dispatch: explicit runtime routes to its OWN handler (sibling handler skipped)', $failures, $passes );
 smoke_assert( 'runtime_a', is_array( $result ) ? ( $result['runtime'] ?? '' ) : '', 'dispatch: handler received the canonical input with runtime', $failures, $passes );
 
 $handled_by = array();
@@ -629,15 +623,56 @@ $handled_by = array();
 agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/owned-by-a' ) );
 smoke_assert( array( 'a' ), $handled_by, 'dispatch: spec meta.runtime routes the workflow_id to its owner', $failures, $passes );
 
-// Unattributed dispatch (no runtime anywhere) falls back to the legacy filter.
-$handled_by = array();
-agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/not-registered', 'spec' => null ) );
-smoke_assert( array( 'legacy' ), $handled_by, 'dispatch: unattributed dispatch falls back to the legacy handler', $failures, $passes );
+// Unattributed dispatch (no runtime anywhere) is ambiguous when MORE THAN ONE
+// runtime is registered on the site (#572) — no first-callable-wins fallback.
+$handled_by         = array();
+$ambiguous_dispatch = agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/not-registered', 'spec' => null ) );
+smoke_assert( array(), $handled_by, 'dispatch: unattributed dispatch with two registered runtimes calls neither handler', $failures, $passes );
+smoke_assert( true, $ambiguous_dispatch instanceof \WP_Error, 'dispatch: unattributed dispatch with two registered runtimes => WP_Error', $failures, $passes );
+smoke_assert(
+	'agents_run_workflow_ambiguous_runtime',
+	$ambiguous_dispatch instanceof \WP_Error ? $ambiguous_dispatch->get_error_code() : '',
+	'dispatch: ambiguous runtime error code lists no single winner',
+	$failures,
+	$passes
+);
 
-// Explicit runtime with no scoped entry also falls back (legacy consumer keeps working).
+// Explicit runtime with no scoped entry is a `no_handler` error — no fallback
+// to any other registered handler.
+$handled_by      = array();
+$unknown_runtime = agents_run_workflow_dispatch( array( 'workflow_id' => null, 'spec' => array( 'id' => 'x', 'steps' => array() ), 'runtime' => 'runtime_nobody' ) );
+smoke_assert( array(), $handled_by, 'dispatch: unknown runtime calls no handler', $failures, $passes );
+smoke_assert(
+	'agents_run_workflow_no_handler',
+	$unknown_runtime instanceof \WP_Error ? $unknown_runtime->get_error_code() : '',
+	'dispatch: unknown runtime => no_handler (no fallback)',
+	$failures,
+	$passes
+);
+
+// Unattributed dispatch with EXACTLY ONE registered runtime dispatches to it.
+remove_all_filters( 'wp_agent_workflow_runtime_handlers' );
 $handled_by = array();
-agents_run_workflow_dispatch( array( 'workflow_id' => null, 'spec' => array( 'id' => 'x', 'steps' => array() ), 'runtime' => 'runtime_nobody' ) );
-smoke_assert( array( 'legacy' ), $handled_by, 'dispatch: unknown runtime falls back to the legacy handler', $failures, $passes );
+register_workflow_runtime_handler(
+	'runtime_a',
+	static function ( array $input ) use ( &$handled_by ) {
+		$handled_by[] = 'a';
+		return array( 'run_id' => 'h-a-solo', 'workflow_id' => (string) ( $input['workflow_id'] ?? '' ), 'status' => 'succeeded' );
+	}
+);
+agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/not-registered', 'spec' => null ) );
+smoke_assert( array( 'a' ), $handled_by, 'dispatch: unattributed dispatch with exactly ONE registered runtime dispatches to it', $failures, $passes );
+
+// Unattributed dispatch with ZERO registered runtimes is `no_handler`.
+remove_all_filters( 'wp_agent_workflow_runtime_handlers' );
+$zero_result = agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/not-registered', 'spec' => null ) );
+smoke_assert(
+	'agents_run_workflow_no_handler',
+	$zero_result instanceof \WP_Error ? $zero_result->get_error_code() : '',
+	'dispatch: unattributed dispatch with zero registered runtimes => no_handler',
+	$failures,
+	$passes
+);
 
 // A properly scoped hook yields its recorder ONLY for its own key.
 remove_all_filters( 'wp_agent_workflow_run_recorder' );

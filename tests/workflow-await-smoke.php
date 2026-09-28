@@ -192,6 +192,7 @@ function smoke_assert_true( $actual, string $name, array &$failures, int &$passe
 
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-bindings.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-type-registry.php';
+require_once __DIR__ . '/../src/Workflows/register-workflow-step-types.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-result.php';
@@ -246,12 +247,21 @@ function await_register_ability( string $name, \Closure $handler ): void {
 	$GLOBALS['__abilities'][ $name ] = new WP_Ability( $name, array( 'execute_callback' => $handler ) );
 }
 
-add_filter(
-	'wp_agent_workflow_known_step_types',
-	static function ( array $types ): array {
-		$types[] = 'waiting';
-		return $types;
-	}
+\AgentsAPI\AI\Workflows\register_workflow_step_type(
+	'waiting',
+	array(
+		'handler' => static function ( array $step, array $context ) {
+			unset( $context );
+			$directive = array(
+				'kind'    => 'await',
+				'wait_id' => (string) ( $step['wait_id'] ?? 'wait-default' ),
+			);
+			if ( isset( $step['timeout_at'] ) ) {
+				$directive['timeout_at'] = $step['timeout_at'];
+			}
+			return array( '_suspend' => $directive );
+		},
+	)
 );
 
 $GLOBALS['__echo_calls'] = 0;

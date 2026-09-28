@@ -72,29 +72,13 @@ class WP_Agent_Workflow_Runner {
 		protected ?WP_Agent_Workflow_Run_Recorder $recorder = null,
 		array $step_handlers = array()
 	) {
-		$defaults = WP_Agent_Workflow_Step_Type_Registry::handlers();
-
-		/**
-		 * Filter the step-type handler map. Consumers add new step types
-		 * (`branch`, `parallel`, `workflow`, …) by registering a callable
-		 * here. Default `ability` and `agent` handlers can also be replaced
-		 * if a consumer wants to substitute a different ability / agent
-		 * runtime.
-		 *
-		 * @deprecated 0.14.0 Register step types through
-		 *             {@see WP_Agent_Workflow_Step_Type_Registry::register()}
-		 *             or `register_workflow_step_type()` instead. This
-		 *             filter is kept for one release of back-compat and
-		 *             will be removed in a future version.
-		 *
-		 * @since 0.103.0
-		 *
-		 * @param array<string,mixed> $handlers Registry + caller-supplied handlers.
-		 */
-		$this->step_handlers = (array) apply_filters(
-			'wp_agent_workflow_step_handlers',
-			array_merge( $defaults, $step_handlers )
-		);
+		// The step-type registry ({@see WP_Agent_Workflow_Step_Type_Registry})
+		// is the sole source of default handlers. Caller-supplied
+		// $step_handlers still override/extend registry defaults for this
+		// runner instance; register a new step type on the registry (or via
+		// `register_workflow_step_type()`) to make it available everywhere.
+		$defaults            = WP_Agent_Workflow_Step_Type_Registry::handlers();
+		$this->step_handlers = array_merge( $defaults, $step_handlers );
 	}
 
 	/**
@@ -1747,24 +1731,12 @@ class WP_Agent_Workflow_Runner {
 	}
 
 	/**
-	 * Return the filtered default handler map for nested step execution.
+	 * Return the registry's default handler map for nested step execution.
 	 *
 	 * @return array<string,mixed>
 	 */
 	private static function default_step_handlers(): array {
-		/**
-		 * @deprecated 0.14.0 Register step types through
-		 *             {@see WP_Agent_Workflow_Step_Type_Registry::register()}
-		 *             or `register_workflow_step_type()` instead. Kept for
-		 *             one release of back-compat.
-		 */
-		/** @var array<string,mixed> $handlers */
-		$handlers = (array) apply_filters(
-			'wp_agent_workflow_step_handlers',
-			WP_Agent_Workflow_Step_Type_Registry::handlers()
-		);
-
-		return $handlers;
+		return WP_Agent_Workflow_Step_Type_Registry::handlers();
 	}
 
 	/**
