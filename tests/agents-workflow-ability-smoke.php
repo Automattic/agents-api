@@ -44,7 +44,7 @@ function smoke_reset_workflow_filters(): void {
 	$hooks = array(
 		'agents_run_workflow_dispatch_failed',
 		'agents_run_workflow_permission',
-		'wp_agent_workflow_handler',
+		'wp_agent_workflow_runtime_handlers',
 	);
 
 	foreach ( $hooks as $hook ) {
@@ -77,7 +77,7 @@ use function AgentsAPI\AI\Workflows\agents_run_workflow_output_schema;
 use function AgentsAPI\AI\Workflows\agents_run_workflow_dispatch;
 use function AgentsAPI\AI\Workflows\agents_run_workflow_permission;
 use function AgentsAPI\AI\Workflows\agents_validate_workflow;
-use function AgentsAPI\AI\Workflows\register_workflow_handler;
+use function AgentsAPI\AI\Workflows\register_workflow_runtime_handler;
 use function AgentsAPI\AI\Workflows\agents_get_workflow_run;
 use function AgentsAPI\AI\Workflows\agents_list_workflow_run_events;
 use function AgentsAPI\AI\Workflows\agents_workflow_run_read_permission;
@@ -142,21 +142,25 @@ smoke_assert( true, isset( $desc_hit['inputs']['q'] ), 'describe surfaces input 
 $desc_miss = agents_describe_workflow( array( 'workflow_id' => 'nope' ) );
 smoke_assert( null, $desc_miss['spec'], 'describe returns null for unknown workflow', $failures, $passes );
 
-// ─── run-workflow dispatcher: no handler ─────────────────────────────
+// ─── run-workflow dispatcher: unattributed, zero runtimes registered ──
 
 $result = agents_run_workflow_dispatch( array( 'workflow_id' => 'whatever' ) );
-smoke_assert( true, $result instanceof WP_Error, 'no handler => WP_Error', $failures, $passes );
+smoke_assert( true, $result instanceof WP_Error, 'zero registered runtimes => WP_Error', $failures, $passes );
 smoke_assert(
 	'agents_run_workflow_no_handler',
 	$result instanceof WP_Error ? $result->get_error_code() : '',
-	'no handler error code',
+	'zero registered runtimes error code',
 	$failures,
 	$passes
 );
 
-// ─── run-workflow dispatcher: register a handler and invoke ──────────
+// ─── run-workflow dispatcher: unattributed, exactly ONE runtime registered ──
+//
+// No explicit `runtime` input and no registered spec meta.runtime: with
+// exactly one runtime handler registered, dispatch is unambiguous.
 
-register_workflow_handler(
+register_workflow_runtime_handler(
+	'demo-runtime',
 	static function ( array $input ): array {
 		return array(
 			'run_id'      => 'fake-run-1',
@@ -171,14 +175,14 @@ register_workflow_handler(
 );
 
 $ok = agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/x', 'inputs' => array( 'a' => 1 ) ) );
-smoke_assert( false, $ok instanceof WP_Error, 'registered handler runs', $failures, $passes );
+smoke_assert( false, $ok instanceof WP_Error, 'single registered runtime dispatches unattributed input', $failures, $passes );
 smoke_assert( 'fake-run-1', $ok['run_id'] ?? '', 'handler output is returned to caller', $failures, $passes );
 smoke_assert( array( 'a' => 1 ), $ok['output']['echo'] ?? array(), 'handler sees forwarded inputs', $failures, $passes );
 
 // ─── handler returns invalid type ────────────────────────────────────
 
 smoke_reset_workflow_filters();
-add_filter( 'wp_agent_workflow_handler', static fn() => static fn() => 'not an array' );
+register_workflow_runtime_handler( 'demo-runtime', static fn( array $input ) => 'not an array' );
 
 $bad = agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/x' ) );
 smoke_assert( true, $bad instanceof WP_Error, 'invalid handler return => WP_Error', $failures, $passes );
@@ -189,6 +193,40 @@ smoke_assert(
 	$failures,
 	$passes
 );
+
+// ─── run-workflow dispatcher: unattributed, TWO runtimes registered => ambiguous ──
+
+smoke_reset_workflow_filters();
+register_workflow_runtime_handler( 'runtime_a', static fn( array $input ): array => array( 'run_id' => 'a', 'workflow_id' => '', 'status' => 'succeeded' ) );
+register_workflow_runtime_handler( 'runtime_b', static fn( array $input ): array => array( 'run_id' => 'b', 'workflow_id' => '', 'status' => 'succeeded' ) );
+
+$ambiguous = agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/unattributed' ) );
+smoke_assert( true, $ambiguous instanceof WP_Error, 'two registered runtimes + unattributed dispatch => WP_Error', $failures, $passes );
+smoke_assert(
+	'agents_run_workflow_ambiguous_runtime',
+	$ambiguous instanceof WP_Error ? $ambiguous->get_error_code() : '',
+	'ambiguous runtime error code',
+	$failures,
+	$passes
+);
+
+// ─── run-workflow dispatcher: explicit runtime with no matching handler ──
+// No fallback to any other registered handler — this is a no_handler error,
+// even though runtime_a and runtime_b are both registered above.
+
+$unknown_runtime = agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/x', 'runtime' => 'runtime_nobody' ) );
+smoke_assert( true, $unknown_runtime instanceof WP_Error, 'explicit unknown runtime => WP_Error', $failures, $passes );
+smoke_assert(
+	'agents_run_workflow_no_handler',
+	$unknown_runtime instanceof WP_Error ? $unknown_runtime->get_error_code() : '',
+	'explicit unknown runtime error code',
+	$failures,
+	$passes
+);
+
+// An explicit runtime input still routes to its own handler even with two registered.
+$attributed = agents_run_workflow_dispatch( array( 'workflow_id' => 'demo/x', 'runtime' => 'runtime_a' ) );
+smoke_assert( 'a', is_array( $attributed ) ? ( $attributed['run_id'] ?? '' ) : '', 'explicit runtime routes to its own handler among several', $failures, $passes );
 
 // ─── observability: dispatch_failed fires ────────────────────────────
 

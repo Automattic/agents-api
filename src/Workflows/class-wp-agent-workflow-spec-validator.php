@@ -34,19 +34,6 @@ defined( 'ABSPATH' ) || exit;
 
 final class WP_Agent_Workflow_Spec_Validator {
 
-	/**
-	 * Agents-api's built-in step type names.
-	 *
-	 * Kept for backward compatibility only — since 0.14.0 the source of
-	 * truth for known step types is {@see WP_Agent_Workflow_Step_Type_Registry::types()}
-	 * (see {@see self::known_step_types()}), not this constant. A consumer
-	 * that still reads this constant directly sees agents-api's own four
-	 * built-ins, not types a host has registered through the registry.
-	 *
-	 * @since 0.103.0
-	 */
-	public const KNOWN_STEP_TYPES = array( 'ability', 'agent', 'foreach', 'parallel' );
-
 	/** @since 0.103.0 */
 	public const KNOWN_TRIGGER_TYPES = array( 'on_demand', 'wp_action', 'cron' );
 
@@ -193,37 +180,16 @@ final class WP_Agent_Workflow_Spec_Validator {
 
 	/**
 	 * Known step types: {@see WP_Agent_Workflow_Step_Type_Registry}'s
-	 * registered types, extended by the legacy
-	 * `wp_agent_workflow_known_step_types` filter for one release of
-	 * back-compat.
+	 * registered types. The registry is the sole source of truth; register a
+	 * new type through {@see WP_Agent_Workflow_Step_Type_Registry::register()}
+	 * or `register_workflow_step_type()`.
 	 *
 	 * @since 0.14.0
 	 *
 	 * @return array<int,string>
 	 */
 	public static function known_step_types(): array {
-		$known = WP_Agent_Workflow_Step_Type_Registry::types();
-
-		if ( ! function_exists( 'apply_filters' ) ) {
-			return $known;
-		}
-
-		/**
-		 * Filters the known workflow step types.
-		 *
-		 * @deprecated 0.14.0 Register step types through
-		 *             {@see WP_Agent_Workflow_Step_Type_Registry::register()}
-		 *             or `register_workflow_step_type()` instead. This
-		 *             filter is kept for one release of back-compat and
-		 *             will be removed in a future version.
-		 *
-		 * @since 0.103.0
-		 *
-		 * @param array<int,string> $known_types Registry-derived known types.
-		 */
-		$filtered = (array) apply_filters( 'wp_agent_workflow_known_step_types', $known );
-
-		return array_values( array_filter( $filtered, 'is_string' ) );
+		return WP_Agent_Workflow_Step_Type_Registry::types();
 	}
 
 	/**

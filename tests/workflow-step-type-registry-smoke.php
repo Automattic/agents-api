@@ -243,52 +243,6 @@ $handlers = WP_Agent_Workflow_Step_Type_Registry::handlers();
 $output   = call_user_func( $handlers['greet'], array( 'name' => 'Chris' ), array() );
 smoke_assert( array( 'greeting' => 'hello Chris' ), $output, 'duplicate registration keeps the first handler', $failures, $passes );
 
-// ─── Legacy two-filter registration still validates and runs ──────────────
-
-WP_Agent_Workflow_Step_Type_Registry::reset();
-$GLOBALS['__filters'] = array();
-
-add_filter(
-	'wp_agent_workflow_known_step_types',
-	static fn( $types ) => array_merge( (array) $types, array( 'legacy_branch' ) )
-);
-add_filter(
-	'wp_agent_workflow_step_handlers',
-	static function ( $handlers ) {
-		$handlers['legacy_branch'] = static function ( array $step, array $context ) {
-			unset( $step, $context );
-			return array( 'legacy_ran' => true );
-		};
-		return $handlers;
-	}
-);
-
-// Legacy-filter-registered types get NO registry field validation — this is
-// the exact gap #574 calls out for unmigrated consumers. Structural
-// validation still passes because the type is "known" via the filter.
-$errors = WP_Agent_Workflow_Spec_Validator::validate(
-	array(
-		'id'    => 'demo/legacy',
-		'steps' => array( array( 'id' => 'a', 'type' => 'legacy_branch' ) ),
-	)
-);
-smoke_assert( array(), $errors, 'legacy filter-registered step type passes structural validation', $failures, $passes );
-
-$legacy_spec = WP_Agent_Workflow_Spec::from_array(
-	array(
-		'id'    => 'demo/legacy-run',
-		'steps' => array( array( 'id' => 'a', 'type' => 'legacy_branch' ) ),
-	)
-);
-smoke_assert( false, $legacy_spec instanceof WP_Error, 'legacy spec constructs without WP_Error', $failures, $passes );
-
-if ( ! ( $legacy_spec instanceof WP_Error ) ) {
-	$recorder = new Registry_Smoke_Capture_Recorder();
-	$result   = ( new WP_Agent_Workflow_Runner( $recorder ) )->run( $legacy_spec );
-	smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_SUCCEEDED, $result->get_status(), 'legacy filter-registered handler runs through the runner', $failures, $passes );
-	smoke_assert( true, $result->get_output()['last']['legacy_ran'] ?? false, 'legacy filter-registered handler output reaches the run result', $failures, $passes );
-}
-
 // ─── Built-in error codes are unchanged after the move into the registry ──
 
 WP_Agent_Workflow_Step_Type_Registry::reset();

@@ -178,6 +178,7 @@ function smoke_assert( $expected, $actual, string $name, array &$failures, int &
 
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-bindings.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-type-registry.php';
+require_once __DIR__ . '/../src/Workflows/register-workflow-step-types.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-result.php';
@@ -198,6 +199,7 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Runner;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec;
+use function AgentsAPI\AI\Workflows\register_workflow_step_type;
 
 class Capture_Recorder implements WP_Agent_Workflow_Run_Recorder {
 	public array $writes = array();
@@ -640,7 +642,14 @@ smoke_assert( 'demo_bang', $result2->get_error()['code'], 'top-level error carri
 
 // ─── Throwing step handlers become failed terminal run records ─────────
 
-add_filter( 'wp_agent_workflow_known_step_types', static fn( $types ) => array_merge( (array) $types, array( 'throwing' ) ) );
+register_workflow_step_type(
+	'throwing',
+	array(
+		'handler' => static function (): array {
+			throw new \RuntimeException( 'handler exploded' );
+		},
+	)
+);
 
 $throwing_spec = WP_Agent_Workflow_Spec::from_array(
 	array(
@@ -726,32 +735,23 @@ smoke_assert( WP_Agent_Run_Control::STATUS_CANCELLED, $input_cancel_stored['stat
 WP_Agent_Run_Control::reset_store();
 
 // ─── Unknown step type with no handler ───────────────────────────────
+//
+// The step-type registry pairs a type's known-type registration with its
+// handler in one call, so validation and dispatch can no longer drift apart
+// through normal registration — this scenario (a type that validates but the
+// runner has no handler for) is only reachable by constructing the Spec
+// directly, bypassing WP_Agent_Workflow_Spec_Validator entirely, the same way
+// workflow-cancel-fencing-smoke.php does.
 
-$martian = WP_Agent_Workflow_Spec::from_array(
-	array(
-		'id'    => 'demo/martian',
-		'steps' => array( array( 'id' => 'a', 'type' => 'martian', 'foo' => 'bar' ) ),
-	)
+$martian_raw = array(
+	'id'    => 'demo/martian',
+	'steps' => array( array( 'id' => 'a', 'type' => 'martian', 'foo' => 'bar' ) ),
 );
-// Validator would have rejected this — but test the runner's defensive handling
-// by passing an already-constructed Spec where the type made it through.
-if ( $martian instanceof WP_Error ) {
-	// Validator extension already exists from a previous test run — register a stub handler so the spec
-	// constructs but the runner has no handler.
-	add_filter( 'wp_agent_workflow_known_step_types', static fn( $t ) => array_merge( (array) $t, array( 'martian' ) ) );
-	$martian = WP_Agent_Workflow_Spec::from_array(
-		array(
-			'id'    => 'demo/martian',
-			'steps' => array( array( 'id' => 'a', 'type' => 'martian', 'foo' => 'bar' ) ),
-		)
-	);
-}
+$martian     = new WP_Agent_Workflow_Spec( 'demo/martian', '0.0.0', array(), $martian_raw['steps'], array(), array(), $martian_raw );
 
-if ( ! ( $martian instanceof WP_Error ) ) {
-	$result5 = ( new WP_Agent_Workflow_Runner( null ) )->run( $martian );
-	smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $result5->get_status(), 'no handler => failed run', $failures, $passes );
-	smoke_assert( 'no_step_handler', $result5->get_error()['code'], 'runner reports no_step_handler', $failures, $passes );
-}
+$result5 = ( new WP_Agent_Workflow_Runner( null ) )->run( $martian );
+smoke_assert( WP_Agent_Workflow_Run_Result::STATUS_FAILED, $result5->get_status(), 'no handler => failed run', $failures, $passes );
+smoke_assert( 'no_step_handler', $result5->get_error()['code'], 'runner reports no_step_handler', $failures, $passes );
 
 // ─── Recorder->start() returning WP_Error fails fast ──────────────────
 
@@ -912,7 +912,10 @@ smoke_assert( 1, $result8->get_output()['last']['iterations'][1]['last']['points
 
 // ─── foreach reuses constructor-injected handlers for nested steps ────
 
-add_filter( 'wp_agent_workflow_known_step_types', static fn( $types ) => array_merge( (array) $types, array( 'custom_nested' ) ) );
+// Registered with a stub handler purely so `from_array` recognizes the type
+// during structural validation; the constructor-injected handler below is
+// what the runner actually dispatches to (and is what this test verifies).
+register_workflow_step_type( 'custom_nested', array( 'handler' => static fn(): array => array() ) );
 
 $custom_foreach_spec = WP_Agent_Workflow_Spec::from_array(
 	array(

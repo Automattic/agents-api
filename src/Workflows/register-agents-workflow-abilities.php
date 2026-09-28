@@ -3,7 +3,8 @@
  * Canonical workflow ability registrations.
  *
  * Three abilities, all dispatchers — agents-api itself ships no runner;
- * consumers register a runtime via the `wp_agent_workflow_handler` filter:
+ * consumers register a runtime via `register_workflow_runtime_handler()`
+ * (the `wp_agent_workflow_runtime_handlers` filter):
  *
  *   - `agents/run-workflow`      — execute a workflow by id (or inline spec).
  *   - `agents/validate-workflow` — structural validate (no DB / runtime touch).
@@ -53,7 +54,7 @@ add_action(
 				AGENTS_RUN_WORKFLOW_ABILITY,
 				array(
 					'label'               => 'Run Workflow',
-					'description'         => 'Canonical entry point for running a registered workflow. Routes to the runtime that owns the target workflow via the wp_agent_workflow_runtime_handlers map, falling back to the legacy wp_agent_workflow_handler filter.',
+					'description'         => 'Canonical entry point for running a registered workflow. Routes to the runtime that owns the target workflow via the wp_agent_workflow_runtime_handlers map. When no runtime is identifiable, dispatches to the single registered handler if exactly one is registered; zero or more than one is an error.',
 					'category'            => 'agents-api',
 					'input_schema'        => agents_run_workflow_input_schema(),
 					'output_schema'       => agents_run_workflow_output_schema(),
@@ -216,8 +217,8 @@ add_action(
  *   2. The registered workflow's spec `meta['runtime']` — a spec declares its
  *      owning runtime key in its free-form `meta` map when it is registered,
  *      so dispatches by `workflow_id` route to the registering runtime.
- *   3. Empty string — no runtime is identifiable; dispatch falls back to the
- *      legacy first-callable-wins filter.
+ *   3. Empty string — no runtime is identifiable. The dispatcher then applies
+ *      the unattributed-dispatch rule: {@see agents_run_workflow_dispatch()}.
  *
  * @since 0.13.0
  *
@@ -252,64 +253,72 @@ function agents_workflow_resolve_dispatch_runtime( array $input ): string {
  * spec `meta['runtime']`), the dispatcher looks it up in the runtime-scoped
  * handler map ({@see 'wp_agent_workflow_runtime_handlers'}) and calls ONLY the
  * handler registered under that key. Two consumers on one site can each
- * register a handler and neither receives the other's dispatches.
+ * register a handler and neither receives the other's dispatches. An
+ * attributed runtime with no matching entry is a `no_handler` error — there is
+ * no fallback to any other registered handler.
+ *
+ * When no runtime is identifiable (no explicit `runtime` input and no
+ * registered spec `meta['runtime']`), the unattributed-dispatch rule applies:
+ * exactly one registered handler dispatches unambiguously; zero registered
+ * handlers is the same `no_handler` error; more than one registered handler
+ * is `agents_run_workflow_ambiguous_runtime` — the dispatcher can't guess
+ * which of several runtimes should own an unattributed run, so the caller
+ * must supply an explicit `runtime` input.
  *
  * @since  0.103.0
  * @since  0.13.0 Routes by owning runtime key via `wp_agent_workflow_runtime_handlers`.
+ * @since  0.16.0 Removed the first-callable-wins fallback (#572). Unattributed
+ *                dispatch now requires exactly one registered handler.
  *
  * @param  array<mixed> $input Canonical run-workflow input.
- * @return array<mixed>|\WP_Error Canonical output, or WP_Error if no runtime is registered.
+ * @return array<mixed>|\WP_Error Canonical output, or WP_Error if the handler can't be resolved unambiguously.
  */
 function agents_run_workflow_dispatch( array $input ) {
 	$runtime = agents_workflow_resolve_dispatch_runtime( $input );
 
-	$handler = null;
-	if ( '' !== $runtime ) {
-		/**
-		 * Filter the runtime-scoped workflow handler map (#567).
-		 *
-		 * Consumers register their handler keyed by the opaque runtime key they
-		 * own: array<string runtime, callable handler>. The dispatcher picks
-		 * exactly the entry matching the target workflow's owning runtime —
-		 * first-callable-wins no longer applies to attributed dispatches. A
-		 * handler receives the canonical input array and returns either the
-		 * canonical output or WP_Error.
-		 *
-		 * Use {@see register_workflow_runtime_handler()} to add an entry.
-		 *
-		 * @since 0.13.0
-		 *
-		 * @param array<string,callable> $handlers Runtime key → handler map. Empty by default.
-		 * @param string                 $runtime  The resolved owning runtime key.
-		 * @param array<mixed>           $input    The canonical input being dispatched.
-		 */
-		$handlers  = (array) apply_filters( 'wp_agent_workflow_runtime_handlers', array(), $runtime, $input );
-		$candidate = $handlers[ $runtime ] ?? null;
-		if ( is_callable( $candidate ) ) {
-			$handler = $candidate;
-		}
-	}
+	/**
+	 * Filter the runtime-scoped workflow handler map (#567).
+	 *
+	 * Consumers register their handler keyed by the opaque runtime key they
+	 * own: array<string runtime, callable handler>. A handler receives the
+	 * canonical input array and returns either the canonical output or
+	 * WP_Error.
+	 *
+	 * Use {@see register_workflow_runtime_handler()} to add an entry.
+	 *
+	 * @since 0.13.0
+	 *
+	 * @param array<string,callable> $handlers Runtime key → handler map. Empty by default.
+	 * @param string                 $runtime  The resolved owning runtime key ('' when unattributed).
+	 * @param array<mixed>           $input    The canonical input being dispatched.
+	 */
+	$handlers = (array) apply_filters( 'wp_agent_workflow_runtime_handlers', array(), $runtime, $input );
 
-	if ( null === $handler ) {
-		/**
-		 * LEGACY FALLBACK — first-callable-wins dispatch for dispatches whose
-		 * owning runtime is unidentifiable, or whose runtime has no scoped
-		 * entry. BACK-COMPAT for exactly one release: a site with a single
-		 * unscoped consumer keeps working unchanged. Delete this fallback once
-		 * consumers register via `wp_agent_workflow_runtime_handlers`; do NOT
-		 * keep a permanent alias.
-		 *
-		 * Consumers register a callable that accepts the canonical input array
-		 * and returns either the canonical output or WP_Error. The first hook
-		 * to return a callable wins.
-		 *
-		 * @since 0.103.0
-		 *
-		 * @param callable|null $handler Currently registered handler. Null when
-		 *                               no runtime has registered.
-		 * @param array<mixed>         $input   The canonical input being dispatched.
-		 */
-		$handler = apply_filters( 'wp_agent_workflow_handler', null, $input );
+	if ( '' !== $runtime ) {
+		// Attributed dispatch: exactly the entry matching the target
+		// workflow's owning runtime, or `no_handler` — no fallback to any
+		// other registered handler.
+		$handler = $handlers[ $runtime ] ?? null;
+	} elseif ( 1 === count( $handlers ) ) {
+		// Unattributed dispatch: unambiguous only when exactly one runtime
+		// is registered on the site.
+		$handler = reset( $handlers );
+	} elseif ( count( $handlers ) > 1 ) {
+		$ambiguous_keys = array_keys( $handlers );
+		sort( $ambiguous_keys );
+
+		/** This action is documented below. */
+		do_action( 'agents_run_workflow_dispatch_failed', 'agents_run_workflow_ambiguous_runtime', $input );
+
+		return new \WP_Error(
+			'agents_run_workflow_ambiguous_runtime',
+			sprintf(
+				'agents/run-workflow could not identify an owning runtime and more than one runtime is registered (%s). Pass an explicit `runtime` input, or register the target workflow\'s spec with meta.runtime.',
+				implode( ', ', $ambiguous_keys )
+			)
+		);
+	} else {
+		$handler = null;
 	}
 
 	if ( ! is_callable( $handler ) ) {
@@ -319,14 +328,16 @@ function agents_run_workflow_dispatch( array $input ) {
 		 *
 		 * @since 0.103.0
 		 *
-		 * @param string $reason Always `'no_handler'` for this branch.
+		 * @param string $reason Always `'no_handler'` for this branch (or
+		 *                       `'agents_run_workflow_ambiguous_runtime'` for
+		 *                       the ambiguous-runtime branch above).
 		 * @param array<mixed>  $input  The canonical input that was rejected.
 		 */
 		do_action( 'agents_run_workflow_dispatch_failed', 'no_handler', $input );
 
 		return new \WP_Error(
 			'agents_run_workflow_no_handler',
-			'No agents/run-workflow handler is registered. Install a consumer plugin that registers a runtime, or add a callable to the wp_agent_workflow_handler filter.'
+			'No agents/run-workflow handler is registered for this dispatch. Install a consumer plugin that registers a runtime via register_workflow_runtime_handler(), or pass a `runtime` input matching a registered handler.'
 		);
 	}
 
@@ -565,7 +576,7 @@ function agents_run_workflow_input_schema(): array {
 			),
 			'runtime'     => array(
 				'type'        => array( 'string', 'null' ),
-				'description' => 'Owning runtime key to route the dispatch to (#567). Opaque, consumer-chosen. Overrides the registered workflow spec\'s meta.runtime; omit to route by the spec, or when a single legacy runtime is registered.',
+				'description' => 'Owning runtime key to route the dispatch to (#567). Opaque, consumer-chosen. Overrides the registered workflow spec\'s meta.runtime; omit to route by the spec, or when exactly one runtime handler is registered on the site. Required when more than one runtime handler is registered and the spec has no meta.runtime.',
 			),
 			'spec'        => array(
 				'type'        => array( 'object', 'null' ),
@@ -703,31 +714,6 @@ function agents_workflow_run_events_output_schema(): array {
 
 function agents_workflow_string( mixed $value ): string {
 	return is_scalar( $value ) ? trim( (string) $value ) : '';
-}
-
-/**
- * Convenience helper for consumers: register a callable as the workflow
- * runtime handler.
- *
- * @since 0.103.0
- *
- * @param callable $handler  Receives the canonical input array, returns the
- *                           canonical output array or WP_Error.
- * @param int      $priority Filter priority. Default 10.
- */
-function register_workflow_handler( callable $handler, int $priority = 10 ): void {
-	add_filter(
-		'wp_agent_workflow_handler',
-		static function ( $existing, array $input ) use ( $handler ) {
-			unset( $input );
-			if ( null !== $existing ) {
-				return $existing;
-			}
-			return $handler;
-		},
-		$priority,
-		2
-	);
 }
 
 /**

@@ -33,10 +33,7 @@ if ( ! class_exists( 'WP_Error' ) ) {
 if ( ! function_exists( 'is_wp_error' ) ) { function is_wp_error( $value ): bool { return $value instanceof WP_Error; } }
 if ( ! function_exists( 'apply_filters' ) ) {
 	function apply_filters( string $hook, $value, ...$args ) {
-		unset( $args );
-		if ( 'wp_agent_workflow_known_step_types' === $hook && is_array( $value ) ) {
-			$value[] = 'counting';
-		}
+		unset( $hook, $args );
 		return $value;
 	}
 }
@@ -48,6 +45,7 @@ require_once __DIR__ . '/../src/Runtime/interface-wp-agent-exclusive-run-control
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control-store-exception.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-control.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-step-type-registry.php';
+require_once __DIR__ . '/../src/Workflows/register-workflow-step-types.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec-validator.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-spec.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-result-envelope.php';
@@ -80,6 +78,13 @@ use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Recorder;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Run_Result;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Runner;
 use AgentsAPI\AI\Workflows\WP_Agent_Workflow_Spec;
+use function AgentsAPI\AI\Workflows\register_workflow_step_type;
+
+// Registered with a stub handler purely so the request controller's
+// persist/reload round-trip (spec -> to_array() -> from_array()) recognizes
+// `counting` during structural validation; the actual handler the runner
+// dispatches to is the one Fencing_Runner injects via its constructor.
+register_workflow_step_type( 'counting', array( 'handler' => static fn(): array => array() ) );
 
 final class Fencing_Memory_Store implements WP_Agent_Atomic_Run_Control_Store, WP_Agent_Exclusive_Run_Control_Store {
 	public array $states = array();

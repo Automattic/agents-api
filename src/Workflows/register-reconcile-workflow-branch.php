@@ -905,15 +905,6 @@ function agents_workflow_resolve_recorder( string $runtime = '', string $run_id 
 	 * no hook) resolves it. `$runtime` is `''` for runs started before the
 	 * runtime key existed.
 	 *
-	 * BACK-COMPAT (one release only, then delete this paragraph): hooks
-	 * registered against the original zero-argument contract still work —
-	 * WordPress passes only the arguments a hook declares, so an old hook
-	 * receives just `$recorder` and resolves every run on the site exactly as
-	 * it did before scoping shipped. That global ownership is the collision
-	 * this seam fixes; unscoped hooks must migrate to the scoped contract
-	 * (accept `$runtime` + `$run_id`, return null for foreign runs) and the
-	 * unscoped behavior then dies with the fallback release.
-	 *
 	 * @since 0.5.0
 	 * @since 0.13.0 Added the `$runtime` and `$run_id` scoping arguments.
 	 *
@@ -947,23 +938,12 @@ function agents_workflow_resolve_runner( WP_Agent_Workflow_Run_Recorder $recorde
 
 /**
  * Resolve the step-type handler map for aggregate execution during reconcile.
+ * The step-type registry is the sole source of handlers.
  *
  * @since 0.5.0
  *
  * @return array<string,mixed>
  */
 function agents_workflow_resolve_step_handlers(): array {
-	/**
-	 * @deprecated 0.14.0 Register step types through
-	 *             {@see WP_Agent_Workflow_Step_Type_Registry::register()}
-	 *             or `register_workflow_step_type()` instead. Kept for one
-	 *             release of back-compat.
-	 */
-	/** @var array<string,mixed> $handlers */
-	$handlers = (array) apply_filters(
-		'wp_agent_workflow_step_handlers',
-		WP_Agent_Workflow_Step_Type_Registry::handlers()
-	);
-
-	return $handlers;
+	return WP_Agent_Workflow_Step_Type_Registry::handlers();
 }
