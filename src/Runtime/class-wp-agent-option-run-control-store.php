@@ -281,7 +281,11 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run
 				return $lock_value;
 			}
 			if ( false === $created ) {
-				throw new WP_Agent_Run_Control_Store_Exception( 'Atomic run-control lock creation failed.' );
+				if ( ! $this->is_transient_lock_contention( $db ) ) {
+					throw new WP_Agent_Run_Control_Store_Exception( 'Atomic run-control lock creation failed.' );
+				}
+				usleep( 50000 );
+				continue;
 			}
 
 			$current = $this->get_var( $db, $db->prepare( 'SELECT option_value FROM %i WHERE option_name = %s LIMIT 1', $table, $lock_key ) );
@@ -290,7 +294,7 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run
 				if ( 1 === $replaced ) {
 					return $lock_value;
 				}
-				if ( false === $replaced ) {
+				if ( false === $replaced && ! $this->is_transient_lock_contention( $db ) ) {
 					throw new WP_Agent_Run_Control_Store_Exception( 'Atomic run-control lock takeover failed.' );
 				}
 			}
@@ -299,6 +303,19 @@ class WP_Agent_Option_Run_Control_Store implements WP_Agent_Atomic_Workspace_Run
 		} while ( microtime( true ) < $deadline );
 
 		throw new WP_Agent_Run_Control_Store_Exception( 'Atomic run-control lock acquisition timed out.' );
+	}
+
+	/**
+	 * Two connections racing an `INSERT IGNORE` (or a conditional takeover
+	 * `UPDATE`) against the same unique lock row can make InnoDB report a
+	 * deadlock or a lock-wait timeout instead of the clean "0 rows
+	 * affected" outcome this loop already retries. Both are transient
+	 * admission-race artifacts of the exact contention this method exists
+	 * to serialize, not a genuine query or storage failure, so they get
+	 * the same retry treatment as a lost duplicate-key race.
+	 */
+	private function is_transient_lock_contention( \wpdb $db ): bool {
+		return str_contains( $db->last_error, 'Deadlock found' ) || str_contains( $db->last_error, 'Lock wait timeout' );
 	}
 
 	private function release_lock( \wpdb $db, string $table, string $lock_key, string $lock_value ): void {
