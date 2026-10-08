@@ -202,7 +202,7 @@ if ( ! class_exists( 'WP_Agent_Package_Adoption_Orchestrator' ) ) {
 
 		/** @param array<string,mixed> $artifact */
 		private static function artifact_id( array $artifact ): string {
-			return trim( str_replace( '\\', '/', self::string_value( $artifact['artifact_id'] ?? ( $artifact['slug'] ?? '' ) ) ) );
+			return WP_Agent_Package_Artifact_Identity::normalize_id( $artifact['artifact_id'] ?? ( $artifact['slug'] ?? '' ) );
 		}
 
 		private static function artifact_key( string $type, string $id ): string {

@@ -19,6 +19,7 @@ require_once __DIR__ . '/../src/Runtime/class-wp-agent-run-result-envelope.php';
 require_once __DIR__ . '/../src/Runtime/class-wp-agent-runtime-package-run-result.php';
 require_once __DIR__ . '/../src/Workflows/class-wp-agent-workflow-run-result.php';
 require_once __DIR__ . '/../src/Tasks/class-wp-agent-task-run-control.php';
+require_once __DIR__ . '/../src/Packages/class-wp-agent-package-artifact-identity.php';
 require_once __DIR__ . '/../src/Packages/class-wp-agent-package-artifact.php';
 require_once __DIR__ . '/../src/Packages/class-wp-agent-package-artifact-status.php';
 require_once __DIR__ . '/../src/Packages/class-wp-agent-package-installed-artifact.php';

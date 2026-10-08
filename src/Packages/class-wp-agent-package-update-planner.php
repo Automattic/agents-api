@@ -174,12 +174,7 @@ if ( ! class_exists( 'WP_Agent_Package_Update_Planner' ) ) {
 		}
 
 		private static function normalize_artifact_id( mixed $artifact_id ): string {
-			$artifact_id = trim( str_replace( '\\', '/', self::string_value( $artifact_id ) ) );
-			if ( '' === $artifact_id || str_starts_with( $artifact_id, '/' ) || str_contains( $artifact_id, '..' ) ) {
-				throw new InvalidArgumentException( 'Agent package artifact rows require a package-local artifact_id.' );
-			}
-
-			return $artifact_id;
+			return WP_Agent_Package_Artifact_Identity::normalize_id( $artifact_id );
 		}
 
 		/** @param array<string,mixed>|null $artifact */
