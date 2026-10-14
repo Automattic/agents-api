@@ -871,9 +871,140 @@ WP_Agent_Routine_Action_Scheduler_Bridge::maybe_purge_legacy_action_generation_o
 durable_assert( false, array_key_exists( 'agents_routine_action_generation_5', $GLOBALS['wpdb']->rows ), 'maybe_purge: the first call purges legacy rows' );
 durable_assert( true, is_numeric( get_option( 'agents_routine_action_generation_purged', false ) ), 'maybe_purge: a marker option records that the purge ran' );
 
-$GLOBALS['wpdb']->rows['agents_routine_action_generation_6'] = 'gen-d';
-WP_Agent_Routine_Action_Scheduler_Bridge::maybe_purge_legacy_action_generation_options();
-durable_assert( true, array_key_exists( 'agents_routine_action_generation_6', $GLOBALS['wpdb']->rows ), 'maybe_purge: a second call is gated by the marker and does not run again' );
+	$GLOBALS['wpdb']->rows['agents_routine_action_generation_6'] = 'gen-d';
+	WP_Agent_Routine_Action_Scheduler_Bridge::maybe_purge_legacy_action_generation_options();
+	durable_assert( true, array_key_exists( 'agents_routine_action_generation_6', $GLOBALS['wpdb']->rows ), 'maybe_purge: a second call is gated by the marker and does not run again' );
+
+// ---------------------------------------------------------------------------
+// 9. Duplicate-chain collapse (issue #582): two matching pending chains —
+//    the residue of a concurrent double-schedule race where two requests
+//    both saw no pending action and both scheduled — are collapsed to one
+//    on the next register() call, instead of firing once per chain per
+//    tick forever.
+// ---------------------------------------------------------------------------
+
+// 9a. The observed production state: the watermark points at the LOWER
+//     chain (the racing request's watermark write won), so both chains run
+//     unfenced and the routine fires twice per tick. register() must
+//     collapse to the highest-id chain without scheduling anything or
+//     minting a new generation.
+smoke_reset_state();
+$chain_low = smoke_as_save(
+	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
+	array( 'routine_id' => 'dup' ),
+	WP_Agent_Routine_Action_Scheduler_Bridge::GROUP,
+	time() + 300,
+	300
+);
+$chain_high = smoke_as_save(
+	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
+	array( 'routine_id' => 'dup' ),
+	WP_Agent_Routine_Action_Scheduler_Bridge::GROUP,
+	time() + 300,
+	300
+);
+update_option(
+	'agents_routine_generation_dup',
+	array( 'generation' => 'race-gen', 'watermark' => $chain_low )
+);
+
+$as_next_before                   = $GLOBALS['smoke_as_next_id'];
+$GLOBALS['smoke_as_cancel_calls'] = array();
+$collapse                         = WP_Agent_Routine_Registry::register( 'dup', array( 'agent' => 'commander', 'interval' => 300 ) );
+durable_assert( true, $collapse instanceof WP_Agent_Routine, 'collapse: registering a duplicated routine still succeeds' );
+durable_assert( array( $chain_low ), $GLOBALS['smoke_as_cancel_calls'], 'collapse: exactly the duplicate (lowest-id) chain is cancelled' );
+durable_assert( $as_next_before, $GLOBALS['smoke_as_next_id'], 'collapse: no new action is scheduled' );
+durable_assert(
+	array( 'generation' => 'race-gen', 'watermark' => $chain_low ),
+	get_option( 'agents_routine_generation_dup', array() ),
+	'collapse: generation/watermark are untouched — a collapse is not a schedule change'
+);
+durable_assert( array( $chain_high ), array_keys( smoke_pending_rows() ), 'collapse: exactly one matching chain remains pending' );
+
+// The kept chain is above even the stale-low watermark, so it runs
+// unfenced and fires the routine callback exactly once.
+$before = count( $GLOBALS['smoke_chat_ability']->calls );
+durable_assert( true, smoke_as_run( $chain_high ), 'collapse: the kept (highest-id) chain runs unfenced' );
+durable_assert( $before + 1, count( $GLOBALS['smoke_chat_ability']->calls ), 'collapse: the kept chain fires the routine callback' );
+
+// After the collapse, a re-register is a pure read-only no-op again.
+$GLOBALS['smoke_as_cancel_calls'] = array();
+$as_next_before                   = $GLOBALS['smoke_as_next_id'];
+WP_Agent_Routine_Registry::register( 'dup', array( 'agent' => 'commander', 'interval' => 300 ) );
+durable_assert( array(), $GLOBALS['smoke_as_cancel_calls'], 'collapse: the follow-up register cancels nothing' );
+durable_assert( $as_next_before, $GLOBALS['smoke_as_next_id'], 'collapse: the follow-up register schedules nothing' );
+
+// 9b. A worker already claimed the duplicate when the collapse landed: the
+//     claim raced the cancel, so the runner still tries the claimed
+//     action. The generation fence (its id is below the watermark — here
+//     the racing watermark write pointed at the higher chain) cancels it
+//     at before_execute, so it neither fires nor spawns a successor; the
+//     keeper is unaffected.
+smoke_reset_state();
+$chain_low = smoke_as_save(
+	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
+	array( 'routine_id' => 'dup-claimed' ),
+	WP_Agent_Routine_Action_Scheduler_Bridge::GROUP,
+	time() + 300,
+	300
+);
+$chain_high = smoke_as_save(
+	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
+	array( 'routine_id' => 'dup-claimed' ),
+	WP_Agent_Routine_Action_Scheduler_Bridge::GROUP,
+	time() + 300,
+	300
+);
+update_option(
+	'agents_routine_generation_dup-claimed',
+	array( 'generation' => 'race-gen-2', 'watermark' => $chain_high )
+);
+
+$claimed_row = $GLOBALS['smoke_as'][ $chain_low ];
+WP_Agent_Routine_Registry::register( 'dup-claimed', array( 'agent' => 'commander', 'interval' => 300 ) );
+durable_assert( array( $chain_low ), $GLOBALS['smoke_as_cancel_calls'], 'in-flight: the collapse cancels the duplicate chain by id' );
+durable_assert( array( $chain_high ), array_keys( smoke_pending_rows() ), 'in-flight: exactly the keeper remains pending' );
+
+// Resurrect the claimed row as pending to model the claim winning the race.
+$GLOBALS['smoke_as'][ $chain_low ]           = $claimed_row;
+$GLOBALS['smoke_as'][ $chain_low ]['status'] = ActionScheduler_Store::STATUS_PENDING;
+
+$before = count( $GLOBALS['smoke_chat_ability']->calls );
+durable_assert( false, smoke_as_run( $chain_low ), 'in-flight: the claimed duplicate is fenced at execution (id below the watermark)' );
+durable_assert( $before, count( $GLOBALS['smoke_chat_ability']->calls ), 'in-flight: the claimed duplicate does not fire the routine callback' );
+durable_assert( ActionScheduler_Store::STATUS_CANCELED, $GLOBALS['smoke_as'][ $chain_low ]['status'], 'in-flight: the claimed duplicate stays cancelled — no recurrence successor spawns' );
+durable_assert( true, smoke_as_run( $chain_high ), 'in-flight: the keeper runs normally' );
+durable_assert( $before + 1, count( $GLOBALS['smoke_chat_ability']->calls ), 'in-flight: the keeper fires the routine callback' );
+
+// 9c. One-shot run_now enqueues are never recurring and must survive a
+//     collapse: only duplicate *recurring* chains are cancelled (also
+//     covers collapsing with no recorded watermark at all — pre-fence
+//     legacy chains).
+smoke_reset_state();
+$chain_low = smoke_as_save(
+	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
+	array( 'routine_id' => 'dup-one-shot' ),
+	WP_Agent_Routine_Action_Scheduler_Bridge::GROUP,
+	time() + 300,
+	300
+);
+$chain_high = smoke_as_save(
+	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
+	array( 'routine_id' => 'dup-one-shot' ),
+	WP_Agent_Routine_Action_Scheduler_Bridge::GROUP,
+	time() + 300,
+	300
+);
+$one_shot = smoke_as_save(
+	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
+	array( 'routine_id' => 'dup-one-shot' ),
+	WP_Agent_Routine_Action_Scheduler_Bridge::GROUP,
+	time()
+);
+WP_Agent_Routine_Registry::register( 'dup-one-shot', array( 'agent' => 'commander', 'interval' => 300 ) );
+durable_assert( array( $chain_low ), $GLOBALS['smoke_as_cancel_calls'], 'one-shot: only the duplicate recurring chain is cancelled' );
+durable_assert( array( $chain_high, $one_shot ), array_keys( smoke_pending_rows() ), 'one-shot: the pending run_now enqueue survives the collapse alongside the keeper' );
+durable_assert( false, array_key_exists( 'agents_routine_generation_dup-one-shot', $GLOBALS['smoke_options'] ), 'one-shot: no generation option is minted when there was none' );
 
 // ---------------------------------------------------------------------------
 

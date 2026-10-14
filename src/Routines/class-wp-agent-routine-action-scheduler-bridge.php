@@ -30,7 +30,12 @@
  *    request. `register()` only unschedules and reschedules when no
  *    pending action exists or its recurrence (interval seconds / cron
  *    expression) no longer matches the routine; an unchanged routine is a
- *    read-only no-op.
+ *    read-only no-op. When *several* pending chains already match (e.g.
+ *    left behind by a concurrent double-schedule race, where two requests
+ *    both saw no pending action and both scheduled), the extra chains are
+ *    collapsed: the newest (highest action id) chain is kept and every
+ *    other matching chain is cancelled, so duplicate chains self-heal on
+ *    the next registration instead of firing twice per tick forever.
  *  - Generation + watermark fencing: a schedule change mints a fresh
  *    generation and records the new chain's first action id as a
  *    *watermark* in the routine's single option row
@@ -217,8 +222,30 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge implements WP_Agent_Routine
 		$logical_args = array( 'routine_id' => $routine_id );
 
 		$existing = $this->pending_map()[ $routine_id ] ?? array();
-		if ( null !== self::matching_action_id( $existing, $routine ) ) {
-			return true; // Unchanged: nothing to do.
+		$matching = self::matching_action_ids( $existing, $routine );
+		if ( array() !== $matching ) {
+			// A matching chain already exists. If several do — e.g. a
+			// concurrent double-schedule race where two requests both saw
+			// no pending action and both scheduled — collapse the
+			// duplicates: keep exactly one chain and cancel the rest, so
+			// the routine stops firing once per duplicate chain per tick.
+			// The keeper is the *highest* action id: Action Scheduler ids
+			// are a global increasing sequence and the watermark is always
+			// some chain's own first id, so the newest chain is the only
+			// choice guaranteed to sit at or above the routine's current
+			// watermark (a keeper below the watermark would be cancelled
+			// by the generation fence at its first execution). One-shot
+			// `run_now` enqueues are not recurring and never match, so
+			// they are never collapsed away.
+			if ( count( $matching ) > 1 ) {
+				$keeper = max( $matching );
+				foreach ( $matching as $action_id ) {
+					if ( $action_id !== $keeper ) {
+						$this->cancel( $action_id );
+					}
+				}
+			}
+			return true; // Unchanged (or just collapsed): nothing to do.
 		}
 
 		if ( WP_Agent_Routine::TRIGGER_EXPRESSION === $routine->get_trigger_type() ) {
@@ -484,21 +511,29 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge implements WP_Agent_Routine
 	}
 
 	/**
-	 * The pending action, among those already known for a routine, whose
-	 * recurrence matches the routine's current trigger — or null when none
+	 * Every pending action, among those already known for a routine, whose
+	 * recurrence matches the routine's current trigger — empty when none
 	 * does (including when the only pending actions are one-shot `run_now`
 	 * enqueues, which are never recurring and therefore never "the"
 	 * schedule).
 	 *
+	 * A non-empty result with more than one element means duplicate
+	 * chains are pending (a concurrent double-schedule race, or an older
+	 * version's failure to collapse them): register() keeps the highest
+	 * id and cancels the rest.
+	 *
 	 * @param array<int,\ActionScheduler_Action> $actions_by_id
+	 * @return list<int> Matching action ids, ascending.
 	 */
-	private static function matching_action_id( array $actions_by_id, WP_Agent_Routine $routine ): ?int {
+	private static function matching_action_ids( array $actions_by_id, WP_Agent_Routine $routine ): array {
+		$matching = array();
 		foreach ( $actions_by_id as $action_id => $action ) {
 			if ( self::recurrence_matches( $action, $routine ) ) {
-				return (int) $action_id;
+				$matching[] = (int) $action_id;
 			}
 		}
-		return null;
+		sort( $matching );
+		return $matching;
 	}
 
 	/**
