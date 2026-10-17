@@ -588,6 +588,447 @@ class WP_Agent_Chat_Run_Control {
 	}
 
 	/**
+	 * Verify that a presented run claim matches the stored run claim token.
+	 *
+	 * The run claim token is the write credential handed to the chat handler as
+	 * `_agents_run_claim_token` when `agents/chat` reserves the run. An external
+	 * runtime presents it back to the claim-bound write surface; no client
+	 * principal, capability, or owner claim can substitute for it.
+	 *
+	 * @param string $run_id      Run ID.
+	 * @param string $claim_token Presented run claim token.
+	 * @return array<string,mixed>|\WP_Error Normalized run (with cancellation visibility), or an error.
+	 */
+	public static function verify_run_claim( string $run_id, string $claim_token, ?WP_Agent_Workspace_Scope $workspace = null ) {
+		$run = self::claimed_run_from_state( self::state( $workspace ), $run_id, $claim_token );
+		return $run instanceof \WP_Error ? $run : self::claimed_run_view( $run );
+	}
+
+	/**
+	 * Append canonical message envelopes to the transcript of a claimed run.
+	 *
+	 * @param string                    $run_id      Run ID.
+	 * @param string                    $claim_token Presented run claim token.
+	 * @param array<int,mixed>          $messages    Canonical message envelopes or plain role/content messages.
+	 * @return array<string,mixed>|\WP_Error Appended envelopes (with stable ids) and run status, or an error.
+	 */
+	public static function append_run_messages( string $run_id, string $claim_token, array $messages, ?WP_Agent_Workspace_Scope $workspace = null, ?WP_Agent_Conversation_Store $conversation_store = null ) {
+		$target = self::claimed_writable_session( $run_id, $claim_token, $workspace, $conversation_store );
+		if ( $target instanceof \WP_Error ) {
+			return $target;
+		}
+
+		$appended = self::normalize_write_messages( $messages );
+		if ( $appended instanceof \WP_Error ) {
+			return $appended;
+		}
+
+		$transcript = array_merge( $target['messages'], $appended );
+		if ( ! self::persist_session_transcript( $target, $transcript ) ) {
+			return new \WP_Error( 'agents_chat_run_transcript_write_failed', 'The conversation store rejected the transcript write.' );
+		}
+
+		return self::claimed_run_view( $target['run'] ) + array(
+			'messages' => $appended,
+			'count'    => count( $appended ),
+		);
+	}
+
+	/**
+	 * Update (replace in place) one message previously appended to a claimed run.
+	 *
+	 * Message identity is the envelope `id` assigned on append, so streamed text
+	 * can be edited in place without re-appending.
+	 *
+	 * @param string       $run_id      Run ID.
+	 * @param string       $claim_token Presented run claim token.
+	 * @param string       $message_id  Stable message id assigned on append.
+	 * @param array<mixed> $message     Replacement canonical envelope or plain message.
+	 * @return array<string,mixed>|\WP_Error Updated envelope and run status, or an error.
+	 */
+	public static function update_run_message( string $run_id, string $claim_token, string $message_id, array $message, ?WP_Agent_Workspace_Scope $workspace = null, ?WP_Agent_Conversation_Store $conversation_store = null ) {
+		$message_id = trim( $message_id );
+		if ( '' === $message_id ) {
+			return new \WP_Error( 'agents_chat_run_invalid_message', 'message_id must be a non-empty string.' );
+		}
+
+		$target = self::claimed_writable_session( $run_id, $claim_token, $workspace, $conversation_store );
+		if ( $target instanceof \WP_Error ) {
+			return $target;
+		}
+
+		try {
+			$replacement = WP_Agent_Message::normalize( $message );
+		} catch ( \InvalidArgumentException $error ) {
+			return new \WP_Error( 'agents_chat_run_invalid_message', $error->getMessage() );
+		}
+
+		$transcript = $target['messages'];
+		$updated    = null;
+		foreach ( $transcript as $index => $stored ) {
+			if ( ! is_array( $stored ) || self::string_value( $stored['id'] ?? '' ) !== $message_id ) {
+				continue;
+			}
+
+			$replacement['id'] = $message_id;
+			if ( ! isset( $replacement['created_at'] ) && is_string( $stored['created_at'] ?? null ) && '' !== $stored['created_at'] ) {
+				$replacement['created_at'] = $stored['created_at'];
+			}
+			$replacement['updated_at'] = self::now();
+			$transcript[ $index ]      = $replacement;
+			$updated                   = $replacement;
+			break;
+		}
+
+		if ( null === $updated ) {
+			return new \WP_Error( 'agents_chat_run_message_not_found', 'No transcript message was found for the requested message_id.' );
+		}
+
+		if ( ! self::persist_session_transcript( $target, $transcript ) ) {
+			return new \WP_Error( 'agents_chat_run_transcript_write_failed', 'The conversation store rejected the transcript write.' );
+		}
+
+		return self::claimed_run_view( $target['run'] ) + array( 'message' => $updated );
+	}
+
+	/**
+	 * Append lifecycle events to a claimed run.
+	 *
+	 * @param string                            $run_id      Run ID.
+	 * @param string                            $claim_token Presented run claim token.
+	 * @param array<int,mixed>                  $events      Events with `type`, optional `message`, optional `metadata`.
+	 * @return array<string,mixed>|\WP_Error Appended events and run status, or an error.
+	 */
+	public static function append_run_events( string $run_id, string $claim_token, array $events, ?WP_Agent_Workspace_Scope $workspace = null ) {
+		$pending_events = array();
+		foreach ( $events as $event ) {
+			if ( ! is_array( $event ) ) {
+				return new \WP_Error( 'agents_chat_run_invalid_event', 'Each event must be an object.' );
+			}
+			$type = trim( self::string_value( $event['type'] ?? '' ) );
+			if ( '' === $type ) {
+				return new \WP_Error( 'agents_chat_run_invalid_event', 'Each event requires a non-empty type.' );
+			}
+			$entry = array(
+				'type'     => $type,
+				'metadata' => is_array( $event['metadata'] ?? null ) ? WP_Agent_Run_Control::string_keyed_array( $event['metadata'] ) : array(),
+			);
+			if ( isset( $event['message'] ) ) {
+				$entry['message'] = self::string_value( $event['message'] );
+			}
+			$pending_events[] = $entry;
+		}
+
+		if ( array() === $pending_events ) {
+			return new \WP_Error( 'agents_chat_run_invalid_event', 'events must contain at least one event.' );
+		}
+
+		$allow_legacy = null === $workspace && ( ! class_exists( '\wpdb' ) || self::run_is_unowned( $run_id, $workspace ) );
+		try {
+			$result = self::mutate_state(
+				static function ( array $state ) use ( $run_id, $claim_token, $pending_events ): array {
+					$run = self::claimed_run_from_state( $state, $run_id, $claim_token );
+					if ( $run instanceof \WP_Error ) {
+						return array(
+							'state'  => $state,
+							'result' => $run,
+						);
+					}
+					if ( self::is_terminal_status( $run['status'] ?? null ) ) {
+						return array(
+							'state'  => $state,
+							'result' => new \WP_Error( 'agents_chat_run_already_finished', 'The chat run has already reached a terminal status.' ),
+						);
+					}
+
+					$stored   = array_values( $state['events'][ $run_id ] ?? array() );
+					$appended = array();
+					foreach ( $pending_events as $entry ) {
+						$entry['id']         = (string) count( $stored );
+						$entry['created_at'] = self::now();
+						$stored[]            = $entry;
+						$appended[]          = $entry;
+					}
+					$state['events'][ $run_id ] = $stored;
+
+					return array(
+						'state'  => $state,
+						'result' => self::claimed_run_view( $run ) + array(
+							'events' => $appended,
+							'count'  => count( $appended ),
+						),
+					);
+				},
+				$workspace,
+				$allow_legacy
+			);
+		} catch ( \RuntimeException $error ) {
+			return self::atomic_unavailable( $error );
+		}
+
+		if ( $result instanceof \WP_Error ) {
+			return $result;
+		}
+		return is_array( $result ) ? WP_Agent_Run_Control::string_keyed_array( $result ) : new \WP_Error( 'agents_chat_run_atomic_unavailable', 'Atomic chat event append returned an invalid result.' );
+	}
+
+	/**
+	 * Transition the status of a claimed run.
+	 *
+	 * A committed cancellation request stays visible: a non-honoring status is
+	 * coerced to `cancelling` (non-terminal) or `cancelled` (terminal), exactly
+	 * like the in-process finish path, so external runtimes observe cancellation
+	 * through the returned `status`/`cancelled` fields.
+	 *
+	 * @param string $run_id      Run ID.
+	 * @param string $claim_token Presented run claim token.
+	 * @param string $status      Requested canonical status (any chat status except `queued`).
+	 * @return array<string,mixed>|\WP_Error Normalized run, or an error.
+	 */
+	public static function set_run_status( string $run_id, string $claim_token, string $status, ?WP_Agent_Workspace_Scope $workspace = null ) {
+		$requested = strtolower( trim( $status ) );
+		if ( ! in_array( $requested, self::statuses(), true ) || self::STATUS_QUEUED === $requested ) {
+			return new \WP_Error( 'agents_chat_run_invalid_status', 'status must be a canonical chat run status other than queued.' );
+		}
+
+		$allow_legacy = null === $workspace && ( ! class_exists( '\wpdb' ) || self::run_is_unowned( $run_id, $workspace ) );
+		try {
+			$result = self::mutate_state(
+				static function ( array $state ) use ( $run_id, $claim_token, $requested ): array {
+					$run = self::claimed_run_from_state( $state, $run_id, $claim_token );
+					if ( $run instanceof \WP_Error ) {
+						return array(
+							'state'  => $state,
+							'result' => $run,
+						);
+					}
+
+					$run                      = self::normalize_cancellation_state( $run );
+					$state['runs'][ $run_id ] = $run;
+					if ( self::is_terminal_status( $run['status'] ?? null ) ) {
+						return array(
+							'state'  => $state,
+							'result' => self::claimed_run_view( $run ),
+						);
+					}
+
+					$honors_cancellation = in_array( $requested, array( self::STATUS_CANCELLED, self::STATUS_INTERRUPTED ), true );
+					$next                = $requested;
+					if ( self::is_cancellation_requested( $run ) && ! $honors_cancellation ) {
+						$next = self::is_terminal_status( $requested ) ? self::STATUS_CANCELLED : self::STATUS_CANCELLING;
+					}
+
+					$run['status']            = $next;
+					$run['updated_at']        = self::now();
+					$run                      = self::normalize_cancellation_state( $run );
+					$state['runs'][ $run_id ] = $run;
+					$state                    = self::record_event( $state, $run_id, self::is_terminal_status( $next ) ? 'run_finished' : 'run_updated', array( 'status' => $next ) );
+					return array(
+						'state'  => $state,
+						'result' => self::claimed_run_view( $run ),
+					);
+				},
+				$workspace,
+				$allow_legacy
+			);
+		} catch ( \RuntimeException $error ) {
+			return self::atomic_unavailable( $error );
+		}
+
+		if ( $result instanceof \WP_Error ) {
+			return $result;
+		}
+		return is_array( $result ) ? WP_Agent_Run_Control::string_keyed_array( $result ) : new \WP_Error( 'agents_chat_run_atomic_unavailable', 'Atomic chat status transition returned an invalid result.' );
+	}
+
+	/**
+	 * Claim queued user input for a claimed run.
+	 *
+	 * Interactive turns (for example `input_required`) are answered by clients
+	 * through `agents/queue-chat-message`; this drains those answers for the
+	 * runtime holding the run claim. Only items queued by the run's own
+	 * conversation owner are returned.
+	 *
+	 * @param string $run_id      Run ID.
+	 * @param string $claim_token Presented run claim token.
+	 * @return array<string,mixed>|\WP_Error Claimed queue items and run status, or an error.
+	 */
+	public static function claim_run_input( string $run_id, string $claim_token, ?WP_Agent_Workspace_Scope $workspace = null ) {
+		$allow_legacy = null === $workspace && ( ! class_exists( '\wpdb' ) || self::run_is_unowned( $run_id, $workspace ) );
+		try {
+			$result = self::mutate_state(
+				static function ( array $state ) use ( $run_id, $claim_token ): array {
+					$run = self::claimed_run_from_state( $state, $run_id, $claim_token );
+					if ( $run instanceof \WP_Error ) {
+						return array(
+							'state'  => $state,
+							'result' => $run,
+						);
+					}
+
+					$session_id = self::string_value( $run['session_id'] ?? '' );
+					$owner      = self::string_value( $run['_owner'] ?? '' );
+					$claimed    = array();
+					$remaining  = array();
+					foreach ( array_values( $state['queues'][ $session_id ] ?? array() ) as $item ) {
+						if ( self::string_value( $item['_owner'] ?? '' ) === $owner ) {
+							$claimed[] = self::public_queue_item( $item );
+							continue;
+						}
+						$remaining[] = $item;
+					}
+					if ( array() === $remaining ) {
+						unset( $state['queues'][ $session_id ] );
+					} else {
+						$state['queues'][ $session_id ] = $remaining;
+					}
+
+					return array(
+						'state'  => $state,
+						'result' => self::claimed_run_view( $run ) + array(
+							'messages' => $claimed,
+							'count'    => count( $claimed ),
+						),
+					);
+				},
+				$workspace,
+				$allow_legacy
+			);
+		} catch ( \RuntimeException $error ) {
+			return self::atomic_unavailable( $error );
+		}
+
+		if ( $result instanceof \WP_Error ) {
+			return $result;
+		}
+		return is_array( $result ) ? WP_Agent_Run_Control::string_keyed_array( $result ) : new \WP_Error( 'agents_chat_run_atomic_unavailable', 'Atomic chat input claim returned an invalid result.' );
+	}
+
+	/**
+	 * Resolve the raw stored run for a presented claim token.
+	 *
+	 * @param array{runs:array<string,array<string,mixed>>,queues:array<string,array<int,array<string,mixed>>>,events:array<string,array<int,array<string,mixed>>>} $state Stored state.
+	 * @return array<string,mixed>|\WP_Error Raw stored run.
+	 */
+	private static function claimed_run_from_state( array $state, string $run_id, string $claim_token ) {
+		$run = $state['runs'][ $run_id ] ?? null;
+		if ( ! is_array( $run ) ) {
+			return new \WP_Error( 'agents_chat_run_not_found', 'No chat run was found for the requested run_id.' );
+		}
+
+		$stored      = self::string_value( $run['_claim_token'] ?? '' );
+		$claim_token = trim( $claim_token );
+		if ( '' === $claim_token || '' === $stored || ! hash_equals( $stored, $claim_token ) ) {
+			return new \WP_Error( 'agents_chat_run_claim_forbidden', 'The chat run is not writable with the presented run claim.' );
+		}
+
+		return $run;
+	}
+
+	/**
+	 * Normalize a claimed run into the public write-result envelope.
+	 *
+	 * @param array<string,mixed> $run Raw stored run.
+	 * @return array<string,mixed>
+	 */
+	private static function claimed_run_view( array $run ): array {
+		$normalized              = self::normalize_run( self::normalize_cancellation_state( $run ) );
+		$normalized['cancelled'] = (bool) ( $normalized['cancelled'] ?? false );
+		return $normalized;
+	}
+
+	/**
+	 * Resolve the writable transcript session for a claimed run.
+	 *
+	 * @return array{run:array<string,mixed>,session:array<string,mixed>,session_id:string,store:WP_Agent_Conversation_Store,messages:array<int,mixed>}|\WP_Error
+	 */
+	private static function claimed_writable_session( string $run_id, string $claim_token, ?WP_Agent_Workspace_Scope $workspace, ?WP_Agent_Conversation_Store $conversation_store ) {
+		$run = self::claimed_run_from_state( self::state( $workspace ), $run_id, $claim_token );
+		if ( $run instanceof \WP_Error ) {
+			return $run;
+		}
+		if ( self::is_terminal_status( $run['status'] ?? null ) ) {
+			return new \WP_Error( 'agents_chat_run_already_finished', 'The chat run has already reached a terminal status.' );
+		}
+
+		$session_id = self::string_value( $run['session_id'] ?? '' );
+		if ( '' === $session_id || ! empty( $run['_session_pending'] ) || str_starts_with( $session_id, 'pending:' ) ) {
+			return new \WP_Error( 'agents_chat_run_session_pending', 'The chat run is not bound to a canonical conversation session yet.' );
+		}
+
+		$conversation_store ??= WP_Agent_Conversation_Sessions::get_store();
+		if ( ! $conversation_store instanceof WP_Agent_Conversation_Store ) {
+			return new \WP_Error( 'agents_chat_run_session_store_required', 'Claim-bound transcript writes require an authoritative conversation session store.' );
+		}
+
+		$session = $conversation_store->get_session( $session_id );
+		if ( ! is_array( $session ) ) {
+			return new \WP_Error( 'agents_chat_run_session_not_found', 'No conversation session was found for the claimed run.' );
+		}
+
+		return array(
+			'run'        => $run,
+			'session'    => $session,
+			'session_id' => $session_id,
+			'store'      => $conversation_store,
+			'messages'   => is_array( $session['messages'] ?? null ) ? array_values( $session['messages'] ) : array(),
+		);
+	}
+
+	/**
+	 * Normalize appended envelopes and assign stable message identity.
+	 *
+	 * @param array<int,mixed> $messages Raw messages.
+	 * @return array<int,array<string,mixed>>|\WP_Error
+	 */
+	private static function normalize_write_messages( array $messages ) {
+		if ( array() === $messages ) {
+			return new \WP_Error( 'agents_chat_run_invalid_message', 'messages must contain at least one message.' );
+		}
+
+		$normalized = array();
+		foreach ( $messages as $message ) {
+			if ( ! is_array( $message ) ) {
+				return new \WP_Error( 'agents_chat_run_invalid_message', 'Each message must be an object.' );
+			}
+			try {
+				$envelope = WP_Agent_Message::normalize( $message );
+			} catch ( \InvalidArgumentException $error ) {
+				return new \WP_Error( 'agents_chat_run_invalid_message', $error->getMessage() );
+			}
+			if ( '' === self::string_value( $envelope['id'] ?? '' ) ) {
+				$envelope['id'] = WP_Agent_Run_Control::generate_run_id( 'msg_' );
+			}
+			if ( '' === self::string_value( $envelope['created_at'] ?? '' ) ) {
+				$envelope['created_at'] = self::now();
+			}
+			$normalized[] = $envelope;
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Persist a replaced transcript while preserving session row continuity fields.
+	 *
+	 * @param array{session:array<string,mixed>,session_id:string,store:WP_Agent_Conversation_Store} $target  Resolved session target.
+	 * @param array<int,mixed>                                                                      $messages Complete transcript.
+	 */
+	private static function persist_session_transcript( array $target, array $messages ): bool {
+		$session              = $target['session'];
+		$provider_response_id = is_string( $session['provider_response_id'] ?? null ) && '' !== $session['provider_response_id'] ? $session['provider_response_id'] : null;
+
+		return $target['store']->update_session(
+			$target['session_id'],
+			array_values( $messages ),
+			is_array( $session['metadata'] ?? null ) ? $session['metadata'] : array(),
+			self::string_value( $session['provider'] ?? '' ),
+			self::string_value( $session['model'] ?? '' ),
+			$provider_response_id
+		);
+	}
+
+	/**
 	 * Build the interrupt message shape consumed by WP_Agent_Conversation_Loop.
 	 *
 	 * Runtimes that cannot abort an in-flight provider request immediately can

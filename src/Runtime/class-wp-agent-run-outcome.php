@@ -26,6 +26,7 @@ class WP_Agent_Run_Outcome {
 	public const STATUS_CANCELLED            = 'cancelled';
 	public const STATUS_INTERRUPTED          = 'interrupted';
 	public const STATUS_INCOMPLETE           = 'incomplete';
+	public const STATUS_PENDING              = 'pending';
 
 	public const STOP_NATURAL        = 'natural';
 	public const STOP_MAX_TURNS      = 'max_turns';
@@ -43,6 +44,7 @@ class WP_Agent_Run_Outcome {
 			self::STATUS_CANCELLED,
 			self::STATUS_INTERRUPTED,
 			self::STATUS_INCOMPLETE,
+			self::STATUS_PENDING,
 		);
 	}
 
@@ -122,6 +124,10 @@ class WP_Agent_Run_Outcome {
 				return WP_Agent_Run_Control::STATUS_FAILED;
 			case self::STATUS_COMPLETED:
 				return WP_Agent_Run_Control::STATUS_COMPLETED;
+			case self::STATUS_PENDING:
+				// Accepted-pending: an external runtime holds the run claim and
+				// finalizes status later through the claim-bound write surface.
+				return WP_Agent_Run_Control::STATUS_RUNNING;
 			default:
 				return WP_Agent_Run_Control::STATUS_RUNNING;
 		}
@@ -152,6 +158,9 @@ class WP_Agent_Run_Outcome {
 		}
 		if ( self::STATUS_CANCELLED === $status ) {
 			return self::STATUS_CANCELLED;
+		}
+		if ( self::STATUS_PENDING === $status ) {
+			return self::STATUS_PENDING;
 		}
 		if ( self::STATUS_FAILED === $status || isset( $result['failure'] ) ) {
 			return self::STATUS_FAILED;
@@ -184,7 +193,7 @@ class WP_Agent_Run_Outcome {
 
 	/** @param array<mixed> $result */
 	private static function derive_retryable( array $result, string $status ): bool {
-		if ( in_array( $status, array( self::STATUS_RUNTIME_TOOL_PENDING, self::STATUS_APPROVAL_REQUIRED, self::STATUS_CANCELLED, self::STATUS_INTERRUPTED ), true ) ) {
+		if ( in_array( $status, array( self::STATUS_RUNTIME_TOOL_PENDING, self::STATUS_APPROVAL_REQUIRED, self::STATUS_CANCELLED, self::STATUS_INTERRUPTED, self::STATUS_PENDING ), true ) ) {
 			return false;
 		}
 		if ( self::STATUS_BUDGET_EXCEEDED === self::string_value( $result['status'] ?? null ) ) {
