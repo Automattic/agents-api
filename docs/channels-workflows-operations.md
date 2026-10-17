@@ -186,6 +186,22 @@ Read abilities return observer-safe run envelopes for non-operators. Stored run 
 
 Queued messages return the same run payload plus `queued_message_id` and `position`. Async runtimes can drain queued messages through their worker, cron, or Action Scheduler integration. Synchronous runtimes can expose queued state and require polling or an explicit continue operation in the consuming product; the substrate does not force a background runner.
 
+### Claim-bound chat run writes
+
+When a `wp_agent_chat_handler` routes a turn to an out-of-process runtime, that runtime writes the run and its transcript back through the canonical claim-bound write abilities instead of a parallel contract. `agents/chat` reserves the run before the handler executes and injects an opaque `_agents_run_claim_token` into the handler input; the handler hands the token (with the `run_id` and `session_id`) to its runtime, and the runtime presents the token back as `claim_token`.
+
+| Ability | Purpose |
+| --- | --- |
+| `agents/append-chat-run-messages` | Append canonical message envelopes (assistant text, tool calls/results, `input_required`, `approval_required`, notices) to the session transcript. Each appended message receives a stable `id`. |
+| `agents/update-chat-run-message` | Replace one previously appended message by its stable `id`, so streamed text is edited in place. |
+| `agents/append-chat-run-events` | Append lifecycle events to the same event stream served by `agents/list-chat-run-events`. |
+| `agents/set-chat-run-status` | Transition run status (`running` → `completed`/`failed`/`cancelled`, or a suspended status such as `approval_required`). The response always carries `cancelled`, so a status heartbeat doubles as cancellation observation. |
+| `agents/claim-chat-run-input` | Drain queued user answers (for example to an `input_required` message) submitted through `agents/queue-chat-message`. |
+
+Authorization is bound to the run claim: the presented `claim_token` must match the token stored when the run was reserved, so a runtime can only write runs it claimed, for sessions it was handed. A client-supplied `principal` or `session_owner` never grants write access, and the permission callbacks never consult the current user's capabilities. Hosts can veto (never widen) the decision with the `agents_chat_run_write_claim_permission` filter.
+
+To return immediately with an accepted-pending run, an external handler returns the canonical output with `status => 'pending'` and `completed => false`. The dispatcher then leaves the stored run open (`running`) instead of terminalizing it, and the runtime finalizes status later through `agents/set-chat-run-status`. A committed cancellation request still wins over a late success claim, exactly like the in-process finish path.
+
 ## Session, webhook, and idempotency helpers
 
 Shared channel primitives include:

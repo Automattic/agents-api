@@ -125,6 +125,7 @@
       "php tests/channels-smoke.php",
       "php tests/chat-run-control-smoke.php",
       "php tests/chat-run-control-multisite-smoke.php",
+      "php tests/chat-run-write-smoke.php",
       "php tests/external-chat-run-bridge-fixture-smoke.php",
       "php tests/task-execution-smoke.php",
       "php tests/frontend-chat-rest-smoke.php",

@@ -296,7 +296,15 @@ function agents_chat_run_claimed( array $input, callable $run, ?array $run_conte
 		}
 	}
 
-	$status   = WP_Agent_Run_Outcome::run_control_status( $result );
+	$status = WP_Agent_Run_Outcome::run_control_status( $result );
+	if ( in_array( $status, array( WP_Agent_Chat_Run_Control::STATUS_RUNNING, WP_Agent_Chat_Run_Control::STATUS_QUEUED ), true ) ) {
+		// Accepted, pending: the handler handed the turn to an external runtime
+		// that still holds the run claim. Leave the stored run open so the
+		// runtime can append transcript/events and finalize status through the
+		// claim-bound write abilities instead of terminalizing here.
+		return $result;
+	}
+
 	$finished = WP_Agent_Chat_Run_Control::finish_run( $run_id, $status, $run_context['workspace'] );
 	if ( is_wp_error( $finished ) ) {
 		do_action( 'agents_chat_dispatch_failed', $finished->get_error_code(), $input );
