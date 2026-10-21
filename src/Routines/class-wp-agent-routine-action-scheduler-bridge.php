@@ -39,6 +39,20 @@
  *    registry's reconcile uses: it never trusts the record, re-reads the
  *    store, and repairs drift the record cannot see (including a recorded
  *    signature whose action was deleted out-of-band).
+ *  - Self-healing repair loop: because declarations trust the record, the
+ *    substrate itself owns the authoritative repair — ONE recurring
+ *    Action Scheduler action ({@see PERIODIC_RECONCILE_HOOK}, group
+ *    `agents-api`, hourly) whose callback runs the registry's
+ *    lock-protected `WP_Agent_Routine_Registry::reconcile()` in apply
+ *    mode. A chain lost out of band is repaired within at most one
+ *    interval of its loss. The maintenance action is declared exactly
+ *    like a routine: {@see ensure_periodic_reconcile()} fast-paths on the
+ *    maintenance chain's own record in the schedules map (zero scheduler
+ *    queries per request), every actual run stamps a liveness timestamp
+ *    into that record, and once the timestamp is older than one interval
+ *    the next declaration revalidates the chain against the store (one
+ *    bounded query per revalidation, not per request) and re-creates it
+ *    if the maintenance chain itself was lost out of band.
  *  - One chain per routine. Whenever a register()/repair() call reaches
  *    Action Scheduler and finds more than one *matching* pending chain, it
  *    keeps exactly one — the lowest-id chain that the generation/watermark
@@ -121,6 +135,38 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge implements WP_Agent_Routine
 	 * so this is far shorter than the reconcile lock's TTL.
 	 */
 	private const SCHEDULE_LOCK_TTL = 30;
+
+	/**
+	 * Hook of the substrate-owned recurring maintenance action whose
+	 * callback runs the registry's lock-protected reconcile() in apply
+	 * mode — the authoritative repair loop that keeps a chain lost out of
+	 * band from staying lost. Lives in {@see GROUP} so it is visible (and
+	 * cancellable) next to the routines it repairs.
+	 */
+	public const PERIODIC_RECONCILE_HOOK = 'wp_agent_routine_periodic_reconcile';
+
+	/**
+	 * Seconds between periodic reconcile runs (one hour): the documented
+	 * upper bound on how long a lost chain stays lost.
+	 */
+	public const PERIODIC_RECONCILE_INTERVAL = 3600;
+
+	/**
+	 * The schedules-map key of the maintenance chain's own record. Prefix
+	 * `@` cannot occur in a routine id ({@see WP_Agent_Routine} runs ids
+	 * through `sanitize_title()`, which strips it), so the key can never
+	 * collide with a real routine's entry.
+	 */
+	private const PERIODIC_RECONCILE_RECORD_KEY = '@periodic-reconcile';
+
+	/**
+	 * Seconds the declaration fast path trusts the maintenance record's
+	 * liveness timestamp before revalidating the chain against the store.
+	 * One interval: a live chain stamps the timestamp on every run, so a
+	 * record older than this means the chain (or its record) needs an
+	 * authoritative look — at most once per interval, never per request.
+	 */
+	private const PERIODIC_RECONCILE_REVALIDATE_AFTER = 3600;
 
 	/**
 	 * Prefix of the pre-fix per-action option rows
@@ -261,7 +307,10 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge implements WP_Agent_Routine
 	 * out-of-band deletion (pruned store, restored backup) is invisible to
 	 * declarations and is repaired by
 	 * {@see WP_Agent_Routine_Registry::reconcile()} — whose repair path
-	 * never trusts the record.
+	 * never trusts the record. That repair runs on a schedule: the
+	 * substrate's own hourly {@see PERIODIC_RECONCILE_HOOK} maintenance
+	 * action invokes it in apply mode, so a lost chain is restored within
+	 * at most one interval of its loss.
 	 *
 	 * @return bool True when a schedule is in place (freshly registered,
 	 *             already matching the record, or being scheduled right now
@@ -408,6 +457,159 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge implements WP_Agent_Routine
 		} finally {
 			$this->release_schedule_lock( $routine_id );
 		}
+	}
+
+	/**
+	 * Declare the substrate-owned maintenance chain whose callback runs the
+	 * registry's lock-protected reconcile() in apply mode — the periodic
+	 * authoritative repair that keeps a chain lost out of band (pruned
+	 * store, restored backup, an action Action Scheduler stops
+	 * rescheduling) from staying lost.
+	 *
+	 * Idempotent and cheap to call on every request, exactly like a
+	 * routine declaration: while the maintenance chain's own record in the
+	 * schedules map ({@see PERIODIC_RECONCILE_RECORD_KEY}) carries the
+	 * expected signature and a liveness timestamp younger than one
+	 * interval, this returns before issuing a single scheduler query.
+	 * Every actual run of the chain stamps that timestamp, so a fresh
+	 * record is proof the chain is alive. Only a missing, mismatched, or
+	 * stale record reaches {@see repair_periodic_reconcile()} — at most
+	 * once per interval, never per request — which revalidates the chain
+	 * against the store and re-creates it if the maintenance chain itself
+	 * was lost out of band.
+	 *
+	 * @return bool True when a maintenance chain is in place (freshly
+	 *             (re)asserted, already live per the record, or being
+	 *             asserted right now by the concurrent process that holds
+	 *             the schedule lock); false when Action Scheduler is
+	 *             unavailable or the schedule call failed.
+	 */
+	public function ensure_periodic_reconcile(): bool {
+		if ( ! $this->is_available() ) {
+			return false;
+		}
+
+		$record = $this->periodic_record();
+		if (
+			null !== $record
+			&& self::periodic_signature() === $record['signature']
+			&& ( time() - $record['checked'] ) < self::PERIODIC_RECONCILE_REVALIDATE_AFTER
+		) {
+			return true; // Fresh liveness timestamp: the chain ran recently.
+		}
+
+		return $this->repair_periodic_reconcile();
+	}
+
+	/**
+	 * Authoritative check-and-repair of the maintenance chain against real
+	 * Action Scheduler state — the path a missing, mismatched, or stale
+	 * maintenance record takes.
+	 *
+	 * Serialized through the same single-flight schedule lock the routine
+	 * paths use (keyed on the reserved record id), then:
+	 *
+	 * - pending maintenance actions exist → keep the lowest-id one whose
+	 *   recurrence still matches the expected interval, cancel every other
+	 *   pending maintenance action by id (duplicate chains and
+	 *   wrong-recurrence chains alike), and record it;
+	 * - none pending but an instance is in-progress (claimed by a worker)
+	 *   → the chain is live; Action Scheduler spawns its successor when
+	 *   the instance completes, so nothing is scheduled and the record is
+	 *   written with a fresh liveness timestamp;
+	 * - nothing anywhere → schedule a fresh hourly chain (first run
+	 *   immediately) and record it.
+	 *
+	 * @return bool True when a maintenance chain is in place after the call.
+	 */
+	public function repair_periodic_reconcile(): bool {
+		if ( ! $this->is_available() ) {
+			return false;
+		}
+
+		if ( ! $this->acquire_schedule_lock( self::PERIODIC_RECONCILE_RECORD_KEY ) ) {
+			// Another process is asserting the maintenance chain right now; it
+			// will finish the job and record it. No-op cheaply.
+			return true;
+		}
+
+		try {
+			$pending = $this->periodic_actions( \ActionScheduler_Store::STATUS_PENDING );
+
+			$matching = array();
+			foreach ( $pending as $action_id => $action ) {
+				if ( self::periodic_recurrence_matches( $action ) ) {
+					$matching[ $action_id ] = $action;
+					continue;
+				}
+				// A wrong recurrence (an out-of-band edit or a prior interval):
+				// superseded — the chain it belongs to no longer matches.
+				$this->cancel( (int) $action_id );
+			}
+
+			if ( array() !== $matching ) {
+				$keep_id = (int) min( array_keys( $matching ) );
+				foreach ( array_keys( $matching ) as $action_id ) {
+					if ( (int) $action_id !== $keep_id ) {
+						$this->cancel( (int) $action_id );
+					}
+				}
+				$this->record_periodic_schedule( $keep_id );
+				return true;
+			}
+
+			$running = $this->periodic_actions( \ActionScheduler_Store::STATUS_RUNNING );
+			if ( array() !== $running ) {
+				// An instance is executing right now; its recurrence successor
+				// is spawned when it completes. Record it so concurrent
+				// declarations fast-path instead of minting a second chain.
+				$this->record_periodic_schedule( (int) min( array_keys( $running ) ) );
+				return true;
+			}
+
+			$new_id = as_schedule_recurring_action(
+				time(),
+				self::PERIODIC_RECONCILE_INTERVAL,
+				self::PERIODIC_RECONCILE_HOOK,
+				array(),
+				self::GROUP
+			);
+
+			if ( empty( $new_id ) ) {
+				return false;
+			}
+
+			$this->record_periodic_schedule( (int) $new_id );
+			return true;
+		} finally {
+			$this->release_schedule_lock( self::PERIODIC_RECONCILE_RECORD_KEY );
+		}
+	}
+
+	/**
+	 * The maintenance chain's callback: stamp the record's liveness
+	 * timestamp — this run is itself the evidence the chain is alive; the
+	 * declaration fast path trusts it until it ages past one interval —
+	 * then run the registry's lock-protected reconcile() in apply mode, so
+	 * missing routine schedules are re-enqueued, duplicate chains collapse
+	 * to one, and orphaned ones are removed within one interval of the
+	 * drift appearing.
+	 *
+	 * Registered on {@see PERIODIC_RECONCILE_HOOK}; Action Scheduler spawns
+	 * the next hourly occurrence after this callback completes.
+	 */
+	public static function run_periodic_reconcile(): void {
+		self::instance()->touch_periodic_schedule();
+
+		$report = WP_Agent_Routine_Registry::reconcile();
+
+		/**
+		 * Fires after a periodic reconcile run completes. Consumers can wire
+		 * up run-recording and alerting on the report here.
+		 *
+		 * @param array{enqueued:string[],removed:string[],unchanged:string[],errors:array<string,string>} $report
+		 */
+		do_action( 'wp_agent_routine_periodic_reconcile_completed', $report );
 	}
 
 	/**
@@ -692,6 +894,146 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge implements WP_Agent_Routine
 	}
 
 	/**
+	 * The schedule signature the maintenance chain's record must carry.
+	 */
+	private static function periodic_signature(): string {
+		return 'interval:' . self::PERIODIC_RECONCILE_INTERVAL;
+	}
+
+	/**
+	 * Whether a maintenance-chain action's own Action Scheduler recurrence
+	 * still matches {@see PERIODIC_RECONCILE_INTERVAL}. Deliberately the
+	 * same comparison shape as {@see recurrence_matches()} minus the
+	 * routine: only the interval is schedule-significant for the
+	 * maintenance chain's idempotency.
+	 */
+	private static function periodic_recurrence_matches( \ActionScheduler_Action $action ): bool {
+		$schedule = $action->get_schedule();
+		if ( ! $schedule->is_recurring() ) {
+			return false;
+		}
+		$recurrence = $schedule->get_recurrence();
+		return is_numeric( $recurrence ) && (int) $recurrence === self::PERIODIC_RECONCILE_INTERVAL;
+	}
+
+	/**
+	 * The persisted record of the maintenance chain
+	 * ({@see PERIODIC_RECONCILE_RECORD_KEY} in the schedules map), or null
+	 * when there is none (never declared, record pruned, or an
+	 * unparseable row).
+	 *
+	 * @return array{signature:string, action_id:int, checked:int}|null
+	 */
+	private function periodic_record(): ?array {
+		$record = $this->schedules_map()[ self::PERIODIC_RECONCILE_RECORD_KEY ] ?? null;
+		if ( ! is_array( $record ) ) {
+			return null;
+		}
+
+		$signature = is_string( $record['signature'] ?? null ) ? $record['signature'] : '';
+		$action_id = is_numeric( $record['action_id'] ?? null ) ? (int) $record['action_id'] : 0;
+		$checked   = is_numeric( $record['checked'] ?? null ) ? (int) $record['checked'] : 0;
+		if ( '' === $signature || $action_id <= 0 || $checked <= 0 ) {
+			return null;
+		}
+
+		return array(
+			'signature' => $signature,
+			'action_id' => $action_id,
+			'checked'   => $checked,
+		);
+	}
+
+	/**
+	 * Persist the maintenance chain's schedule record (signature + chain
+	 * id + a fresh liveness timestamp). Called only from the authoritative
+	 * repair path, which has just verified or minted the chain.
+	 */
+	private function record_periodic_schedule( int $action_id ): void {
+		if ( ! self::has_option_layer() ) {
+			return;
+		}
+
+		$map                                          = $this->schedules_map();
+		$map[ self::PERIODIC_RECONCILE_RECORD_KEY ] = array(
+			'signature' => self::periodic_signature(),
+			'action_id' => $action_id,
+			'checked'   => time(),
+		);
+		update_option( self::SCHEDULES_OPTION, $map, false );
+		$this->schedules_cache = $map;
+	}
+
+	/**
+	 * Stamp the maintenance record's liveness timestamp — the periodic
+	 * callback calls this on every run, which is what makes a fresh record
+	 * trustworthy enough for the declaration fast path to skip the store
+	 * entirely. When no parseable record exists, fall through to the
+	 * authoritative repair instead: the callback is itself proof a chain
+	 * is live, and repair() finds it in-progress and records it.
+	 */
+	private function touch_periodic_schedule(): void {
+		if ( ! self::has_option_layer() ) {
+			return;
+		}
+
+		$record = $this->periodic_record();
+		if ( null === $record ) {
+			$this->repair_periodic_reconcile();
+			return;
+		}
+
+		$map                                           = $this->schedules_map();
+		$map[ self::PERIODIC_RECONCILE_RECORD_KEY ]['checked'] = time();
+		update_option( self::SCHEDULES_OPTION, $map, false );
+		$this->schedules_cache = $map;
+	}
+
+	/**
+	 * All maintenance-chain actions currently in the given Action
+	 * Scheduler status — pending, or in-progress once a worker has claimed
+	 * an instance. A bounded, targeted query (hook + group + status) only
+	 * the repair path pays; the declaration fast path never does.
+	 *
+	 * @return array<int, \ActionScheduler_Action>
+	 */
+	private function periodic_actions( string $status ): array {
+		if ( ! function_exists( 'as_get_scheduled_actions' ) || ! class_exists( '\ActionScheduler_Store' ) ) {
+			return array();
+		}
+
+		$ids = as_get_scheduled_actions(
+			array(
+				'hook'     => self::PERIODIC_RECONCILE_HOOK,
+				'group'    => self::GROUP,
+				'status'   => $status,
+				'per_page' => -1,
+			),
+			'ids'
+		);
+		if ( ! is_array( $ids ) ) {
+			return array();
+		}
+
+		$actions = array();
+		foreach ( $ids as $id ) {
+			$action_id = is_numeric( $id ) ? (int) $id : 0;
+			if ( $action_id <= 0 ) {
+				continue;
+			}
+
+			try {
+				$actions[ $action_id ] = \ActionScheduler_Store::instance()->fetch_action( $action_id );
+			} catch ( \Throwable $error ) {
+				unset( $error );
+				continue;
+			}
+		}
+
+		return $actions;
+	}
+
+	/**
 	 * Persist the routine's schedule record (signature + chain's first
 	 * action id). A no-op write when the record already says exactly this —
 	 * reconcile calls this for every healthy routine and must not turn that
@@ -811,39 +1153,116 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge implements WP_Agent_Routine
 	 * schedule step must not run concurrently in two processes, or both see
 	 * "no matching chain" and both schedule one (the duplicate-chain race).
 	 *
-	 * An `add_option()`-based lock: the insert succeeds only when no lock row
-	 * exists, so acquisition is atomic in MySQL against `option_name`'s
-	 * unique key. A lock older than {@see SCHEDULE_LOCK_TTL} is stale (its
-	 * holder crashed mid-schedule) and is taken over. With no option layer at
-	 * all (pure-PHP harnesses) callers are already single-process and the
-	 * lock is a no-op success.
+	 * One atomic `$wpdb` compare-and-set, identical in shape to the
+	 * registry's reconcile lock: `INSERT ... ON DUPLICATE KEY UPDATE`
+	 * against `wp_options` directly, never through
+	 * `add_option()`/`get_option()`. The single query handles all three
+	 * cases atomically against `option_name`'s unique key:
+	 *
+	 *  - no row exists: plain insert, 1 affected row;
+	 *  - row exists and is stale — older than {@see SCHEDULE_LOCK_TTL}, its
+	 *    holder crashed mid-schedule — `ON DUPLICATE KEY UPDATE` overwrites
+	 *    it, MySQL reports 2 affected rows for a changed row;
+	 *  - row exists and is fresh: the `IF()` leaves the value unchanged,
+	 *    MySQL reports 0 affected rows for a no-op update.
+	 *
+	 * The takeover being part of the same compare-and-set is what makes it
+	 * single-flight: any number of processes that all observe the same
+	 * stale lock are serialized by MySQL's row lock, and only the first
+	 * re-checks the stale condition against the fresh value — the rest see
+	 * 0 affected rows and no-op. The previous implementation's stale
+	 * takeover was an unconditional `update_option()`, so every process
+	 * that observed the same stale lock took it over and proceeded —
+	 * re-opening the duplicate-chain race exactly when a crashed holder had
+	 * left a stale lock behind.
+	 *
+	 * Reading and writing exclusively through `$wpdb` — with an explicit
+	 * `wp_cache_delete()` after every write — also means a stale options-
+	 * cache entry can never make the lock unavailable or un-releasable.
+	 * `$wpdb->query()` returns the raw affected-rows count for a non-SELECT
+	 * query, so `> 0` is "we now hold the lock".
+	 *
+	 * With no option layer or no `$wpdb` at all (pure-PHP harnesses) callers
+	 * are already single-process and the lock is a no-op success.
 	 */
 	private function acquire_schedule_lock( string $routine_id ): bool {
 		if ( ! self::has_option_layer() ) {
 			return true;
 		}
 
-		$name = self::SCHEDULE_LOCK_OPTION_PREFIX . $routine_id;
-		if ( add_option( $name, time(), '', false ) ) {
+		global $wpdb;
+		if ( ! $wpdb instanceof \wpdb ) {
 			return true;
 		}
 
-		$held_at = get_option( $name, 0 );
-		if ( is_numeric( $held_at ) && ( time() - (int) $held_at ) < self::SCHEDULE_LOCK_TTL ) {
-			return false; // Freshly held by another process.
+		$name         = self::SCHEDULE_LOCK_OPTION_PREFIX . $routine_id;
+		$now          = time();
+		$stale_before = $now - self::SCHEDULE_LOCK_TTL;
+
+		$query = $wpdb->prepare(
+			'INSERT INTO %i (option_name, option_value, autoload)
+			VALUES (%s, %s, %s)
+			ON DUPLICATE KEY UPDATE option_value = IF( CAST( option_value AS UNSIGNED ) <= %d, VALUES(option_value), option_value )',
+			$wpdb->options,
+			$name,
+			(string) $now,
+			'no',
+			$stale_before
+		);
+		if ( ! is_string( $query ) ) {
+			return false;
 		}
 
-		// Stale (or unreadable): take over so a crashed holder cannot strand
-		// the routine unscheduled.
-		update_option( $name, time(), false );
-		return true;
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is built by $wpdb->prepare() above.
+		$affected = $wpdb->query( $query );
+
+		self::flush_schedule_lock_cache( $name );
+
+		return is_int( $affected ) && $affected > 0;
 	}
 
 	private function release_schedule_lock( string $routine_id ): void {
 		if ( ! self::has_option_layer() ) {
 			return;
 		}
-		delete_option( self::SCHEDULE_LOCK_OPTION_PREFIX . $routine_id );
+
+		global $wpdb;
+		if ( ! $wpdb instanceof \wpdb ) {
+			return;
+		}
+
+		$name = self::SCHEDULE_LOCK_OPTION_PREFIX . $routine_id;
+
+		$query = $wpdb->prepare( 'DELETE FROM %i WHERE option_name = %s', $wpdb->options, $name );
+		if ( is_string( $query ) ) {
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is built by $wpdb->prepare() above.
+			$wpdb->query( $query );
+		}
+
+		self::flush_schedule_lock_cache( $name );
+	}
+
+	/**
+	 * Explicitly evict a schedule-lock option from the object cache after
+	 * every direct `$wpdb` write, so anything that does happen to read it
+	 * via `get_option()` never observes a value the DB no longer has.
+	 */
+	private static function flush_schedule_lock_cache( string $name ): void {
+		if ( function_exists( 'wp_cache_delete' ) ) {
+			wp_cache_delete( $name, 'options' );
+		}
+	}
+
+	/**
+	 * Test-only: expose the single-flight schedule-lock acquisition so a
+	 * pure-PHP smoke can model two concurrent processes that both observe
+	 * the same stale lock and race for the takeover (production callers
+	 * reach it through repair(), where the loser no-ops before scheduling).
+	 *
+	 * @param string $routine_id Routine id the lock is keyed on.
+	 */
+	public function acquire_schedule_lock_for_tests( string $routine_id ): bool {
+		return $this->acquire_schedule_lock( $routine_id );
 	}
 
 	/**

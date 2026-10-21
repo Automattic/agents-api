@@ -561,6 +561,17 @@ function smoke_pending_rows(): array {
 	return $rows;
 }
 
+/** @return array<int,array<string,mixed>> Pending maintenance-chain rows. */
+function smoke_periodic_rows(): array {
+	$rows = array();
+	foreach ( smoke_pending_rows() as $id => $row ) {
+		if ( WP_Agent_Routine_Action_Scheduler_Bridge::PERIODIC_RECONCILE_HOOK === $row['hook'] ) {
+			$rows[ $id ] = $row;
+		}
+	}
+	return $rows;
+}
+
 function smoke_hook_fired( string $hook ): bool {
 	foreach ( $GLOBALS['smoke_fired_hooks'] as $entry ) {
 		if ( $entry[0] === $hook ) {
@@ -1035,23 +1046,50 @@ durable_assert( array( $rec_dup ), $GLOBALS['smoke_as_cancel_calls'], 'reconcile
 
 // ---------------------------------------------------------------------------
 // 12. Check-then-schedule is single-flight: a lock held by another process
-//     schedules no second chain; a stale lock is taken over and released.
+//     schedules no second chain; a stale lock is taken over and released;
+//     and the stale-lock takeover itself is single-flight — of any number
+//     of processes that observe the same stale lock, exactly one wins the
+//     compare-and-set. The lock lives only in $wpdb — never in
+//     get_option()/the options cache — so it is seeded and inspected
+//     directly against the fake DB row store.
 // ---------------------------------------------------------------------------
 
 smoke_reset_state();
-$GLOBALS['smoke_options']['agents_routine_schedule_lock_conc'] = time(); // fresh lock, held by "another process"
+$GLOBALS['wpdb']->rows['agents_routine_schedule_lock_conc'] = (string) time(); // fresh lock, held by "another process"
 WP_Agent_Routine_Registry::register( 'conc', array( 'agent' => 'commander', 'interval' => 600 ) );
 durable_assert( 0, count( smoke_pending_rows() ), 'concurrent: a fresh lock held by another process schedules no chain' );
 durable_assert( array(), get_option( 'agents_routine_schedules', array() ), 'concurrent: the losing caller records nothing' );
 
-$GLOBALS['smoke_options']['agents_routine_schedule_lock_conc'] = time() - 120; // stale: the holder crashed
+$GLOBALS['wpdb']->rows['agents_routine_schedule_lock_conc'] = (string) ( time() - 120 ); // stale: the holder crashed
 WP_Agent_Routine_Registry::register( 'conc', array( 'agent' => 'commander', 'interval' => 600 ) );
 durable_assert( 1, count( smoke_pending_rows() ), 'concurrent: a stale lock is taken over and the routine is scheduled' );
-durable_assert( false, array_key_exists( 'agents_routine_schedule_lock_conc', $GLOBALS['smoke_options'] ), 'concurrent: the schedule lock is released after the run' );
+durable_assert( false, array_key_exists( 'agents_routine_schedule_lock_conc', $GLOBALS['wpdb']->rows ), 'concurrent: the schedule lock is released after the run' );
 
 $conc_id = $GLOBALS['smoke_as_next_id'];
 WP_Agent_Routine_Registry::register( 'conc', array( 'agent' => 'commander', 'interval' => 600 ) );
 durable_assert( $conc_id, $GLOBALS['smoke_as_next_id'], 'concurrent: with the schedule recorded, re-declaration schedules nothing' );
+
+// Takeover single-flight: two processes that both observe the same stale
+// lock both attempt the compare-and-set takeover. MySQL serializes them on
+// the row lock, so only the first re-checks a stale value; the loser sees
+// the winner's fresh lock and acquires nothing. Modelled by two sequential
+// acquires against the same seeded stale row — the fake wpdb reproduces
+// MySQL's affected-rows semantics, so the second acquire can only succeed
+// if the takeover were not atomic.
+smoke_reset_state();
+$GLOBALS['wpdb']->rows['agents_routine_schedule_lock_race'] = (string) ( time() - 120 );
+$first  = WP_Agent_Routine_Action_Scheduler_Bridge::instance()->acquire_schedule_lock_for_tests( 'race' );
+$second = WP_Agent_Routine_Action_Scheduler_Bridge::instance()->acquire_schedule_lock_for_tests( 'race' );
+durable_assert( true, $first, 'concurrent takeover: the first stale-lock taker wins the compare-and-set' );
+durable_assert( false, $second, 'concurrent takeover: the second taker of the same stale lock loses' );
+durable_assert( true, (int) $GLOBALS['wpdb']->rows['agents_routine_schedule_lock_race'] >= time() - 2, 'concurrent takeover: the winner holds a fresh lock' );
+
+// And a loser through the public path no-ops without scheduling: with the
+// winner still holding the (now fresh) lock it took over, a declaration of
+// the same routine must not mint a second chain.
+WP_Agent_Routine_Registry::register( 'race', array( 'agent' => 'commander', 'interval' => 600 ) );
+durable_assert( 0, count( smoke_pending_rows() ), 'concurrent takeover: a losing declaration schedules no chain' );
+durable_assert( array(), get_option( 'agents_routine_schedules', array() ), 'concurrent takeover: the losing declaration records nothing' );
 
 // ---------------------------------------------------------------------------
 // 13. A recorded signature whose action was deleted out-of-band: plain
@@ -1102,6 +1140,124 @@ durable_assert( 'interval:600', get_option( 'agents_routine_schedules', array() 
 
 WP_Agent_Routine_Registry::unregister( 'pr' );
 durable_assert( array(), get_option( 'agents_routine_schedules', array() ), 'pause/resume: unregister drops the schedule record' );
+
+// ---------------------------------------------------------------------------
+// 15. The substrate-owned periodic repair: one hourly recurring maintenance
+//     action whose callback runs the lock-protected reconcile() in apply
+//     mode. Declarations are idempotent and zero-scheduler-query on a fresh
+//     record; a routine chain deleted out of band is restored by the next
+//     callback run; and the maintenance chain itself is restored by the
+//     next declaration once its liveness timestamp goes stale.
+// ---------------------------------------------------------------------------
+
+smoke_reset_state();
+WP_Agent_Routine_Registry::register( 'heal-periodic', array( 'agent' => 'commander', 'interval' => 600 ) );
+
+// The init declaration schedules exactly one hourly maintenance chain.
+do_action( 'init' );
+$per_rows = smoke_periodic_rows();
+durable_assert( 1, count( $per_rows ), 'periodic: the init declaration schedules exactly one maintenance chain' );
+$per_id = (int) array_key_first( $per_rows );
+durable_assert( 3600, $GLOBALS['smoke_as'][ $per_id ]['interval'], 'periodic: the maintenance chain recurs hourly' );
+durable_assert( 'interval:3600', get_option( 'agents_routine_schedules', array() )['@periodic-reconcile']['signature'] ?? '', 'periodic: the maintenance chain is recorded' );
+
+// While the record is fresh, declarations are zero-scheduler-query and
+// strictly idempotent.
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$GLOBALS['smoke_as_query_count'] = 0;
+do_action( 'init' );
+durable_assert( 0, $GLOBALS['smoke_as_query_count'], 'periodic: a fresh record makes the declaration zero-scheduler-query' );
+durable_assert( 1, count( smoke_periodic_rows() ), 'periodic: the declaration never re-creates the chain' );
+
+// A callback run stamps the record's liveness timestamp (claim → run →
+// successor-spawn, as a real Action Scheduler runner does), and while an
+// instance is claimed the callback schedules no duplicate chain.
+$GLOBALS['smoke_as'][ $per_id ]['status'] = ActionScheduler_Store::STATUS_RUNNING; // claimed by the runner
+$GLOBALS['smoke_options']['agents_routine_schedules']['@periodic-reconcile']['checked'] = time() - 100;
+WP_Agent_Routine_Action_Scheduler_Bridge::run_periodic_reconcile();
+durable_assert( true, ( get_option( 'agents_routine_schedules', array() )['@periodic-reconcile']['checked'] ?? 0 ) >= time() - 2, 'periodic: a run stamps the record liveness timestamp' );
+$per_all = array_filter( $GLOBALS['smoke_as'], static fn( array $row ): bool => WP_Agent_Routine_Action_Scheduler_Bridge::PERIODIC_RECONCILE_HOOK === $row['hook'] );
+durable_assert( array( $per_id ), array_keys( $per_all ), 'periodic: the claimed run schedules no duplicate maintenance chain' );
+
+// The run completes; Action Scheduler spawns the next occurrence.
+$GLOBALS['smoke_as'][ $per_id ]['status'] = ActionScheduler_Store::STATUS_CANCELED;
+smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::PERIODIC_RECONCILE_HOOK, array(), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 3600, 3600 );
+
+// BLOCKING-FINDING COVERAGE: a routine chain deleted out of band is
+// restored by the next periodic callback run — exactly one chain, and a
+// record that matches it.
+smoke_reset_state();
+WP_Agent_Routine_Registry::register( 'heal-periodic', array( 'agent' => 'commander', 'interval' => 600 ) );
+$heal_first_id = $GLOBALS['smoke_as_next_id'];
+do_action( 'init' );
+$per_rows = smoke_periodic_rows();
+$per_id   = (int) array_key_first( $per_rows );
+unset( $GLOBALS['smoke_as'][ $heal_first_id ] ); // pruned store / manual deletion
+
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$GLOBALS['smoke_as'][ $per_id ]['status'] = ActionScheduler_Store::STATUS_RUNNING; // the callback is executing
+WP_Agent_Routine_Action_Scheduler_Bridge::run_periodic_reconcile();
+
+$heal_rows = array();
+foreach ( smoke_pending_rows() as $id => $row ) {
+	if ( WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK === $row['hook'] ) {
+		$heal_rows[ $id ] = $row;
+	}
+}
+durable_assert( 1, count( $heal_rows ), 'periodic heal: exactly one routine chain is back after the callback run' );
+$heal_record = get_option( 'agents_routine_schedules', array() )['heal-periodic'] ?? array();
+durable_assert( 'interval:600', $heal_record['signature'] ?? '', 'periodic heal: the record signature matches the restored chain' );
+durable_assert( (int) array_key_first( $heal_rows ), (int) ( $heal_record['action_id'] ?? 0 ), 'periodic heal: the record points at the restored chain' );
+
+// While an instance is claimed, even a record-less declaration must not
+// mint a second chain: the in-progress instance is the liveness evidence,
+// and its successor appears when it completes.
+$GLOBALS['smoke_options']['agents_routine_schedules'] = array_diff_key( $GLOBALS['smoke_options']['agents_routine_schedules'], array( '@periodic-reconcile' => array() ) );
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$as_next_before = $GLOBALS['smoke_as_next_id'];
+$GLOBALS['smoke_as_cancel_calls'] = array();
+do_action( 'init' );
+durable_assert( $as_next_before, $GLOBALS['smoke_as_next_id'], 'periodic heal: a claimed instance covers a record-less declaration without scheduling anything' );
+durable_assert( $per_id, (int) ( get_option( 'agents_routine_schedules', array() )['@periodic-reconcile']['action_id'] ?? 0 ), 'periodic heal: the claimed instance is recorded' );
+durable_assert( true, ( get_option( 'agents_routine_schedules', array() )['@periodic-reconcile']['checked'] ?? 0 ) >= time() - 2, 'periodic heal: recording the claimed instance stamps a fresh liveness timestamp' );
+
+// Finish the run; the successor appears.
+$GLOBALS['smoke_as'][ $per_id ]['status'] = ActionScheduler_Store::STATUS_CANCELED;
+$per_next = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::PERIODIC_RECONCILE_HOOK, array(), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 3600, 3600 );
+
+// A fresh liveness timestamp keeps the declaration zero-I/O even with the
+// maintenance chain itself deleted out of band — the trust window is what
+// bounds the repair's cost.
+unset( $GLOBALS['smoke_as'][ $per_next ] );
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$GLOBALS['smoke_as_query_count'] = 0;
+do_action( 'init' );
+durable_assert( 0, $GLOBALS['smoke_as_query_count'], 'periodic self-heal: a fresh liveness timestamp keeps the declaration zero-I/O' );
+durable_assert( 0, count( smoke_periodic_rows() ), 'periodic self-heal: the trust window is what delays the repair' );
+
+// Once the timestamp ages past one interval, the next declaration
+// revalidates against the store and re-creates the maintenance chain.
+$GLOBALS['smoke_options']['agents_routine_schedules']['@periodic-reconcile']['checked'] = time() - 4000;
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$GLOBALS['smoke_as_query_count'] = 0;
+do_action( 'init' );
+$per_rows = smoke_periodic_rows();
+durable_assert( 1, count( $per_rows ), 'periodic self-heal: a stale liveness timestamp restores the lost maintenance chain' );
+durable_assert( 'interval:3600', get_option( 'agents_routine_schedules', array() )['@periodic-reconcile']['signature'] ?? '', 'periodic self-heal: the restored chain is recorded' );
+durable_assert( 3600, $GLOBALS['smoke_as'][ (int) array_key_first( $per_rows ) ]['interval'], 'periodic self-heal: the restored chain recurs hourly' );
+durable_assert( true, $GLOBALS['smoke_as_query_count'] > 0, 'periodic self-heal: the revalidation pays its bounded query only when stale' );
+
+// Duplicate and wrong-recurrence maintenance chains collapse to exactly
+// one — the same one-chain discipline the routine paths enforce.
+smoke_reset_state();
+$GLOBALS['smoke_as_next_id'] = 400;
+$dup_keep = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::PERIODIC_RECONCILE_HOOK, array(), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 300, 3600 );
+$dup_extra = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::PERIODIC_RECONCILE_HOOK, array(), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 300, 3600 );
+$dup_wrong = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::PERIODIC_RECONCILE_HOOK, array(), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 300, 600 );
+do_action( 'init' );
+durable_assert( array( $dup_keep ), array_keys( smoke_periodic_rows() ), 'periodic collapse: duplicates and wrong-recurrence chains collapse to the lowest matching' );
+durable_assert( array( $dup_extra, $dup_wrong ), array_values( array_reverse( $GLOBALS['smoke_as_cancel_calls'] ) ), 'periodic collapse: the extra chains are cancelled by id' );
+durable_assert( 'interval:3600', get_option( 'agents_routine_schedules', array() )['@periodic-reconcile']['signature'] ?? '', 'periodic collapse: the kept chain is recorded' );
 
 // ---------------------------------------------------------------------------
 

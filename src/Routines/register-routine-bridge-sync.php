@@ -73,3 +73,31 @@ add_action(
 // cancelled. This is Action-Scheduler-specific plumbing owned by the
 // default backend; the callbacks no-op when Action Scheduler is absent.
 WP_Agent_Routine_Action_Scheduler_Bridge::register_generation_fence();
+
+// The substrate-owned periodic authoritative repair: one recurring Action
+// Scheduler action (hook `wp_agent_routine_periodic_reconcile`, group
+// `agents-api`, hourly) whose callback runs the registry's lock-protected
+// reconcile() in apply mode. Plain declarations trust the schedule record,
+// so this loop is what keeps a chain lost out of band (pruned store,
+// restored backup, an action Action Scheduler stops rescheduling) from
+// staying lost: it is repaired within at most one interval of its loss.
+add_action(
+	WP_Agent_Routine_Action_Scheduler_Bridge::PERIODIC_RECONCILE_HOOK,
+	array( WP_Agent_Routine_Action_Scheduler_Bridge::class, 'run_periodic_reconcile' ),
+	10,
+	0
+);
+
+// Declaring the maintenance chain is idempotent and cheap: it fast-paths on
+// the chain's own schedule record (zero scheduler queries while the record
+// is fresh — every actual run stamps a liveness timestamp into it) and only
+// reaches the store when the record is missing, mismatched, or older than
+// one interval, i.e. at most once per interval, to revalidate — and if
+// needed re-create — the chain.
+add_action(
+	'init',
+	static function (): void {
+		WP_Agent_Routine_Action_Scheduler_Bridge::instance()->ensure_periodic_reconcile();
+	},
+	20
+);
