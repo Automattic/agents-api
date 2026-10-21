@@ -22,7 +22,7 @@ add_action(
 			AGENTS_RECONCILE_ROUTINES_ABILITY,
 			array(
 				'label'               => 'Reconcile Routines',
-				'description'         => 'Reconcile registered routines against the Action Scheduler store: enqueue missing routine schedules and remove orphaned ones. Supports a dry-run mode that only reports.',
+				'description'         => 'Reconcile registered routines against the Action Scheduler store: enqueue missing routine schedules, collapse duplicate chains to one, and remove orphaned ones. Supports a dry-run mode that only reports.',
 				'category'            => 'agents-api',
 				'input_schema'        => array(
 					'type'       => 'object',
