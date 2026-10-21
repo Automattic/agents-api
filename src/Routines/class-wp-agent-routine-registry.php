@@ -25,10 +25,11 @@ final class WP_Agent_Routine_Registry {
 
 	/**
 	 * Option name of the reconcile compare-and-set lock. Written and read
-	 * only through direct `$wpdb` queries (see {@see acquire_reconcile_lock()}
-	 * / {@see release_reconcile_lock()}) — never through `get_option()` —
-	 * so a stale or missing options-cache entry can never make the lock
-	 * unavailable or un-releasable.
+	 * only through direct `$wpdb` queries (see
+	 * {@see WP_Agent_Routine_Option_Lock::acquire()} /
+	 * {@see WP_Agent_Routine_Option_Lock::release()}) — never through
+	 * `get_option()` — so a stale or missing options-cache entry can never
+	 * make the lock unavailable or un-releasable.
 	 */
 	private const RECONCILE_LOCK_OPTION = 'agents_routine_reconcile_lock';
 
@@ -284,10 +285,10 @@ final class WP_Agent_Routine_Registry {
 	 *
 	 * The whole run is serialized through a `$wpdb`-level compare-and-set
 	 * lock (`agents_routine_reconcile_lock`; see
-	 * {@see acquire_reconcile_lock()}) that never trusts the options
-	 * cache for the decision — a lock older than five minutes is treated
-	 * as stale and taken over. Dry runs report the same shape without
-	 * writing anything (and without taking the lock).
+	 * {@see WP_Agent_Routine_Option_Lock::acquire()}) that never trusts the
+	 * options cache for the decision — a lock older than five minutes is
+	 * treated as stale and taken over. Dry runs report the same shape
+	 * without writing anything (and without taking the lock).
 	 *
 	 * @param array<string,mixed> $opts Recognised keys: `dry_run` (bool).
 	 * @return array{enqueued:string[],removed:string[],unchanged:string[],errors:array<string,string>}
@@ -308,7 +309,7 @@ final class WP_Agent_Routine_Registry {
 			return self::reconcile_unlocked( true );
 		}
 
-		if ( ! self::acquire_reconcile_lock() ) {
+		if ( ! WP_Agent_Routine_Option_Lock::acquire( self::RECONCILE_LOCK_OPTION, self::RECONCILE_LOCK_TTL ) ) {
 			return array(
 				'enqueued'  => array(),
 				'removed'   => array(),
@@ -320,7 +321,7 @@ final class WP_Agent_Routine_Registry {
 		try {
 			return self::reconcile_unlocked( false );
 		} finally {
-			self::release_reconcile_lock();
+			WP_Agent_Routine_Option_Lock::release( self::RECONCILE_LOCK_OPTION );
 		}
 	}
 
@@ -411,95 +412,6 @@ final class WP_Agent_Routine_Registry {
 			'unchanged' => $unchanged,
 			'errors'    => $errors,
 		);
-	}
-
-	/**
-	 * Acquire the reconcile lock via a single atomic `$wpdb` compare-and-set
-	 * — `INSERT ... ON DUPLICATE KEY UPDATE` against `wp_options` directly,
-	 * never through `get_option()`/`add_option()`.
-	 *
-	 * This closes a production failure mode: a killed request can leave
-	 * `agents_routine_reconcile_lock` as a persistent object-cache entry
-	 * (e.g. Redis) with no backing DB row. `add_option()` then always
-	 * fails (the cache says the option exists), the old code's stale check
-	 * read the same cached value, and `delete_option()` found nothing in
-	 * the DB to delete — the lock stayed stuck "held" indefinitely. Reading
-	 * and writing exclusively through `$wpdb` — and never consulting
-	 * `get_option()`/the options cache for the decision — means a stale
-	 * cache entry with no DB row cannot block acquisition: MySQL's
-	 * `ON DUPLICATE KEY` path only ever sees the real row (or its absence).
-	 *
-	 * The single query handles all three cases atomically against
-	 * `option_name`'s unique key:
-	 *  - no row exists: plain insert, 1 affected row;
-	 *  - row exists and is stale (older than {@see RECONCILE_LOCK_TTL}):
-	 *    `ON DUPLICATE KEY UPDATE` overwrites it, MySQL reports 2 affected
-	 *    rows for a changed row;
-	 *  - row exists and is fresh: the `IF()` leaves the value unchanged,
-	 *    MySQL reports 0 affected rows for a no-op update.
-	 *
-	 * `$wpdb->query()` returns the raw affected-rows count for a
-	 * non-SELECT query, so `> 0` is "we now hold the lock" and `0` is
-	 * "someone else holds it, and it is not stale".
-	 *
-	 * When there is no option layer at all (non-WordPress harness) callers
-	 * are already single-process and the lock is a no-op success.
-	 */
-	private static function acquire_reconcile_lock(): bool {
-		global $wpdb;
-		if ( ! $wpdb instanceof \wpdb ) {
-			return true;
-		}
-
-		$now          = time();
-		$stale_before = $now - self::RECONCILE_LOCK_TTL;
-
-		$query = $wpdb->prepare(
-			'INSERT INTO %i (option_name, option_value, autoload)
-			VALUES (%s, %s, %s)
-			ON DUPLICATE KEY UPDATE option_value = IF( CAST( option_value AS UNSIGNED ) <= %d, VALUES(option_value), option_value )',
-			$wpdb->options,
-			self::RECONCILE_LOCK_OPTION,
-			(string) $now,
-			'no',
-			$stale_before
-		);
-		if ( ! is_string( $query ) ) {
-			return false;
-		}
-
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is built by $wpdb->prepare() above.
-		$affected = $wpdb->query( $query );
-
-		self::flush_reconcile_lock_cache();
-
-		return is_int( $affected ) && $affected > 0;
-	}
-
-	private static function release_reconcile_lock(): void {
-		global $wpdb;
-		if ( ! $wpdb instanceof \wpdb ) {
-			return;
-		}
-
-		$query = $wpdb->prepare( 'DELETE FROM %i WHERE option_name = %s', $wpdb->options, self::RECONCILE_LOCK_OPTION );
-		if ( is_string( $query ) ) {
-			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is built by $wpdb->prepare() above.
-			$wpdb->query( $query );
-		}
-
-		self::flush_reconcile_lock_cache();
-	}
-
-	/**
-	 * Explicitly evict the lock option from the object cache after every
-	 * direct `$wpdb` write, so anything that does happen to read it via
-	 * `get_option()` never observes a value the DB no longer has.
-	 */
-	private static function flush_reconcile_lock_cache(): void {
-		if ( function_exists( 'wp_cache_delete' ) ) {
-			wp_cache_delete( self::RECONCILE_LOCK_OPTION, 'options' );
-		}
 	}
 
 	/**
