@@ -111,6 +111,7 @@ if ( ! function_exists( 'as_enqueue_async_action' ) ) {
 }
 
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine.php';
+require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-option-lock.php';
 require_once __DIR__ . '/../src/Routines/interface-wp-agent-routine-backend.php';
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-registry.php';
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-action-scheduler-bridge.php';

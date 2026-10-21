@@ -811,39 +811,22 @@ final class WP_Agent_Routine_Action_Scheduler_Bridge implements WP_Agent_Routine
 	 * schedule step must not run concurrently in two processes, or both see
 	 * "no matching chain" and both schedule one (the duplicate-chain race).
 	 *
-	 * An `add_option()`-based lock: the insert succeeds only when no lock row
-	 * exists, so acquisition is atomic in MySQL against `option_name`'s
-	 * unique key. A lock older than {@see SCHEDULE_LOCK_TTL} is stale (its
-	 * holder crashed mid-schedule) and is taken over. With no option layer at
-	 * all (pure-PHP harnesses) callers are already single-process and the
-	 * lock is a no-op success.
+	 * Delegates to the shared routines option lock: one atomic `$wpdb`
+	 * compare-and-set that inserts the lock row when absent and takes over a
+	 * lock older than {@see SCHEDULE_LOCK_TTL} in the same query — never
+	 * through the options API, whose cache could report a lock as held with
+	 * no backing DB row (or hand a stale takeover to two processes at once,
+	 * the flaw of the plain `update_option()` takeover this replaces).
 	 */
 	private function acquire_schedule_lock( string $routine_id ): bool {
-		if ( ! self::has_option_layer() ) {
-			return true;
-		}
-
-		$name = self::SCHEDULE_LOCK_OPTION_PREFIX . $routine_id;
-		if ( add_option( $name, time(), '', false ) ) {
-			return true;
-		}
-
-		$held_at = get_option( $name, 0 );
-		if ( is_numeric( $held_at ) && ( time() - (int) $held_at ) < self::SCHEDULE_LOCK_TTL ) {
-			return false; // Freshly held by another process.
-		}
-
-		// Stale (or unreadable): take over so a crashed holder cannot strand
-		// the routine unscheduled.
-		update_option( $name, time(), false );
-		return true;
+		return WP_Agent_Routine_Option_Lock::acquire(
+			self::SCHEDULE_LOCK_OPTION_PREFIX . $routine_id,
+			self::SCHEDULE_LOCK_TTL
+		);
 	}
 
 	private function release_schedule_lock( string $routine_id ): void {
-		if ( ! self::has_option_layer() ) {
-			return;
-		}
-		delete_option( self::SCHEDULE_LOCK_OPTION_PREFIX . $routine_id );
+		WP_Agent_Routine_Option_Lock::release( self::SCHEDULE_LOCK_OPTION_PREFIX . $routine_id );
 	}
 
 	/**

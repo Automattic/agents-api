@@ -160,6 +160,48 @@ if ( ! function_exists( 'delete_option' ) ) {
 	}
 }
 
+// Fake WP-Cron: the `cron` option equivalent, plus a call log so a test can
+// assert the scheduling side (not just the stored events).
+$GLOBALS['smoke_cron_events']         = array();
+$GLOBALS['smoke_cron_schedule_calls'] = array();
+if ( ! function_exists( 'wp_next_scheduled' ) ) {
+	/**
+	 * @param array<array-key,mixed> $args
+	 * @return int|false
+	 */
+	function wp_next_scheduled( string $hook, array $args = array() ) {
+		unset( $args );
+		$event = $GLOBALS['smoke_cron_events'][ $hook ] ?? null;
+		return is_array( $event ) ? (int) $event['timestamp'] : false;
+	}
+}
+if ( ! function_exists( 'wp_schedule_event' ) ) {
+	/**
+	 * @param array<array-key,mixed> $args
+	 */
+	function wp_schedule_event( int $timestamp, string $recurrence, string $hook, array $args = array(), bool $wp_error = false ): bool {
+		unset( $args, $wp_error );
+		$GLOBALS['smoke_cron_schedule_calls'][] = $hook;
+		if ( isset( $GLOBALS['smoke_cron_events'][ $hook ] ) ) {
+			return false;
+		}
+		$GLOBALS['smoke_cron_events'][ $hook ] = array(
+			'timestamp'  => $timestamp,
+			'recurrence' => $recurrence,
+		);
+		return true;
+	}
+}
+if ( ! function_exists( 'wp_clear_scheduled_hook' ) ) {
+	/**
+	 * @param array<array-key,mixed> $args
+	 */
+	function wp_clear_scheduled_hook( string $hook, array $args = array() ): void {
+		unset( $args );
+		unset( $GLOBALS['smoke_cron_events'][ $hook ] );
+	}
+}
+
 // Fake chat ability invoked by the scheduled-run listener.
 class Smoke_Chat_Ability {
 	/** @var array<int,array<string,mixed>> */
@@ -525,6 +567,7 @@ $GLOBALS['wpdb'] = new wpdb();
 
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine.php';
 require_once __DIR__ . '/../src/Routines/interface-wp-agent-routine-backend.php';
+require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-option-lock.php';
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-registry.php';
 require_once __DIR__ . '/../src/Routines/class-wp-agent-routine-action-scheduler-bridge.php';
 require_once __DIR__ . '/../src/Routines/register-routine-bridge-sync.php';
@@ -532,22 +575,25 @@ require_once __DIR__ . '/../src/Routines/register-action-scheduler-listener.php'
 
 use AgentsAPI\AI\Routines\WP_Agent_Routine;
 use AgentsAPI\AI\Routines\WP_Agent_Routine_Action_Scheduler_Bridge;
+use AgentsAPI\AI\Routines\WP_Agent_Routine_Option_Lock;
 use AgentsAPI\AI\Routines\WP_Agent_Routine_Registry;
 
 function smoke_reset_state(): void {
-	$GLOBALS['smoke_as_fetches']      = array();
-	$GLOBALS['smoke_as_cancel_calls'] = array();
-	$GLOBALS['smoke_as_query_count']  = 0;
+	$GLOBALS['smoke_as_fetches']            = array();
+	$GLOBALS['smoke_as_cancel_calls']       = array();
+	$GLOBALS['smoke_as_query_count']        = 0;
 	WP_Agent_Routine_Registry::reset();
 	WP_Agent_Routine_Registry::reset_backend();
 	WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
-	$GLOBALS['smoke_as']           = array();
-	$GLOBALS['smoke_as_next_id']   = 0;
-	$GLOBALS['smoke_options']      = array();
-	$GLOBALS['smoke_object_cache'] = array();
-	$GLOBALS['wpdb']->rows         = array();
-	$GLOBALS['smoke_fired_hooks']  = array();
-	$GLOBALS['smoke_chat_ability'] = new Smoke_Chat_Ability();
+	$GLOBALS['smoke_as']                   = array();
+	$GLOBALS['smoke_as_next_id']           = 0;
+	$GLOBALS['smoke_options']              = array();
+	$GLOBALS['smoke_object_cache']         = array();
+	$GLOBALS['wpdb']->rows                 = array();
+	$GLOBALS['smoke_fired_hooks']          = array();
+	$GLOBALS['smoke_chat_ability']         = new Smoke_Chat_Ability();
+	$GLOBALS['smoke_cron_events']          = array();
+	$GLOBALS['smoke_cron_schedule_calls']  = array();
 }
 
 /** @return array<int,array<string,mixed>> */
@@ -568,6 +614,21 @@ function smoke_hook_fired( string $hook ): bool {
 		}
 	}
 	return false;
+}
+
+/**
+ * The args each firing of a hook carried (first firing first).
+ *
+ * @return array<int,list<mixed>>
+ */
+function smoke_hook_args( string $hook ): array {
+	$out = array();
+	foreach ( $GLOBALS['smoke_fired_hooks'] as $entry ) {
+		if ( $entry[0] === $hook ) {
+			$out[] = $entry[1];
+		}
+	}
+	return $out;
 }
 
 // ---------------------------------------------------------------------------
@@ -1036,22 +1097,44 @@ durable_assert( array( $rec_dup ), $GLOBALS['smoke_as_cancel_calls'], 'reconcile
 // ---------------------------------------------------------------------------
 // 12. Check-then-schedule is single-flight: a lock held by another process
 //     schedules no second chain; a stale lock is taken over and released.
+//     Like the reconcile lock, the per-routine schedule lock now lives only
+//     in $wpdb (the shared routines option lock) — never in
+//     get_option()/the options cache — so it is seeded and inspected
+//     directly against the fake DB row store.
 // ---------------------------------------------------------------------------
 
 smoke_reset_state();
-$GLOBALS['smoke_options']['agents_routine_schedule_lock_conc'] = time(); // fresh lock, held by "another process"
+$GLOBALS['wpdb']->rows['agents_routine_schedule_lock_conc'] = (string) time(); // fresh lock, held by "another process"
 WP_Agent_Routine_Registry::register( 'conc', array( 'agent' => 'commander', 'interval' => 600 ) );
 durable_assert( 0, count( smoke_pending_rows() ), 'concurrent: a fresh lock held by another process schedules no chain' );
 durable_assert( array(), get_option( 'agents_routine_schedules', array() ), 'concurrent: the losing caller records nothing' );
 
-$GLOBALS['smoke_options']['agents_routine_schedule_lock_conc'] = time() - 120; // stale: the holder crashed
+$GLOBALS['wpdb']->rows['agents_routine_schedule_lock_conc'] = (string) ( time() - 120 ); // stale: the holder crashed
 WP_Agent_Routine_Registry::register( 'conc', array( 'agent' => 'commander', 'interval' => 600 ) );
 durable_assert( 1, count( smoke_pending_rows() ), 'concurrent: a stale lock is taken over and the routine is scheduled' );
-durable_assert( false, array_key_exists( 'agents_routine_schedule_lock_conc', $GLOBALS['smoke_options'] ), 'concurrent: the schedule lock is released after the run' );
+durable_assert( false, array_key_exists( 'agents_routine_schedule_lock_conc', $GLOBALS['wpdb']->rows ), 'concurrent: the schedule lock is released after the run' );
+durable_assert( false, array_key_exists( 'agents_routine_schedule_lock_conc', $GLOBALS['smoke_options'] ), 'concurrent: the schedule lock never touches the options API' );
 
 $conc_id = $GLOBALS['smoke_as_next_id'];
 WP_Agent_Routine_Registry::register( 'conc', array( 'agent' => 'commander', 'interval' => 600 ) );
 durable_assert( $conc_id, $GLOBALS['smoke_as_next_id'], 'concurrent: with the schedule recorded, re-declaration schedules nothing' );
+
+// Atomic takeover: two acquirers that both observe the same stale lock row
+// cannot both win — the takeover is the compare-and-set itself, so only the
+// first write changes the row and the second sees a fresh value.
+smoke_reset_state();
+$GLOBALS['wpdb']->rows['agents_routine_lock_race'] = (string) ( time() - 400 ); // stale: both processes observe this
+$race_first  = WP_Agent_Routine_Option_Lock::acquire( 'agents_routine_lock_race', 30 );
+$race_second = WP_Agent_Routine_Option_Lock::acquire( 'agents_routine_lock_race', 30 );
+durable_assert( true, $race_first, 'lock helper: the first taker of a stale lock wins' );
+durable_assert( false, $race_second, 'lock helper: the second taker of the same stale lock loses — exactly one acquirer wins' );
+WP_Agent_Routine_Option_Lock::release( 'agents_routine_lock_race' );
+durable_assert( false, array_key_exists( 'agents_routine_lock_race', $GLOBALS['wpdb']->rows ), 'lock helper: release deletes the row' );
+
+// A fresh lock is never taken over, and an absent lock is acquired outright.
+$GLOBALS['wpdb']->rows['agents_routine_lock_fresh'] = (string) time();
+durable_assert( false, WP_Agent_Routine_Option_Lock::acquire( 'agents_routine_lock_fresh', 30 ), 'lock helper: a fresh lock is not taken over' );
+durable_assert( true, WP_Agent_Routine_Option_Lock::acquire( 'agents_routine_lock_absent', 30 ), 'lock helper: an absent lock is acquired' );
 
 // ---------------------------------------------------------------------------
 // 13. A recorded signature whose action was deleted out-of-band: plain
@@ -1102,6 +1185,67 @@ durable_assert( 'interval:600', get_option( 'agents_routine_schedules', array() 
 
 WP_Agent_Routine_Registry::unregister( 'pr' );
 durable_assert( array(), get_option( 'agents_routine_schedules', array() ), 'pause/resume: unregister drops the schedule record' );
+
+// ---------------------------------------------------------------------------
+// 15. Hourly WP-Cron repair: one `wp_agent_routines_reconcile` event is
+//     declared on init (guarded by wp_next_scheduled, so repeat declarations
+//     schedule exactly one event), and firing its hook runs the
+//     lock-protected reconcile — restoring a chain deleted out of band and
+//     reporting through wp_agent_routines_reconcile_completed.
+// ---------------------------------------------------------------------------
+
+smoke_reset_state();
+do_action( 'init' );
+do_action( 'init' ); // a second declaration on the same (or a later) request
+durable_assert( array( 'wp_agent_routines_reconcile' ), array_keys( $GLOBALS['smoke_cron_events'] ), 'cron repair: declaring on init twice schedules exactly one cron event' );
+durable_assert( 'hourly', $GLOBALS['smoke_cron_events']['wp_agent_routines_reconcile']['recurrence'] ?? '', 'cron repair: the event recurs hourly' );
+durable_assert( array( 'wp_agent_routines_reconcile' ), $GLOBALS['smoke_cron_schedule_calls'], 'cron repair: exactly one wp_schedule_event() call happened' );
+
+// A routine whose chain is deleted out of band (cancelled in the Action
+// Scheduler admin UI, a pruned or restored table): plain declarations trust
+// the record, so only the cron repair brings it back.
+WP_Agent_Routine_Registry::register( 'cron-heal', array( 'agent' => 'commander', 'interval' => 600 ) );
+$cron_heal_old_id = $GLOBALS['smoke_as_next_id'];
+unset( $GLOBALS['smoke_as'][ $cron_heal_old_id ] ); // the chain is lost out of band
+
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+do_action( \AgentsAPI\AI\Routines\WP_AGENT_ROUTINES_RECONCILE_HOOK ); // the hourly cron callback
+
+$cron_heal_rows = smoke_pending_rows();
+durable_assert( 1, count( $cron_heal_rows ), 'cron repair: exactly one matching chain is back after the cron run' );
+$cron_heal_new_id = (int) array_key_first( $cron_heal_rows );
+durable_assert( true, $cron_heal_new_id > $cron_heal_old_id, 'cron repair: the restored chain is a fresh one' );
+$durable_cron_record = get_option( 'agents_routine_schedules', array() )['cron-heal'] ?? array();
+durable_assert( 'interval:600', $durable_cron_record['signature'] ?? '', 'cron repair: the schedule record matches the restored recurrence' );
+durable_assert( $cron_heal_new_id, $durable_cron_record['action_id'] ?? 0, 'cron repair: the schedule record points at the restored chain' );
+
+$cron_reports = smoke_hook_args( 'wp_agent_routines_reconcile_completed' );
+durable_assert( 1, count( $cron_reports ), 'cron repair: the completion action fired exactly once' );
+durable_assert( array( 'cron-heal' ), $cron_reports[0][0]['enqueued'] ?? array( 'no-report' ), 'cron repair: the completion action carries the reconcile report' );
+durable_assert( false, isset( $cron_reports[0][0]['errors']['_lock'] ), 'cron repair: the lock-protected reconcile ran to completion' );
+
+// The repair is idempotent: a second cron run changes nothing.
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+do_action( \AgentsAPI\AI\Routines\WP_AGENT_ROUTINES_RECONCILE_HOOK );
+durable_assert( 1, count( smoke_pending_rows() ), 'cron repair: a second cron run keeps exactly one chain' );
+durable_assert( array( 'wp_agent_routines_reconcile' ), $GLOBALS['smoke_cron_schedule_calls'], 'cron repair: firing the cron hook never reschedules the event itself' );
+
+// A cron repair for a paused routine does not resurrect it.
+WP_Agent_Routine_Registry::register( 'cron-paused', array( 'agent' => 'commander', 'interval' => 600 ) );
+WP_Agent_Routine_Registry::pause( 'cron-paused' );
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$GLOBALS['smoke_fired_hooks'] = array();
+do_action( \AgentsAPI\AI\Routines\WP_AGENT_ROUTINES_RECONCILE_HOOK );
+durable_assert( 1, count( smoke_pending_rows() ), 'cron repair: a paused routine stays unscheduled' );
+
+// An already-scheduled event (e.g. from a previous install) is not
+// rescheduled: firing init again performs no second wp_schedule_event().
+smoke_reset_state();
+$preexisting_event_at = time() + 100;
+$GLOBALS['smoke_cron_events']['wp_agent_routines_reconcile'] = array( 'timestamp' => $preexisting_event_at, 'recurrence' => 'hourly' );
+do_action( 'init' );
+durable_assert( array(), $GLOBALS['smoke_cron_schedule_calls'], 'cron repair: an already-scheduled event is not rescheduled' );
+durable_assert( $preexisting_event_at, $GLOBALS['smoke_cron_events']['wp_agent_routines_reconcile']['timestamp'] ?? 0, 'cron repair: the existing event is left untouched' );
 
 // ---------------------------------------------------------------------------
 
