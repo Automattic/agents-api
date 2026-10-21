@@ -55,6 +55,29 @@ interface WP_Agent_Routine_Backend {
 	public function register( WP_Agent_Routine $routine ): bool;
 
 	/**
+	 * Authoritative check-and-repair of one routine's schedule against the
+	 * backend's real store.
+	 *
+	 * Unlike {@see register()} — which may serve an unchanged declaration
+	 * from cheap recorded state and never touches the store — this method
+	 * never trusts recorded state: it re-reads what is actually pending,
+	 * collapses duplicate matching chains down to one live chain, cancels
+	 * superseded chains, and (re)schedules when no live matching chain
+	 * exists. This is the path {@see WP_Agent_Routine_Registry::reconcile()}
+	 * uses, because reconcile's entire purpose is repairing drift that
+	 * recorded state cannot see (pruned stores, restored backups, manually
+	 * deleted rows).
+	 *
+	 * @since 0.17.0
+	 *
+	 * @param WP_Agent_Routine $routine The routine to verify and repair.
+	 * @return bool True when a live schedule is in place after the call
+	 *              (freshly scheduled, collapsed, or verified); false when
+	 *              the backend cannot schedule or the schedule call failed.
+	 */
+	public function repair( WP_Agent_Routine $routine ): bool;
+
+	/**
 	 * Cancel every schedule this backend owns for the routine and drop any
 	 * bookkeeping (generation, paused marker) associated with it.
 	 *

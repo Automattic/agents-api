@@ -273,11 +273,14 @@ final class WP_Agent_Routine_Registry {
 	 *
 	 * Registry state and backend state drift: the backend's store can be
 	 * pruned, a site can be restored from backup, scheduled work can be
-	 * manually deleted. For every registered, non-paused routine this checks
-	 * pending-handle coverage by logical identity (routine id) and registers
-	 * a fresh schedule when coverage is missing; pending handles whose
-	 * logical routine_id is not registered (or is durably paused) are
-	 * cancelled as orphans.
+	 * manually deleted, or a stale schedule record can outlive its action.
+	 * For every registered, non-paused routine this runs the backend's
+	 * authoritative {@see WP_Agent_Routine_Backend::repair()} — which never
+	 * trusts the backend's recorded state: it re-reads pending coverage by
+	 * logical identity, collapses duplicate matching chains to one, and
+	 * registers a fresh schedule when no live matching chain exists; pending
+	 * handles whose logical routine_id is not registered (or is durably
+	 * paused) are cancelled as orphans.
 	 *
 	 * The whole run is serialized through a `$wpdb`-level compare-and-set
 	 * lock (`agents_routine_reconcile_lock`; see
@@ -347,18 +350,30 @@ final class WP_Agent_Routine_Registry {
 				continue;
 			}
 
-			if ( ! empty( $pending[ $routine_id ] ) ) {
-				$unchanged[] = $routine_id;
-				continue;
-			}
+			// A routine with any pending handle had coverage entering the run;
+			// repair() may still collapse duplicate chains underneath it, but
+			// the report's `unchanged` means "was covered" — same shape as the
+			// pre-repair contract.
+			$covered = ! empty( $pending[ $routine_id ] );
 
 			if ( $dry_run ) {
-				$enqueued[] = $routine_id;
+				if ( $covered ) {
+					$unchanged[] = $routine_id;
+				} else {
+					$enqueued[] = $routine_id;
+				}
 				continue;
 			}
 
-			if ( $backend->register( $routine ) ) {
-				$enqueued[] = $routine_id;
+			// Authoritative: repair() re-reads the store, so a routine whose
+			// schedule record still matches but whose action was deleted
+			// out-of-band is re-scheduled here.
+			if ( $backend->repair( $routine ) ) {
+				if ( $covered ) {
+					$unchanged[] = $routine_id;
+				} else {
+					$enqueued[] = $routine_id;
+				}
 			} else {
 				$errors[ $routine_id ] = 'Failed to enqueue the missing routine schedule.';
 			}

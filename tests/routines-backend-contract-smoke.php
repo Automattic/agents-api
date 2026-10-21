@@ -147,6 +147,18 @@ class Contract_Fake_Backend implements WP_Agent_Routine_Backend {
 		return true;
 	}
 
+	public function repair( WP_Agent_Routine $routine ): bool {
+		$this->calls[] = 'repair:' . $routine->get_id();
+		$this->registered_routines[] = $routine;
+		// Authoritative: only puts a schedule in place when none exists — the
+		// real bridge re-reads the store and collapses duplicates; this fake
+		// models the same "never a duplicate" outcome.
+		if ( empty( $this->pending[ $routine->get_id() ] ) ) {
+			$this->pending[ $routine->get_id() ][] = ++$this->next_handle;
+		}
+		return true;
+	}
+
 	public function unregister( string $routine_id ): void {
 		$this->calls[] = 'unregister:' . $routine_id;
 		unset( $this->pending[ $routine_id ] );
@@ -281,7 +293,7 @@ $fake->calls = array();
 $result      = WP_Agent_Routine_Registry::reconcile();
 
 contract_assert( true, in_array( 'pending_by_routine', $fake->calls, true ), 'reconcile: the backend bulk read is used' );
-contract_assert( array( 'register:beta' ), $fake->calls_of( 'register:' ), 'reconcile: the missing routine is enqueued through the backend' );
+contract_assert( array( 'repair:alpha', 'repair:beta' ), $fake->calls_of( 'repair:' ), 'reconcile: every covered and missing routine goes through the authoritative repair verb' );
 contract_assert( array( 'cancel:999' ), $fake->calls_of( 'cancel:' ), 'reconcile: the orphaned handle is cancelled through the backend' );
 contract_assert( array( 'beta' ), $result['enqueued'], 'reconcile: enqueued reports the missing routine' );
 contract_assert( array( 'ghost' ), $result['removed'], 'reconcile: removed reports the orphan' );
@@ -292,7 +304,7 @@ contract_assert( array(), $result['errors'], 'reconcile: no errors on a healthy 
 unset( $fake->pending['beta'] );
 $fake->calls = array();
 $result      = WP_Agent_Routine_Registry::reconcile( array( 'dry_run' => true ) );
-contract_assert( array(), $fake->calls_of( 'register:' ), 'reconcile: dry run writes nothing through the backend' );
+contract_assert( array(), $fake->calls_of( 'repair:' ), 'reconcile: dry run writes nothing through the backend' );
 contract_assert( array(), $fake->calls_of( 'cancel:' ), 'reconcile: dry run cancels nothing through the backend' );
 contract_assert( array( 'beta' ), $result['enqueued'], 'reconcile: dry run reports the missing schedule' );
 

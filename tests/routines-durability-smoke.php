@@ -349,7 +349,8 @@ function as_unschedule_all_actions( string $hook, array $args = array(), string 
  * @return array<int,mixed>
  */
 function as_get_scheduled_actions( array $query = array(), string $return_format = 'OBJECT' ): array {
-	$ids = array();
+	$GLOBALS['smoke_as_query_count'] = ( $GLOBALS['smoke_as_query_count'] ?? 0 ) + 1;
+	$ids                             = array();
 	foreach ( $GLOBALS['smoke_as'] as $id => $row ) {
 		if ( isset( $query['hook'] ) && $row['hook'] !== $query['hook'] ) {
 			continue;
@@ -536,6 +537,7 @@ use AgentsAPI\AI\Routines\WP_Agent_Routine_Registry;
 function smoke_reset_state(): void {
 	$GLOBALS['smoke_as_fetches']      = array();
 	$GLOBALS['smoke_as_cancel_calls'] = array();
+	$GLOBALS['smoke_as_query_count']  = 0;
 	WP_Agent_Routine_Registry::reset();
 	WP_Agent_Routine_Registry::reset_backend();
 	WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
@@ -874,6 +876,232 @@ durable_assert( true, is_numeric( get_option( 'agents_routine_action_generation_
 $GLOBALS['wpdb']->rows['agents_routine_action_generation_6'] = 'gen-d';
 WP_Agent_Routine_Action_Scheduler_Bridge::maybe_purge_legacy_action_generation_options();
 durable_assert( true, array_key_exists( 'agents_routine_action_generation_6', $GLOBALS['wpdb']->rows ), 'maybe_purge: a second call is gated by the marker and does not run again' );
+
+// ---------------------------------------------------------------------------
+// 9. Declarations are cheap: the first sync schedules and records every
+//    routine once; after that, re-declaring N (≥300) unchanged routines in a
+//    fresh request performs ZERO Action Scheduler I/O. This is the fix for
+//    the ~720-queries-per-page-view production outage (Automattic/agents-api
+//    #582, Extra-Chill/data-machine#3495).
+// ---------------------------------------------------------------------------
+
+smoke_reset_state();
+$bulk_count = 300;
+$GLOBALS['smoke_bulk_ids'] = array();
+for ( $i = 0; $i < $bulk_count; $i++ ) {
+	WP_Agent_Routine_Registry::register( "bulk-{$i}", array( 'agent' => 'commander', 'interval' => 3600 ) );
+	$GLOBALS['smoke_bulk_ids'][ $i ] = $GLOBALS['smoke_as_next_id'];
+}
+$first_sync_fetches = count( $GLOBALS['smoke_as_fetches'] );
+$first_sync_queries = $GLOBALS['smoke_as_query_count'];
+durable_assert( $bulk_count, count( smoke_pending_rows() ), 'bulk: the first sync schedules every routine' );
+durable_assert( $bulk_count, count( get_option( 'agents_routine_schedules', array() ) ), 'bulk: the first sync records every routine\'s schedule signature' );
+durable_assert( 1, $first_sync_queries, 'bulk: the first sync pays exactly one bulk pending-actions query' );
+durable_assert( $bulk_count, $first_sync_fetches, 'bulk: the first sync fetches each newly scheduled action once (one-time cost)' );
+
+// A fresh request: request-scoped caches start empty, and the persisted
+// schedule record is all a declaration reads — zero scheduler I/O, no
+// matter how many routines are declared.
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$GLOBALS['smoke_as_fetches']     = array();
+$GLOBALS['smoke_as_query_count'] = 0;
+for ( $i = 0; $i < $bulk_count; $i++ ) {
+	WP_Agent_Routine_Registry::register( "bulk-{$i}", array( 'agent' => 'commander', 'interval' => 3600 ) );
+}
+durable_assert( 0, count( $GLOBALS['smoke_as_fetches'] ), 'bulk: re-declaring 300 unchanged routines performs zero fetch_action() calls' );
+durable_assert( 0, $GLOBALS['smoke_as_query_count'], 'bulk: re-declaring 300 unchanged routines performs zero as_get_scheduled_actions() queries' );
+durable_assert( $bulk_count, count( smoke_pending_rows() ), 'bulk: unchanged declarations leave every schedule in place' );
+
+// ---------------------------------------------------------------------------
+// 10. Changing one routine's interval reschedules only that routine.
+// ---------------------------------------------------------------------------
+
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$GLOBALS['smoke_as_fetches']      = array();
+$GLOBALS['smoke_as_query_count']  = 0;
+$GLOBALS['smoke_as_cancel_calls'] = array();
+$as_next_before                   = $GLOBALS['smoke_as_next_id'];
+WP_Agent_Routine_Registry::register( 'bulk-7', array( 'agent' => 'commander', 'interval' => 7200 ) );
+durable_assert( $as_next_before + 1, $GLOBALS['smoke_as_next_id'], 'changed bulk: exactly one new action is scheduled' );
+durable_assert( array( $GLOBALS['smoke_bulk_ids'][7] ), $GLOBALS['smoke_as_cancel_calls'], "changed bulk: only bulk-7's superseded action is cancelled" );
+durable_assert( 1, $GLOBALS['smoke_as_query_count'], 'changed bulk: the changed routine pays exactly one bulk read' );
+durable_assert( $bulk_count, count( smoke_pending_rows() ), 'changed bulk: every routine still has exactly one live chain' );
+$changed_watermark = get_option( 'agents_routine_generation_bulk-7', array() );
+durable_assert( $as_next_before + 1, $changed_watermark['watermark'] ?? 0, "changed bulk: bulk-7's watermark advances to the new chain" );
+
+// A fresh request after the change: every routine — including the changed
+// one — is a zero-I/O declaration again.
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$GLOBALS['smoke_as_fetches']     = array();
+$GLOBALS['smoke_as_query_count'] = 0;
+for ( $i = 0; $i < $bulk_count; $i++ ) {
+	WP_Agent_Routine_Registry::register( "bulk-{$i}", array( 'agent' => 'commander', 'interval' => 7 === $i ? 7200 : 3600 ) );
+}
+durable_assert( 0, count( $GLOBALS['smoke_as_fetches'] ) + $GLOBALS['smoke_as_query_count'], 'changed bulk: after the change, all 300 declarations are zero-I/O again' );
+
+// ---------------------------------------------------------------------------
+// 11. Duplicate matching chains collapse to exactly one; an in-flight
+//     claimed action is untouched.
+// ---------------------------------------------------------------------------
+
+// (a) Two matching chains left behind by the pre-fix race (no schedule
+//     record — the state production sites upgrade from): register()
+//     collapses them instead of returning at the first match.
+smoke_reset_state();
+$dup_old = smoke_as_save(
+	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
+	array( 'routine_id' => 'dup' ),
+	WP_Agent_Routine_Action_Scheduler_Bridge::GROUP,
+	time() + 300,
+	300
+);
+$dup_new = smoke_as_save(
+	WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK,
+	array( 'routine_id' => 'dup' ),
+	WP_Agent_Routine_Action_Scheduler_Bridge::GROUP,
+	time() + 4800,
+	300
+);
+durable_assert( 2, $dup_new, 'collapse: two matching chains seeded out-of-band' );
+WP_Agent_Routine_Registry::register( 'dup', array( 'agent' => 'commander', 'interval' => 300 ) );
+durable_assert( array( $dup_old ), array_keys( smoke_pending_rows() ), 'collapse: two pre-existing matching chains collapse to exactly one' );
+durable_assert( array( $dup_new ), $GLOBALS['smoke_as_cancel_calls'], 'collapse: the duplicate is cancelled by id' );
+durable_assert( 2, $GLOBALS['smoke_as_next_id'], 'collapse: a live matching chain is adopted, not rescheduled' );
+$dup_record = get_option( 'agents_routine_schedules', array() )['dup'] ?? array();
+durable_assert( 'interval:300', $dup_record['signature'] ?? '', 'collapse: the adopted chain is recorded with its signature' );
+durable_assert( $dup_old, $dup_record['action_id'] ?? 0, 'collapse: the record points at the kept chain' );
+
+// (b) The keep is watermark-aware: among matching chains, the lowest-id
+//     chain at or above the routine's current watermark is kept; a
+//     below-watermark (fenced) chain is cancelled by id rather than kept.
+smoke_reset_state();
+update_option(
+	'agents_routine_generation_wm',
+	array( 'generation' => 'gen-wm', 'watermark' => 50 ),
+	false
+);
+$GLOBALS['smoke_as_next_id'] = 39;
+$wm_below = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK, array( 'routine_id' => 'wm' ), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 300, 300 );
+$GLOBALS['smoke_as_next_id'] = 59;
+$wm_above = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK, array( 'routine_id' => 'wm' ), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 300, 300 );
+durable_assert( array( 40, 60 ), array( $wm_below, $wm_above ), 'collapse: seeded chains land either side of the watermark' );
+WP_Agent_Routine_Registry::register( 'wm', array( 'agent' => 'commander', 'interval' => 300 ) );
+durable_assert( array( $wm_above ), array_keys( smoke_pending_rows() ), 'collapse: the live (at-or-above-watermark) chain is the one kept' );
+durable_assert( array( $wm_below ), $GLOBALS['smoke_as_cancel_calls'], 'collapse: the fenced below-watermark chain is cancelled by id' );
+
+// (c) Matching chains that are ALL below the watermark are fenced — keeping
+//     any of them would keep a chain the fence is about to cancel, so a
+//     fresh live chain is minted instead.
+smoke_reset_state();
+update_option(
+	'agents_routine_generation_stale',
+	array( 'generation' => 'gen-stale', 'watermark' => 500 ),
+	false
+);
+$GLOBALS['smoke_as_next_id'] = 99;
+$stale_old = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK, array( 'routine_id' => 'stale' ), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 300, 300 );
+WP_Agent_Routine_Registry::register( 'stale', array( 'agent' => 'commander', 'interval' => 300 ) );
+$stale_new = $GLOBALS['smoke_as_next_id'];
+durable_assert( array( $stale_new ), array_keys( smoke_pending_rows() ), 'collapse: chains that are all below the watermark are replaced by a fresh live chain' );
+durable_assert( array( $stale_old ), $GLOBALS['smoke_as_cancel_calls'], 'collapse: the all-fenced chain is cancelled' );
+durable_assert( $stale_new, get_option( 'agents_routine_generation_stale', array() )['watermark'] ?? 0, 'collapse: the fresh chain advances the watermark' );
+
+// (d) An action already claimed by an in-flight worker is not broken: it is
+//     not part of the pending set, so the collapse neither cancels nor
+//     re-stamps it.
+smoke_reset_state();
+$claimed_id = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK, array( 'routine_id' => 'claimed' ), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 300, 300 );
+$GLOBALS['smoke_as'][ $claimed_id ]['status'] = ActionScheduler_Store::STATUS_RUNNING; // claimed mid-flight
+$pending_kept = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK, array( 'routine_id' => 'claimed' ), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 300, 300 );
+WP_Agent_Routine_Registry::register( 'claimed', array( 'agent' => 'commander', 'interval' => 300 ) );
+durable_assert( ActionScheduler_Store::STATUS_RUNNING, $GLOBALS['smoke_as'][ $claimed_id ]['status'], 'collapse: the in-flight claimed action is untouched' );
+durable_assert( false, in_array( $claimed_id, $GLOBALS['smoke_as_cancel_calls'], true ), 'collapse: the claimed action is never cancelled' );
+durable_assert( array( $pending_kept ), array_keys( smoke_pending_rows() ), 'collapse: the still-pending chain is the one kept and recorded' );
+
+// (e) reconcile() collapses duplicates too — it is the authoritative path,
+//     so a duplicate that appears between reconciles is healed there even
+//     though plain declarations fast-path on the recorded signature.
+smoke_reset_state();
+WP_Agent_Routine_Registry::register( 'rec', array( 'agent' => 'commander', 'interval' => 600 ) );
+$rec_keep = $GLOBALS['smoke_as_next_id'];
+$GLOBALS['smoke_as_next_id'] = 9;
+$rec_dup = smoke_as_save( WP_Agent_Routine_Action_Scheduler_Bridge::SCHEDULED_HOOK, array( 'routine_id' => 'rec' ), WP_Agent_Routine_Action_Scheduler_Bridge::GROUP, time() + 600, 600 );
+$GLOBALS['smoke_as_cancel_calls'] = array();
+$result = WP_Agent_Routine_Registry::reconcile();
+durable_assert( array(), $result['enqueued'], 'reconcile collapse: a duplicated chain is not re-enqueued' );
+durable_assert( array( 'rec' ), $result['unchanged'], 'reconcile collapse: the covered routine reports unchanged' );
+durable_assert( array( $rec_keep ), array_keys( smoke_pending_rows() ), 'reconcile collapse: exactly one chain remains' );
+durable_assert( array( $rec_dup ), $GLOBALS['smoke_as_cancel_calls'], 'reconcile collapse: the duplicate is cancelled by id' );
+
+// ---------------------------------------------------------------------------
+// 12. Check-then-schedule is single-flight: a lock held by another process
+//     schedules no second chain; a stale lock is taken over and released.
+// ---------------------------------------------------------------------------
+
+smoke_reset_state();
+$GLOBALS['smoke_options']['agents_routine_schedule_lock_conc'] = time(); // fresh lock, held by "another process"
+WP_Agent_Routine_Registry::register( 'conc', array( 'agent' => 'commander', 'interval' => 600 ) );
+durable_assert( 0, count( smoke_pending_rows() ), 'concurrent: a fresh lock held by another process schedules no chain' );
+durable_assert( array(), get_option( 'agents_routine_schedules', array() ), 'concurrent: the losing caller records nothing' );
+
+$GLOBALS['smoke_options']['agents_routine_schedule_lock_conc'] = time() - 120; // stale: the holder crashed
+WP_Agent_Routine_Registry::register( 'conc', array( 'agent' => 'commander', 'interval' => 600 ) );
+durable_assert( 1, count( smoke_pending_rows() ), 'concurrent: a stale lock is taken over and the routine is scheduled' );
+durable_assert( false, array_key_exists( 'agents_routine_schedule_lock_conc', $GLOBALS['smoke_options'] ), 'concurrent: the schedule lock is released after the run' );
+
+$conc_id = $GLOBALS['smoke_as_next_id'];
+WP_Agent_Routine_Registry::register( 'conc', array( 'agent' => 'commander', 'interval' => 600 ) );
+durable_assert( $conc_id, $GLOBALS['smoke_as_next_id'], 'concurrent: with the schedule recorded, re-declaration schedules nothing' );
+
+// ---------------------------------------------------------------------------
+// 13. A recorded signature whose action was deleted out-of-band: plain
+//     declarations trust the record (zero I/O) and reconcile repairs it.
+// ---------------------------------------------------------------------------
+
+smoke_reset_state();
+WP_Agent_Routine_Registry::register( 'heal', array( 'agent' => 'commander', 'interval' => 600 ) );
+$heal_deleted_id = $GLOBALS['smoke_as_next_id'];
+unset( $GLOBALS['smoke_as'][ $heal_deleted_id ] ); // pruned store / manual deletion
+
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$GLOBALS['smoke_as_fetches']     = array();
+$GLOBALS['smoke_as_query_count'] = 0;
+WP_Agent_Routine_Registry::register( 'heal', array( 'agent' => 'commander', 'interval' => 600 ) );
+durable_assert( 0, count( $GLOBALS['smoke_as_fetches'] ) + $GLOBALS['smoke_as_query_count'], 'heal: a plain declaration trusts the recorded signature and performs zero scheduler I/O' );
+
+$result = WP_Agent_Routine_Registry::reconcile();
+durable_assert( array( 'heal' ), $result['enqueued'], 'heal: reconcile re-schedules a recorded routine whose action was deleted out-of-band' );
+$heal_new_id = $GLOBALS['smoke_as_next_id'];
+durable_assert( array( $heal_new_id ), array_keys( smoke_pending_rows() ), 'heal: exactly one live chain exists after the repair' );
+durable_assert( $heal_new_id, get_option( 'agents_routine_schedules', array() )['heal']['action_id'] ?? 0, 'heal: the record points at the replacement chain' );
+
+WP_Agent_Routine_Action_Scheduler_Bridge::instance()->reset_pending_cache_for_tests();
+$GLOBALS['smoke_as_fetches']     = array();
+$GLOBALS['smoke_as_query_count'] = 0;
+WP_Agent_Routine_Registry::register( 'heal', array( 'agent' => 'commander', 'interval' => 600 ) );
+durable_assert( 0, count( $GLOBALS['smoke_as_fetches'] ) + $GLOBALS['smoke_as_query_count'], 'heal: after the repair, declarations are zero-I/O again' );
+
+// ---------------------------------------------------------------------------
+// 14. Pause/resume and unregister keep the schedule record consistent: a
+//     paused routine's record is dropped, so resume() really re-schedules
+//     instead of fast-pathing on the dead chain's signature.
+// ---------------------------------------------------------------------------
+
+smoke_reset_state();
+WP_Agent_Routine_Registry::register( 'pr', array( 'agent' => 'commander', 'interval' => 600 ) );
+$pr_first_id = $GLOBALS['smoke_as_next_id'];
+WP_Agent_Routine_Registry::pause( 'pr' );
+durable_assert( 0, count( smoke_pending_rows() ), 'pause/resume: pausing unschedules the routine' );
+durable_assert( array(), get_option( 'agents_routine_schedules', array() ), 'pause/resume: pausing drops the schedule record' );
+
+WP_Agent_Routine_Registry::resume( 'pr' );
+$pr_second_id = $GLOBALS['smoke_as_next_id'];
+durable_assert( array( $pr_second_id ), array_keys( smoke_pending_rows() ), 'pause/resume: resume re-schedules the routine' );
+durable_assert( true, $pr_second_id > $pr_first_id, 'pause/resume: resume mints a fresh chain, it does not fast-path' );
+durable_assert( 'interval:600', get_option( 'agents_routine_schedules', array() )['pr']['signature'] ?? '', 'pause/resume: resume re-records the signature' );
+
+WP_Agent_Routine_Registry::unregister( 'pr' );
+durable_assert( array(), get_option( 'agents_routine_schedules', array() ), 'pause/resume: unregister drops the schedule record' );
 
 // ---------------------------------------------------------------------------
 
